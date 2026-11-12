@@ -2045,6 +2045,33 @@ export class CrosslineStore {
     }).immediate();
   }
 
+  /**
+   * The open session's work ended at `at`, said afterwards (「早停了」 on the 「超时」 message, a forgotten timer stopped by the nudge pass,
+   * or a correction through the execution route). The session stays open and paused from `at`, as the floating timer's 结束 leaves it, so
+   * resuming or completing works as before; pauses that began after `at` are dropped (the work had already stopped), and a pause that
+   * straddles `at` is kept open from its own start. `at` is clamped to the session's start and to now. Once per `at`.
+   */
+  stopSessionAt(workspaceId: string, workOrderId: string, at: string, reason: string, now = new Date().toISOString()): { changed: boolean; stoppedAt?: string } {
+    return this.#db.transaction(() => {
+      const open = this.#openExecution(workspaceId, workOrderId);
+      if (!open) throw new Error("NO_ACTIVE_EXECUTION");
+      const stopMs = Math.min(Date.parse(now), Math.max(Date.parse(open.startedAt), Date.parse(at)));
+      if (!Number.isFinite(stopMs)) throw new Error("STOP_TIME_INVALID");
+      const stoppedAt = new Date(stopMs).toISOString();
+      const before = open.interruptions.filter((item) => Date.parse(item.pausedAt) < stopMs);
+      const last = before.at(-1);
+      // Already paused by then: the work stopped where that pause began.
+      const interruptions = last && (!last.resumedAt || Date.parse(last.resumedAt) > stopMs)
+        ? [...before.slice(0, -1), { pausedAt: last.pausedAt, reason: last.reason }]
+        : [...before, { pausedAt: stoppedAt, reason }];
+      if (JSON.stringify(interruptions) === JSON.stringify(open.interruptions)) return { changed: false, stoppedAt: interruptions.at(-1)!.pausedAt };
+      this.#writeInterruptions(open.id, interruptions, open.durationObserved);
+      this.appendEvent({ ownerId: open.ownerId, workspaceId, idempotencyKey: `execution:${open.id}:stopped:${stoppedAt}`,
+        type: "execution.stopped_at", entityId: workOrderId, payload: { executionId: open.id, at: stoppedAt, reason } });
+      return { changed: true, stoppedAt: interruptions.at(-1)!.pausedAt };
+    }).immediate();
+  }
+
   listExecutions(workspaceId: string, workOrderId?: string): StoredExecution[] {
     const rows = (workOrderId
       ? this.#prepare("SELECT * FROM executions WHERE workspace_id = ? AND work_order_id = ? ORDER BY started_at, id").all(workspaceId, workOrderId)

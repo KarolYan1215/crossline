@@ -68,6 +68,36 @@ test("a session left open on a task no longer under way is not counted as today'
   expect(loadWrap(TEST_CTX, now).timedMinutes).toBe(30);
 });
 
+test("a timer stopped with 结束 (left paused) stops counting where it was paused; a forgotten one is cut by the nudge pass (2026-11-11)", async () => {
+  at("15:37");
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  store.saveWorkOrder({ id: "sim", ownerId: TEST_CTX.principalId, workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "",
+    intent: "完成西湖 NeuroSim 仿真", state: "active", riskTier: "routine", estimate, payload: {} });
+  store.saveStepPlan(ws, "sim", plan([{ ...step("v6s2", "批准实测参数映射"), estimate: { p25Minutes: 60, p50Minutes: 90, p85Minutes: 180 } }]), TEST_CTX.principalId, "initial");
+  store.openSession(ws, "sim", TEST_CTX.principalId, toZonedInstant(DAY, "15:37", ZONE));
+
+  // 结束 at 15:45, read at 21:24: eight minutes, not five hours and forty-seven.
+  store.pauseExecution(ws, "sim", "本次计时结束", toZonedInstant(DAY, "15:45", ZONE));
+  expect(loadWrap(TEST_CTX, at("21:24")).timedMinutes).toBe(8);
+  store.resumeExecution(ws, "sim", toZonedInstant(DAY, "21:24", ZONE));
+
+  // Left running again from 21:24 (the 90-minute step): the pass at 01:00 the next day has not called it forgotten yet...
+  const { nudgesFor: pass } = await import("./nudges");
+  const next = (clock: string) => { const instant = toZonedInstant("2026-10-13", clock, ZONE); vi.stubEnv("CROSSLINE_FIXED_NOW", instant); return new Date(instant); };
+  await pass(TEST_CTX, at("23:59"));
+  expect(store.listExecutions(ws, "sim")[0]!.interruptions.at(-1)!.resumedAt).toBeDefined();
+  // ...at 01:55 (four and a half hours worked) it is stopped where 「超时」 was due — 135 worked minutes, 8 before the pause, so 23:31 —
+  // and said once.
+  await pass(TEST_CTX, next("01:55"));
+  const session = store.listExecutions(ws, "sim")[0]!;
+  expect(session.interruptions.at(-1)).toEqual({ pausedAt: toZonedInstant(DAY, "23:31", ZONE), reason: "计时一直没停，按超时提醒时截止" });
+  await pass(TEST_CTX, next("01:57"));
+  const said = store.listEvents(ws, { type: "execution.stopped_at" });
+  expect(said).toHaveLength(1);
+  expect(loadWrap(TEST_CTX, next("02:00"), DAY).timedMinutes).toBe(135);
+  expect(store.listConversationMessages(ws, store.conversationFor(ws, "2026-10-13").id).filter((message) => JSON.stringify(message.payload).includes("forgotten:"))).toHaveLength(1);
+});
+
 test("a block due later waits for the wrap-up; 部分 keeps the step open with half done, and 收工 ends the day's message", async () => {
   at("08:30");
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");

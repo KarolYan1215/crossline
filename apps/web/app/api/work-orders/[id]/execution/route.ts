@@ -1,6 +1,6 @@
 import {
   archiveWorkOrder, completeWorkOrderExecution, focusStep, markMaterialsReady, pauseWorkOrderExecution,
-  resumeWorkOrderExecution, retryMaterialPreparation, startWorkOrderExecution,
+  resumeWorkOrderExecution, retryMaterialPreparation, startWorkOrderExecution, stopWorkOrderExecutionAt,
   type ExecutionResult
 } from "../../../../../lib/crossline";
 import { rejectUnsafeRequest } from "../guard";
@@ -43,6 +43,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     else if (body.action === "archive") result = await withUndo(ctx, tOf(ctx)("归档：{{title}}", { title: titleOf(ctx, id) }), () => archiveWorkOrder(ctx, id, reason));
     else if (body.action === "pause") result = pauseWorkOrderExecution(ctx, id, reason);
     else if (body.action === "resume") result = resumeWorkOrderExecution(ctx, id);
+    // The timed work ended earlier than the timer says (a timer left running): `at` is an ISO instant, clamped to the session.
+    else if (body.action === "stop_at") {
+      if (typeof body.at !== "string" || !Number.isFinite(Date.parse(body.at))) return Response.json({ ok: false, code: "STOP_TIME_INVALID" }, { status: 400 });
+      result = stopWorkOrderExecutionAt(ctx, id, { at: body.at }, reason);
+    }
     else if (body.action === "complete") {
       const evidence = readEvidence(body.evidence);
       if (!evidence) return Response.json({ ok: false, code: "INVALID_EVIDENCE_CLAIM" }, { status: 400 });

@@ -1842,6 +1842,21 @@ export function resumeWorkOrderExecution(ctx: AccessContext, workOrderId: string
 }
 
 /**
+ * The timed work ended at `at` (an ISO instant, or `minutes` after the open session began): 「早停了」 on the 「超时」 message, a forgotten
+ * timer stopped by the nudge pass, or a correction (`stop_at` on the execution route). The session stays open and paused from then.
+ */
+export function stopWorkOrderExecutionAt(ctx: AccessContext, workOrderId: string, when: { at: string } | { minutes: number }, reason: string,
+  now = appNow()): ExecutionResult & { stoppedAt?: string } {
+  if (findWorkOrder(ctx.workspaceId, workOrderId)?.state !== "active") return { ok: false, code: "NO_ACTIVE_EXECUTION" };
+  const open = getStore().listExecutions(ctx.workspaceId, workOrderId).find((execution) => !execution.endedAt);
+  if (!open) return { ok: false, code: "NO_ACTIVE_EXECUTION" };
+  const at = "at" in when ? when.at : new Date(Date.parse(open.startedAt) + Math.max(0, when.minutes) * 60_000).toISOString();
+  if (!Number.isFinite(Date.parse(at))) return { ok: false, code: "STOP_TIME_INVALID" };
+  const result = getStore().stopSessionAt(ctx.workspaceId, workOrderId, at, reason.trim() || "计时截止", now.toISOString()); // i18n-ignore: stored reason
+  return { ok: true, ...(result.stoppedAt ? { stoppedAt: result.stoppedAt } : {}) };
+}
+
+/**
  * An active order can have no open session: a confirmed block (the completion check, the wrap-up, the return page) closes the session it
  * covers while the task stays active. Pausing or resuming it then is a refusal, not a store error: the floating timer's 结束 pressed after
  * answering 「做得怎么样」 on the phone threw `NO_ACTIVE_EXECUTION` out of the route (found by the month simulation).

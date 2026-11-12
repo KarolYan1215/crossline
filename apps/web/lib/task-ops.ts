@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { formatInTimeZone } from "date-fns-tz";
 import { SNOOZE_MINUTES, type AccessContext, type TaskOp } from "@crossline/core";
-import { addWaitingForOrder, appNow, archiveWorkOrder, effectiveSchedulePreferences, focusStep, getStore, planToday, startWorkOrderExecution } from "./crossline";
+import { addWaitingForOrder, appNow, archiveWorkOrder, effectiveSchedulePreferences, focusStep, getStore, planToday, startWorkOrderExecution, stopWorkOrderExecutionAt } from "./crossline";
 import { applyChange } from "./impact";
 import { editSteps, recordStepProgress, reportProgress, requestStepReplan } from "./steps";
 import { requestTutorial } from "./tutorial";
@@ -64,6 +64,11 @@ export async function applyTaskOp(ctx: AccessContext, workOrderId: string, op: T
     }
     case "tutorial": return requestTutorial(ctx, workOrderId);
     case "snooze": return snoozeBlock(ctx, workOrderId, op.text, op.minutes);
+    // 「早停了」 on the 「超时」 message: the timed work ended `minutes` after the session began.
+    case "stop_timer": {
+      const result = stopWorkOrderExecutionAt(ctx, workOrderId, { minutes: op.minutes }, tOf(ctx)("早停了"));
+      return result.ok ? { ok: true } : result;
+    }
     default: return { ok: false, code: "TASK_OP_UNKNOWN" };
   }
 }

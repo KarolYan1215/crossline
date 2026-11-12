@@ -1,5 +1,5 @@
 import { ACTIVITY_RULES, STEP_ROLES, TIME_ATTRIBUTION_SCHEMA, TIME_DRAFT_DAYS, TIME_DRAFT_DECISIONS, TIME_DRAFTS, draftTimeEntries, instantInZone, validateTimeAttribution,
-  zonedParts, type ActivityRule, type DraftBlock, type DraftDecision, type TimeAttribution, type TimeDraft } from "@crossline/core";
+  sessionWorkEnd, zonedParts, type ActivityRule, type DraftBlock, type DraftDecision, type TimeAttribution, type TimeDraft } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
 import { ACTIVITY_DETAIL_CONSENT } from "./activity-recorder";
@@ -56,9 +56,9 @@ export function createTimeDraftPass(store: CrosslineStore, workspaceId: string, 
     const kept = readTimeDrafts(store, workspaceId).filter((draft) => Date.parse(draft.end) >= since);
     const segments = store.activityEntriesSince(workspaceId, new Date(since).toISOString());
     const rules = json<unknown[]>(store.getSetting(workspaceId, ACTIVITY_RULES), []).filter(isRule);
-    // Timed time is never drafted: every session, a running one to now.
-    const timed = store.listExecutions(workspaceId).filter((execution) => Date.parse(execution.endedAt ?? now.toISOString()) >= since)
-      .map((execution) => ({ start: execution.startedAt, end: execution.endedAt ?? now.toISOString() }));
+    // Timed time is never drafted: every session, a running one to now, one left paused to where the pause began.
+    const timed = store.listExecutions(workspaceId).map((execution) => ({ start: execution.startedAt, end: new Date(sessionWorkEnd(execution, now.getTime())).toISOString() }))
+      .filter((span) => Date.parse(span.end) >= since);
     const found = draftTimeEntries({ segments, rules, blocks: seenBlocks(store, workspaceId, since, now, zone),
       excluded: [...timed, ...kept.map((draft) => ({ start: draft.start, end: draft.end }))], now: now.toISOString() });
     const titles = new Map<string, string[]>();

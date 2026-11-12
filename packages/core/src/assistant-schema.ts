@@ -5,11 +5,13 @@
  */
 export type TaskOpType = "due" | "defer" | "estimate" | "step_done" | "step_add" | "replan" | "waiting" | "energy" | "note" | "progress" | "archive" | "start" | "tutorial" | "complete"
   /** 「推迟 10 分钟」 on a block's start prompt only (2026-11-11): it names one block, so it is not among the box's `TASK_OP_TYPES`. */
-  | "snooze";
+  | "snooze"
+  /** 「早停了」 on the 「超时」 message only (2026-11-11): the timed work ends `minutes` after the session began. */
+  | "stop_timer";
 export type TaskOp = {
   type: TaskOpType;
   /** due/defer/waiting: YYYY-MM-DD. */ date: string;
-  /** estimate: usual minutes; snooze: minutes until the block is said again. */ minutes: number;
+  /** estimate: usual minutes; snooze: minutes until the block is said again; stop_timer: minutes after the session's start where its work ended. */ minutes: number;
   /** estimate (one step), step_done: a step id of the task; otherwise "". */ stepId: string;
   /** step_add: the new step; replan: what to change; waiting: what is awaited; note/progress: the record; archive: why; snooze: the block's id. */ text: string;
   /** waiting: who provides it. */ who: string;

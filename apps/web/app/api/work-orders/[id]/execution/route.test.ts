@@ -84,3 +84,16 @@ test("the phone's 「推迟 10 分钟」 snoozes the block it names, nothing els
   expect((await post({ action: "snooze", blockId: "scheduled:other:v1s1" })).status).toBe(409);
   expect(store.listWorkOrders(TEST_CTX.workspaceId)[0]?.state).toBe("ready_for_human");
 });
+
+test("stop_at corrects a timer left running: the work ends at the given instant; a bad instant is a 400 (2026-11-11)", async () => {
+  const store = seed();
+  await post({ action: "start" });
+  expect((await post({ action: "stop_at", at: "not a time" })).status).toBe(400);
+  const started = store.listExecutions(TEST_CTX.workspaceId, "w1")[0]!.startedAt;
+  // A time after now is clamped to now; the session's own start is the earliest it can end.
+  const at = started;
+  const response = await post({ action: "stop_at", at, reason: "更正：忘了停" });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ ok: true, stoppedAt: at });
+  expect(store.listExecutions(TEST_CTX.workspaceId, "w1")[0]!.interruptions).toEqual([{ pausedAt: at, reason: "更正：忘了停" }]);
+});

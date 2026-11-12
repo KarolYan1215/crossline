@@ -47,3 +47,15 @@ test("「推迟 10 分钟」 on a block's prompt records a snooze of that block 
   expect(await snooze("scheduled:other:v1s1")).toEqual({ ok: false, code: "SNOOZE_BLOCK_INVALID" });
   expect(store.listEvents(ws, { type: "block.snoozed" })).toHaveLength(1);
 });
+
+test("「早停了」 on the 「超时」 message ends the timed work at the usual length after the start; with no timer it refuses (2026-11-11)", async () => {
+  const store = setup();
+  const op = { type: "stop_timer" as const, date: "", minutes: 90, stepId: "", text: "", who: "", energy: "", summary: "" };
+  expect(await applyTaskOp(TEST_CTX, "w1", op)).toEqual({ ok: false, code: "NO_ACTIVE_EXECUTION" });
+  store.transitionWorkOrder(ws, "w1", { type: "materials.not_required" }, "mnr:w1");
+  store.transitionWorkOrder(ws, "w1", { type: "human.started" }, "start:w1", { durationObserved: true, occurredAt: "2026-10-08T10:00:00.000Z" });
+  expect(await applyTaskOp(TEST_CTX, "w1", op)).toEqual({ ok: true });
+  const session = store.listExecutions(ws, "w1")[0]!;
+  expect(session.endedAt).toBeUndefined();
+  expect(session.interruptions).toEqual([{ pausedAt: new Date(Date.parse(session.startedAt) + 90 * 60_000).toISOString(), reason: "早停了" }]);
+});

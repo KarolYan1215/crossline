@@ -1120,5 +1120,10 @@
   "申请太频繁，请稍后再试。": "Too many applications. Try again later.",
   "过去的 {{count}} 个活动不参加了": "Let the {{count}} past events go",
   "{{titles}} 归档，可从已归档恢复；其余照旧等本人决定": "{{titles}} archived, restorable from the archive; the rest still wait for you",
-  "活动 {{day}} 已过去，本人选择不参加了": "The event on {{day}} is over; let go"
+  "活动 {{day}} 已过去，本人选择不参加了": "The event on {{day}} is over; let go",
+  "早停了": "Stopped earlier",
+  "计时已截止，之后的时间不算": "Timer cut off; the time after it does not count",
+  "计时一直没停，按超时提醒时截止": "The timer was left running; cut off at the overrun reminder",
+  "{{what}}的计时一直没停，已算到 {{at}}（比通常多一半时），之后的时间不算。实际做得更久，完成时填实际用时即可。": "The timer for {{what}} was left running, so it counts until {{at}} (half again the usual length) and no further. If the work really took longer, enter the actual time when you finish.",
+  "知道了": "Got it"
 }

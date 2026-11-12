@@ -5,9 +5,10 @@ import { dueProvenance, listAgentTasks, type StoredConversationMessage } from "@
 import {
   availableSlots, calendarLineOf, inferBlockOutcome, OVER_CAPACITY_TAG, type InferredOutcome, isCancelledEvent, onPersonsBoard, planNudges, preparesOf, taskTitleOf,
   type AccessContext, type NotifyLevelName, type NudgeBlock, type NudgeEnding, type NudgeButton, type NudgeKind, type NudgeSlack, type PlannedNudge, type ProposedAction,
-  QUIET_HOURS_SETTING, inQuiet, quietHoursOf
+  QUIET_HOURS_SETTING, inQuiet, quietHoursOf, forgottenTimerStop
 } from "@crossline/core";
-import { commitSoon, effectiveSchedulePreferences, energyAnswerMatters, getStore, loadCurrentPlan, planToday, readAvailability, toZonedInstant } from "./crossline";
+import { commitSoon, effectiveSchedulePreferences, energyAnswerMatters, getStore, loadCurrentPlan, planToday, readAvailability, STEP_FOCUSED, stopWorkOrderExecutionAt,
+  toZonedInstant } from "./crossline";
 import { blockWorkMinutes, dayCapacityOf, measuredCapacityOn, measuredView } from "./measured-capacity";
 import { listed, openAsks, thisWeek } from "./asks";
 import { calendarFiling, currentWorkState, missedItems } from "./timeline";
@@ -173,8 +174,27 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
       ...(selfSet ? { selfSet, deferDue: deferDue > due ? deferDue : addDays(due, 2) } : {}) }];
   });
 
-  const timerOrder = running ? byId.get(running.workOrderId) : undefined;
-  const currentStep = timerOrder ? store.getStepPlan(ctx.workspaceId, timerOrder.id)?.steps.find((step) => step.status === "planned") : undefined;
+  let timerOrder = running ? byId.get(running.workOrderId) : undefined;
+  // The step the session is about: the block's own step it was started on (`focusStep`, W-258), else the task's first open one — the
+  // usual minutes 「超时」 measures against are that step's.
+  const openSteps = timerOrder ? (store.getStepPlan(ctx.workspaceId, timerOrder.id)?.steps ?? []).filter((step) => step.status === "planned") : [];
+  const focused = timerOrder && running ? (store.listEvents(ctx.workspaceId, { type: STEP_FOCUSED, entityId: timerOrder.id })
+    .filter((event) => event.createdAt >= running.startedAt).at(-1)?.payload as { stepId?: string } | undefined)?.stepId : undefined;
+  const currentStep = openSteps.find((step) => step.id === focused) ?? openSteps[0];
+  // A timer nobody stopped (2026-11-11, 15:37 to 20:58 on one step): stopped where 「超时」 was due, and said once.
+  const stopAt = timerOrder && running ? forgottenTimerStop({ startedAt: running.startedAt, pausedMinutes: running.pauseMinutes,
+    usualMinutes: currentStep?.estimate.p50Minutes ?? timerOrder.estimate.p50Minutes }, now.getTime()) : undefined;
+  if (timerOrder && running && stopAt) {
+    const stopped = stopWorkOrderExecutionAt(ctx, timerOrder.id, { at: stopAt }, t("计时一直没停，按超时提醒时截止"), now);
+    if (stopped.ok) {
+      const what = t("「{{text}}」", { text: `${taskTitleOf(timerOrder)}${currentStep ? ` · ${currentStep.title}` : ""}` });
+      say(ctx, t("{{what}}的计时一直没停，已算到 {{at}}（比通常多一半时），之后的时间不算。实际做得更久，完成时填实际用时即可。",
+        { what, at: formatInTimeZone(new Date(stopped.stoppedAt ?? stopAt), zone, "HH:mm") }),
+        [{ kind: "href", label: t("看任务"), href: `/workbench/${encodeURIComponent(timerOrder.id)}` }, { kind: "ack", label: t("知道了") }],
+        { kind: "timer_overrun", fingerprint: `forgotten:${running.startedAt}`, counted: false, urgent: false }, now);
+      timerOrder = undefined;
+    }
+  }
   const finished = backgroundDone(ctx, now, locale);
   const meeting = todays.some((block) => block.id.startsWith("graph_calendar:") && !isCancelledEvent(block.title)
     && minutesOf(block.start) <= nowMinute && nowMinute < minutesOf(block.end));
@@ -191,7 +211,7 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
       why: t("回答后，今天剩下和之后的时段会按精力重新安排。") } : undefined;
   const planned = planNudges({
     now: now.toISOString(), today, clock, tomorrow: addDays(today, 1), level, muted, locale,
-    quiet: { timerRunning: Boolean(running), inMeeting: meeting, answeredRecently: Boolean(answeredAt) && now.getTime() - Date.parse(answeredAt!) < ANSWERED_QUIET_MS,
+    quiet: { timerRunning: Boolean(timerOrder), inMeeting: meeting, answeredRecently: Boolean(answeredAt) && now.getTime() - Date.parse(answeredAt!) < ANSWERED_QUIET_MS,
       // Focused by the screen record (its detail consent only): only the urgent interrupts. Away is the worker's to act on (phone only).
       focused: currentWorkState(ctx, plan)?.state === "focused" },
     // The person's quiet hours (23:00–08:00 until they set their own, in Settings, the box or the interview).

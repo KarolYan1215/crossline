@@ -1,6 +1,6 @@
 import "server-only";
 import { archetypeById, completionRule, preparesOf, STEP_ANSWER_SLOT, stepAnswerSlot, finishedSteps, goalSettingKey, proposalReady, producedArtifacts, relevantDocuments, staleDateMentions, stepDatesFollowingDue, taskProgress, taskTitleOf, usedArtifacts, type AccessContext, type FamiliarityLevel, type Preparation, type SuccessCriterion,
-  type EvidenceQuestionTemplate } from "@crossline/core";
+  sessionWorkedMinutes, type EvidenceQuestionTemplate } from "@crossline/core";
 import { doneKinds, familiarityBook, familiarityFor, listAgentTasks, mailLinksOf, needStatesOf, preparationOf, readStoredArtifactPlan, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
   type StoredBackgroundFact, type StoredStepPlan, type StoredTaskStep } from "@crossline/db";
 import { defaultIdentityPacks, identityPacksFor } from "@crossline/identity-packs";
@@ -96,7 +96,7 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
       })
     ];
     const worked = executions.filter((execution) => execution.workOrderId === order.id && execution.durationObserved).reduce((sum, execution) =>
-      sum + Math.max(0, Math.round(((execution.endedAt ? Date.parse(execution.endedAt) : Date.now()) - Date.parse(execution.startedAt)) / 60_000) - execution.pauseMinutes), 0);
+      sum + sessionWorkedMinutes(execution, Date.now()), 0);
     const verdicts = new Map((payload.gateReview?.criteriaVerdict ?? []).map((item) => [item.criterionId, item]));
     const latestAssessment = new Map<string, { quarters: number; note: string }>();
     for (const event of assessed.filter((item) => item.entityId === order.id))

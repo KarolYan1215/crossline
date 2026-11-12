@@ -4,6 +4,7 @@
  * traced to the rule that raised it. The web writes each one into the day's conversation; the person answers with its buttons (a
  * button is the answer, carried out at once and undoable) or by typing.
  */
+import { OVERRUN_RATIO } from "./session-time";
 import type { ProposedAction } from "./concierge";
 import { tFor, type Locale, type Translate } from "./i18n";
 
@@ -144,14 +145,13 @@ const CONFIRM_WINDOW_MINUTES = 30;
 /** 「推迟 10 分钟」 (2026-11-11 §3): the block is said again after this long; after `MAX_SNOOZES` it is not said again. */
 export const SNOOZE_MINUTES = 10;
 export const MAX_SNOOZES = 2;
-const OVERRUN_RATIO = 1.5;
 
 const minutesOf = (clock: string) => { const [h, m] = clock.split(":").map(Number); return (h ?? 0) * 60 + (m ?? 0); };
 const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
 const hours = (t: Translate, minutes: number) => minutes >= 60 ? t("{{hours}} 小时", { hours: Math.round(minutes / 6) / 10 }) : t("{{minutes}} 分钟", { minutes: Math.max(0, Math.round(minutes)) });
 /** 「title · step」 in the language's quotes. */
 const quoted = (t: Translate, title: string, step?: string) => t("「{{text}}」", { text: `${title}${step ? ` · ${step}` : ""}` });
-const op = (orderId: string, type: "start" | "defer" | "step_done" | "due" | "snooze", summary: string,
+const op = (orderId: string, type: "start" | "defer" | "step_done" | "due" | "snooze" | "stop_timer", summary: string,
   extra: { date?: string; stepId?: string; minutes?: number; text?: string } = {}): ProposedAction =>
   ({ action: "task.op", summary, args: { workOrderId: orderId, type, date: extra.date ?? "", minutes: extra.minutes ?? 0, stepId: extra.stepId ?? "", text: extra.text ?? "",
     who: "", energy: "", outcome: "" } });
@@ -227,10 +227,17 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
     const elapsed = (Date.parse(input.now) - Date.parse(timer.startedAt)) / 60_000 - (timer.pausedMinutes ?? 0);
     if (elapsed >= timer.usualMinutes * OVERRUN_RATIO) {
       const what = quoted(t, timer.stepTitle || timer.title);
-      out.push({ kind: "timer_overrun", fingerprint: `overrun:${timer.startedAt}`, urgent: true, counted: true,
+      // The usual length past the start (and its pauses), on the person's clock: where 「早停了」 ends the timed work.
+      const kept = timer.usualMinutes + (timer.pausedMinutes ?? 0);
+      const stopClock = ((now - Math.round((Date.parse(input.now) - Date.parse(timer.startedAt)) / 60_000) + kept) % 1440 + 1440) % 1440;
+      const at = `${String(Math.floor(stopClock / 60)).padStart(2, "0")}:${String(stopClock % 60).padStart(2, "0")}`;
+      // Not counted against the day's cap: it is about the person's own running timer, and a measure left running is wrong data, not an
+      // interruption (2026-11-11: the cap was spent by 09:00 and a timer ran five hours unsaid).
+      out.push({ kind: "timer_overrun", fingerprint: `overrun:${timer.startedAt}`, urgent: true, counted: false,
         ...(timer.stepId ? { step: { orderId: timer.orderId, stepId: timer.stepId } } : {}),
         text: t("{{what}}已计时 {{elapsed}} 分钟，比通常的 {{usual}} 分钟多一半。", { what, elapsed: Math.round(elapsed), usual: timer.usualMinutes }),
         buttons: [...(timer.stepId ? [{ kind: "action" as const, label: t("这步做完了"), action: op(timer.orderId, "step_done", t("{{what}}完成", { what }), { stepId: timer.stepId }) }] : []),
+          { kind: "action", label: t("早停了：算到 {{at}}", { at }), action: op(timer.orderId, "stop_timer", t("{{what}}计时算到 {{at}}", { what, at }), { minutes: kept }) },
           { kind: "ack", label: t("还差一点") }, { kind: "say", label: t("卡住了") }, mute] });
     }
   }

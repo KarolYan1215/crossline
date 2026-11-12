@@ -1,4 +1,4 @@
-import { workedRhythm, type AvailabilityWindow } from "@crossline/core";
+import { sessionWorkedMinutes, workedRhythm, type AvailabilityWindow } from "@crossline/core";
 import type { ForecastWeek, GoalForecast } from "@crossline/planner";
 import type { Translate } from "./i18n";
 
@@ -159,10 +159,9 @@ export type InvestmentLine = { line: string;
   stated: number | null; actualShare: number | null; plannedShare: number | null };
 export type Investment = { weeks: InvestmentWeek[]; next7: Record<string, number>; lines: InvestmentLine[]; hasActual: boolean; hasPlanned: boolean };
 
-/** Worked minutes of an execution: wall clock to its end (or now, while it runs), less its pauses. */
+/** Worked minutes of an execution: wall clock to its end (or now, while it runs; or where an open pause began), less its pauses. */
 export function workedMinutes(execution: ExecutionLike, now: string): number {
-  const end = execution.endedAt ?? now;
-  return Math.max(0, Math.round((Date.parse(end) - Date.parse(execution.startedAt)) / 60_000) - execution.pauseMinutes);
+  return sessionWorkedMinutes(execution, now);
 }
 
 /** The calendar day of an instant in a zone. */

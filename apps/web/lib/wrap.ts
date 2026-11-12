@@ -1,5 +1,5 @@
 import "server-only";
-import { inferBlockOutcome, isRestEvent, MAX_SNOOZES, withFrozen, wrapTimeOf, type AccessContext, type InferredOutcome, type NudgeEnding } from "@crossline/core";
+import { inferBlockOutcome, sessionWorkEnd, isRestEvent, MAX_SNOOZES, withFrozen, wrapTimeOf, type AccessContext, type InferredOutcome, type NudgeEnding } from "@crossline/core";
 import { blockWorkMinutes } from "./measured-capacity";
 import { formatInTimeZone } from "date-fns-tz";
 import { appNow, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, readFrozen, toZonedInstant, writeFrozen } from "./crossline";
@@ -104,7 +104,8 @@ export function loadWrap(ctx: AccessContext, now = appNow(), requestedDay?: stri
   const running = new Set(orders.filter((order) => order.state === "active").map((order) => order.id));
   // Every timer of the day as an interval (one still running ends now), for the day's total and each block's share of it.
   const spans = store.listExecutions(ctx.workspaceId).filter((execution) => execution.endedAt || running.has(execution.workOrderId)).map((execution) => ({ orderId: execution.workOrderId, from: Date.parse(execution.startedAt),
-    to: Math.min(execution.endedAt ? Date.parse(execution.endedAt) : now.getTime(), now.getTime()), pause: execution.pauseMinutes }))
+    // A session left paused stopped working where the pause began (`sessionWorkEnd`); counting it to now read 「今天计时 5h47」 (2026-11-11).
+    to: Math.min(sessionWorkEnd(execution, now.getTime()), now.getTime()), pause: execution.pauseMinutes }))
     .filter((span) => span.to > span.from);
   const dayFrom = Date.parse(toZonedInstant(day, "00:00", zone)), dayTo = dayFrom + 86_400_000;
   const overlap = (span: { from: number; to: number }, from: number, to: number) => Math.max(0, Math.min(span.to, to) - Math.max(span.from, from)) / 60_000;

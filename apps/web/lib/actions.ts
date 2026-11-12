@@ -96,6 +96,7 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     if ((args.type === "progress" || args.type === "step_done") && args.minutes > 0) recordReportedMinutes(ctx, args.workOrderId, args.minutes);
     const result = await applyTaskOp(ctx, args.workOrderId, { ...args, summary: "" });
     // A snooze opens nothing: the block's prompt comes back by itself.
+    if (args.type === "stop_timer") return result.ok ? { ok: true, message: tOf(ctx)("计时已截止，之后的时间不算") } : result;
     if (args.type === "snooze") return result.ok ? { ok: true, message: tOf(ctx)("{{minutes}} 分钟后再提醒", { minutes: Math.round(args.minutes) || SNOOZE_MINUTES }) } : result;
     return result.ok ? { ok: true, href } : result;
   },

@@ -510,6 +510,7 @@ export * from "./concierge";
 export * from "./setting-catalog";
 export * from "./interview-settings";
 export * from "./nudges";
+export * from "./session-time";
 export * from "./rituals";
 export * from "./granularity";
 export * from "./energy-model";
