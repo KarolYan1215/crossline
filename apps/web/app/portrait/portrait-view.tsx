@@ -7,6 +7,7 @@ import { portraitLabels, portraitType, redactPortrait, type EnergyRhythm, type P
 import { LineNetwork, type NetworkEdge } from "../ui/line-network";
 import { FigurePicker } from "./figure-picker";
 import { ProfileSections } from "./profile-sections";
+import { CareerSection, HypothesesSection } from "./career-sections";
 import { AdviceMatrix, DivergingAxes, EnergyScatter, Fit, GapChart, IdentityBars, RhythmChart, ValuesRadar } from "./portrait-charts";
 import { radarValues, rhythmStats } from "./poster-geometry";
 import { joinList, type Locale, type Translate } from "../../lib/i18n";
@@ -25,10 +26,13 @@ const ICON = { size: 17, strokeWidth: 1.75, "aria-hidden": true } as const;
 
 /** The report's contents in two groups: what is shared, then what only the person sees (2026-10-28 redesign). */
 const SHARED_SECTIONS = [["type", "超级个体类型"], ["rhythm", "精力节律"], ["values", "价值与能量"], ["lines", "主线飞轮"]] as const;
-const PRIVATE_SECTIONS = [["claims", "逐条核对"], ["problem", "真问题"], ["compass", "指南针、能量与主线"], ["gap", "言行落差与锚"], ["insights", "现况洞察与可行建议"], ["next", "Crossline 下一步"]] as const;
+const PRIVATE_SECTIONS = [["claims", "逐条核对"], ["problem", "真问题"], ["compass", "指南针、能量与主线"], ["gap", "言行落差与锚"], ["insights", "现况洞察与可行建议"],
+  ["careers", "职业方向"], ["hypotheses", "假设"], ["next", "Crossline 下一步"]] as const;
+/** Sections only some reports have (contract B, 2026-11-12): listed in the contents only when the report holds them. */
+const OPTIONAL_SECTIONS = new Set(["careers", "hypotheses"]);
 
 /** The contents beside the report, the section in view marked. */
-function Contents() {
+function Contents({ present = [] }: { present?: string[] }) {
   const t = useT();
   const [current, setCurrent] = useState("type");
   useEffect(() => {
@@ -38,14 +42,14 @@ function Contents() {
     }, { rootMargin: "-15% 0px -70% 0px" });
     for (const [id] of [...SHARED_SECTIONS, ...PRIVATE_SECTIONS]) { const element = document.getElementById(`pt-s-${id}`); if (element) observer.observe(element); }
     return () => observer.disconnect();
-  }, []);
+  }, [present.join()]);
   const link = ([id, label]: readonly [string, string]) => <a key={id} href={`#pt-s-${id}`} aria-current={current === id ? "true" : undefined}>{t(label)}</a>;
   return <nav className="pt-toc" aria-label={t("画像目录")}>
     <p className="pt-toc-group"><Share2 {...ICON} size={14} />{t("可分享")}</p>
     {SHARED_SECTIONS.map(link)}
     <small className="pt-toc-note">{t("分享只含这一组；人名、机构、课程编号已隐去")}</small>
     <p className="pt-toc-group"><Lock {...ICON} size={14} />{t("仅自己可见")}</p>
-    {PRIVATE_SECTIONS.map(link)}
+    {PRIVATE_SECTIONS.filter(([id]) => !OPTIONAL_SECTIONS.has(id) || present.includes(id)).map(link)}
   </nav>;
 }
 
@@ -320,6 +324,10 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
   const lineById = new Map(state.lines.map((line) => [line.id, line]));
   const ordered = [...state.lines].sort((a, b) => (a.hard === b.hard ? 0 : a.hard ? -1 : 1) || (a.rank ?? 99) - (b.rank ?? 99));
   const date = (state.at ?? new Date().toISOString()).slice(0, 10);
+  const careers = raw.careers ?? [], hypotheses = raw.hypotheses ?? [];
+  // The sections after the insights are numbered by what this report holds, so a report without careers has no gap in the numbers.
+  const numbering = [careers.length ? "careers" : "", hypotheses.length ? "hypotheses" : "", "next"].filter(Boolean);
+  const numberOf = (id: string) => String(9 + numbering.indexOf(id)).padStart(2, "0");
   const footer = <footer className="pt-footer">
     <span>{state.version > 1 ? t("Crossline · 个人画像报告 · {{date}} · 第 {{version}} 版", { date, version: state.version }) : t("Crossline · 个人画像报告 · {{date}}", { date })}</span>
     {qr && <span className="pt-qr"><img src={qr} alt={t("Crossline 主页二维码")} width={72} height={72} /><small>{publicUrl}</small></span>}
@@ -329,7 +337,7 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
     <p className="muted pt-agent-hint" data-no-export="">{t("「导出给 Agent」得到一份 Markdown，可贴进 ChatGPT、Claude 或 Codex，作为 AGENTS.md 或自定义指令，让它们按本人的方式协作。")}</p>
     <div className="pt-layout">
       <aside className="pt-side" data-no-export="">
-        <Contents />
+        <Contents present={numbering} />
         <FigurePicker onCurrent={showFigure} appearance={state.appearance} />
       </aside>
     <div className="pt-doc">
@@ -401,8 +409,10 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
         </div>
         {footer}
       </section>
+      <CareerSection careers={careers} lineLabel={(id) => lineById.get(id)?.label ?? id} number={numberOf("careers")} />
+      <HypothesesSection hypotheses={hypotheses} number={numberOf("hypotheses")} />
       <section className="pt-page" data-private="" id="pt-s-next">
-        <h2><small>09</small>{t("Crossline 下一步")}</h2>
+        <h2><small>{numberOf("next")}</small>{t("Crossline 下一步")}</h2>
         <ol className="pt-next">
           <li data-done={state.next.hoursSet || undefined}><b>{t("确认可用时段")}</b><span>{state.next.hoursSet ? t("已设定") : state.next.hoursProposed ? t("访谈已提议，在计划页预览后采用") : t("在计划页设定工作时段")}</span></li>
           {state.next.lines.map((line) => <li key={line.id} data-line={line.id} data-done={line.approved.length > 0 || undefined}>

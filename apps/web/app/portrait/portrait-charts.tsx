@@ -81,28 +81,40 @@ export function IdentityBars({ rows }: { rows: Array<{ lineId: string; label: st
   </li>)}</ul>;
 }
 
-/** Schwartz's ten values on fixed axes in the circle's order (`radarValues`), each 0–100 from the evidence. */
-export function ValuesRadar({ values, size = 300 }: { values: NonNullable<PortraitReport["compass"]["values"]>; size?: number }) {
+/**
+ * Schwartz's ten values on fixed axes in the circle's order (`radarValues`), each 0–100 from the evidence. A value not talked about yet
+ * (`score: null`, the interview's radar) gets no point and a muted name: drawn at 0 it read as a value the person rejects. The outline is
+ * closed only when every value has a score. `note` is set under the chart (「推断，非测量」 in the interview).
+ */
+export function ValuesRadar({ values, size = 300, note }: { values: Array<{ name: string; score: number | null; evidence: string }>; size?: number; note?: string }) {
   const t = useT();
   const c = size / 2, r = size / 2 - 72;
   const point = (index: number, value: number) => {
     const angle = -Math.PI / 2 + (index / values.length) * Math.PI * 2;
     return { x: c + Math.cos(angle) * r * (value / 100), y: c + Math.sin(angle) * r * (value / 100), angle };
   };
-  const shape = values.map((item, index) => point(index, item.score)).map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
-  return <svg className="pt-chart" viewBox={`0 0 ${size} ${size}`} role="img" aria-label={t("价值取向：{{values}}", { values: values.map((item) => `${t(item.name)} ${item.score}`).join(t("，")) })}>
+  const whole = values.every((item) => item.score !== null);
+  const shape = values.map((item, index) => point(index, item.score ?? 0)).map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const scored = values.filter((item) => item.score !== null);
+  return <svg className="pt-chart" viewBox={`0 0 ${size} ${size + (note ? 16 : 0)}`} role="img" aria-label={t("价值取向：{{values}}", { values: scored.map((item) => `${t(item.name)} ${item.score}`).join(t("，")) })}>
     {[25, 50, 75, 100].map((ring) => <polygon key={ring} points={values.map((_, index) => point(index, ring)).map((p) => `${p.x},${p.y}`).join(" ")}
       fill="none" style={{ stroke: RADAR_TRACK }} strokeWidth={ring === 100 ? 1.2 : 0.8} />)}
     {values.map((_, index) => { const p = point(index, 100); return <line key={index} x1={c} y1={c} x2={p.x} y2={p.y} style={{ stroke: RADAR_TRACK }} strokeWidth="0.8" />; })}
-    <polygon points={shape} style={{ fill: "var(--pt-accent)", stroke: "var(--pt-accent)" }} fillOpacity=".16" strokeWidth="2" />
-    {values.map((item, index) => { const p = point(index, item.score); return <circle key={item.name} cx={p.x} cy={p.y} r="3.5" style={{ fill: "var(--pt-accent)" }}><title>{item.evidence}</title></circle>; })}
+    {whole ? <polygon points={shape} style={{ fill: "var(--pt-accent)", stroke: "var(--pt-accent)" }} fillOpacity=".16" strokeWidth="2" />
+      : values.map((item, index) => { if (item.score === null) return null; const p = point(index, item.score);
+        return <line key={`s-${item.name}`} x1={c} y1={c} x2={p.x} y2={p.y} style={{ stroke: "var(--pt-accent)" }} strokeWidth="2" strokeOpacity=".55" />; })}
+    {values.map((item, index) => { if (item.score === null) return null; const p = point(index, item.score);
+      return <circle key={item.name} cx={p.x} cy={p.y} r="3.5" style={{ fill: "var(--pt-accent)" }}><title>{item.evidence}</title></circle>; })}
     {values.map((item, index) => {
       const p = point(index, 116);
       const cos = Math.cos(p.angle), sin = Math.sin(p.angle);
       const anchor = Math.abs(cos) < 0.2 ? "middle" : cos > 0 ? "start" : "end";
-      return <text key={`t-${item.name}`} x={p.x} y={p.y + 4 + (Math.abs(cos) < 0.2 ? sin * 6 : 0)} textAnchor={anchor} fontSize="13" style={{ fill: RADAR_INK }}>
-        <tspan className="pt-serif" fontWeight="700">{t(item.name)}</tspan><tspan style={{ fill: RADAR_MUTED }}> {item.score}</tspan></text>;
+      return <text key={`t-${item.name}`} x={p.x} y={p.y + 4 + (Math.abs(cos) < 0.2 ? sin * 6 : 0)} textAnchor={anchor} fontSize="13" style={{ fill: item.score === null ? RADAR_MUTED : RADAR_INK }}
+        data-unscored={item.score === null || undefined}>
+        <tspan className="pt-serif" fontWeight={item.score === null ? 400 : 700}>{t(item.name)}</tspan><tspan style={{ fill: RADAR_MUTED }}> {item.score ?? t("未谈到")}</tspan>
+        {item.score === null && <title>{t("还没有谈到")}</title>}</text>;
     })}
+    {note && <text x={c} y={size + 10} textAnchor="middle" fontSize="12" style={{ fill: RADAR_MUTED }}>{note}</text>}
   </svg>;
 }
 

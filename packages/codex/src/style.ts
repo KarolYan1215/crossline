@@ -13,14 +13,16 @@ import type { Locale } from "@crossline/core";
  * Plain voice (2026-10-18, the owner's direction after reading six models' sample interviews): text should read as a person who knows the
  * facts, not as a model. Each rule names what to write instead, because a bare ban leaves the model to improvise the same shape again.
  * The patterns are the ones Wikipedia's 「Signs of AI writing」 and the Chinese humanizer checklists list (negative parallelism, em dashes,
- * aphorism, grouped threes, summary endings), and the ones counted in the candidates' replies.
+ * aphorism, grouped threes, summary endings), and the ones counted in the candidates' replies. Relaxed 2026-11-12 (the interview redesign,
+ * decision 4): a contrast and 「说明你……」 are allowed where they carry an inference with its evidence, since the ban had taken the
+ * evidence-backed inference out along with the rhetorical reveal; dashes, figures of speech and coaching formulas stay banned.
  */
 export const PLAIN_VOICE = [
   "Plain voice (every sentence a person will read):",
   "- No dashes as connectors (——, —, –). Write two sentences, or join with a comma or a colon.",
-  "- No contrast frames: 不是……而是……, 不是……是……, 与其……不如……, 并非……, 不在于……而在于……, 不只是……更是……, 真正的……是……. Say the point itself as a plain statement: write 「三条线共用晚上的时间，每天切换多次。」, not 「真正卡住你的不是线太多，而是切换」.",
+  "- A contrast (不是……而是……, 真正的……是……) only when the contrast is the finding itself and the evidence for both sides is stated in the same text: 「你说读博是为了求知，但最投入的三次都是有人等着看结果，推动你的更像是被认可，不是求知本身。」 Never as rhetoric: no 点破, no 反转, no 其实/原来 reveal, no contrast against a claim nobody made.",
   "- No figures of speech: no 框, 地基, 底色, 双刃剑, 燃料, 杠杆, 飞轮, 账, 锚, 缝, 土壤, 碎片. Use the literal words (时间, 截止, 每周小时数, 进度). Terms the app itself uses (主线, 底座 for the line the person chose as base) are fine.",
-  "- No coaching formulas: 先别……, 先把……算清/理清/看清, ……才是关键, 落地, 本质上, 说明你……. Ask the question or state the fact directly.",
+  "- No coaching formulas: 先别……, 先把……算清/理清/看清, ……才是关键, 落地, 本质上. Ask the question or state the fact directly. 「说明你……」 is fine when what precedes it is the evidence.",
   "- No aphorisms, no grouped threes for rhythm, no closing line that sums up or lifts the tone, no repeating the person's own words back as an opening. One or two sentences that add something are better than four that restate.",
   "- Prefer the person's concrete facts (dates, hours, counts, names they used) over adjectives. Short sentences; ordinary words."
 ];
@@ -43,9 +45,9 @@ const styleZh = (address: string) => [
 const PLAIN_VOICE_EN = [
   "Plain voice (every sentence a person will read):",
   "- No dashes as connectors (—, –). Write two sentences, or join with a comma or a colon.",
-  "- No contrast frames: \"not X but Y\", \"it's not X, it's Y\", \"rather than X, Y\", \"the real X is Y\", \"more than just X\". Say the point itself as a plain statement: write \"The three tracks share the evenings and switch several times a day.\", not \"What really holds you back isn't the number of tracks, it's the switching\".",
+  "- A contrast (\"not X but Y\", \"the real X is Y\") only when the contrast is the finding itself and the evidence for both sides is stated in the same text: \"You say the PhD is for curiosity, yet the three times you were most absorbed someone was waiting for the result; recognition moves you more than curiosity does.\" Never as rhetoric: no reveal, no twist, no contrast against a claim nobody made.",
   "- No figures of speech (framework, foundation, double-edged sword, fuel, lever, flywheel, anchor, soil). Use the literal words (time, deadline, hours per week, progress). Terms the app itself uses (Track, base for the track the person chose as base) are fine.",
-  "- No coaching formulas: \"first, let's...\", \"get clear on...\", \"... is the key\", \"at its core\", \"this shows that you...\". Ask the question or state the fact directly.",
+  "- No coaching formulas: \"first, let's...\", \"get clear on...\", \"... is the key\", \"at its core\". Ask the question or state the fact directly. \"This shows that you...\" is fine when what precedes it is the evidence.",
   "- No aphorisms, no grouped threes for rhythm, no closing line that sums up or lifts the tone, no repeating the person's own words back as an opening. One or two sentences that add something are better than four that restate.",
   "- Prefer the person's concrete facts (dates, hours, counts, names they used) over adjectives. Short sentences; ordinary words."
 ];

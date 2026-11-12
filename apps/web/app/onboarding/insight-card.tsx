@@ -3,6 +3,22 @@
 import { useEffect, useState } from "react";
 import { useT } from "../locale-context";
 import { Receipt } from "./receipt";
+import type { TurnInsightView } from "./onboarding-types";
+
+/**
+ * The falsifier's condition alone, so the card's line 「如果{{falsifier}}，这条就不准」 is said once: the model may already write the
+ * whole sentence, or start with 如果 / 假如 / 若 / "If", or end with 「这条就不准」. Empty when nothing is left.
+ */
+export function falsifierCondition(falsifier: string | undefined): string {
+  let text = (falsifier ?? "").trim();
+  // i18n-ignore-start: patterns matched against what the model wrote
+  text = text.replace(/[。.！!；;\s]+$/u, "");
+  text = text.replace(/[，,、\s]*(那么|则|那)?(这条(观察|推断|判断)?|这个(推断|判断)?|它)(就|便)?(不准|不成立|是错的|错了)$/u, "");
+  text = text.replace(/[,\s]*(then\s+)?(this|it)\s+(would\s+be|is)\s+(wrong|off)$/iu, "");
+  text = text.replace(/^(如果|假如|要是|倘若|若)\s*/u, "").replace(/^if\s+/iu, "");
+  // i18n-ignore-end
+  return text.replace(/[，,、；;\s]+$/u, "").trim();
+}
 
 /**
  * The observation the deep stages give back (2026-10-19): two things the person said, connected, with the replies quoted under it, and
@@ -12,7 +28,7 @@ import { Receipt } from "./receipt";
  * brings the card back), then is gone; its round's fold keeps it, rated, where it can be changed (`vanish` off).
  */
 export function InsightCard({ sessionId, seq, insight, rating, onRated, vanish = false }: {
-  sessionId: string; seq: number; insight: { text: string; refs: Array<{ replyId: string; quote: string }> };
+  sessionId: string; seq: number; insight: TurnInsightView;
   rating: "fits" | "off" | undefined; onRated: () => void; vanish?: boolean;
 }) {
   const t = useT();
@@ -40,10 +56,14 @@ export function InsightCard({ sessionId, seq, insight, rating, onRated, vanish =
   if (receipt) return <Receipt text={shown === "fits" ? t("已记下，画像会用到这一条。") : t("已记下，画像不会用这一条。")}
     onUndo={() => void undo()} onDone={() => { setReceipt(false); onRated(); }} />;
   if (vanish && shown) return null;
+  const condition = falsifierCondition(insight.falsifier);
   return <aside className="ob-insight" aria-label={t("观察")}>
     <b className="ob-insight-label">{t("观察")}</b>
     <p className="gen">{insight.text}</p>
     <ul className="ob-insight-quotes">{insight.refs.map((ref) => <li key={`${ref.replyId}:${ref.quote}`}>「{ref.quote}」</li>)}</ul>
+    {(insight.external?.length ?? 0) > 0 && <ul className="ob-insight-external" aria-label={t("外部来源")}>{insight.external!.map((item) =>
+      <li key={item.url}><a href={item.url} target="_blank" rel="noreferrer noopener" className="gen">{item.text || item.url}</a></li>)}</ul>}
+    {condition && <small className="ob-insight-falsifier">{t("如果{{falsifier}}，这条就不准", { falsifier: condition })}</small>}
     <div className="ob-insight-rate" role="group" aria-label={t("这条观察准不准")}>
       <button type="button" className="ob-btn ob-quiet" aria-pressed={shown === "fits"} disabled={busy} onClick={() => void rate("fits")}>{t("准")}</button>
       <button type="button" className="ob-btn ob-quiet" aria-pressed={shown === "off"} disabled={busy} onClick={() => void rate("off")}>{t("不准")}</button>

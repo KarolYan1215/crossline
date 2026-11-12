@@ -80,7 +80,8 @@ import { createMilestoneConversation, createMilestoneProposer, createRelationRev
 import { createGoalBackplanner, milestonesAwaitingBackplan } from "./goal-backplanner";
 import { createPlanExplainer } from "./plan-explainer-runner";
 import { createWeeklyInsight } from "./weekly-insight-runner";
-import { createOnboardingSessionRunner } from "./onboarding-session";
+import { createOnboardingSessionRunner, finishInterview } from "./onboarding-session";
+import { researchRunnerFor } from "./onboarding-research";
 import { createOnboardingExtractor, extractionRunning, requestExtraction } from "./onboarding-extract";
 import { extractText, reextractForLayout } from "./extract";
 import { WHISPER_MODEL, createTranscriber, createWhisperEngine, modelsDirectory } from "./transcribe";
@@ -1884,6 +1885,18 @@ if (!capabilitySecret) {
           // The interview just finished: the first drafts, and the search for the lines' skills (lineSetupDue), start now, not at the next tick.
           if (outcome.state === "ready") { void firstDraftsPass(workspaceId).catch(() => undefined); void publicSkillPass(workspaceId, new Date().toISOString()).catch(() => undefined); }
           return outcome; }),
+    onboardingFinish: async (_client, sessionId, workspaceId) => {
+      const { outcome, settled } = finishInterview(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId), sessionId);
+      if (outcome.state !== "finished") return outcome;
+      // Marked as being written at once, so the page says so and the background pass does not write a report before the extraction finished.
+      analysisStore.appendEvent({ ownerId: analysisStore.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `portrait.requested:${Date.now()}`,
+        type: "portrait.requested", entityId: workspaceId, payload: { via: "finish" } });
+      void settled.then(() => writePortraitFor(workspaceId)).catch(() => undefined).finally(() => {
+        void firstDraftsPass(workspaceId).catch(() => undefined); void publicSkillPass(workspaceId, new Date().toISOString()).catch(() => undefined); });
+      return outcome;
+    },
+    onboardingResearch: async (_client, sessionId, threadId, text, workspaceId) =>
+      researchRunnerFor(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId)).answer(sessionId, threadId, text),
     transcriptionStatus: () => transcriber.status(),
     startTranscriptionDownload: async () => {
       const current = await transcriber.status();

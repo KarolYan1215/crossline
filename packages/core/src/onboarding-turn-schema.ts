@@ -4,6 +4,8 @@ import { SCHWARTZ_VALUES } from "./portrait";
 import type { ProfileCard } from "./profile-instruments";
 import type { OnboardingDepth } from "./onboarding-depth";
 import { INTERVIEW_SETTING_KEYS } from "./interview-settings";
+import { DIMENSION_FIELD, DIMENSION_IDS, DIMENSION_NOTE_FIELD, HYPOTHESIS_ITEM_FIELD, URL_FIELD, careerItemSchema, cleanCareers, cleanDimensionNotes, cleanHypotheses, oneOf,
+  type CareerOption, type DimensionId, type DimensionNote, type Hypothesis } from "./profile-hypotheses";
 import {
   ATTRIBUTE_CANDIDATES_MAX, ATTRIBUTE_CANDIDATES_MIN, ATTRIBUTE_KIND_FIELD, ATTRIBUTE_KINDS, ATTRIBUTE_MAX_LENGTH, attributeProblem, cleanAttribute, duplicateAttributes,
   guessKind, notAtomic, type AttributeCandidate, type AttributeKind
@@ -84,19 +86,36 @@ export const stageIndexIn = (flow: InterviewFlow, stage: string): number => Math
  * for, what absorbs and drains them. The others gather facts in a batch of option cards.
  */
 export const DEEP_STAGES: ReadonlySet<OnboardingStage> = new Set<OnboardingStage>(["narrative", "situation", "compass", "energy"]);
-/** How the interview talks, chosen by the person at the start (default neutral); a setting, so it can change mid-interview. */
-// Two voices since 2026-10-18 (the owner's decision): 「直接犀利」 asked for exactly the 点破/反转 writing that reads as machine-made, so it
-// is gone, and an account that chose it reads as neutral (`readTone`).
-export const ONBOARDING_TONES = ["neutral", "warm"] as const;
+/**
+ * How the interview talks. One built-in voice since 2026-11-12 (the owner's decision 10 of the interview redesign): 「直接犀利」 —
+ * matter-of-fact, willing to judge from evidence, no flattery, no lecturing, no rhetoric — written into the Skill, not chosen by the
+ * person. The 2026-10-18 voices (neutral, warm) and an older direct one stored in `ONBOARDING_TONE_SETTING` all read as it (`readTone`).
+ */
+export const ONBOARDING_TONES = ["direct"] as const;
 export type OnboardingTone = (typeof ONBOARDING_TONES)[number];
 export const ONBOARDING_TONE_SETTING = "onboarding.tone";
 export const ONBOARDING_TONE_LABEL: Record<OnboardingTone, { label: string; detail: string }> = {
-  neutral: { label: "冷静客观", detail: "就事论事，讲清依据，不带情绪" },
-  warm: { label: "温柔体贴", detail: "先回应感受，再问事情，语气柔和" }
+  direct: { label: "直接犀利", detail: "就事论事，有证据就下判断，不讨好，不说教" }
 };
-export function readTone(value: string | null | undefined): OnboardingTone {
-  return (ONBOARDING_TONES as readonly string[]).includes(value ?? "") ? value as OnboardingTone : "neutral";
+export function readTone(_value?: string | null): OnboardingTone {
+  return "direct";
 }
+
+export * from "./profile-hypotheses";
+/** A question the dialogue hands to a research thread (contract C): it needs the web, and the dialogue leaves it alone until it is done. */
+export type ResearchRequest = { question: string; why: string; dimension: DimensionId };
+export const RESEARCH_STATUSES = ["running", "asking", "done", "failed"] as const;
+/** One research thread (contract C), kept in the setting `onboarding.research:<sessionId>`. */
+export type ResearchThread = {
+  id: string; question: string; why: string; dimension: DimensionId;
+  status: (typeof RESEARCH_STATUSES)[number];
+  threadId?: string;
+  messages: Array<{ role: "agent" | "person"; text: string; at: string; sources?: Array<{ title: string; url: string }> }>;
+  ask?: string;
+  conclusion?: string;
+  sources?: Array<{ title: string; url: string }>;
+  createdAt: string; updatedAt: string;
+};
 /** The facts that are about the person rather than one line (their compass, their energy) are filed under this id. */
 export const PERSON_LINE = "person";
 
@@ -127,10 +146,15 @@ export type ProfileModel = {
    * chapter as they tell it. Empty on a portrait written before.
    */
   careerTheme: string; roleModels: string[]; motto: string; turningPoints: string[]; futureScript: string;
+  /**
+   * The hypothesis log, the career directions and a note per dimension (contract B, 2026-11-12): rewritten whole by every extraction run,
+   * the interview's external memory and the side panel's data. Empty on a portrait written before.
+   */
+  hypotheses: Hypothesis[]; careers: CareerOption[]; dimensions: DimensionNote[];
 };
 export const EMPTY_PROFILE_MODEL: ProfileModel = { portrait: "", coreConflict: "", problem: "", gravity: [], designable: [], reframes: [], workView: "",
   lifeView: "", consistency: "", trueNorth: "", energyMap: [], flow: [], says: "", does: "", anchor: "", realWant: "", allocation: "", values: [],
-  careerTheme: "", roleModels: [], motto: "", turningPoints: [], futureScript: "" };
+  careerTheme: "", roleModels: [], motto: "", turningPoints: [], futureScript: "", hypotheses: [], careers: [], dimensions: [] };
 /**
  * For each line: a personal description from what was said, and 3–12 mutually independent attributes (`attributeCandidates`) the person
  * builds a long-term goal 「成为 A 的、B 的<身份>」 from — each cited to the reply or file it came from, labelled with its kind, and an
@@ -173,6 +197,12 @@ export type OnboardingTurn = {
   insight?: TurnInsight;
   /** The dialogue's own record of where the interview stands, handed back next round. */
   progress?: TurnProgress;
+  /** Questions the dialogue hands to research threads this round (contract C); the worker opens one thread per question. */
+  research?: ResearchRequest[];
+  /** The extraction's hypothesis log, career directions and dimension notes, each list rewritten whole (contract B). */
+  hypotheses?: Hypothesis[];
+  careers?: CareerOption[];
+  dimensions?: DimensionNote[];
   /**
    * The instrument cards the app put beside the round's questions (`cardsFor`; flow v2, profile stages): never written by the model, so
    * their wording and keys stay the published items'.
@@ -185,10 +215,17 @@ export type OnboardingTurn = {
 export type ItemScore = { itemId: string; score: number; confidence: number; sentences?: number[] };
 
 /**
- * An observation (观察卡): two things the person said in different replies, connected, with the pattern named and no advice. `refs` name
- * the replies (`reply-N`) and a short verbatim span of each; `checkInsight` keeps the card only when every span is in its reply.
+ * An observation (观察卡, contract A, 2026-11-12): an inference about the person that may judge, resting on at least one verbatim span of
+ * their replies (`refs`, `reply-N` and the span), with outside data or literature when there is any (`external`, each with its URL), and
+ * what would show it wrong (`falsifier`, shown under the card as 「如果……，这条就不准」). `checkInsight` keeps the card only when it
+ * has a falsifier and every span is in its reply.
  */
-export type TurnInsight = { text: string; refs: Array<{ replyId: string; quote: string }> };
+export type TurnInsight = {
+  text: string;
+  refs: Array<{ replyId: string; quote: string }>;
+  external?: Array<{ text: string; url: string }>;
+  falsifier: string;
+};
 /**
  * The interview's progress record (2026-10-19, the owner's decision): which part it is in, what of that part is clear and what is not,
  * whether this round's answers finished the part, and what to ask next. Written by the dialogue every round, kept by the app and handed
@@ -287,6 +324,11 @@ export type OnboardingTurnContext = {
    * W-183: the abstract carried only how many there were, and the dialogue twice told the person their Tuesday 14:00 class was a morning one.
    */
   fixedSchedule?: string[];
+  /**
+   * The research threads of this interview (contract C): a topic whose thread is not `done` is left alone; a `done` one's conclusion is
+   * used from this round on.
+   */
+  research?: Array<{ id: string; question: string; status: ResearchThread["status"]; conclusion?: string }>;
 };
 
 /**
@@ -339,6 +381,8 @@ export type OnboardingExtractContext = {
    * replies (`itemScores`), or leaves it out when the words do not say.
    */
   scaleItems?: Array<{ id: string; text: string; anchors: readonly [string, string, string]; card: string }>;
+  /** Conclusions of the interview's finished research threads (contract C), with their sources: outside data the hypotheses may rest on. */
+  research?: Array<{ question: string; conclusion: string; sources: Array<{ title: string; url: string }> }>;
 };
 
 /** What the validator may check a citation against. Never sent to the model. */
@@ -365,7 +409,7 @@ export type EvidenceSentence = { ref: string; start: number; end: number; text: 
 
 const text = (max: number, min = 1) => ({ type: "string", minLength: min, maxLength: max }) as const;
 const slug = { type: "string", minLength: 1, maxLength: 80 } as const;
-const object = (properties: Record<string, unknown>) =>
+const object =(properties: Record<string, unknown>) =>
   ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
 /** Sentence numbers (2026-10-19): the model points at what it was shown instead of copying it, and the system fills the words in. */
 export const REFS = { type: "array", maxItems: 8, items: { type: "integer", minimum: 1 } } as const;
@@ -495,10 +539,19 @@ function turnFields(ids?: TurnIds) {
     fileDates: DATE_EXTRACTION_SCHEMA,
     nextAction: { type: "string", enum: ["ask", "ready_for_milestones"] },
     stage: { type: "string", enum: [...ONBOARDING_STAGES] },
-    // One observation in the deep stages (2026-10-19, the owner's decision): two things the person said, in different replies, connected and
-    // the pattern named, no advice. `text` empty for none. Checked in code (`checkInsight`): each quote must be in the reply it names.
-    insight: object({ text: { type: "string", maxLength: 300 },
-      refs: { type: "array", maxItems: 3, items: object({ replyId: { type: "string", maxLength: 20 }, quote: { type: "string", maxLength: 80 } }) } }),
+    // The round's observation (contract A, 2026-11-12): an inference that may judge, resting on the person's verbatim words, with outside
+    // data when there is any and what would show it wrong. `text` empty for none. Checked in code (`checkInsight`): a falsifier, and each
+    // quote in the reply it names.
+    insight: object({ text: { type: "string", maxLength: 400 },
+      refs: { type: "array", maxItems: 4, items: object({ replyId: { type: "string", maxLength: 20 }, quote: { type: "string", maxLength: 80 } }) },
+      external: { type: "array", maxItems: 3, items: object({ text: text(300), url: URL_FIELD }) },
+      falsifier: { type: "string", maxLength: 200 } }),
+    // Questions for research threads (contract C): what needs the web to answer, why it matters, the dimension it bears on.
+    research: { type: "array", maxItems: 3, items: object({ question: text(300), why: text(300), dimension: DIMENSION_FIELD }) },
+    // The hypothesis log, career directions and dimension notes (contract B), each list rewritten whole by the extraction.
+    hypotheses: { type: "array", maxItems: 40, items: HYPOTHESIS_ITEM_FIELD },
+    careers: { type: "array", maxItems: 6, items: careerItemSchema(line) },
+    dimensions: { type: "array", maxItems: 10, items: DIMENSION_NOTE_FIELD },
     // The interview's own progress record, rewritten every round and handed back at the start of the next (`TurnProgress`).
     progress: object({ part: { type: "string", enum: [...ONBOARDING_STAGES] }, covered: { type: "array", maxItems: 8, items: text(60) },
       open: { type: "array", maxItems: 8, items: text(60) }, partDone: { type: "boolean" }, next: text(160) }),
@@ -528,8 +581,9 @@ function turnFields(ids?: TurnIds) {
  * and the next questions. The **extraction** — facts with their sentence numbers, projects, dates, line attributes, hours, the
  * portrait — is written by its own run in the background, so its repairs never hold the conversation up.
  */
-export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage", "insight", "progress"] as const;
-export const EXTRACT_KEYS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles", "goalEdits", "availability", "settings", "profileSections", "itemScores"] as const;
+export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage", "insight", "progress", "research"] as const;
+export const EXTRACT_KEYS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles", "goalEdits", "availability", "settings", "profileSections", "itemScores",
+  "hypotheses", "careers", "dimensions"] as const;
 export const onboardingDialogueSchema = (ids?: TurnIds) => object(pick(turnFields(ids), DIALOGUE_KEYS));
 export const onboardingExtractSchema = (ids?: TurnIds) => object(pick(turnFields(ids), EXTRACT_KEYS));
 export const ONBOARDING_DIALOGUE_SCHEMA = onboardingDialogueSchema();
@@ -559,10 +613,10 @@ export function listsAtLimit(output: unknown, schema: unknown = ONBOARDING_EXTRA
   });
 }
 /** What the person waits for, and what is stored as the round. */
-export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage" | "insight" | "progress">;
+export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage" | "insight" | "progress" | "research">;
 /** What the background run writes to the ledger. */
 export type OnboardingExtraction = Pick<OnboardingTurn, "slotUpdates" | "projectsDetected" | "flywheelCandidates" | "lineProfiles" | "goalEdits"
-  | "availability" | "settings"> & { fileDates?: DateExtraction; profileSections?: ProfileSections; itemScores?: ItemScore[] };
+  | "availability" | "settings" | "hypotheses" | "careers" | "dimensions"> & { fileDates?: DateExtraction; profileSections?: ProfileSections; itemScores?: ItemScore[] };
 
 const SLOT = /^[a-z][a-z0-9_]{1,39}$/;
 const ID = /^[a-zA-Z0-9_-]{1,80}$/;
@@ -669,7 +723,39 @@ function checkTurn(value: unknown, known: KnownSources, minimumCandidates: numbe
     lineProfiles: (turn.lineProfiles ?? []).map((line) => ({ ...line, attributeCandidates: cleanCandidates(line.attributeCandidates ?? []) })),
     goalEdits: (turn.goalEdits ?? []).map((edit) => ({ ...edit, parts: edit.parts.map((part) => ({ text: cleanAttribute(part.text), kind: kindOf(part) })).filter((part) => part.text) })),
     availability: turn.availability ?? { windows: [], why: "" },
-    profile: withValues({ ...EMPTY_PROFILE_MODEL, ...(turn.profile ?? {}) }) };
+    profile: withValues({ ...EMPTY_PROFILE_MODEL, ...(turn.profile ?? {}) }),
+    ...(Array.isArray(turn.research) ? { research: cleanResearch(turn.research) } : {}),
+    ...cleanProfileInsights(turn, known) };
+}
+
+const str = (value: unknown, max: number) => typeof value === "string" ? value.trim().slice(0, max) : "";
+
+/** The dialogue's research questions: each with a question and a known dimension, each question once. */
+function cleanResearch(list: unknown[]): ResearchRequest[] {
+  const seen = new Set<string>();
+  return list.flatMap((raw) => {
+    const item = raw as Partial<ResearchRequest> | null;
+    const question = str(item?.question, 300);
+    if (!question || !oneOf(DIMENSION_IDS, item?.dimension) || seen.has(loose(question))) return [];
+    seen.add(loose(question));
+    return [{ question, why: str(item?.why, 300), dimension: item!.dimension! }];
+  });
+}
+
+/**
+ * The extraction's hypotheses, careers and dimension notes, kept only as far as they are what they claim (contract B, 2026-11-12;
+ * `cleanHypotheses`, `cleanCareers`): never a refusal, an item that does not hold is dropped and the rest kept, like the dates. A quote a
+ * hypothesis rests on must be verbatim in the reply or file it names; a career's hypothesis ids are the ones this answer keeps.
+ */
+export function cleanProfileInsights(value: Partial<Pick<OnboardingTurn, "hypotheses" | "careers" | "dimensions">>, sources: Pick<KnownSources, "replies" | "sources" | "identities">):
+  Partial<Pick<OnboardingTurn, "hypotheses" | "careers" | "dimensions">> {
+  const hypotheses = Array.isArray(value.hypotheses) ? cleanHypotheses(value.hypotheses, (ref) => sources.replies[ref] ?? sources.sources[ref]) : undefined;
+  return {
+    ...(hypotheses ? { hypotheses } : {}),
+    ...(Array.isArray(value.careers) ? { careers: cleanCareers(value.careers, new Set((hypotheses ?? []).map((item) => item.id)),
+      new Set(sources.identities.filter((id) => id !== PERSON_LINE))) } : {}),
+    ...(Array.isArray(value.dimensions) ? { dimensions: cleanDimensionNotes(value.dimensions) } : {})
+  };
 }
 
 /**

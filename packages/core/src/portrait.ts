@@ -1,5 +1,7 @@
 import { CHARACTER_EXPRESSIONS, CHARACTER_POSES } from "./portrait-character";
 import { WRITTEN_CLAIMS_SCHEMA, type WrittenClaim } from "./profile-report";
+import { DIMENSION_FIELD, DIMENSION_IDS, HYPOTHESIS_ITEM_FIELD, careerItemSchema, cleanCareers, cleanHypotheses, oneOf, type CareerOption, type DimensionId,
+  type Hypothesis } from "./profile-hypotheses";
 
 /**
  * Fixed dimensions (decided 2026-10-12) so two people's portraits can be compared: Schwartz's ten basic values in their circular order
@@ -73,7 +75,25 @@ export type PortraitReport = {
   character?: { outfit: string; props: string[]; pose: string; expression: string; appearance?: string };
   /** Schema 6 (2026-10-31): what the report says, by section, each with its own words to rest on (`resolveWrittenClaims` keeps the traceable). */
   claims?: WrittenClaim[];
+  /**
+   * The interview redesign (2026-11-12, contract B): the hypotheses the report rests on, as the interview's log keeps them (the person's
+   * 准/不准 copied from it by code); the case formulation over D0–D9 the report closes on — per dimension what was found and on which
+   * hypotheses, what drives and what holds the person back, the loops that keep the present going with where each can be broken, and
+   * their resources; and career directions, each with the job ads' requirement matrix against their evidence, the gaps, and a trial.
+   * Absent on a report written before.
+   */
+  hypotheses?: Hypothesis[];
+  formulation?: PortraitFormulation;
+  careers?: CareerOption[];
   sensitive: string[];
+};
+
+/** The case formulation (5P rewritten as drive, obstacles, maintaining loops and resources), with what each dimension found. */
+export type PortraitFormulation = {
+  dimensions: Array<{ id: DimensionId; summary: string; hypothesisIds: string[] }>;
+  drivers: string[]; obstacles: string[];
+  loops: Array<{ loop: string; leverage: string }>;
+  resources: string[];
 };
 
 const text = (max: number) => ({ type: "string", minLength: 0, maxLength: max }) as const;
@@ -102,6 +122,13 @@ export const PORTRAIT_SCHEMA = object({
   character: object({ outfit: text(80), props: list(3, 40), pose: { type: "string", enum: [...CHARACTER_POSES] }, expression: { type: "string", enum: [...CHARACTER_EXPRESSIONS] },
     appearance: text(160) }),
   claims: WRITTEN_CLAIMS_SCHEMA,
+  hypotheses: { type: "array", maxItems: 24, items: HYPOTHESIS_ITEM_FIELD },
+  formulation: object({
+    dimensions: { type: "array", maxItems: 10, items: object({ id: DIMENSION_FIELD, summary: text(400), hypothesisIds: { type: "array", maxItems: 8, items: text(12) } }) },
+    drivers: list(6, 200), obstacles: list(6, 200),
+    loops: { type: "array", maxItems: 4, items: object({ loop: text(300), leverage: text(300) }) },
+    resources: list(6, 200) }),
+  careers: { type: "array", maxItems: 5, items: careerItemSchema(text(60)) },
   sensitive: list(30, 60)
 });
 
@@ -127,9 +154,12 @@ function inFixedOrder<T>(items: T[] | undefined, names: readonly string[], nameO
 /**
  * Keeps what can be drawn: lines and their feeds must be the person's lines; sensitive spans must occur in the text they would hide;
  * values and say–do pairs, when present, are the fixed sets in their fixed order. `lenient` only orders them — the answer kept once
- * repairs have run out, which the page then draws without the radar.
+ * repairs have run out, which the page then draws without the radar. Hypotheses, the formulation and careers are never refused, only
+ * kept as far as they hold (`cleanHypotheses`, `cleanCareers`): a quote checked against `replies` (by `reply-N`) when given, outside data
+ * and job ads only with a web URL, the person's 准/不准 from `ratedOf`, never from the model.
  */
-export function validatePortrait(value: unknown, lineIds: string[], options: { lenient?: boolean } = {}): PortraitReport {
+export function validatePortrait(value: unknown, lineIds: string[],
+  options: { lenient?: boolean; replies?: Record<string, string>; ratedOf?: (id: string) => Hypothesis["rated"] } = {}): PortraitReport {
   const report = value as PortraitReport | undefined;
   if (!report?.cover || !report.problem || !report.compass || !report.energy || !report.lines || !report.gap || !Array.isArray(report.insights)) throw new Error("PORTRAIT_SCHEMA_INVALID");
   if (!report.cover.portrait.trim()) throw new Error("PORTRAIT_EMPTY");
@@ -148,9 +178,29 @@ export function validatePortrait(value: unknown, lineIds: string[], options: { l
     const total = items.reduce((sum, item) => sum + (item[key] ?? 0), 0);
     if (total > 0 && Math.abs(total - 100) > 5) for (const item of items) item[key] = Math.round(((item[key] ?? 0) / total) * 100);
   }
+  const replies = options.replies;
+  const hypotheses = Array.isArray(report.hypotheses) ? cleanHypotheses(report.hypotheses, replies ? (ref) => replies[ref] : undefined, options.ratedOf) : undefined;
+  const hypothesisIds = new Set((hypotheses ?? []).map((item) => item.id));
+  const careers = Array.isArray(report.careers) ? cleanCareers(report.careers, hypothesisIds, known) : undefined;
+  const formulation = report.formulation && typeof report.formulation === "object" ? cleanFormulation(report.formulation, hypothesisIds) : undefined;
   const body = JSON.stringify({ ...report, sensitive: [] });
   return { ...report, compass: { ...report.compass, ...(values ? { values } : {}) }, gap: { ...report.gap, ...(pairs ? { pairs } : {}) },
-    lines: { ...report.lines, items }, sensitive: [...new Set(report.sensitive.map((span) => span.trim()).filter((span) => span.length >= 2 && body.includes(span)))] };
+    lines: { ...report.lines, items }, ...(hypotheses ? { hypotheses } : {}), ...(careers ? { careers } : {}), ...(formulation ? { formulation } : {}),
+    sensitive: [...new Set(report.sensitive.map((span) => span.trim()).filter((span) => span.length >= 2 && body.includes(span)))] };
+}
+
+/** The formulation's dimensions known, each once and in order, citing only hypotheses the report keeps; its lists only non-empty strings. */
+function cleanFormulation(raw: PortraitFormulation, hypothesisIds: ReadonlySet<string>): PortraitFormulation {
+  const strings = (list: unknown) => Array.isArray(list) ? list.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()) : [];
+  const byId = new Map<DimensionId, PortraitFormulation["dimensions"][number]>();
+  for (const item of Array.isArray(raw.dimensions) ? raw.dimensions : []) {
+    if (oneOf(DIMENSION_IDS, item?.id) && !byId.has(item.id) && typeof item.summary === "string" && item.summary.trim())
+      byId.set(item.id, { id: item.id, summary: item.summary.trim(), hypothesisIds: strings(item.hypothesisIds).filter((id) => hypothesisIds.has(id)) });
+  }
+  return { dimensions: DIMENSION_IDS.flatMap((id) => byId.get(id) ?? []), drivers: strings(raw.drivers), obstacles: strings(raw.obstacles),
+    loops: (Array.isArray(raw.loops) ? raw.loops : []).filter((loop) => typeof loop?.loop === "string" && loop.loop.trim())
+      .map((loop) => ({ loop: loop.loop.trim(), leverage: typeof loop.leverage === "string" ? loop.leverage.trim() : "" })),
+    resources: strings(raw.resources) };
 }
 
 /** The shared version: every sensitive span replaced with a block, the private second half left out by the page. */

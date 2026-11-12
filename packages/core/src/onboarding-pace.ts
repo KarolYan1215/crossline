@@ -2,7 +2,7 @@ import type { AvailabilityWindow } from "./availability";
 import { joinList, monthDay, tFor, type Locale } from "./i18n";
 import { locateQuote } from "./sentences";
 import { depthPace, type OnboardingDepth } from "./onboarding-depth";
-import { DEEP_STAGES, INTERVIEW_FLOW_STAGES, ONBOARDING_STAGES, type InterviewFlow, type OnboardingStage, type TurnInsight, type TurnProgress, type TurnQuestion } from "./onboarding-turn-schema";
+import { INTERVIEW_FLOW_STAGES, ONBOARDING_STAGES, isWebUrl, type InterviewFlow, type OnboardingStage, type TurnInsight, type TurnProgress, type TurnQuestion } from "./onboarding-turn-schema";
 
 /**
  * What keeps the interview moving and gives something back at every part (2026-10-19, the owner's decisions after testers lost patience):
@@ -43,16 +43,20 @@ export function portraitConfirmedByInsights(ratings: InsightRatings): boolean {
 }
 
 /**
- * An observation is kept only when it is what it claims to be: in a deep stage, with text, resting on at least two of the person's replies
- * (different ones), each quote found in the reply it names. Anything else is dropped, never repaired: a round is not held up for it.
+ * An observation is kept only when it is what it claims to be (contract A, 2026-11-12): text, a falsifier (「如果……，这条就不准」), and at
+ * least one of the person's replies quoted, each quote found in the reply it names; outside data only with a web URL. Any part of the main
+ * interview may give one (a line's own interview, `details`, does not). Anything else is dropped, never repaired: a round is not held up for it.
  */
 export function checkInsight(insight: TurnInsight | undefined, replies: Record<string, string>, stage: string | undefined): TurnInsight | undefined {
   const text = insight?.text?.trim() ?? "";
-  if (!text || !DEEP_STAGES.has(stage as OnboardingStage)) return undefined;
+  const falsifier = insight?.falsifier?.trim() ?? "";
+  if (!text || !falsifier || stage === "details" || !(ONBOARDING_STAGES as readonly string[]).includes(stage ?? "")) return undefined;
   const refs = (insight?.refs ?? []).filter((ref) => typeof ref?.replyId === "string" && typeof ref.quote === "string" && ref.quote.trim()
     && ref.replyId in replies && Boolean(locateQuote(replies[ref.replyId]!, ref.quote)));
-  if (refs.length < 2 || new Set(refs.map((ref) => ref.replyId)).size < 2) return undefined;
-  return { text, refs: refs.slice(0, 3).map((ref) => ({ replyId: ref.replyId, quote: ref.quote.trim() })) };
+  if (!refs.length || refs.length < (insight?.refs ?? []).length) return undefined;
+  const external = (insight?.external ?? []).filter((item) => typeof item?.text === "string" && item.text.trim() && isWebUrl(item.url))
+    .slice(0, 3).map((item) => ({ text: item.text.trim(), url: item.url.trim() }));
+  return { text, refs: refs.slice(0, 4).map((ref) => ({ replyId: ref.replyId, quote: ref.quote.trim() })), ...(external.length ? { external } : {}), falsifier };
 }
 
 /** The progress record as stored; anything malformed reads as none (an older round, or a model that left it out). */

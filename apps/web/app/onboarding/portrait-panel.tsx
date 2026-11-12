@@ -10,6 +10,10 @@ export type ProfileModelView = {
   flow: string[]; says: string; does: string; anchor: string; realWant: string; allocation: string;
   /** Schwartz values scored so far (absent on a profile written before they existed). */
   values?: Array<{ value: string; score: number }>;
+  /** The hypothesis log, career options and dimension notes (contract B, 2026-11-12); absent on a profile written before. */
+  hypotheses?: import("./interview-contract").Hypothesis[];
+  careers?: import("./interview-contract").CareerOption[];
+  dimensions?: import("./interview-contract").DimensionNote[];
 };
 export type LineView = { id: string; label: string; rank: number | null; hard: boolean; goals: string[]; goalParts: string[] };
 

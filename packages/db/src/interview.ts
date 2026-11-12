@@ -1,4 +1,4 @@
-import { cardsSettled, depthPace, flowOf, PROFILE_SECTIONS_SETTING, ONBOARDING_DEPTH_SETTING, readDepth, PROFILE_INSTRUMENTS_SETTING, readInstrumentAnswers, settledItems, ATTENTION_SETTING, START_CONFIRMED_SETTING, START_CONFIRM_SINCE, interviewChecklist, lineAttributes, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, portraitConfirmedByInsights, readInsightRatings, ONBOARDING_INSIGHTS, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile, type Locale } from "@crossline/core";
+import { cardsSettled, flowOf, PROFILE_SECTIONS_SETTING, ONBOARDING_DEPTH_SETTING, readDepth, PROFILE_INSTRUMENTS_SETTING, readInstrumentAnswers, settledItems, ATTENTION_SETTING, START_CONFIRMED_SETTING, START_CONFIRM_SINCE, interviewChecklist, lineAttributes, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, portraitConfirmedByInsights, readInsightRatings, ONBOARDING_INSIGHTS, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile, type Locale } from "@crossline/core";
 import { interviewLocale, readLocale } from "./locale";
 import { unfiledFilesIn } from "./file-belonging";
 import { latestFileDates } from "./index";
@@ -47,12 +47,13 @@ export function interviewChecklistFor(store: CrosslineStore, workspaceId: string
   // The main interview (a line's own interview is `line-…`) on the profile-first flow has cards to answer before the app opens.
   const main = store.listOnboardingSessions(workspaceId).filter((session) => !session.id.startsWith("line-"))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-  // The cards exist in Chinese only so far, so an English interview is never held for them. The tier's set is what holds the start: the
-  // quick tier's short one (W-186).
+  // The cards exist in Chinese only so far, so an English interview is never held for them. The short set holds the start (W-186): the
+  // tiers are gone (2026-11-12) and the interview offers every card, but the start standard is what it was for every account that never
+  // chose a tier, so the other pages open no later than before.
   const profileCards = main && flowOf(main.coverage) === "v2"
     && (extras.locale ?? interviewLocale(store, workspaceId) ?? readLocale(store, workspaceId)) !== "en"
     ? cardsSettled(settledItems(readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING))),
-      depthPace(readDepth(store.getSetting(workspaceId, ONBOARDING_DEPTH_SETTING))).cards) : undefined;
+      "short") : undefined;
   return interviewChecklist({
     lines,
     descriptions: Object.fromEntries(Object.entries(profiles).map(([id, value]) => [id, { description: value.description ?? "", candidates: (value.attributes ?? []).length || (value.goalCandidates ?? []).length }])),

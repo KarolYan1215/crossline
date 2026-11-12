@@ -21,6 +21,7 @@ import { IMPORT_TRIAGE_SCHEMA } from "./task-import";
 import { AUTOMATION_PLAN_SCHEMA } from "./automations";
 import { WORKFLOW_TURN_SCHEMA } from "./workflow-authoring";
 import { DATE_EXTRACTION_SCHEMA } from "./date-schema";
+import { ONBOARDING_RESEARCH_SCHEMA } from "./onboarding-research";
 import { DILIGENCE_OUTPUT_SCHEMA } from "./diligence-schema";
 import { ENERGY_ADVICE_REVIEW_SCHEMA } from "./energy-advice";
 import { FLYWHEEL_OUTPUT_SCHEMA } from "./flywheel-schema";
@@ -70,9 +71,14 @@ export type SkillNeeds = {
 };
 
 export const SKILL_NEEDS: Record<string, SkillNeeds> = {
+  // The interview, its extraction and the portrait may search the web (2026-11-12, decision 19 of the redesign) but do not need it: a
+  // `webSearch` need here would refuse the whole interview on a provider without search (a sponsored model, a third-party key without
+  // Tavily). Only the research thread, which is nothing but web lookups, needs it.
   "crossline-onboarding": { label: "访谈", schemas: ["ONBOARDING_DIALOGUE_SCHEMA"] },
   // Reads earlier sentences through its lookups (`search_evidence`, `read_sentences`).
   "crossline-onboarding-extract": { label: "访谈整理", schemas: ["ONBOARDING_EXTRACT_SCHEMA"], tools: true },
+  // A research thread of the interview (contract C): looks things up on the web and reads the person's own material through the lookups.
+  "crossline-onboarding-research": { label: "访谈调研", schemas: ["ONBOARDING_RESEARCH_SCHEMA"], tools: true, webSearch: true },
   "crossline-milestone-architect": { label: "里程碑设计", schemas: ["MILESTONE_PROPOSAL_SCHEMA"] },
   "crossline-milestone-risk-reviewer": { label: "里程碑风险审查", schemas: ["MILESTONE_RISK_SCHEMA"] },
   "crossline-artifact-planner": { label: "跨主线产出规划", schemas: ["ARTIFACT_PLAN_SCHEMA"] },
@@ -198,7 +204,7 @@ const CONFORMANCE_SCHEMAS: Record<string, Record<string, unknown>> = {
   AGENT_SUMMARY_SCHEMA, ANALYSIS_OUTPUT_SCHEMA, AUTOMATION_PLAN_SCHEMA, ARCHETYPE_CURATION_SCHEMA, ARTIFACT_PLAN_SCHEMA, BACKGROUND_FACTS_OUTPUT_SCHEMA, BACKPLAN_SCHEMA,
   CALENDAR_CLASSIFICATION_SCHEMA, CONCIERGE_SCHEMA, MAIL_TRIAGE_SCHEMA, MAIL_REPLY_DRAFT_SCHEMA, IMPORT_TRIAGE_SCHEMA, DATE_EXTRACTION_SCHEMA, DILIGENCE_OUTPUT_SCHEMA, ENERGY_ADVICE_REVIEW_SCHEMA, FLYWHEEL_OUTPUT_SCHEMA, FOLDER_LINES_SCHEMA, RECORDING_DIGEST_SCHEMA, MEDIA_DESCRIPTION_SCHEMA, FAVOURITE_TOPICS_SCHEMA, GOAL_SPLIT_SCHEMA,
   MANUAL_DESIGN_SCHEMA, MATERIAL_SEARCH_SCHEMA, NODE_WRITEUP_SCHEMA, MILESTONE_GATE_OUTPUT_SCHEMA, MILESTONE_PROPOSAL_SCHEMA, MILESTONE_PLAN_SCHEMA, MILESTONE_RISK_SCHEMA, MINE_SKILL_SCHEMA,
-  ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA, PLAN_EXPLAINER_OUTPUT_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_GAP_SCHEMA, STEP_PLAN_SCHEMA,
+  ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA, ONBOARDING_RESEARCH_SCHEMA, PLAN_EXPLAINER_OUTPUT_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_GAP_SCHEMA, STEP_PLAN_SCHEMA,
   VALIDATION_REVIEW_SCHEMA, PROGRESS_ASSESSMENT_SCHEMA, TASK_TITLES_SCHEMA, WEEKLY_INSIGHT_OUTPUT_SCHEMA, PUBLIC_SKILL_REVIEW_SCHEMA, PUBLIC_SKILL_BATCH_REVIEW_SCHEMA, SKILL_SCOUT_SCHEMA, TASK_MERGE_REVIEW_SCHEMA,
   OPPORTUNITY_WATCHES_SCHEMA, OPPORTUNITY_READING_SCHEMA, VISA_READING_SCHEMA, QUOTE_READING_SCHEMA,
   FORM_FILL_SCHEMA, FORM_CHECK_SCHEMA, FORM_OBSERVE_SCHEMA, DICTATION_CORRECTION_SCHEMA, WORKFLOW_TURN_SCHEMA, TIME_ATTRIBUTION_SCHEMA
@@ -311,7 +317,9 @@ export const SCHEMA_PROXIES: Record<string, string> = { MAIL_TRIAGE_SCHEMA: "CAL
   // A visa page (2026-11-02): a short list of objects with an enum and quoted strings, like calendar filing.
   VISA_READING_SCHEMA: "CALENDAR_CLASSIFICATION_SCHEMA",
   // Quotes (2026-11-10): a short list of objects with short strings and a number, like calendar filing.
-  QUOTE_READING_SCHEMA: "CALENDAR_CLASSIFICATION_SCHEMA" };
+  QUOTE_READING_SCHEMA: "CALENDAR_CLASSIFICATION_SCHEMA",
+  // An interview research run (2026-11-12): a few strings, one of them long, and a short list of two-string objects, like a tutorial step's write-up.
+  ONBOARDING_RESEARCH_SCHEMA: "NODE_WRITEUP_SCHEMA" };
 const caseRuns = (record: ConformanceRecord) => {
   const runs = record.runs.flatMap((run) => LEGACY_CASES[run.caseId] ? LEGACY_CASES[run.caseId]!.split("|").map((caseId) => ({ ...run, caseId })) : [run]);
   const proxied = Object.entries(SCHEMA_PROXIES).filter(([schema]) => !runs.some((run) => run.caseId === schema))

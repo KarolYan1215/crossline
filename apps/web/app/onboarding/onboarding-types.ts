@@ -22,10 +22,17 @@ export type Question = {
 export type AssistantTurn = {
   reply: string; questions: Question[]; nextAction: "ask" | "ready_for_milestones"; stage?: string;
   coverage: Array<{ identityId: string; filled: string[]; missing: string[] }>;
-  /** The deep stages' observation, kept only when its quotes are in the replies it names (`checkInsight`). */
-  insight?: { text: string; refs: Array<{ replyId: string; quote: string }> };
+  /**
+   * The observation, kept only when its quotes are in the replies it names (`checkInsight`); `falsifier` and `external` from 2026-11-12
+   * (contract A), absent on rounds stored before.
+   */
+  insight?: TurnInsightView;
   /** The profile module's cards the app put in this round (flow v2): answered by tapping one of five dots, or in words in the card's box. */
   cards?: import("@crossline/core").ProfileCard[];
+};
+export type TurnInsightView = {
+  text: string; refs: Array<{ replyId: string; quote: string }>;
+  external?: Array<{ text: string; url: string }>; falsifier?: string;
 };
 export type Message = { seq: number; role: "assistant" | "user"; content: unknown; createdAt: string };
 export type DateBatchItem = {
@@ -80,6 +87,10 @@ export type OnboardingState = {
   /** The capacity conflict and, once the start standard stands, the week's draft (`weekCapacity`). */
   capacity?: import("@crossline/core").WeekCapacity;
   skeleton?: import("@crossline/core").SkeletonBlock[];
+  /** How far the interview is from its lower bound (the start standard) and from complete (contract D); absent before the route sends it. */
+  completeness?: import("./interview-contract").Completeness;
+  /** The research threads the interview opened (contract C), each with its own conversation; absent before the route sends them. */
+  research?: import("./interview-contract").ResearchThread[];
   /** The person's 准 / 不准 per round (round seq → verdict). */
   insightRatings?: Record<string, "fits" | "off">;
   identities: Identity[];

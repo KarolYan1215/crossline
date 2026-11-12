@@ -29,7 +29,7 @@ import { configureModelGate, runCodexSkill, setProviderResolver, setUsageSink, s
   threadProvider, withUsageWorkspace, type ProviderRouting, type SkillUsage } from "../packages/codex/src/index";
 import {
   ONBOARDING_INSIGHTS, ONBOARDING_TONE_SETTING, PROFILE_CLAIMS_SETTING, PROFILE_INSTRUMENTS_SETTING, THIRD_PARTY_CAPABILITIES, cardWordsHead,
-  composeGoal, instrumentClaims, instrumentReadings, interviewComplete, parseSponsorModels, readInsightRatings, readInstrumentAnswers, readyToStart,
+  composeGoal, instrumentClaims, interviewCompleteness, instrumentReadings, interviewComplete, parseSponsorModels, readInsightRatings, readInstrumentAnswers, readyToStart,
   scaleAnswerLine, screenQuestions, sponsorSpend, type AccessContext, type OnboardingTone, type ProfileCard, type StoredLineProfile
 } from "../packages/core/src/index";
 import { CrosslineStore, interviewChecklistFor, questionScreenFor } from "../packages/db/src/index";
@@ -38,7 +38,10 @@ import { openingReply } from "../apps/web/app/onboarding/opening-card";
 import { identityLines } from "../apps/worker/src/lines";
 import { createOnboardingExtractor, extractionSettled, requestExtraction } from "../apps/worker/src/onboarding-extract";
 import { readSectionRecords } from "../apps/worker/src/onboarding-persist";
-import { createOnboardingSessionRunner } from "../apps/worker/src/onboarding-session";
+import { createOnboardingSessionRunner, finishInterview } from "../apps/worker/src/onboarding-session";
+import { readResearch, researchRunnerFor } from "../apps/worker/src/onboarding-research";
+import { createWebTools } from "../apps/worker/src/web-tools";
+import { webSearchFromEnv } from "../packages/connectors/src/index";
 import { createPortraitWriter } from "../apps/worker/src/portrait-writer";
 import { sponsorFromEnv, SPONSOR_PROVIDER_ID } from "../apps/worker/src/sponsor";
 
@@ -72,7 +75,9 @@ process.env.CROSSLINE_STATE_DIR = path.join(scratch, "state");
 process.env.CROSSLINE_DATA_DIR = path.join(scratch, "data");
 
 // ---- usage, the gateway and the routing: what the worker gives an invited account, the model pinned ----
-const SKILLS = ["crossline-onboarding", "crossline-onboarding-extract", "crossline-portrait-writer", "crossline-eval-persona"];
+const SKILLS = ["crossline-onboarding", "crossline-onboarding-extract", "crossline-onboarding-research", "crossline-portrait-writer", "crossline-eval-persona"];
+// The interview's runs get the web as an invited account's do (2026-11-12): Crossline's own search through the configured search API.
+const search = webSearchFromEnv();
 const keyOf = (name: string, role: "interview" | "player") => `persona-eval:${name}:${role}`;
 const usageByKey = new Map<string, SkillUsage[]>();
 setUsageSink((usage) => { if (usage.workspaceId) usageByKey.set(usage.workspaceId, [...(usageByKey.get(usage.workspaceId) ?? []), usage]); });
@@ -84,7 +89,8 @@ const routing = (key: string, pinned: string): ProviderRouting => {
   const contextK = sponsor.models.find((item) => item.model === pinned)?.contextK;
   return { provider: { id: SPONSOR_PROVIDER_ID, kind: "chat", label: "开发者提供的模型", baseUrl: sponsor.baseUrl, model: pinned, responseFormat: "json_object",
     keyLast4: null, updatedAt: "1970-01-01T00:00:00.000Z", ...(contextK ? { contextK } : {}) },
-    gatewayUrl: gateway.urlFor(key, SPONSOR_PROVIDER_ID), admitted: new Set(SKILLS), codexSignedIn: false, capabilities: { ...THIRD_PARTY_CAPABILITIES, webSearch: false } };
+    gatewayUrl: gateway.urlFor(key, SPONSOR_PROVIDER_ID), admitted: new Set(SKILLS), codexSignedIn: false, capabilities: { ...THIRD_PARTY_CAPABILITIES, webSearch: Boolean(search) },
+    functionCalls: true, ...(search && !key.endsWith(":player") ? { webTools: createWebTools(search) } : {}) };
 };
 setProviderResolver((key) => key?.startsWith("persona-eval:") ? routing(key, key.endsWith(":player") ? playerModel : model) : undefined);
 const supervisor = await startCodexSupervisor({ port: Number(process.env.CROSSLINE_CODEX_SUPERVISOR_PORT ?? 3392),
@@ -160,7 +166,7 @@ async function runPerson(name: string, opening: Opening) {
   const transcript: string[] = [`# ${name} · ${stamp}`, "", `开场卡：语气 ${opening.tone}；主线 ${opening.lines.join("、")}；底座 ${opening.base}；固定日程 ${opening.fixed.join("、") || "无"}`, ""];
   const earlier: Array<{ interviewer: string; me: string }> = [];
   const rounds: Array<Record<string, unknown>> = [];
-  let text = openingReply({ tone: opening.tone, edition: "full", lines: ordered, domains: {}, base: opening.base, fixed: opening.fixed }, false);
+  let text = openingReply({ edition: "full", lines: ordered, domains: {}, base: opening.base, fixed: opening.fixed }, false);
   let turns = 0, state = "", goalsAdopted = 0;
   const started = Date.now();
   let readyAt: number | undefined;
@@ -223,6 +229,25 @@ async function runPerson(name: string, opening: Opening) {
         open: items.filter((item) => !item.done && !item.deferred && item.owner === "interview").map((item) => item.id) });
       log({ turn: turns, stage: turn.stage, questions: batch.length, cards: cards.length, next: turn.nextAction, ready: Boolean(readyAt) });
       if (outcome.state === "ready") break;
+      // The research threads' questions to the person, answered by the player in the side card (never in the main conversation).
+      const research = researchRunnerFor(store, workspaceId, repoRoot, () => client);
+      for (const thread of readResearch(store, workspaceId, "eval").filter((item) => item.status === "asking" && item.ask)) {
+        const sideContext = { version: "crossline.eval-persona.v2", persona: life, reply: `（侧栏调研卡：${thread.question}）`, questions: [{ id: "side", text: thread.ask!, kind: "free", options: [] }],
+          files: [], cards: [], insight: "", earlier: earlier.slice(-3) };
+        const side = await withUsageWorkspace(playerKey, () => runCodexSkill<Played>(client, sideContext, { skillName: "crossline:crossline-eval-persona", cwd: repoRoot,
+          provider: threadProvider(routing(playerKey, playerModel), playerModel, "crossline-eval-persona"),
+          developerInstructions: "Play the person as the Skill describes. Return raw JSON only.", outputSchema: PLAYER_SCHEMA, prepareInput: () => sideContext,
+          validateOutput: (output) => output as Played, onAudit: () => {}, timeoutMs: 30 * 60_000 }));
+        const said = side.ok ? [side.output.answers[0]?.other, side.output.freeText].filter(Boolean).join(" ") : "";
+        if (said) { research.answer("eval", thread.id, said); transcript.push(`**侧栏调研卡**：${thread.question}`, "", `问：${thread.ask}`, "", `答：${said}`, ""); }
+      }
+      // The person presses 「结束并出报告」: once the start standard stands, when the page's completeness is full (it reminds them), or when
+      // the dialogue has nothing more of its own to ask and they have nothing else to say.
+      const completeness = interviewCompleteness({ lowerBound: Boolean(readyAt), stagesSeen: rounds.map((round) => String(round.stage ?? "")),
+        ...json<{ dimensions?: []; hypotheses?: []; careers?: [] }>("profile.model", {}) });
+      log({ turn: turns, completeness: completeness.score, full: completeness.full });
+      const closing = batch.some((question) => question.id === "closing-open") && batch.length === 1;
+      if (readyAt && (completeness.full || closing)) { transcript.push(`**本人按「结束并出报告」**（完善度 ${Math.round(completeness.score * 100)}%）`, ""); break; }
 
       const context = { version: "crossline.eval-persona.v2", persona: life, reply: turn.reply,
         questions: batch.map(({ id, text: body, kind, options }) => ({ id, text: body, kind, options: options.map((option) => ({ label: option.label })) })),
@@ -258,10 +283,15 @@ async function runPerson(name: string, opening: Opening) {
     // for them in the app; then the portrait writer, as the worker runs it once the interview is complete.
     const extractor = createOnboardingExtractor(store, workspaceId, repoRoot, () => client);
     await withUsageWorkspace(interviewKey, async () => {
+      // Research threads still running finish first (at most 30 minutes): their conclusions are part of what the portrait reads.
+      for (let waited = 0; waited < 30 && readResearch(store, workspaceId, "eval").some((item) => item.status === "running"); waited += 1) await wait(60_000);
+      await finishInterview(store, workspaceId, repoRoot, () => client, "eval").settled;
       await extractionSettled(workspaceId);
       for (let run = 0; run < 3 && !json<{ portrait?: string }>("profile.model", {}).portrait; run += 1)
         await requestExtraction(workspaceId, (preferred) => extractor.runOnce(preferred), "eval");
     });
+    writeFileSync(path.join(dir, "research.json"), JSON.stringify(readResearch(store, workspaceId, "eval"), null, 2));
+    writeFileSync(path.join(dir, "profile-model.json"), JSON.stringify(json("profile.model", {}), null, 2));
     // Chips the finishing runs wrote are adopted too: the person can tap them on the left column at any time.
     goalsAdopted += adoptGoals();
     const written = await withUsageWorkspace(interviewKey, () => createPortraitWriter(store, workspaceId, repoRoot, () => client)());

@@ -6,7 +6,7 @@ import { FileReadList } from "./file-read-list";
 import { InsightCard } from "./insight-card";
 import { DiligencePanel } from "./diligence-panel";
 import { TranscriptionCard, type TranscriptionStatus } from "./transcription-card";
-import { DEEP_STAGES, ONBOARDING_DEPTH_LABEL, ONBOARDING_DEPTHS, ONBOARDING_TONE_LABEL, ONBOARDING_TONES, type OnboardingDepth, type OnboardingStage, type OnboardingTone } from "@crossline/core";
+import { DEEP_STAGES, type OnboardingStage } from "@crossline/core";
 import { QuestionCard } from "./question-card";
 import { cardReplyLines, NO_CARD_ANSWERS, ProfileCards, type CardAnswers } from "./profile-cards";
 import { StageBar } from "./portrait-panel";
@@ -15,7 +15,6 @@ import { StageView } from "./stage-view";
 import { FirstHint } from "../ui/first-hint";
 import { OpeningCard, openingReply, type OpeningAnswer } from "./opening-card";
 import { announceRound, FailureDetail, TurnProgress } from "./turn-progress";
-import { SegmentedControl } from "../ui/controls";
 import { AssessCard } from "./assess-card";
 import { QuotaNotice } from "./quota-notice";
 import { withLink } from "./rich-text";
@@ -24,6 +23,8 @@ import { useLocale } from "../locale-context";
 import { VoiceField } from "../ui/voice/voice-input";
 import { foldThread } from "./round-fold";
 import { Receipt } from "./receipt";
+import { FinishButton } from "./finish-button";
+import { ResearchPanel } from "./research-panel";
 import { asksLongTermGoal, composeAnswers, type Answer, type AssistantTurn, type DocumentRow, type Message, type OnboardingState } from "./onboarding-types";
 
 const ACCEPT = ".pdf,.docx,.txt,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.m4a,.mp3,.wav,.aac,.ogg,.flac";
@@ -106,11 +107,13 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   // While the extraction records the last replies (it runs after the round is shown), the facts, the start ring and the left column
   // follow it without a refresh. A failing one is not polled: the worker retries it on its own clock.
   const organizing = Boolean(state?.organizing && (state.organizing.replies || state.organizing.files) && !state.organizing.failing);
+  // A research thread still running or waiting on the person is followed at the same pace (contract C): its card and status come by themselves.
+  const researchLive = Boolean(state?.research?.some((thread) => thread.status === "running" || thread.status === "asking"));
   useEffect(() => {
-    if (!organizing) return;
+    if (!organizing && !researchLive) return;
     const timer = setInterval(() => { if (document.visibilityState === "visible") void load(); }, 5000);
     return () => clearInterval(timer);
-  }, [organizing, load]);
+  }, [organizing, researchLive, load]);
   // Attention time (decided 2026-10-12): every 15 seconds while the page is visible, the server is told how long ago the person last typed
   // or clicked; it counts only beats within a minute of input, so the model's thinking time while the person is away is not counted.
   useEffect(() => {
@@ -326,14 +329,9 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   };
   const filesRead = state.documents.some((doc) => doc.extractionStatus === "done");
 
-  /** The opening card's answers: tone and lines are written at once, then sent as the first reply the interview quotes. */
+  /** The opening card's answers: the lines are written at once, then sent as the first reply the interview quotes. */
   const start = async (answer: OpeningAnswer) => {
     setBusy("turn"); setError("");
-    await fetch("/api/onboarding/tone", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tone: answer.tone }) }).catch(() => undefined);
-    const depth = answer.depth ?? state.depth;
-    await fetch("/api/onboarding/depth", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ depth }) }).catch(() => undefined);
-    // The switches above the thread show the chosen tone and tier at once, not the defaults until the first round ends.
-    setState((previous) => previous && { ...previous, tone: answer.tone, depth });
     if (state.setupLines) {
       const ordered = answer.base ? [answer.base, ...answer.lines.filter((label) => label !== answer.base)] : answer.lines;
       const response = await fetch("/api/lines", { method: "POST", headers: { "content-type": "application/json" },
@@ -344,14 +342,6 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     setBusy("");
     await runTurn(openingReply(answer, filesRead, locale));
   };
-  const changeTone = async (tone: OnboardingTone) => {
-    const response = await fetch("/api/onboarding/tone", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tone }) }).catch(() => undefined);
-    if (response?.ok) await load();
-  };
-  const changeDepth = async (depth: OnboardingDepth) => {
-    const response = await fetch("/api/onboarding/depth", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ depth }) }).catch(() => undefined);
-    if (response?.ok) await load();
-  };
 
   return <div className="ob3" onDragOver={(event) => { event.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop} data-dragging={over}>
     <LeftColumn state={state} busy={busy !== "" && busy !== "turn"} accept={ACCEPT} onUpload={(files) => void upload(files)} onChanged={() => void load()}
@@ -360,13 +350,8 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     <section className="ob-centre" aria-label={t("访谈对话")}>
       <header className="ob-centre-head">
         <StageBar stage={stage} line={state.focusLine?.label} flow={state.flow} depth={state.depth} progress={state.progress} />
-        {!opening && !state.focusLine && <div className="ob-tone"><span>{t("语气")}</span>
-          <SegmentedControl label={t("访谈语气")} value={state.tone} onChange={(next) => void changeTone(next)}
-            options={ONBOARDING_TONES.map((id) => ({ value: id, label: t(ONBOARDING_TONE_LABEL[id].label) }))} /></div>}
-        {/* The tier can be changed between rounds; the next round asks at the new depth (onboarding-depth.ts). */}
-        {!opening && !state.focusLine && <div className="ob-tone"><span>{t("详细程度")}</span>
-          <SegmentedControl label={t("访谈详细程度")} value={state.depth} onChange={(next) => void changeDepth(next)}
-            options={ONBOARDING_DEPTHS.map((id) => ({ value: id, label: t(ONBOARDING_DEPTH_LABEL[id].label) }))} /></div>}
+        {/* Only the person ends the interview (decisions 13 and 27): from the start standard on, at any time; the bar is how complete it is. */}
+        {!opening && !state.focusLine && !complete && state.session && <FinishButton sessionId={state.session.id} completeness={state.completeness} disabled={busy !== "" || background} />}
         {/* Inside the header: the column is a fixed grid of rows, and a note that comes and goes must not shift the thread's row. */}
         {!state.focusLine && <FirstHint id="onboarding-columns" title={t("这一页怎么用")}>
           {t("中间是访谈：每轮一组问题，答不上来可以选「不确定」或跳过，系统先按假设记下，之后随时可改。")}
@@ -378,7 +363,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
         {t("访谈以开始时的语言继续（{{language}}）。界面切换不影响访谈。", { language: state.interviewLocale === "en" ? "English" : t("中文") })}</p>}
       <div className="ob-thread ob-voice" aria-live="polite">
         {!state.focusLine && <AssessCard />}
-        {opening && <OpeningCard linesKnown={!state.setupLines} knownLines={state.lines.map((line) => line.label)} initialTone={state.tone} initialDepth={state.depth}
+        {opening && <OpeningCard linesKnown={!state.setupLines} knownLines={state.lines.map((line) => line.label)}
           busy={busy !== ""} hasMaterials={filesRead} needsConnection={!state.focusLine && connected === false} onStart={(answer) => void start(answer)} />}
         {messages.length === 0 && state.focusLine && <div className="ob-turn ob-assistant"><p>{t("「{{line}}」的访谈：现状、长期目标、项目、截止日与已有文件。", { line: state.focusLine.label })}</p></div>}
         {/* Rounds before the latest fold to one line each; an observation still waiting for 准/不准 stays out until it is rated. */}
@@ -455,6 +440,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
 
     <div className="ob-right">
       {state.profile?.portrait && <p className="ob-portrait-now gen">{state.profile.portrait}</p>}
+      {!state.focusLine && state.session && (state.research?.length ?? 0) > 0 && <ResearchPanel sessionId={state.session.id} threads={state.research!} onChanged={() => void load()} />}
       <StageView state={state} stage={stage} complete={complete} onChanged={() => void load()} />
       {state.availabilityProposed && <p className="ob-note">{withLink(t("已按说过的时间提议每周可用时段，可在 <a>计划页</a> 预览后采用。"), (inner) => <a href="/plan#time">{inner}</a>)}</p>}
     </div>

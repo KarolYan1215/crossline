@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { INTERVIEW_FLOW_STAGES, flowOf, ONBOARDING_INSIGHTS, progressView, readInsightRatings, readTurnProgress, FIRST_DRAFTS_SETTING, ONBOARDING_LAST_FAILURE, readOnboardingFailure, ONBOARDING_TONE_SETTING, ONBOARDING_DEPTH_SETTING, readDepth, firstDraftsState, openStageQuestion, questionKind, readTone, sameQuestion, screenQuestions, unsureAnswer, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
+import { INTERVIEW_FLOW_STAGES, flowOf, ONBOARDING_INSIGHTS, progressView, readInsightRatings, readTurnProgress, FIRST_DRAFTS_SETTING, ONBOARDING_LAST_FAILURE, readOnboardingFailure, ONBOARDING_TONE_SETTING, ONBOARDING_DEPTH_SETTING, readDepth, firstDraftsState, interviewCompleteness, openStageQuestion, questionKind, readTone, sameQuestion, screenQuestions, unsureAnswer, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
 import { INTERVIEW_LOCALE_SETTING, extractBacklog, interviewLocale, questionScreenFor } from "@crossline/db";
 import { isLocale } from "@crossline/i18n";
 import { resolveAccessContext } from "../../../../lib/access-guard";
@@ -11,6 +11,7 @@ import { identityLines, needsLineSetup } from "../../../../lib/lines";
 import { interviewStatus, pendingAnswerIds, questionsOwnedElsewhere } from "../../../../lib/interview-status";
 import { startConfirmed, startSummary } from "../../../../lib/start-confirm";
 import { portraitConfirmation } from "../../../../lib/portrait";
+import { readResearchThreads } from "../../../../lib/interview-research";
 
 /**
  * Everything the onboarding screen shows, in one read: the conversation so far, the projects and facts the
@@ -92,6 +93,16 @@ export async function GET(request: Request) {
     flow,
     capacity, skeleton: start.readyToStart ? draft : [],
     insightRatings: ratings,
+    // The 「结束并出报告」 button (2026-11-12): off below the start standard, filled by how complete the portrait is, full well above it.
+    completeness: (() => {
+      const model = json<{ dimensions?: Array<{ id: string; evidenced: boolean }>; hypotheses?: Array<{ status: string }>; careers?: Array<{ trial?: { task?: string } }> } | null>("profile.model", null);
+      return interviewCompleteness({ lowerBound: ready, lowerMissing: start.startMissing.map((item) => item.label),
+        stagesSeen: raw.filter((message) => message.role === "assistant").map((message) => String((message.content as { stage?: unknown }).stage ?? "")),
+        ...(model?.dimensions ? { dimensions: model.dimensions } : {}), ...(model?.hypotheses ? { hypotheses: model.hypotheses } : {}),
+        ...(model?.careers ? { careers: model.careers } : {}), ...(interviewLocale(store, workspaceId) ? { locale: interviewLocale(store, workspaceId)! } : {}) });
+    })(),
+    // The research threads beside the conversation (worker onboarding-research.ts): listed, their questions shown as side cards.
+    research: session ? readResearchThreads(workspaceId, session.id) : [],
     adoptedDates: loadAdoptedDates(access.ctx),
     ok: true, organizing,
     // Why the last round did not finish, kept after a reload (the worker writes it; the next attempt removes it).

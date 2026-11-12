@@ -134,17 +134,13 @@ test("project items read slots by meaning, and a course's part needs no grading 
   expect(withSchedule.filter((item) => item.id.startsWith("project:")).map((item) => [item.id, item.done])).toEqual([["project:ece555", true], ["project:ece555-final", true]]);
 });
 
-// 2026-10-31: the person picks how thorough the interview is; a project's details are asked in it only in the deeper tiers.
-test("the tier decides which project items the interview asks and which wait for planning", () => {
+// 2026-11-12: the tiers are gone; whatever depth an account once stored, a project's details wait for its planning, as the quick tier's did.
+test("a project's details wait for planning whatever tier an account once chose", () => {
   const sparse = { ...full, facts: full.facts.filter((fact) => fact.projectId !== "ece555"), dates: [] };
   const deferredOf = (depth: ChecklistInput["depth"]) => Object.fromEntries(interviewChecklist({ ...sparse, depth })
     .filter((item) => item.id.endsWith(":ece555") && item.id.startsWith("project")).map((item) => [item.id, Boolean(item.deferred)]));
-  expect(deferredOf(undefined)).toEqual({ "project:ece555": true, "project_course:ece555": true });
-  expect(deferredOf("quick")).toEqual({ "project:ece555": true, "project_course:ece555": true });
-  expect(deferredOf("standard")).toEqual({ "project:ece555": false, "project_course:ece555": true });
-  expect(deferredOf("thorough")).toEqual({ "project:ece555": false, "project_course:ece555": false });
-  const course = interviewChecklist({ ...sparse, depth: "thorough" }).find((item) => item.id === "project_course:ece555")!;
-  expect(course.ask).toBe("「ECE 555」的成绩是怎么算的？各部分各占多少？");
+  for (const depth of [undefined, "quick", "standard", "thorough", "open"] as const)
+    expect(deferredOf(depth)).toEqual({ "project:ece555": true, "project_course:ece555": true });
 });
 
 test("the portrait's parts are read by meaning: the slot names the extraction writes for risks, priorities and motives count", () => {

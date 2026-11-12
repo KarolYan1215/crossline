@@ -21,9 +21,13 @@ export const ONBOARDING_DEPTH_LABEL: Record<OnboardingDepth, { label: string; de
   open: { label: "不限时", detail: "不限时长和轮数，每个话题问到你自己的例子为止，什么时候结束由你决定" }
 };
 
-/** An account that never chose (every interview before the tiers) runs the quick interview it always ran. */
-export function readDepth(value: string | null | undefined): OnboardingDepth {
-  return (ONBOARDING_DEPTHS as readonly string[]).includes(value ?? "") ? value as OnboardingDepth : "quick";
+/**
+ * There are no tiers any more (the owner, 2026-11-12: 「删除所有档位」): every interview runs `open` — no round, time or word budget, ended
+ * only by the person's 「结束并出报告」 once the start standard stands. A stored choice is read and ignored; the names stay so an older
+ * setting or page still parses.
+ */
+export function readDepth(_value?: string | null | undefined): OnboardingDepth {
+  return "open";
 }
 
 export type DepthPace = {
@@ -58,11 +62,20 @@ export type DepthPace = {
   rounds: number;
 };
 
+/**
+ * The one interview there is (2026-11-12). A project's details wait for its planning as they did for every account that never chose a tier,
+ * so the start standard is unchanged, and there is no per-project details part: the interview is for the portrait. The cards are the
+ * short set: the full one's 43 items and interest cards were what a beta tester rejected (asked not to be questioned about interests again), and
+ * a long questionnaire is what loses people (docs/claude/profile-first-loop.md); the portrait's inferences come from the conversation.
+ * Its own constant: Next's production minifier split `DEPTH_PACE` into one variable per key and lost `open` (`DEPTH_PACE_open is not defined`).
+ */
+const OPEN_PACE: DepthPace = { minutes: 120, unlimited: true, roundQuestions: 3, roundMax: 4, cardItems: 3, cards: "short", moveOnAfter: Number.POSITIVE_INFINITY, projects: "deferred", portraitHolds: true, detailsPart: false, rounds: Number.POSITIVE_INFINITY };
+
 export const DEPTH_PACE: Record<OnboardingDepth, DepthPace> = {
   quick: { minutes: 50, unlimited: false, roundQuestions: 3, roundMax: 4, cardItems: 3, cards: "short", moveOnAfter: 2, projects: "deferred", portraitHolds: false, detailsPart: false, rounds: 25 },
   standard: { minutes: 80, unlimited: false, roundQuestions: 4, roundMax: 6, cardItems: 6, cards: "all", moveOnAfter: 3, projects: "core", portraitHolds: true, detailsPart: false, rounds: 40 },
   thorough: { minutes: 120, unlimited: false, roundQuestions: 5, roundMax: 8, cardItems: 6, cards: "all", moveOnAfter: 4, projects: "all", portraitHolds: true, detailsPart: true, rounds: 60 },
-  open: { minutes: 120, unlimited: true, roundQuestions: 5, roundMax: 8, cardItems: 6, cards: "all", moveOnAfter: Number.POSITIVE_INFINITY, projects: "all", portraitHolds: true, detailsPart: true, rounds: Number.POSITIVE_INFINITY }
+  open: OPEN_PACE
 };
 
 /** Whether the main interview has used its rounds (`assistantRounds` already written, this one not counted). */
@@ -70,4 +83,6 @@ export function roundsSpent(depth: OnboardingDepth | undefined, assistantRounds:
   return assistantRounds + 1 >= depthPace(depth).rounds;
 }
 
-export const depthPace = (depth: OnboardingDepth | undefined): DepthPace => DEPTH_PACE[depth ?? "quick"];
+export function depthPace(_depth?: OnboardingDepth | undefined): DepthPace {
+  return OPEN_PACE;
+}

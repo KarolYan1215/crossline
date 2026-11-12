@@ -185,7 +185,7 @@ const asDialogue = (value: unknown) => value && typeof value === "object" ? { ..
  * Chat Completions provider in JSON mode), drops keys it had nothing for, and the whole answer used to be refused for it as
  * 「输出结构不符合要求」 — repeatedly, so nothing from the interview's deep stages was recorded (2026-10-19 walkthrough, the developer's model).
  */
-const EXTRACT_LISTS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "lineProfiles", "goalEdits", "settings"] as const;
+const EXTRACT_LISTS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "lineProfiles", "goalEdits", "settings", "hypotheses", "careers", "dimensions"] as const;
 // A slot built from a line id that has a hyphen in it (「flywheel_line-x-3_informs」) was refused and the whole answer with it: slots are
 // normalised to their own alphabet instead.
 const slotName = (slot: unknown) => typeof slot === "string" ? slot.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) : slot;

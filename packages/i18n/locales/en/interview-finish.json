@@ -1,0 +1,18 @@
+{
+  "开始使用所需的几项还没齐，先答完再结束。": "A few things needed before starting are still missing; answer them before ending.",
+  "没能结束访谈，可以重试。": "The interview could not be ended; try again.",
+  "请先写点什么。": "Write something first.",
+  "这段话太长了，分几次说。": "That is too long; send it in parts.",
+  "没有送到，可以重试。": "It was not delivered; try again.",
+  "还有没有别的想聊的？没有的话，可以按「结束并出报告」。": "Anything else to talk about? If not, press “End and write the report”.",
+  "找不到这次访谈。": "This interview could not be found.",
+  "经历与转折": "Story and turning points",
+  "主线细节": "Line details",
+  "开始使用前还需要的几项": "What is still needed before starting",
+  "还没谈到「{{part}}」": "“{{part}}” not discussed yet",
+  "画像还有 {{count}} 个维度缺本人的话或行为作证据": "{{count}} portrait dimensions still lack the person's own words or behaviour as evidence",
+  "推断还不到 {{count}} 条": "Fewer than {{count}} inferences so far",
+  "还有 {{count}} 条推断没有验证或推翻": "{{count}} inferences not yet supported or refuted",
+  "还没有带试做的职业方向": "No career direction with a trial yet",
+  "访谈调研": "Interview research"
+}

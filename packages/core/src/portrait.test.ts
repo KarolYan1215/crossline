@@ -138,3 +138,20 @@ test("类型名互不共用字词；字母是英文词首字母；个人简介�
   expect(typeSummaryProblem("你是军师")).toContain("军师");
   expect(typeSummaryProblem("你像 ENTP 一样")).toContain("外部人格类型");
 });
+
+test("the redesigned report: hypotheses keep verbatim quotes and the person's rating, careers and the formulation cite only kept hypotheses", () => {
+  const checked = validatePortrait({ ...report,
+    hypotheses: [
+      { id: "h1", dimension: "D2", statement: "被看见时投入更多", basis: [{ kind: "quote", text: "导师等着看", ref: "reply-1" }], falsifier: "没人等也一样投入", alternative: "截止本身", status: "supported", reference: null },
+      { id: "h2", dimension: "D6", statement: "编出来的", basis: [{ kind: "quote", text: "从没说过", ref: "reply-1" }], falsifier: "x", alternative: "", status: "open", reference: null }],
+    careers: [{ role: "芯片架构建模实习", why: "h1", hypothesisIds: ["h1", "h2"], requirements: [{ requirement: "Python", share: "9/10", has: "yes", evidence: "" }], sources: [],
+      trial: { weeks: 3, task: "写一个缓存模型", supportsIf: "", refutesIf: "" }, lineId: "research" }],
+    formulation: { dimensions: [{ id: "D2", summary: "被看见", hypothesisIds: ["h1", "h2"] }, { id: "D9", summary: "", hypothesisIds: [] }],
+      drivers: ["被看见", " "], obstacles: [], loops: [{ loop: "截止前焦虑，拖延", leverage: "提前一天交给师兄" }], resources: [] }
+  } as unknown as PortraitReport, ["research"], { replies: { "reply-1": "组会前导师等着看图。" }, ratedOf: (id) => id === "h1" ? "fits" : undefined });
+  expect(checked.hypotheses!.map((item) => [item.id, item.rated])).toEqual([["h1", "fits"]]);
+  expect(checked.careers![0]!.hypothesisIds).toEqual(["h1"]);
+  expect(checked.careers![0]!.requirements).toEqual([]);
+  expect(checked.formulation!.dimensions.map((item) => [item.id, item.hypothesisIds])).toEqual([["D2", ["h1"]]]);
+  expect(checked.formulation!.drivers).toEqual(["被看见"]);
+});

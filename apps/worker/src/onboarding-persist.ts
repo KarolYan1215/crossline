@@ -74,6 +74,17 @@ export function persistExtraction(store: CrosslineStore, workspaceId: string, ex
       records[section] = { sentences: written ? sections[section]!.sentences ?? [] : previous?.sentences ?? [], final, at: now, ...(emptyRuns ? { emptyRuns } : {}) };
     }
     store.setSetting(workspaceId, PROFILE_SECTIONS_SETTING, JSON.stringify(records));
+    // The hypothesis log, career directions and dimension notes (contract B, 2026-11-12): each list the run sent replaces the one on
+    // record whole; an empty one keeps it (a run about a file's dates says nothing new about the person). The person's 准/不准 on a
+    // hypothesis stays with its id.
+    const { hypotheses, careers, dimensions } = extraction;
+    if (hypotheses?.length || careers?.length || dimensions?.length) {
+      const profile = readProfileModel(store, workspaceId);
+      const rated = new Map((profile.hypotheses ?? []).filter((item) => item.rated).map((item) => [item.id, item.rated]));
+      store.setSetting(workspaceId, "profile.model", JSON.stringify({ ...profile,
+        ...(hypotheses?.length ? { hypotheses: hypotheses.map((item) => { const mark = rated.get(item.id); return mark ? { ...item, rated: mark } : item; }) } : {}),
+        ...(careers?.length ? { careers } : {}), ...(dimensions?.length ? { dimensions } : {}) }));
+    }
   }
   // Card items the person answered in words: scored as `mapped` only for items still waiting to be read (a tap is never replaced).
   if (!sessionId.startsWith("line-") && extraction.itemScores?.length) {

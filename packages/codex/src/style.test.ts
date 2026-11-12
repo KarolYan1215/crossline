@@ -39,3 +39,12 @@ test("fields a Skill writes to the person are named in the style, so its 你 and
   expect(interview).not.toContain("Do not address the reader as 你/您");
   expect(styleInstructions("en", ["reply"])).toContain("`reply` speak to the person as \"you\"");
 });
+
+test("a contrast is allowed when it is the finding and its evidence is stated; dashes, metaphors and rhetorical reveals stay banned", () => {
+  const zh = styleInstructions("zh");
+  expect(zh).toContain("only when the contrast is the finding itself");
+  expect(zh).toContain("no 点破");
+  expect(zh).toContain("「说明你……」 is fine when what precedes it is the evidence");
+  expect(zh).toMatch(/dash/i);
+  expect(zh).toContain("No figures of speech");
+});

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { DEPTH_PACE, ONBOARDING_DEPTH_LABEL, ONBOARDING_DEPTHS, ONBOARDING_TONE_LABEL, ONBOARDING_TONES, type OnboardingDepth, type OnboardingTone } from "@crossline/core";
 import { DOMAIN_PACKS, LINE_DOMAINS, lineNounFor, type LineDomain } from "@crossline/identity-packs";
 import { tFor, type Locale } from "../../lib/i18n";
 import { useLocale } from "../locale-context";
@@ -11,9 +10,10 @@ import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY } from "./onboarding-types";
 
 /**
  * The interview's first message (docs/onboarding-v3.md, decided 2026-10-14): the premise in plain words, how it runs and what it gives,
- * then one card of fact questions answered together — how to be spoken to, the lines, the one that cannot move, and the ones with a fixed
- * schedule. It replaces the old line-setup screen and the six-level lecture; the structure is shown at the end, drawn from what was said.
- * Its answers are written in code (tone, lines) and sent as the first reply, so the interview quotes them like anything else said.
+ * then one card of fact questions answered together — the lines, the one that cannot move, and the ones with a fixed schedule. It replaces
+ * the old line-setup screen and the six-level lecture; the structure is shown at the end, drawn from what was said. Its answers are written
+ * in code (lines) and sent as the first reply, so the interview quotes them like anything else said. The tone and the tier are no longer
+ * asked (2026-11-12, decisions 10–11): the interview speaks plainly and has no tiers.
  *
  * The lite edition (decided 2026-10-19, docs/domain-lines.md) is asked first: 健康 and 财富 as domain lines plus, when there is one, the one
  * thing with a fixed schedule. It is not a mode: the answer only pre-fills the lines, and more can be added on the 主线 page at any time.
@@ -26,7 +26,7 @@ const NO_FIXED = "都没有";
 const FIXED_ACTIVITIES = ["上班", "上学", "自由职业"];
 
 export type Edition = "lite" | "full";
-export type OpeningAnswer = { tone: OnboardingTone; depth?: OnboardingDepth; edition: Edition; lines: string[]; domains: Record<string, LineDomain>; base: string; fixed: string[];
+export type OpeningAnswer = { edition: Edition; lines: string[]; domains: Record<string, LineDomain>; base: string; fixed: string[];
   /** The lite edition: what the person typed for the fixed-schedule line, by the line it named (上班 for 职场人), so the interview can quote it. */
   said?: Record<string, string> };
 
@@ -52,10 +52,7 @@ const shown = (label: string, locale?: Locale) => {
 export function openingReply(answer: OpeningAnswer, withMaterials: boolean, locale?: Locale): string {
   const t = tFor(locale);
   const list = (items: string[]) => items.join(locale === "en" ? ", " : "、");
-  return [t("【语气】{{tone}}", { tone: t(ONBOARDING_TONE_LABEL[answer.tone].label) }),
-    ...(answer.depth ? [DEPTH_PACE[answer.depth].unlimited ? t("【详细程度】{{depth}}（不限时长和轮数）", { depth: t(ONBOARDING_DEPTH_LABEL[answer.depth].label) })
-      : t("【详细程度】{{depth}}（约 {{minutes}} 分钟）", { depth: t(ONBOARDING_DEPTH_LABEL[answer.depth].label), minutes: DEPTH_PACE[answer.depth].minutes })] : []),
-    t("【版本】{{edition}}", { edition: t(EDITION_LABEL[answer.edition].label) }),
+  return [t("【版本】{{edition}}", { edition: t(EDITION_LABEL[answer.edition].label) }),
     t("【我的主线】{{lines}}", { lines: list(answer.lines.map((label) => shown(label, locale))) }),
     t("【未来 12–24 个月的底座】{{base}}", { base: answer.base || t(ALL_EQUAL) }),
     t("【有固定日程的主线】{{fixed}}", { fixed: answer.fixed.length ? list(answer.fixed) : t(NO_FIXED) }),
@@ -63,9 +60,9 @@ export function openingReply(answer: OpeningAnswer, withMaterials: boolean, loca
     t(withMaterials ? MATERIALS_FIRST_REPLY : NO_MATERIALS_REPLY)].join("\n");
 }
 
-export function OpeningCard({ linesKnown, knownLines, initialTone, initialDepth = "quick", busy, hasMaterials, needsConnection = false, onStart }: {
-  /** The lines are already set (an account from before this card): only the tone is asked. */
-  linesKnown: boolean; knownLines: string[]; initialTone: OnboardingTone; initialDepth?: OnboardingDepth; busy: boolean; hasMaterials: boolean;
+export function OpeningCard({ linesKnown, knownLines, busy, hasMaterials, needsConnection = false, onStart }: {
+  /** The lines are already set (an account from before this card): nothing is asked, the card only starts the interview. */
+  linesKnown: boolean; knownLines: string[]; busy: boolean; hasMaterials: boolean;
   /** No model connection yet: the card can be filled in, but the first round cannot run until the step above it is done. */
   needsConnection?: boolean;
   onStart: (answer: OpeningAnswer) => void;
@@ -77,8 +74,6 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, initialDepth 
   const allEqual = t(ALL_EQUAL), noFixed = t(NO_FIXED);
   const domainNouns = DOMAIN_NOUNS.map((label) => t(label));
   const activities = FIXED_ACTIVITIES.map((label) => t(label));
-  const [tone, setTone] = useState<OnboardingTone>(initialTone);
-  const [depth, setDepth] = useState<OnboardingDepth>(initialDepth);
   const [edition, setEdition] = useState<Edition>("full");
   const [lines, setLines] = useState<string[]>(linesKnown ? knownLines : []);
   const [liteDomains, setLiteDomains] = useState<string[]>(() => DOMAIN_NOUNS.map((label) => tFor(locale)(label)));
@@ -126,27 +121,8 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, initialDepth 
         <li><b>{t("再排进日历")}</b><span>{t("你有哪些想成为的身份，各自正在做什么、大概什么时候截止；时间说个大概就行，材料里有的不再问。")}</span></li>
         <li><b>{t("拿到结果")}</b><span>{t("画像报告和一周的骨架草稿。具体项目的细节，到拆任务时再补。")}</span></li>
       </ol>
-      <p className="ob-opening-time">{DEPTH_PACE[depth].unlimited
-        ? t("按下面选的详细程度，不限时长和轮数：大部分时间是画像，其余把各条主线的事排进同一张日历。画像这一部分不能跳过，后面怎么安排都以它为准。左侧可以先放入简历、课表、课程大纲，访谈会先读材料，只问材料里没有的。")
-        : t("按下面选的详细程度，大约 {{minutes}} 分钟：大部分时间是画像，其余把各条主线的事排进同一张日历。画像这一部分不能跳过，后面怎么安排都以它为准。左侧可以先放入简历、课表、课程大纲，访谈会先读材料，只问材料里没有的。", { minutes: DEPTH_PACE[depth].minutes })}</p>
+      <p className="ob-opening-time">{t("不限时长和轮数：大部分时间是画像，其余把各条主线的事排进同一张日历。画像这一部分不能跳过，后面怎么安排都以它为准。开始使用所需的几项问清之后，随时可以按「结束并出报告」。左侧可以先放入简历、课表、课程大纲，访谈会先读材料，只问材料里没有的。")}</p>
     </div>
-
-    <fieldset className="ob-question">
-      <legend>{t("你希望我怎么跟你说话？")}</legend>
-      <div className="ob-chips" role="radiogroup">
-        {ONBOARDING_TONES.map((id) => <button key={id} type="button" role="radio" aria-checked={tone === id} data-picked={tone === id}
-          onClick={() => setTone(id)}>{t(ONBOARDING_TONE_LABEL[id].label)}<small>{t(ONBOARDING_TONE_LABEL[id].detail)}</small></button>)}
-      </div>
-    </fieldset>
-
-    {/* The tier (onboarding-depth.ts, 2026-10-31): how much the interview asks; it can be changed above the conversation later. */}
-    <fieldset className="ob-question">
-      <legend>{t("访谈问多细？")}<small>{t("开始后也可以在对话上方随时改")}</small></legend>
-      <div className="ob-chips" role="radiogroup">
-        {ONBOARDING_DEPTHS.map((id) => <button key={id} type="button" role="radio" aria-checked={depth === id} data-picked={depth === id}
-          onClick={() => setDepth(id)}>{t(ONBOARDING_DEPTH_LABEL[id].label)}<small>{t(ONBOARDING_DEPTH_LABEL[id].detail)}</small></button>)}
-      </div>
-    </fieldset>
 
     {!linesKnown && <>
       <fieldset className="ob-question">
@@ -212,7 +188,7 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, initialDepth 
 
     <div className="ob-opening-go">
       <button type="button" className="ob-btn ob-primary" disabled={busy || !chosen.length || needsConnection}
-        onClick={() => onStart({ tone, depth, edition: linesKnown ? "full" : edition, lines: chosen, domains: domainsOf(chosen, locale), base: chosenBase, fixed: chosenFixed,
+        onClick={() => onStart({ edition: linesKnown ? "full" : edition, lines: chosen, domains: domainsOf(chosen, locale), base: chosenBase, fixed: chosenFixed,
           ...(edition === "lite" && hard && said ? { said: { [hard]: said } } : {}) })}>
         {hasMaterials ? t("读完材料，开始访谈") : t("开始访谈")}</button>
       {!chosen.length ? <small className="ob-muted">{t("先选至少一个身份")}</small>

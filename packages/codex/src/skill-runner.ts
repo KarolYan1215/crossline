@@ -386,6 +386,12 @@ function withOptionalTools<T>(options: SkillRunOptions<T>, input: unknown, conte
       call: (name, args) => own?.specs.some((spec) => spec.name === name) ? own.call(name, args) : optional.tools.call(name, args) } } };
 }
 
+/** Two tool sets as one: a name of `own` answers from `own`, the rest from `extra`. */
+function mergedTools(own: SkillTools | undefined, extra: SkillTools): SkillTools {
+  return { specs: [...(own?.specs ?? []), ...extra.specs.filter((spec) => !own?.specs.some((mine) => mine.name === spec.name))],
+    call: (name, args) => own?.specs.some((spec) => spec.name === name) ? own.call(name, args) : extra.call(name, args) };
+}
+
 const WEB_TOOLS_INSTRUCTION = "Web access in this run is through the functions `web_search` (results: title, url, snippet) and `web_fetch` "
   + "(the page's text). Search, then fetch every page you rely on before citing it; cite only pages you fetched, by their exact url.";
 
@@ -659,6 +665,11 @@ export type ContinueTurnOptions<T> = {
   keepEarly?: (rejection: Error, output: unknown) => T | undefined;
   /** The tools the thread was started with (they are declared at `thread/start`; this answers their calls on the follow-up turn). */
   tools?: SkillTools;
+  /**
+   * The thread was started with the web (`SkillRunOptions.allowWebSearch`): on Codex its hosted search items are accepted on this turn too,
+   * and on a provider the stand-in `web_search`/`web_fetch` it was started with are answered (2026-11-12, the interview's follow-up turns).
+   */
+  allowWebSearch?: boolean;
   /** As `SkillRunOptions.tier`. */
   tier?: RouteTier;
 };
@@ -1198,14 +1209,18 @@ function continueOnThread<T>(client: CodexRpcBoundary, threadId: string, message
     const audit: AnalysisAudit = { threadId };
     holdThread(client, threadId);
     const scope = openScope(client, options);
-    const unregister = options.tools ? registerAgentThread(client, threadId, toolAnswerer(options.tools)) : undefined;
+    // A thread started with the web on a provider was given the stand-in search functions at `thread/start`; their calls are answered here.
+    const web = options.allowWebSearch && context.provider ? context.webTools : undefined;
+    const tools = web ? mergedTools(options.tools, web) : options.tools;
+    const unregister = tools ? registerAgentThread(client, threadId, toolAnswerer(tools)) : undefined;
     try {
       if (threadRouteMoved(client, threadId, context)) fail("SKILL_THREAD_LOST");
       await requireLogin(scope, context);
       await resubscribe(client, scope, threadId);
       const output = await runTurnsUntilValid(client, scope, context, audit, {
         skillName: options.skillName, threadId, outputSchema: schemaForLocale(options.outputSchema, runLocale(options.locale, currentUsageWorkspace())),
-        allowedItemTypes: ["agentMessage", "reasoning", "userMessage", ...(options.tools ? ["dynamicToolCall"] : [])],
+        allowedItemTypes: ["agentMessage", "reasoning", "userMessage", ...(tools ? ["dynamicToolCall"] : []),
+          ...(options.allowWebSearch && !context.provider ? ["webSearch", "webSearchCall"] : [])],
         firstPrompt: message, ...(options.images?.length ? { images: options.images } : {}),
         validate: options.validateOutput, onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),
         ...(options.onProgress ? { onProgress: options.onProgress } : {}),

@@ -535,6 +535,10 @@ export async function startCodexSupervisor(options: {
    * everything it learned live in the ledger, so the browser holds only a session id. */
   onboardingTurn?: (client: CodexRpcBoundary, sessionId: string, text: string, signal: AbortSignal,
     workspaceId: string, reread: boolean) => Promise<unknown>;
+  /** The person's 「结束并出报告」 (2026-11-12): the interview ends, the extraction finishes and the portrait is written in the background. */
+  onboardingFinish?: (client: CodexRpcBoundary, sessionId: string, workspaceId: string) => Promise<unknown>;
+  /** The person's answer to, or follow-up in, one of the interview's research threads: goes to that thread alone. */
+  onboardingResearch?: (client: CodexRpcBoundary, sessionId: string, threadId: string, text: string, workspaceId: string) => Promise<unknown>;
   /** Researches one line on the web and stores a report of sourced findings. One run at a time per workspace. */
   runDiligence?: (client: CodexRpcBoundary, identityId: string, force: boolean, workspaceId: string) => Promise<unknown>;
   /** Pulls the text out of an uploaded file the web app has already stored and recorded. No model involved,
@@ -1241,6 +1245,25 @@ export async function startCodexSupervisor(options: {
         finally { if (conversing.get(callerWorkspaceId) === controller) conversing.delete(callerWorkspaceId); }
         return;
       }
+      if (request.method === "POST" && (pathname === "/v1/onboarding/finish" || pathname === "/v1/onboarding/research")
+        && (pathname === "/v1/onboarding/finish" ? options.onboardingFinish : options.onboardingResearch)) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "ONBOARDING_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
+        const body = await readJsonBody(request);
+        const sessionId = String(body?.sessionId ?? "");
+        const threadId = String(body?.threadId ?? "");
+        if (!/^[a-zA-Z0-9_-]{1,128}$/.test(sessionId) || (pathname === "/v1/onboarding/research" && !/^[a-zA-Z0-9_-]{1,64}$/.test(threadId))) {
+          sendJson(response, 400, { blocker: { code: "ONBOARDING_TURN_INVALID", message: say("缺少会话 id") } });
+          return;
+        }
+        await sendJsonWhenReady(response, () => pathname === "/v1/onboarding/finish"
+          ? options.onboardingFinish!(rt, sessionId, callerWorkspaceId)
+          : options.onboardingResearch!(rt, sessionId, threadId, String(body?.text ?? "").slice(0, 12_000), callerWorkspaceId));
+        return;
+      }
       if (request.method === "POST" && pathname === "/v1/onboarding/turn" && options.onboardingTurn) {
         if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
           sendJson(response, 403, { blocker: { code: "ONBOARDING_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
@@ -1259,7 +1282,7 @@ export async function startCodexSupervisor(options: {
         }
         profileTurns.add(callerWorkspaceId);
         const controller = new AbortController();
-        try { await sendJsonWhenReady(response, () => options.onboardingTurn!(rt, sessionId, String(body?.text ?? "").slice(0, 4000), controller.signal, callerWorkspaceId, body?.reread === true)); }
+        try { await sendJsonWhenReady(response, () => options.onboardingTurn!(rt, sessionId, String(body?.text ?? "").slice(0, 16_000), controller.signal, callerWorkspaceId, body?.reread === true)); }
         finally { profileTurns.delete(callerWorkspaceId); }
         return;
       }

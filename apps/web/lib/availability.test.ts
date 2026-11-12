@@ -211,6 +211,8 @@ test("a goal edited one field at a time keeps the rest, and a first partial save
 });
 
 test("what finds no room in the person's hours is pencilled in outside them, and starting one makes it formal", async () => {
+  // The seeded work's dates are fixed: on a later day it is all past due and nothing is left to pencil in.
+  vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-09-18T14:00:00.000Z");
   globalThis.crosslineStore = new CrosslineStore(":memory:");
   // Half an hour a day: most of the seeded work cannot fit.
   const half = [{ days: [0, 1, 2, 3, 4, 5, 6], start: "08:00", end: "08:30", energy: "high" as const }];

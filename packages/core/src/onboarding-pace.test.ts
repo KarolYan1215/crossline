@@ -6,17 +6,26 @@ import { interviewChecklist, interviewComplete, interviewOwnedOpen } from "./int
 const replies = { "reply-2": "最投入的两次都是和同学一起赶比赛项目，熬夜也不累。", "reply-6": "底座是我一个人做的研究，常常一整天不说话。" };
 
 describe("观察卡", () => {
-  it("引用两条不同回答且原文对得上时保留", () => {
-    const kept = checkInsight({ text: "你说最投入的时候是和人一起赶东西；底座主线是一个人做的研究。",
+  const falsifier = "如果一个人赶的项目也让你同样投入，这条就不准";
+  it("有证伪条件、每段引文都在所引回答里时保留；一条回答也可以", () => {
+    const kept = checkInsight({ text: "有人等着结果的事更容易让你投入。", falsifier,
       refs: [{ replyId: "reply-2", quote: "和同学一起赶比赛项目" }, { replyId: "reply-6", quote: "一个人做的研究" }] }, replies, "energy");
     expect(kept?.refs).toHaveLength(2);
+    expect(kept?.falsifier).toBe(falsifier);
+    expect(checkInsight({ text: "x", falsifier, refs: [{ replyId: "reply-2", quote: "熬夜也不累" }] }, replies, "lines")?.refs).toHaveLength(1);
   });
-  it("引用不在原文、只引一条回答、或不在深度阶段时丢掉", () => {
+  it("引文不在原文、没有证伪条件、没有引文、空文本或在单条主线访谈里时丢掉", () => {
     const refs = [{ replyId: "reply-2", quote: "和同学一起赶比赛项目" }, { replyId: "reply-6", quote: "一个人做的实验" }];
-    expect(checkInsight({ text: "x", refs }, replies, "energy")).toBeUndefined();
-    expect(checkInsight({ text: "x", refs: [refs[0]!, { replyId: "reply-2", quote: "熬夜也不累" }] }, replies, "energy")).toBeUndefined();
-    expect(checkInsight({ text: "x", refs: [refs[0]!, { replyId: "reply-6", quote: "一个人做的研究" }] }, replies, "lines")).toBeUndefined();
-    expect(checkInsight({ text: "", refs: [] }, replies, "compass")).toBeUndefined();
+    expect(checkInsight({ text: "x", falsifier, refs }, replies, "energy")).toBeUndefined();
+    expect(checkInsight({ text: "x", falsifier: " ", refs: [refs[0]!] }, replies, "energy")).toBeUndefined();
+    expect(checkInsight({ text: "x", falsifier, refs: [] }, replies, "energy")).toBeUndefined();
+    expect(checkInsight({ text: "x", falsifier, refs: [refs[0]!] }, replies, "details")).toBeUndefined();
+    expect(checkInsight({ text: "", falsifier, refs: [] }, replies, "compass")).toBeUndefined();
+  });
+  it("外部数据只留带网址的", () => {
+    const kept = checkInsight({ text: "x", falsifier, refs: [{ replyId: "reply-2", quote: "熬夜也不累" }],
+      external: [{ text: "内隐与外显动机相关 r = .13", url: "https://www.frontiersin.org/articles/10.3389/fpsyg.2014.00826/full" }, { text: "没有出处", url: "某论文" }] }, replies, "compass");
+    expect(kept?.external).toEqual([{ text: "内隐与外显动机相关 r = .13", url: "https://www.frontiersin.org/articles/10.3389/fpsyg.2014.00826/full" }]);
   });
   it("三个深度阶段各有一条「准」才算确认画像", () => {
     const at = "2026-10-19T00:00:00Z";
@@ -48,8 +57,8 @@ describe("进度账", () => {
     // The same part: its record counts.
     const own = readTurnProgress({ part: "compass", covered: ["工作观"], open: ["人生观"], partDone: false, next: "" });
     expect(progressView(own, "compass", "v2")).toMatchObject({ index: 2, total: 6, clear: 1, of: 2 });
-    // The thorough tier's details part makes seven, wherever the count is shown.
-    expect(progressView(undefined, "narrative", "v2", "thorough")).toMatchObject({ index: 1, total: 7 });
+    // No tier adds a details part any more (2026-11-12): six, whatever depth an account once stored.
+    expect(progressView(undefined, "narrative", "v2", "thorough")).toMatchObject({ index: 1, total: 6 });
   });
   it("摘要不超过十五行", () => {
     const lines = Array.from({ length: 6 }, (_, index) => ({ id: `l${index}`, label: `线${index}`, description: "描述", goal: "" }));
