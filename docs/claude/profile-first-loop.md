@@ -61,3 +61,16 @@ A new account no longer lands on four placeholder goals. It lands on `/onboardin
 - Notes and a line's own interview run whole (`all`) in the ledger lane.
 - `finishInterview` waits for the ledger, then the inferences and the sections, then runs the sections once more for the synthesis.
 - Tests and the eval scripts' single runs keep `lanes: false` / `all`.
+
+**After the fifth replay (2026-11-13, lanes deployed).** Compared with the fourth replay:
+- The person gave her timetable in round 9, and the start standard stood in round 11 (before: round 14 → round 24).
+- Ledger runs took 4–60 s, with 0 s in the gate.
+- Nothing pointed at the end button or said 「可以开始使用」 before the start standard stood.
+- 31 minutes, ¥2.02.
+- Observation cards rated 准: 9/11 (before: 16/22).
+
+Costs and open points:
+- Extraction output rose from 96k to 140k tokens, and reasoning doubled. Each lane reads and reasons on its own, and the sections lane still rewrites a section whole when its stage ends (up to 20k tokens).
+- Two portrait-lane runs waited 2.5–3.5 min in the gate, behind research threads.
+- Careers whose names differ slightly are kept twice (merged by role name).
+- Next to measure: sections as deltas, lower effort for the inferences lane.
