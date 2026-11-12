@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore, writeExtractState } from "@crossline/db";
 import { cardWordsHead, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
   DEPTH_PACE, type OnboardingProgress, type ProfileCard } from "@crossline/core";
-import { cardsForRound, closingQuestion, createOnboardingSessionRunner as createRunner, finishInterview, INSTRUCTIONS, ONBOARDING_SKILL, paceDeepRound, shownOrOpen, stageOrderFor, stagePace, withChecklist, withFreshOpenQuestion } from "./onboarding-session";
+import { cardsForRound, closingQuestion, createOnboardingSessionRunner as createRunner, finishInterview, INSTRUCTIONS, ONBOARDING_SKILL, paceDeepRound, shownOrOpen, stageOrderFor, stagePace, withChecklist, withFreshOpenQuestion, withoutEndHint } from "./onboarding-session";
 import { INSTRUCTIONS as EXTRACT_INSTRUCTIONS } from "./onboarding-extract";
 import { ONBOARDING_EXTRACT_SKILL } from "./onboarding-extract";
 import { fakeRuntime as runtimeWithRoutes } from "./testing/fake-runtime";
@@ -192,6 +192,14 @@ test("once every open question is used up, the round asks whether there is more 
   // One still unused is asked first.
   const fresh = (withFreshOpenQuestion(round as never, (text) => text.startsWith("说说你现在的处境"), undefined, closing) as typeof round).questions;
   expect(fresh.map((question) => question.id)).toEqual(["open-situation"]);
+});
+
+test("before the start standard stands the reply does not point at the end button", () => {
+  const reply = "课表这一段已经按你说的记下。要用的几样都在了，这周先开口找导师的顺序不变。按页面上的「结束并出报告」就会出报告。";
+  expect(withoutEndHint(reply)).toBe("课表这一段已经按你说的记下。要用的几样都在了，这周先开口找导师的顺序不变。");
+  expect(withoutEndHint("访谈问到这里，可以按页面上的「结束并出报告」生成报告。\n\n还缺课表。")).toBe("还缺课表。");
+  // A reply that is nothing but the hint stays as it is rather than going blank.
+  expect(withoutEndHint("按「结束并出报告」就会出报告。")).toBe("按「结束并出报告」就会出报告。");
 });
 
 test("with no Codex runtime the turn is a blocker and saves nothing", async () => {

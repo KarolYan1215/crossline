@@ -88,6 +88,14 @@ test("本人用汉字说的钟点也算固定日程（「早八点到晚九点�
   expect(interviewChecklist(said).find((item) => item.id === "hard_schedule:research")?.done).toBe(true);
 });
 
+test("记在本人名下的课表算唯一那条硬线的固定日程；两条硬线时不替任何一条作数", () => {
+  const undated = { ...full, dates: full.dates.filter((entry) => !entry.recurring) };
+  const classes = { identityId: "person", projectId: "", slot: "fixed_schedule_class", status: "confirmed" as const, sourceRef: "reply-13", value: "周一到周五按课表上课，早八点到晚九点之间，周二没课" };
+  expect(interviewChecklist({ ...undated, facts: [...undated.facts, classes] }).find((item) => item.id === "hard_schedule:research")?.done).toBe(true);
+  const two = { ...undated, facts: [...undated.facts, classes], lines: [...undated.lines, { id: "venture", label: "创业者", hard: true, goals: ["x"] }] };
+  expect(interviewChecklist(two).find((item) => item.id === "hard_schedule:research")?.done).toBe(false);
+});
+
 test("每条主线至少一个当前项目且知道截止；「没有截止」也算", () => {
   const undated = { ...full, dates: full.dates.filter((entry) => entry.recurring) };
   expect(interviewChecklist(undated).find((item) => item.id === "line_project:research")).toMatchObject({ done: false, owner: "interview" });

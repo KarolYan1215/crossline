@@ -556,8 +556,10 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // What the app added (the checklist's and the start items' own questions) goes through the screen the page applies when it lists the
     // round: a goal question the left column's picker already asks was listed as nothing, and the 2026-11-01 rerun showed 「开始之前还想再问
     // 几件事。」 over an empty batch twice.
-    const output = withPlainTerms(withFreshOpenQuestion(shownOrOpen(assembled, questionScreenFor(store, workspaceId), locale),
-      checklistAskable(store, workspaceId, sessionId), locale, startStands ? closingQuestion(locale) : undefined));
+    const roundOut = withFreshOpenQuestion(shownOrOpen(assembled, questionScreenFor(store, workspaceId), locale),
+      checklistAskable(store, workspaceId, sessionId), locale, startStands ? closingQuestion(locale) : undefined);
+    // Before the start standard stands the button would refuse: the reply does not point at it.
+    const output = withPlainTerms(startStands || focusLine ? roundOut : { ...roundOut, reply: withoutEndHint(roundOut.reply) });
     // The observation is kept only when its quotes are in the replies it names; the progress record goes back to the model next round.
     const replies = Object.fromEntries(messages.filter((message) => message.role === "user")
       .map((message) => [`reply-${message.seq}`, String((message.content as { text?: string }).text ?? "")]));
@@ -799,6 +801,15 @@ function conversationSoFar(messages: StoredOnboardingMessage[]): NonNullable<Onb
     return { id: `assistant-${message.seq}`, role: "assistant" as const,
       text: [turn.reply ?? "", ...(turn.questions ?? []).map((question) => question.text ?? "")].filter(Boolean).join("\n") };
   });
+}
+
+/**
+ * A reply without its sentences pointing at the end button, for a round before the start standard stands: pressed then, the button is
+ * refused (2026-11-12 replay 3: 「按页面上的「结束并出报告」就会出报告」 in seven rounds while her fixed schedule was still open).
+ */
+export function withoutEndHint(reply: string): string {
+  const sentences = reply.match(/[^。！？!?\n]+[。！？!?]?|\n+/gu) ?? [];
+  return sentences.filter((sentence) => !/结束并出报告|End and write the report/u.test(sentence)).join("").trim() || reply; // i18n-ignore: the button's label in both languages
 }
 
 /** A session id the browser can mint for itself before the first turn. */

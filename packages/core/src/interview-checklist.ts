@@ -177,7 +177,10 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
     // A fixed weekly arrangement of this line: from its own projects, or — said in a reply under no project — when it is the only hard line.
     const fixed = input.dates.filter((entry) => entry.recurring && (projectLine(entry.project) === line.id || (!projectLine(entry.project) && hardLines.length === 1)));
     const lineProjects = new Set(input.projects.filter((project) => project.identityId === line.id).map((project) => project.id));
-    const stated = input.facts.some((fact) => (fact.identityId === line.id || lineProjects.has(fact.projectId)) && confirmedFact(fact) && statesSchedule(fact));
+    // A schedule filed under the person counts for the only hard line, as a recurring date does (2026-11-12 replay 3: her class hours were
+    // `person`/`fixed_schedule_class`, the item stayed open for 32 rounds and she was asked for her timetable a second time).
+    const stated = input.facts.some((fact) => (fact.identityId === line.id || lineProjects.has(fact.projectId) || (fact.identityId === "person" && hardLines.length === 1))
+      && confirmedFact(fact) && statesSchedule(fact));
     // A start item: an assumed schedule does not count (dates still waiting in a batch do — the person supplied the file that has them).
     const done = fixed.length > 0 || stated;
     items.push({ id: `hard_schedule:${line.id}`, group: "日程", label: t("「{{line}}」的每周固定安排已收集", { line: line.label }), done,
