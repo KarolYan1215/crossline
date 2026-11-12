@@ -805,11 +805,12 @@ function conversationSoFar(messages: StoredOnboardingMessage[]): NonNullable<Onb
 
 /**
  * A reply without its sentences pointing at the end button, for a round before the start standard stands: pressed then, the button is
- * refused (2026-11-12 replay 3: 「按页面上的「结束并出报告」就会出报告」 in seven rounds while her fixed schedule was still open).
+ * refused (2026-11-12 replay 3: 「按页面上的「结束并出报告」就会出报告」 in seven rounds while her fixed schedule was still open). A claim
+ * that the app can be used now goes too (replay 4: 「你可以开始使用应用了」 seven rounds before the start standard stood).
  */
 export function withoutEndHint(reply: string): string {
   const sentences = reply.match(/[^。！？!?\n]+[。！？!?]?|\n+/gu) ?? [];
-  return sentences.filter((sentence) => !/结束并出报告|End and write the report/u.test(sentence)).join("").trim() || reply; // i18n-ignore: the button's label in both languages
+  return sentences.filter((sentence) => !/结束并出报告|End and write the report|可以开始(使用|用)|start using/iu.test(sentence)).join("").trim() || reply; // i18n-ignore: the button's label and the start claim in both languages
 }
 
 /** A session id the browser can mint for itself before the first turn. */

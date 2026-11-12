@@ -27,7 +27,9 @@ export function personTimeZone(store: CrosslineStore, workspaceId: string): stri
     const zone = raw ? (JSON.parse(raw) as { timeZone?: unknown }).timeZone : undefined;
     if (typeof zone === "string" && zone) return zone;
   } catch { /* an unreadable setting falls back to the default zone */ }
-  return "America/Chicago";
+  // The same default the web uses (`effectiveSchedulePreferences`): the server's configured zone first. The 2026-11-12 replay 4 had no
+  // device zone, read America/Chicago, and researched US internships (the Federal Reserve) for a student in China.
+  return process.env.CROSSLINE_TIME_ZONE?.trim() || "America/Chicago";
 }
 
 export type PersistContext = {

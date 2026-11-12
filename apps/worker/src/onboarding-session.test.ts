@@ -198,6 +198,7 @@ test("before the start standard stands the reply does not point at the end butto
   const reply = "课表这一段已经按你说的记下。要用的几样都在了，这周先开口找导师的顺序不变。按页面上的「结束并出报告」就会出报告。";
   expect(withoutEndHint(reply)).toBe("课表这一段已经按你说的记下。要用的几样都在了，这周先开口找导师的顺序不变。");
   expect(withoutEndHint("访谈问到这里，可以按页面上的「结束并出报告」生成报告。\n\n还缺课表。")).toBe("还缺课表。");
+  expect(withoutEndHint("开始要用的几项齐了。你可以开始使用应用了，访谈这边还可以继续。最后核对一次现状。")).toBe("开始要用的几项齐了。最后核对一次现状。");
   // A reply that is nothing but the hint stays as it is rather than going blank.
   expect(withoutEndHint("按「结束并出报告」就会出报告。")).toBe("按「结束并出报告」就会出报告。");
 });
