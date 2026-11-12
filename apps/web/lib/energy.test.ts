@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 vi.mock("server-only", () => ({}));
 vi.mock("./codex-runtime", () => ({ requestCodexSupervisor: vi.fn(async () => ({})), CodexSupervisorRequestError: class extends Error {} }));
-import { BIRTH_YEAR_SETTING, DEFAULT_AVAILABILITY } from "@crossline/core";
+import { BIRTH_DATE_SETTING, BIRTH_YEAR_SETTING, DEFAULT_AVAILABILITY } from "@crossline/core";
 import { HEALTH_SLEEP_SETTING, energyModel, issueHealthToken, phoneDailyLatest, phoneHealthOn, setPhoneHealth, slotEnergy, storeHealthSummary, workspaceForHealthToken } from "./energy";
 import { nudgesFor } from "./nudges";
 import { ENERGY_VOI_SETTING } from "./crossline";
@@ -222,7 +222,9 @@ test("the live model's phase: the default pattern and no age leave the default a
   const store = setup();
   // The default 9–12 pattern states nothing (it used to push every phase to the −6 h bound).
   expect(energyModel(TEST_CTX, DEFAULT_AVAILABILITY)).toMatchObject({ phaseShift: 0, phaseSource: "default" });
-  store.setSetting(ws, BIRTH_YEAR_SETTING, "2006");
+  // A year kept from before the date was asked still gives the age; a date given since is read first.
+  store.setSetting(ws, BIRTH_YEAR_SETTING, "1960");
+  store.setSetting(ws, BIRTH_DATE_SETTING, "2006-03-14");
   const young = energyModel(TEST_CTX, DEFAULT_AVAILABILITY);
   expect(young.phaseSource).toBe("age");
   expect(young.phaseShift).toBeGreaterThan(1);

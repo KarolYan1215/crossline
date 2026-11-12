@@ -394,15 +394,34 @@ export function typicalMidSleep(age: number): number {
 export const phaseShiftFromAge = (age: number): number => round2(typicalMidSleep(age) - POPULATION_MID_SLEEP);
 
 /**
- * The birth year the person chose to give (Settings → 时间与提醒, optional, never asked again): a plain setting, kept apart from the
- * registration forms' secret items.
+ * The birth date the person chose to give (Settings → 时间与提醒, optional, never asked again), `YYYY-MM-DD`: a plain setting, kept apart
+ * from the registration forms' secret items. The day rather than only the year since 2026-11-11 (the owner's request, so the birthday can
+ * be marked later); the energy prior still reads only the age from it.
  */
+export const BIRTH_DATE_SETTING = "profile.birthDate";
+/** The year alone, asked before 2026-11-11: still read for the age when no date was given since. */
 export const BIRTH_YEAR_SETTING = "profile.birthYear";
-/** Age in whole years from a stored birth year, or undefined when none was given or it is not a plausible adult's (14–100). */
-export function ageFromBirthYear(raw: string | null | undefined, now: string): number | undefined {
-  if (!raw || !/^\d{4}$/.test(raw.trim())) return undefined;
-  const age = new Date(now).getUTCFullYear() - Number(raw.trim());
-  return age >= 14 && age <= 100 ? age : undefined;
+/** What the person gave: the date, else a year kept from before the date was asked. */
+export const birthOf = (get: (key: string) => string | null | undefined): string | undefined =>
+  get(BIRTH_DATE_SETTING)?.trim() || get(BIRTH_YEAR_SETTING)?.trim() || undefined;
+
+/** A real calendar day written `YYYY-MM-DD` (no 02-30). */
+export function isCalendarDate(raw: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return false;
+  const day = new Date(`${raw}T00:00:00Z`);
+  return !Number.isNaN(day.getTime()) && day.toISOString().slice(0, 10) === raw;
+}
+
+/**
+ * Age in whole years on `now`'s day from a birth date (or a year kept from before), or undefined when none was given or it is not a
+ * plausible adult's (14–100). A date counts the birthday: someone born 1996-12-01 is 29 on 2026-11-11.
+ */
+export function ageFromBirth(raw: string | null | undefined, now: string): number | undefined {
+  const text = raw?.trim() ?? "";
+  const today = new Date(now).toISOString().slice(0, 10);
+  const age = isCalendarDate(text) ? Number(today.slice(0, 4)) - Number(text.slice(0, 4)) - (today.slice(5) < text.slice(5) ? 1 : 0)
+    : /^\d{4}$/.test(text) ? Number(today.slice(0, 4)) - Number(text) : undefined;
+  return age !== undefined && age >= 14 && age <= 100 ? age : undefined;
 }
 
 export type PhaseSource = "chronotype" | "sleep" | "stated" | "age" | "default";

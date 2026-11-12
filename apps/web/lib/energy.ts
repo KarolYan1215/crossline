@@ -2,7 +2,7 @@ import "server-only";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { formatInTimeZone } from "date-fns-tz";
 import {
-  ACTIVITY_LONG_GAPS, BIRTH_YEAR_SETTING, CAMERA_ENERGY_CONSENT, INPUT_RHYTHM_BUCKETS, INPUT_RHYTHM_CONSENT, PHONE_HEALTH_CONSENT, SELF_SLEEP_SETTING, SLEEP_TRACKING_CONSENT, ageFromBirthYear, phoneHealthGranted, priorPhase, readSelfSleep, calibrate, covariateShift, inputRhythmAt, judgeCovariate, dayCapacity, mergeSleep, predictEnergy, sleepFromGaps, sleepFromPhoneEvents, alertnessAt, statedPeakOf, statedSleep, usualMidSleep,
+  ACTIVITY_LONG_GAPS, CAMERA_ENERGY_CONSENT, INPUT_RHYTHM_BUCKETS, INPUT_RHYTHM_CONSENT, PHONE_HEALTH_CONSENT, SELF_SLEEP_SETTING, SLEEP_TRACKING_CONSENT, ageFromBirth, birthOf, phoneHealthGranted, priorPhase, readSelfSleep, calibrate, covariateShift, inputRhythmAt, judgeCovariate, dayCapacity, mergeSleep, predictEnergy, sleepFromGaps, sleepFromPhoneEvents, alertnessAt, statedPeakOf, statedSleep, usualMidSleep,
   type AccessContext, type AdmittedActivity, type AvailabilityWindow, type DailyActivityId, type CovariateVerdict, type DailyPhysiology, type InputRhythmBucket, type DayCapacity, type EnergyCalibration, type EnergyLevel, type EnergyPrediction, type EnergySource, type PhaseSource, type PhoneSleepEvent, type SleepEpisode
 } from "@crossline/core";
 import { appNow, effectiveSchedulePreferences, getStore } from "./crossline";
@@ -122,7 +122,7 @@ export function energyModel(ctx: AccessContext, windows: AvailabilityWindow[]): 
   const phase = priorPhase({
     midSleep: usualMidSleep({ episodes, hourOf, weekdayOf: (iso) => Number(formatInTimeZone(new Date(iso), zone, "i")), now,
       stated: statedSleep(store.listProfileFacts(ctx.workspaceId)) }),
-    statedPeak: statedPeakOf(windows), age: ageFromBirthYear(store.getSetting(ctx.workspaceId, BIRTH_YEAR_SETTING), now) });
+    statedPeak: statedPeakOf(windows), age: ageFromBirth(birthOf((key) => store.getSetting(ctx.workspaceId, key)), now) });
   const phaseShift = phase.shift;
   const reports = store.listEnergyObservations(ctx.workspaceId).filter((item) => item.source === "self_report" && item.level !== "uncalibrated");
   const calibration = calibrate(reports.flatMap((report) => {

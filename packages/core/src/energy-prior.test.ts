@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
-  DEFAULT_AVAILABILITY, DEFAULT_CALIBRATION, DEFAULT_PEAKS, POPULATION_MID_SLEEP, ageFromBirthYear, energyRhythm, inertia, phaseShiftFromAge, phaseShiftFromPeak,
+  DEFAULT_AVAILABILITY, DEFAULT_CALIBRATION, DEFAULT_PEAKS, POPULATION_MID_SLEEP, ageFromBirth, birthOf, isCalendarDate, energyRhythm, inertia, phaseShiftFromAge, phaseShiftFromPeak,
   priorPhase, statedPeakOf, typicalMidSleep, usualMidSleep
 } from "./index";
 
@@ -60,11 +60,18 @@ describe("age", () => {
     expect(priorPhase({})).toEqual({ shift: 0, source: "default" });
   });
 
-  test("the age comes from a birth year the person gave, and nothing else", () => {
-    expect(ageFromBirthYear("1996", "2026-11-11T00:00:00Z")).toBe(30);
-    expect(ageFromBirthYear(null, "2026-11-11T00:00:00Z")).toBeUndefined();
-    expect(ageFromBirthYear("2030", "2026-11-11T00:00:00Z")).toBeUndefined();
-    expect(ageFromBirthYear("abc", "2026-11-11T00:00:00Z")).toBeUndefined();
+  test("the age comes from a birth date the person gave (or a year kept from before), and nothing else", () => {
+    expect(ageFromBirth("1996-11-11", "2026-11-11T00:00:00Z")).toBe(30);
+    expect(ageFromBirth("1996-12-01", "2026-11-11T00:00:00Z")).toBe(29);
+    expect(ageFromBirth("1996", "2026-11-11T00:00:00Z")).toBe(30);
+    expect(ageFromBirth("1996-02-30", "2026-11-11T00:00:00Z")).toBeUndefined();
+    expect(ageFromBirth(null, "2026-11-11T00:00:00Z")).toBeUndefined();
+    expect(ageFromBirth("2030-01-01", "2026-11-11T00:00:00Z")).toBeUndefined();
+    expect(ageFromBirth("abc", "2026-11-11T00:00:00Z")).toBeUndefined();
+    expect(birthOf((key) => ({ "profile.birthYear": "1990", "profile.birthDate": "1996-05-01" } as Record<string, string>)[key])).toBe("1996-05-01");
+    expect(birthOf((key) => ({ "profile.birthYear": "1990" } as Record<string, string>)[key])).toBe("1990");
+    expect(isCalendarDate("2000-02-29")).toBe(true);
+    expect(isCalendarDate("2001-02-29")).toBe(false);
   });
 });
 

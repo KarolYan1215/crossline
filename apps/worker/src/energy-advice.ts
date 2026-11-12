@@ -1,6 +1,6 @@
 import {
   ACTIVITY_LONG_GAPS, ENERGY_ADVICE_PERIOD_DAYS, ENERGY_ADVICE_REVIEW_SCHEMA, ENERGY_ADVICE_SETTING, PHONE_HEALTH_CONSENT, SLEEP_TRACKING_CONSENT, adviceId, adviceProfiles, energyAdviceRule,
-  BIRTH_YEAR_SETTING, SELF_SLEEP_SETTING, ageFromBirthYear, mergeSleep, statedPeakOf, phoneHealthGranted, readEnergyAdvice, readSelfSleep, resolveAvailability, sleepFromGaps, sleepFromPhoneEvents, spendAllows, validateEnergyAdviceReview, withAdjustments, workedRhythm, zoneClock,
+  SELF_SLEEP_SETTING, ageFromBirth, birthOf, mergeSleep, statedPeakOf, phoneHealthGranted, readEnergyAdvice, readSelfSleep, resolveAvailability, sleepFromGaps, sleepFromPhoneEvents, spendAllows, validateEnergyAdviceReview, withAdjustments, workedRhythm, zoneClock,
   type BackgroundKind, type BackgroundSpend, type EnergyAdvice, type EnergyAdviceReview, type EnergyAdviceReviewRecord, type EnergyLevel, type PhoneSleepEvent, type SleepEpisode
 } from "@crossline/core";
 import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@crossline/codex";
@@ -53,7 +53,7 @@ export function energyAdviceInputs(store: CrosslineStore, workspaceId: string, n
   // The person's best hours as the web's energy model reads them (the first high-energy window of a pattern they changed), and the age
   // they chose to give.
   return { zone, worked, current, rule: energyAdviceRule({ locale: localeOf(store, workspaceId), now: now.toISOString(), zone, episodes: sleepFor(store, workspaceId, clock.hour), reports, worked,
-    statedPeak: statedPeakOf(current.windows), age: ageFromBirthYear(store.getSetting(workspaceId, BIRTH_YEAR_SETTING), now.toISOString()) }) };
+    statedPeak: statedPeakOf(current.windows), age: ageFromBirth(birthOf((key) => store.getSetting(workspaceId, key)), now.toISOString()) }) };
 }
 
 /** Due once a week from the last advice (or the last 「not enough yet」). */

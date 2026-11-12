@@ -123,7 +123,7 @@ function levelsOf(curve: Array<number | null>): number[] {
   return levels;
 }
 const QUARTER_SHARE = 0.25;
-const PHASE_BASIS: Record<PhaseSource, string> = { chronotype: "按时型", sleep: "按睡眠中点", stated: "按本人所述高效时段", age: "按本人所填出生年份的同龄人平均",
+const PHASE_BASIS: Record<PhaseSource, string> = { chronotype: "按时型", sleep: "按睡眠中点", stated: "按本人所述高效时段", age: "按本人所填出生日期的同龄人平均",
   default: "无记录，按通用曲线" };
 
 /** A run shorter than an hour takes its neighbour's level, so the advice saves as a few windows rather than a scatter of half hours. */
