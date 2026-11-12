@@ -1,6 +1,7 @@
 import { tFor } from "@crossline/i18n";
 import { compareTasks, isPrimeWork, paramsFor, type PlanBlocker, type PlanResult, type PlannerTask, type PlanningInput, type ScheduleBlock } from "./index";
 import { createRequire } from "node:module";
+import { reserveMinutes } from "./reserve";
 
 // Keep HiGHS outside the Next server bundle so its loader finds highs.wasm beside itself.
 const loadHighs = createRequire(import.meta.url)("highs") as typeof import("highs").default;
@@ -88,16 +89,6 @@ const floorGrid = (ms: number) => Math.floor(ms / GRID) * GRID;
 const ceilMinutes = (minutes: number) => Math.ceil(minutes / GRID_MINUTES - 1e-9) * GRID_MINUTES;
 const MIN_SEGMENT = 15;
 
-/**
- * What the calendar holds for a task. With no measured time behind the estimate (`confidence: "low"`) the plan adds 10% to the usual
- * time and lets measured time correct it (the person's decision of 2026-11-11, W-255): reserving p85 here, multiplied again by the
- * low-energy efficiency, gave a 90-minute step 3.5 hours of one day. Never more than p85, which `clampContinuousBuffers` lowers to
- * the longest slot for work that has to sit in one piece. A calibrated estimate is held at its p50.
- */
-export function reserveMinutes(estimate: { p50Minutes: number; p85Minutes: number; confidence?: string | undefined }): number {
-  return estimate.confidence === "low"
-    ? Math.max(estimate.p50Minutes, Math.min(estimate.p85Minutes, Math.ceil(estimate.p50Minutes * 1.1 - 1e-9))) : estimate.p50Minutes;
-}
 const durationOf = (task: PlannerTask) => reserveMinutes(task.estimate);
 const term = (coefficient: number, name: string) => `${coefficient < 0 ? "-" : "+"} ${Math.abs(coefficient)} ${name}`;
 const expression = (terms: Array<[number, string]>) => terms.map(([value, name]) => term(value, name)).join(" ") || "0";

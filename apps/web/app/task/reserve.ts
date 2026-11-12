@@ -1,4 +1,4 @@
-import { reserveMinutes } from "@crossline/planner";
+import { reserveMinutes } from "@crossline/planner/reserve";
 
 /**
  * What the calendar holds for a step, said beside its usual time (walkthrough W-153, 2026-10-29). The planner reserves a low-confidence
