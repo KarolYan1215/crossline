@@ -8,7 +8,8 @@ import { tOf } from "../../../../../lib/locale";
 import { requestCodexSupervisor } from "../../../../../lib/codex-runtime";
 import { titleOf, withUndo } from "../../../../../lib/undo";
 import { readChecklistAnswers, readEvidence, readReport } from "../../../../../lib/execution-input";
-import { readCompletionOutcome } from "@crossline/core";
+import { readCompletionOutcome, SNOOZE_MINUTES } from "@crossline/core";
+import { snoozeBlock } from "../../../../../lib/task-ops";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
@@ -24,6 +25,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       // Started from a block: the session is about that block's step (W-258, 2026-11-11). An unknown or finished step is ignored.
       if (result.ok && typeof body.stepId === "string") focusStep(ctx, id, body.stepId);
     }
+    // 「推迟 10 分钟」 on a block's notification (sw.ts, 2026-11-11 §3): the same snooze as the card's task.op.
+    else if (body.action === "snooze") result = snoozeBlock(ctx, id, String(body.blockId ?? ""), SNOOZE_MINUTES);
     else if (body.action === "materials_ready") result = markMaterialsReady(ctx, id, "human");
     else if (body.action === "materials_retry") {
       result = retryMaterialPreparation(ctx, id);

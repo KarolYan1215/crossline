@@ -12,7 +12,7 @@ test("fifteen minutes before a block that bears on a deadline, it says so with �
   const [nudge] = planNudges(base());
   expect(nudge).toMatchObject({ kind: "block_start", urgent: true, counted: false, fingerprint: "start:scheduled:hw2:v1s1:2026-10-10" });
   expect(nudge!.text).toContain("关系到 10/12 的截止");
-  expect(nudge!.buttons.map((button) => button.label)).toEqual(["开始计时", "推到明天", "少问这类"]);
+  expect(nudge!.buttons.map((button) => button.label)).toEqual(["开始计时", "推迟 10 分钟", "推到明天", "少问这类"]);
   // 推到明天 sits behind the card's 「更多」 fold, not beside 开始计时 at the moment of starting (2026-10-30).
   expect(nudge!.buttons.filter((button) => "more" in button && button.more).map((button) => button.label)).toEqual(["推到明天"]);
   expect(nudge!.text).not.toContain("第一步");
@@ -178,4 +178,24 @@ test("every work block is said when it comes up, deadline or not, until ten minu
   // Already timing it: nothing to say.
   expect(planNudges(base({ clock: "15:02", timer: { orderId: "hw2", title: "", stepId: "v1s1", stepTitle: "", startedAt: "2026-10-10T20:01:00.000Z", usualMinutes: 30 } as NonNullable<NudgeInput["timer"]> }))
     .filter((item) => item.kind === "block_start")).toEqual([]);
+});
+
+test("「推迟 10 分钟」 says the block again when the snooze runs out, in the first prompt's place; after two snoozes it is not said again (2026-11-11 §3)", () => {
+  const [first] = planNudges(base());
+  // Chrome shows about two actions on a notification: 开始计时 first, 推迟 10 分钟 second.
+  expect(first!.buttons.map((button) => button.label)).toEqual(["开始计时", "推迟 10 分钟", "推到明天", "少问这类"]);
+  expect((first!.buttons[1] as { action: { args: unknown } }).action.args)
+    .toMatchObject({ type: "snooze", workOrderId: "hw2", minutes: 10, stepId: "v1s1", text: "scheduled:hw2:v1s1" });
+  const sent = new Set([first!.fingerprint]);
+  const snoozed = (clock: string, count: number, until: string) =>
+    planNudges(base({ clock, sent, blocks: [{ ...base().blocks[0]!, snoozed: { count, until } }] })).filter((item) => item.kind === "block_start");
+  expect(snoozed("14:55", 1, "15:00")).toEqual([]);
+  const [again] = snoozed("15:00", 1, "15:00");
+  expect(again).toMatchObject({ fingerprint: "start:scheduled:hw2:v1s1:2026-10-10:1", replaces: "start:scheduled:hw2:v1s1:2026-10-10" });
+  expect(again!.buttons.map((button) => button.label)).toContain("推迟 10 分钟");
+  // A snooze may run past the usual ten minutes after the start: it is said then, while the block lasts.
+  expect(snoozed("15:20", 1, "15:20")).toHaveLength(1);
+  expect(snoozed("15:30", 1, "15:30")).toEqual([]);
+  // Snoozed twice: not said again (the wrap-up notes it instead).
+  expect(snoozed("15:10", 2, "15:10")).toEqual([]);
 });

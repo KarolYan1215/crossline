@@ -1,5 +1,5 @@
 import "server-only";
-import { inferBlockOutcome, isRestEvent, withFrozen, wrapTimeOf, type AccessContext, type InferredOutcome, type NudgeEnding } from "@crossline/core";
+import { inferBlockOutcome, isRestEvent, MAX_SNOOZES, withFrozen, wrapTimeOf, type AccessContext, type InferredOutcome, type NudgeEnding } from "@crossline/core";
 import { blockWorkMinutes } from "./measured-capacity";
 import { formatInTimeZone } from "date-fns-tz";
 import { appNow, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, readFrozen, toZonedInstant, writeFrozen } from "./crossline";
@@ -25,7 +25,9 @@ export type WrapRow = { blockId: string; orderId: string; title: string; step: s
    * Work minutes inside the block from every signal joined in time — this task's timer, the screen in work categories, Codex — and what
    * they say about it (`inferBlockOutcome`; docs/plans/closed-loop-1030.md §2). Shown on the row as 「推断」 and taken by 「推断都对」.
    */
-  workMinutes: number; inferred: InferredOutcome };
+  workMinutes: number; inferred: InferredOutcome;
+  /** Its start prompt was snoozed twice (「推迟 10 分钟」), after which it was not said again (2026-11-11 §3): the row says so. */
+  snoozedTwice?: true };
 export type WrapView = { day: string; at?: string; rows: WrapRow[]; open: number; done: boolean;
   /** Whether `day` is today: an earlier day (`/wrap?day=`) is caught up on, not wrapped up. */
   today: boolean;
@@ -80,6 +82,11 @@ export function loadWrap(ctx: AccessContext, now = appNow(), requestedDay?: stri
     const usual = step?.estimate.p50Minutes ?? store.getWorkOrder(ctx.workspaceId, orderId)?.estimate.p50Minutes ?? 0;
     return minutes + (recorded.get(`${orderId}#${stepId}`) ?? 0) >= usual * 0.9;
   };
+  const snoozes = new Map<string, number>();
+  for (const event of store.listEvents(ctx.workspaceId, { type: "block.snoozed" })) {
+    const payload = event.payload as { blockId?: string; day?: string };
+    if (payload.day === day && payload.blockId) snoozes.set(payload.blockId, (snoozes.get(payload.blockId) ?? 0) + 1);
+  }
   const orders = store.listWorkOrders(ctx.workspaceId);
   const lineOf = new Map(orders.map((order) => [order.id, order.identityId]));
   // A session never ended on a task that is no longer under way (accepted, archived, moved back) is not a running timer: the floating
@@ -106,7 +113,8 @@ export function loadWrap(ctx: AccessContext, now = appNow(), requestedDay?: stri
       return { blockId: block.id, orderId: block.orderId, title: block.title, step: block.step, start: block.start, end: block.end, timedMinutes: timed,
         workMinutes, inferred: ((outcome) => outcome === "done" && !finishes(block.orderId, block.stepId, workMinutes) ? "partial" : outcome)(
           inferBlockOutcome(workMinutes, Math.round((to - from) / 60_000))),
-        ...(line ? { line } : {}), ...(answered.has(block.id) ? { answered: answered.get(block.id)! } : {}) };
+        ...(line ? { line } : {}), ...(answered.has(block.id) ? { answered: answered.get(block.id)! } : {}),
+        ...((snoozes.get(block.id) ?? 0) >= MAX_SNOOZES ? { snoozedTwice: true as const } : {}) };
     });
   const weekday = Number(formatInTimeZone(now, zone, "i")) % 7;
   // The day's rest events (「休息」 from 21:00) end the working day where they begin (W-156).

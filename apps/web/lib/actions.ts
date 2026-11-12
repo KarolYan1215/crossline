@@ -5,7 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createReminderWorkflow, queueExtractDocs, requestAutomation, reviewAgentTask } from "@crossline/db";
-import { ACTIONS, SELF_SLEEP_SETTING, SETTINGS_SECTIONS, describeEvent, readSelfSleep, scheduleLabel, sleepHours, templateCriterion, windowDays, type AccessContext, type ActionArgs,
+import { ACTIONS, SELF_SLEEP_SETTING, SETTINGS_SECTIONS, SNOOZE_MINUTES, describeEvent, readSelfSleep, scheduleLabel, sleepHours, templateCriterion, windowDays, type AccessContext, type ActionArgs,
   type ActionId, type ProposedAction } from "@crossline/core";
 import type { EvidenceClaimInput } from "@crossline/db";
 import { addCapturedTaskWithId, approveWorkOrderProposal, archiveWorkOrder, completeWorkOrderExecution, effectiveSchedulePreferences, getStore, saveMilestoneTemplate,
@@ -95,6 +95,8 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     // Minutes the person says they worked are a closed session, so measured capacity and the calibration see them (as the completion check does).
     if ((args.type === "progress" || args.type === "step_done") && args.minutes > 0) recordReportedMinutes(ctx, args.workOrderId, args.minutes);
     const result = await applyTaskOp(ctx, args.workOrderId, { ...args, summary: "" });
+    // A snooze opens nothing: the block's prompt comes back by itself.
+    if (args.type === "snooze") return result.ok ? { ok: true, message: tOf(ctx)("{{minutes}} 分钟后再提醒", { minutes: Math.round(args.minutes) || SNOOZE_MINUTES }) } : result;
     return result.ok ? { ok: true, href } : result;
   },
   "sleep.report": (ctx, args) => {

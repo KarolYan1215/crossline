@@ -29,14 +29,20 @@ serwist.addEventListeners();
 self.addEventListener("push", (event) => {
   // `title` and `body` are written by the server in the account's language; `lang` names it, so the one button the service worker adds
   // itself is in that language too (else the browser's), without bundling the catalogues into the worker (docs/i18n.md).
-  let message: { title?: string; body?: string; url?: string; tag?: string; start?: string; step?: string; confirm?: string; lang?: string } = {};
+  let message: { title?: string; body?: string; url?: string; tag?: string; start?: string; step?: string; snooze?: string; confirm?: string; lang?: string } = {};
   try { message = event.data?.json() ?? {}; } catch { message = { body: event.data?.text() ?? "" }; }
   event.waitUntil(self.registration.showNotification(message.title || "Crossline", {
     body: message.body ?? "", icon: "/pwa-icon/192", badge: "/pwa-icon/192",
-    data: { url: message.url || "/", start: message.start, step: message.step, confirm: message.confirm }, ...(message.tag ? { tag: message.tag } : {}),
+    data: { url: message.url || "/", start: message.start, step: message.step, snooze: message.snooze, confirm: message.confirm },
+    ...(message.tag ? { tag: message.tag } : {}),
+    // A block said again after a snooze carries its first prompt's tag: it replaces that notification instead of stacking, and still
+    // alerts (`renotify`) rather than swapping in silently.
+    ...(message.start && message.tag ? { renotify: true } : {}),
     // A block coming up stays on screen until answered (Chromium keeps it as a reminder toast on Windows; it needs the button below).
     ...(message.start ? { requireInteraction: true } : {}),
-    ...(message.start ? { actions: [{ action: "start", title: startLabel(message.lang) }] }
+    // Chrome shows about two actions (`Notification.maxActions`): 开始计时 first, 推迟 10 分钟 second. iOS/Safari shows none; tapping the
+    // notification opens the workbench, which has its own 开始.
+    ...(message.start ? { actions: [{ action: "start", title: startLabel(message.lang) }, ...(message.snooze ? [{ action: "snooze", title: snoozeLabel(message.lang) }] : [])] }
       : message.confirm ? { actions: [{ action: "confirm_done", title: confirmLabel(message.lang, true) }, { action: "confirm_not_done", title: confirmLabel(message.lang, false) }] } : {})
   } as NotificationOptions));
 });
@@ -44,6 +50,11 @@ self.addEventListener("push", (event) => {
 function startLabel(lang: string | undefined): string {
   const english = lang ? lang.startsWith("en") : !(self.navigator.language ?? "zh").toLowerCase().startsWith("zh");
   return english ? "Start timer" : "开始计时";
+}
+
+function snoozeLabel(lang: string | undefined): string {
+  const english = lang ? lang.startsWith("en") : !(self.navigator.language ?? "zh").toLowerCase().startsWith("zh");
+  return english ? "Snooze 10 min" : "推迟 10 分钟";
 }
 
 /** The completion check's two answers on the notification itself (docs/plans/closed-loop-1030.md §2). */
@@ -55,7 +66,7 @@ function confirmLabel(lang: string | undefined, done: boolean): string {
 // Tapping it opens the page it is about, reusing an open Crossline window when there is one.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const data = event.notification.data as { url?: string; start?: string; step?: string; confirm?: string } | undefined;
+  const data = event.notification.data as { url?: string; start?: string; step?: string; snooze?: string; confirm?: string } | undefined;
   const url = String(data?.url ?? "/");
   event.waitUntil((async () => {
     // ✓做了 / ✗没做 on a completion check: written here, same origin with the session cookie, and nothing opens — that is the point.
@@ -64,6 +75,12 @@ self.addEventListener("notificationclick", (event) => {
       form.set("kind", event.action === "confirm_done" ? "as_planned" : "not_done");
       form.set("via", "push");
       await fetch(`/api/confirm/${encodeURIComponent(data.confirm)}`, { method: "POST", credentials: "include", body: form }).catch(() => undefined);
+      return;
+    }
+    // 「推迟 10 分钟」: written here like 开始计时, and nothing opens; the block is said again in ten minutes under the same tag.
+    if (event.action === "snooze" && data?.start && data.snooze) {
+      await fetch(`/api/work-orders/${encodeURIComponent(data.start)}/execution`, { method: "POST", credentials: "include",
+        headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "snooze", blockId: data.snooze }) }).catch(() => undefined);
       return;
     }
     // 「开始计时」: started here, same origin with the session cookie, so the page that opens already shows the running timer.

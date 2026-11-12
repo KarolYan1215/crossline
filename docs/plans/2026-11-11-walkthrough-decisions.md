@@ -103,12 +103,12 @@
 
 ## 3. 到点提醒（已做的和还缺的）
 
-已做（§0 第 4 条）。还缺：
+已做（§0 第 4 条）。本人批准了本节，2026-11-11 已做下面前三条，最后一条的「少问这类」仍待本人定：
 
-- **「推迟 10 分钟」按钮**：Chrome 通知一般只显示 2 个按钮（`Notification.maxActions`，<https://developer.mozilla.org/en-US/docs/Web/API/Notification/maxActions_static>）。建议第二个按钮放「推迟 10 分钟」，同一 `tag` 替换原通知；连续推迟两次后不再推，改记进收工页。需要一个新的 `task.op`（`snooze`）和服务端定时再发，工作量 S–M。
-- **iOS / Safari 不支持按钮**（MDN 兼容表）：点开通知进工作台，那里有「开始」。
+- **「推迟 10 分钟」按钮（已做）**：Chrome 通知一般只显示 2 个按钮（`Notification.maxActions`，<https://developer.mozilla.org/en-US/docs/Web/API/Notification/maxActions_static>），顺序是「开始计时」「推迟 10 分钟」；页面里的卡片同样排第二（「推到明天」仍在「更多」里）。按下记一条 `block.snoozed`（新的 `task.op` `snooze`，`text` 带块 id，`snoozeBlock`，`apps/web/lib/task-ops.ts`；通知上的按钮由 `sw.ts` 带登录 cookie POST `/api/work-orders/<id>/execution` `{action: "snooze", blockId}`，走同一个函数）。10 分钟后提醒引擎（每 2 分钟一轮）再说一次，只要块还没结束：页面上是原来那条消息就地重问（指纹 `start:<block>:<day>:1`，`replaces` 记原指纹），不另起一条；推送用原来的 `tag` 替换原通知（`renotify`，仍会响）。推迟两次后不再说，收工页这一块标「推迟两次」（`WrapRow.snoozedTwice`）。推送消息现在也真的带上 `step`（此前 `sendWebPush` 丢了这个字段，手机上的「开始计时」没按步骤计时）。测试：`nudges.test.ts`（core 与 web）、`task-ops.test.ts`、`notify.test.ts`、`web-push.test.ts`、`execution/route.test.ts`。
+- **iOS / Safari 不支持按钮**（MDN 兼容表）：点开通知进工作台，那里有「开始」。没有按钮时 `actions` 被忽略，点开走原来的路径，不受影响。
 - **行内文字回复不要做**：Web Push 的 `type: 'text'` 2018 年提过、没有上线证据（<https://groups.google.com/a/chromium.org/g/blink-dev/c/PNTQCliD2oA>）。
-- **防疲劳**：每个块只发一次（指纹 `start:<block>:<day>`，现状）；已在计时同一任务的不发（现状）；安静时段只排队（现状）；本人选了「少问这类」就不发——这和「确保会弹」有冲突，建议「少问这类」对块开始提醒改成「只在电脑上弹，不推手机」，而不是完全不提醒。这一条要本人定。
+- **防疲劳**：每个块只发一次（指纹 `start:<block>:<day>`，推迟后的再说是同一条），已在计时同一任务的不发，安静时段只排队（现状）。**连续三条没回不再静音块开始提醒（已做）**：本人定了块开始提醒必须可靠弹出，`mutedKinds` 的「沉默三天」对 `block_start` 不生效，其他类照旧。本人选了「少问这类」就不发——这和「确保会弹」有冲突，建议「少问这类」对块开始提醒改成「只在电脑上弹，不推手机」，而不是完全不提醒。这一条仍要本人定，「少问这类」（7 天）暂未改。
 
 ## 4. 账本里仍未解决的发现：分析与方案
 
