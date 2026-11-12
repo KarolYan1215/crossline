@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore, extractBacklog, readExtractState, writeExtractState } from "@crossline/db";
-import { createOnboardingSessionRunner, ONBOARDING_SKILL } from "./onboarding-session";
-import { createOnboardingExtractor, evidenceTools, extractionSettled, ONBOARDING_EXTRACT_SKILL, requestExtraction, searchTerms } from "./onboarding-extract";
+import { createOnboardingSessionRunner as createRunner, ONBOARDING_SKILL } from "./onboarding-session";
+import { createOnboardingExtractor, evidenceTools, extractionSettled, ONBOARDING_EXTRACT_SKILL, readLaneState, requestExtraction, searchTerms } from "./onboarding-extract";
 import { fakeRuntime } from "./testing/fake-runtime";
 
 const EXTRACT = "crossline.onboarding.extract.v1";
+// One run writes everything here, as the answer queues below are written for; the lanes have tests of their own (`lanes: true`).
+const createOnboardingSessionRunner = (...args: Parameters<typeof createRunner>) =>
+  createRunner(args[0], args[1], args[2], args[3], { lanes: false, ...(args[4] ?? {}) });
 let store: CrosslineStore;
 let workspaceId: string;
 beforeEach(() => {
@@ -292,4 +295,51 @@ test("words the person wrote elsewhere are read as notes: facts with their sente
   expect(store.listProfileFacts(workspaceId).find((fact) => fact.slot === "group_meeting")).toMatchObject({ status: "confirmed", sourceQuote: note.text });
   expect(JSON.parse(store.getSetting(workspaceId, "profile.model")!)).toMatchObject({ portrait: "原画像" });
   expect(extractor.nextSession()).toBeUndefined();
+});
+
+test("in lanes the ledger, the portrait's sections and its inferences are written by three runs side by side, each with its own fields and watermark", async () => {
+  const now = "2026-11-12T00:00:00.000Z";
+  const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
+  store.saveOnboardingSession({ id: "s", ownerId, workspaceId, state: "active", coverage: { stage: "situation", flow: "v1" }, createdAt: now, updatedAt: now });
+  const sections = facts({ profileSections: { situation: { problem: "论文和产品抢同一段时间", gravity: [], designable: [], reframes: [], refs: [1] },
+    compass: null, energy: null, synthesis: null } });
+  const { rpc, prompts } = fakeRuntime([round], [ONBOARDING_SKILL, ONBOARDING_EXTRACT_SKILL], { routes: [
+    { match: '"lane":"sections"', answers: [sections] },
+    { match: '"lane":"insights"', answers: [JSON.stringify({ hypotheses: [], careers: [], dimensions: [], dropCareers: [] })] },
+    { match: EXTRACT, answers: [deadline([1])] }] });
+  const run = createRunner(store, workspaceId, "C:\\repo", () => rpc);
+  expect((await run({ sessionId: "s", text: "论文 12 月中投稿，和产品在抢同一段时间。" })).state).toBe("asked");
+  await extractionSettled(workspaceId);
+  const runs = prompts().filter((prompt) => prompt.includes(EXTRACT));
+  expect(runs).toHaveLength(3);
+  const contextOf = (lane: string) => { const prompt = runs.find((item) => item.includes(`"lane":"${lane}"`))!;
+    return JSON.parse(prompt.slice(prompt.indexOf("{"), prompt.lastIndexOf("}") + 1)) as { profile: unknown; profileTask: unknown }; };
+  // The ledger lane records facts without the portrait in its context; the sections' lane owes the portrait, the inferences' reads it.
+  const ledger = runs.find((item) => !item.includes('"lane":"sections"') && !item.includes('"lane":"insights"'))!;
+  expect(JSON.parse(ledger.slice(ledger.indexOf("{"), ledger.lastIndexOf("}") + 1))).toMatchObject({ lane: "ledger", profile: null, profileTask: null });
+  expect(contextOf("sections").profileTask).toEqual({ finalize: [], synthesize: false });
+  expect(contextOf("insights")).toMatchObject({ profileTask: null, profile: expect.any(Object) });
+  expect(store.listProfileFacts(workspaceId).map((fact) => fact.slot)).toEqual(["deadline"]);
+  expect(JSON.parse(store.getSetting(workspaceId, "profile.model")!)).toMatchObject({ problem: "论文和产品抢同一段时间" });
+  for (const lane of ["ledger", "sections", "insights"] as const) expect(readLaneState(store, workspaceId, "s", lane)).toMatchObject({ upTo: 1, failures: 0 });
+  expect(readExtractState(store, workspaceId, "s#sections").upTo).toBe(1);
+});
+
+test("a portrait lane that never ran starts at the single run's watermark: an interview from before the lanes is not read again", () => {
+  const now = "2026-11-12T00:00:00.000Z";
+  const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
+  store.saveOnboardingSession({ id: "s", ownerId, workspaceId, state: "complete", coverage: {}, createdAt: now, updatedAt: now });
+  for (const text of ["一", "二"]) store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text }, createdAt: now });
+  writeExtractState(store, workspaceId, "s", { upTo: 2, failures: 0, ranAt: now });
+  const extractor = createOnboardingExtractor(store, workspaceId, "C:\\repo", () => undefined);
+  expect(readLaneState(store, workspaceId, "s", "sections").upTo).toBe(2);
+  expect(extractor.nextSession([], "sections")).toBeUndefined();
+  expect(extractor.nextSession(["s"], "insights")).toBeUndefined();
+  store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text: "三" }, createdAt: now });
+  expect(extractor.nextSession([], "insights")).toBe("s");
+  // A line's own interview and the notes are the ledger's only.
+  store.saveOnboardingSession({ id: "line-research", ownerId, workspaceId, state: "active", coverage: {}, createdAt: now, updatedAt: now });
+  store.appendOnboardingMessage({ sessionId: "line-research", workspaceId, role: "user", content: { text: "四" }, createdAt: now });
+  expect(extractor.nextSession(["line-research"], "sections")).toBe("s");
+  expect(extractor.nextSession(["line-research"], "ledger")).toBe("line-research");
 });

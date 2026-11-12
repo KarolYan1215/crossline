@@ -47,3 +47,17 @@ A new account no longer lands on four placeholder goals. It lands on `/onboardin
 **After the third replay (2026-11-12, night).** The fixes held: no open-question loop, no date asked twice, the portrait written on its first try (227 s), eight research threads, 25 of 36 observations judged right. One new cause kept the start standard from standing in all 45 rounds: the extraction filed her timetable under the person (`person`/`fixed_schedule_class`), and `hard_schedule:<line>` counted only facts of the line or its projects, so she was asked for it a second time and the button stayed refused. A schedule fact of the person now counts when there is only one hard line, as a recurring date already did. Before the start standard stands, `withoutEndHint` takes out of the reply every sentence pointing at 「结束并出报告」 (the model said it in seven rounds the button would have refused). The Skill no longer plans a trial below its day, task and deliverable (five rounds went into one two-hour writing trial, down to how to handle errands that interrupt it). Extraction is still the slowest part: one run took 27 minutes.
 
 **After the fourth replay (2026-11-12, night).** The start standard stood (round 24); the person pressed the end button in that round; 45 minutes, ¥1.95; no reply pointed at the button before then. Two more causes: the worker's `personTimeZone` fell back to America/Chicago when no device zone was on record while the web falls back to `CROSSLINE_TIME_ZONE` (the replay has no device, read Chicago, and researched US internships, down to a Federal Reserve research assistant, for a student in China); it now uses the same default. And the model said 「你可以开始使用应用了」 seven rounds before the start standard stood, so `withoutEndHint` takes that claim out too. What still delays the start standard is extraction lag: she gave her timetable in round 14 and it was on record only in round 24.
+
+**Extraction in three lanes (2026-11-12).** Design and research: `docs/onboarding-v3.md` 「三层路由与整理提速」.
+- One reply now starts three runs side by side (`requestAllLanes`, `EXTRACT_LANE_KEYS`):
+  - the ledger (facts, dates, hours, lines);
+  - the portrait's sections;
+  - its inferences (hypotheses, careers, dimensions).
+- Each run gets only its lane's fields in its schema and context.
+- Each lane has its own watermark (`<session>#sections`, `<session>#insights`). The ledger keeps the old one, so the start standard and `caughtUp` mean what they meant.
+- A portrait lane that never ran inherits the ledger's watermark (`readLaneState`). Interviews under way at deploy time are not reread.
+- The inferences are written as deltas, merged by id (`mergeProfileInsights`); `dropCareers` removes a direction.
+- The ledger lane of an active interview runs at `interactive` priority. Both portrait lanes (`planning`) can hold the account's two background slots for minutes, and the start standard must not wait behind them.
+- Notes and a line's own interview run whole (`all`) in the ledger lane.
+- `finishInterview` waits for the ledger, then the inferences and the sections, then runs the sections once more for the synthesis.
+- Tests and the eval scripts' single runs keep `lanes: false` / `all`.

@@ -5,12 +5,12 @@ import {
   AVAILABILITY_PROPOSED_SETTING, ONBOARDING_KEEP_EARLY_MAX, type ProfileSection, PROFILE_CONFIRMED, droppedOnboardingItems, keepOnboardingExtraction, LIMITED_LISTS, listsAtLimit, prunedOnboardingItems, lineAttributes, numberedText, onboardingExtractSchema,
   portraitFingerprint, sectionClosed, validateOnboardingExtraction, type SectionRecord,
   type EvidenceSentence, type KnownSources, type OnboardingExtractContext, type OnboardingExtraction, type OnboardingStage, type StoredLineProfile,
-  ONBOARDING_INSIGHTS, readInsightRatings
+  ONBOARDING_INSIGHTS, readInsightRatings, EXTRACT_LANE_KEYS, type ExtractLaneName
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary, type SkillTools } from "@crossline/codex";
 import {
   EXTRACT_BACKOFF_MINUTES, EXTRACT_REREAD_SETTING, FINISH_RUNS_MAX, NOTES_SESSION, markFinishing, readFinishing, firstSentenceOf, pendingExtractDocs, readExtractDocs, readExtractOffsets, readExtractState, writeExtractDocs, writeExtractOffsets, writeExtractState,
-  type CrosslineStore, type StoredOnboardingMessage, type StoredSentence, type StoredSourceDocument
+  type CrosslineStore, type ExtractState, type StoredOnboardingMessage, type StoredSentence, type StoredSourceDocument
 } from "@crossline/db";
 import { identityLines } from "./lines";
 import { tOfWorkspace } from "./locale";
@@ -43,8 +43,29 @@ export const ONBOARDING_EXTRACT_SKILL = "crossline:crossline-onboarding-extract"
 const TEXT_PER_DOCUMENT = 14_000;
 const TEXT_TOTAL = 60_000;
 const DOCUMENTS_PER_RUN = 12;
-/** Replies one run reads at most; more wait for the next run, which follows at once. */
+/** Replies one run reads at most; more wait for the next run, which follows at once. The portrait's lanes read more at a time. */
 const REPLIES_PER_RUN = 6;
+const REPLIES_PER_PORTRAIT_RUN = 12;
+
+/**
+ * Which part of the extraction a run writes (2026-11-12): `all` in one run (the shape the tests and the scripts' single runs use), or
+ * one of three lanes that run side by side (`EXTRACT_LANE_KEYS`). The ledger lane keeps the watermark the start standard and the next
+ * round wait for; the portrait's two lanes keep their own, read no files (they look sentences up), and are the main interview's only.
+ * Before, one run wrote all of it and rewrote the portrait's lists in full, and a timetable given in round 14 was on record in round 24.
+ */
+export type ExtractLane = "all" | ExtractLaneName;
+export const EXTRACT_LANES: readonly ExtractLaneName[] = ["ledger", "sections", "insights"];
+const portraitLane = (lane: ExtractLane) => lane === "sections" || lane === "insights";
+/** The watermark's key: the ledger lane shares the one a single run keeps. */
+export const laneStateKey = (sessionId: string, lane: ExtractLane = "all") => portraitLane(lane) ? `${sessionId}#${lane}` : sessionId;
+/**
+ * A lane's watermark. A portrait lane that has never run starts where the single run (and the ledger lane, which shares its watermark)
+ * got to: an interview already under way, or long finished, when the lanes came is not read again from its first reply.
+ */
+export function readLaneState(store: CrosslineStore, workspaceId: string, sessionId: string, lane: ExtractLane = "all"): ExtractState {
+  const own = readExtractState(store, workspaceId, laneStateKey(sessionId, lane));
+  return portraitLane(lane) && own.ranAt === undefined && !own.failures ? { ...own, upTo: readExtractState(store, workspaceId, sessionId).upTo } : own;
+}
 /** The fact index shown to a run: enough to update rather than repeat, short enough not to crowd out the new sentences. */
 const FACTS_SHOWN = 200;
 const SEARCH_RESULTS = 12;
@@ -75,58 +96,70 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
    */
   // Written, or closed after its empty runs: the same test `portraitTask` uses for the synthesis.
   const synthesized = () => sectionClosed(readSectionRecords(store, workspaceId).synthesis);
-  const nextSession = (preferred: string[] = []): string | undefined => {
-    const sessions = store.listOnboardingSessions(workspaceId);
+  const nextSession = (preferred: string[] = [], lane: ExtractLane = "all"): string | undefined => {
+    // The portrait's lanes read the main interview only: a line's own interview and the notes add facts.
+    const sessions = store.listOnboardingSessions(workspaceId).filter((session) => !portraitLane(lane) || (!session.id.startsWith("line-") && session.id !== NOTES_SESSION));
+    const ours = new Set(sessions.map((session) => session.id));
+    const state = (id: string) => readLaneState(store, workspaceId, id, lane);
     const waiting = (id: string) => store.listOnboardingMessages(workspaceId, id)
-      .some((message) => message.role === "user" && message.seq > readExtractState(store, workspaceId, id).upTo);
-    const due = (id: string) => { const retryAt = readExtractState(store, workspaceId, id).retryAt; return !retryAt || Date.parse(retryAt) <= Date.now(); };
-    // An interview the dialogue ended whose synthesis is not written yet still owes a run, even with nothing new to read.
-    const finishing = (id: string) => { const mark = readFinishing(store, workspaceId, id); return Boolean(mark && mark.runs < FINISH_RUNS_MAX && !synthesized()); };
-    const asked = preferred.find((id) => waiting(id) || (pendingExtractDocs(store, workspaceId).length > 0 && docsSession(id) === id) || finishing(id));
+      .some((message) => message.role === "user" && message.seq > state(id).upTo);
+    const due = (id: string) => { const retryAt = state(id).retryAt; return !retryAt || Date.parse(retryAt) <= Date.now(); };
+    // An interview the dialogue ended whose synthesis is not written yet still owes a run, even with nothing new to read. The sections'
+    // lane writes it; the ledger and the inferences owe nothing past the last reply.
+    const finishing = (id: string) => { const mark = readFinishing(store, workspaceId, id); return (lane === "all" || lane === "sections") && Boolean(mark && mark.runs < FINISH_RUNS_MAX && !synthesized()); };
+    const filesFor = (id: string) => !portraitLane(lane) && pendingExtractDocs(store, workspaceId).length > 0 && docsSession(id) === id;
+    const asked = preferred.find((id) => (!portraitLane(lane) || ours.has(id)) && (waiting(id) || filesFor(id) || finishing(id)));
     if (asked) return asked;
     const replies = sessions.find((session) => waiting(session.id) && due(session.id));
     if (replies) return replies.id;
     const owed = sessions.find((session) => finishing(session.id) && due(session.id));
     if (owed) return owed.id;
-    if (!pendingExtractDocs(store, workspaceId).length) return undefined;
+    if (portraitLane(lane) || !pendingExtractDocs(store, workspaceId).length) return undefined;
     const files = docsSession();
     return files && due(files) ? files : undefined;
   };
 
   /** Writes the failure and when to try again; also what an unexpected throw goes through, so it never reruns at once. */
-  function failed(sessionId: string, code: string, message: string): ExtractOutcome {
-    const state = readExtractState(store, workspaceId, sessionId);
+  function failed(sessionId: string, code: string, message: string, lane: ExtractLane = "all"): ExtractOutcome {
+    const state = readLaneState(store, workspaceId, sessionId, lane);
     const failures = state.failures + 1;
     const wait = EXTRACT_BACKOFF_MINUTES[Math.min(failures, EXTRACT_BACKOFF_MINUTES.length) - 1]!;
     const at = new Date().toISOString();
-    writeExtractState(store, workspaceId, sessionId, { ...state, failures, lastError: { code, message, at }, retryAt: new Date(Date.now() + wait * 60_000).toISOString() });
+    writeExtractState(store, workspaceId, laneStateKey(sessionId, lane), { ...state, failures, lastError: { code, message, at }, retryAt: new Date(Date.now() + wait * 60_000).toISOString() });
     const ownerId = store.getWorkspaceOwnerId(workspaceId);
     if (ownerId) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:extract-failed:${sessionId}:${at}`, type: "onboarding.extract_failed",
-      entityId: sessionId, payload: { code, message: message.slice(0, 300), failures } });
+      entityId: sessionId, payload: { code, message: message.slice(0, 300), failures, lane } });
     return { state: "blocked", sessionId, code, message };
   }
 
   /** One run (see `runInner`); anything it throws is a failure with its backoff, never a silent rerun. */
-  async function runOnce(preferred: string[] = []): Promise<ExtractOutcome> {
-    const sessionId = nextSession(preferred);
+  async function runOnce(preferred: string[] = [], lane: ExtractLane = "all"): Promise<ExtractOutcome> {
+    const sessionId = nextSession(preferred, lane);
     if (!sessionId) return { state: "idle" };
-    try { return await runInner(sessionId); }
-    catch (error) { return failed(sessionId, "EXTRACT_FAILED", error instanceof Error ? error.message : String(error)); }
+    // The notes and a line's own interview have no portrait lanes beside them: the ledger lane reads them whole, as a single run would
+    // (one watermark), so a note is still told apart by its missing `lane` and `profile`.
+    const whole = lane === "ledger" && (sessionId === NOTES_SESSION || sessionId.startsWith("line-"));
+    try { return await runInner(sessionId, whole ? "all" : lane); }
+    catch (error) { return failed(sessionId, "EXTRACT_FAILED", error instanceof Error ? error.message : String(error), lane); }
   }
 
   /** The oldest waiting replies of one conversation (at most `REPLIES_PER_RUN`), and the files waiting, within the reading budget. */
-  async function runInner(sessionId: string): Promise<ExtractOutcome> {
-    const state = readExtractState(store, workspaceId, sessionId);
+  async function runInner(sessionId: string, lane: ExtractLane): Promise<ExtractOutcome> {
+    const state = readLaneState(store, workspaceId, sessionId, lane);
     const client = getClient();
-    const blocked = (code: string, message: string): ExtractOutcome => failed(sessionId, code, message);
+    const blocked = (code: string, message: string): ExtractOutcome => failed(sessionId, code, message, lane);
+    /** Whether this run writes a group of fields: every group in a single run, else its lane's. */
+    const writes = (group: ExtractLaneName) => lane === "all" || lane === group;
     if (!client) return blocked("CODEX_SUPERVISOR_UNAVAILABLE", "Codex 运行时不可用。");
     const ownerId = store.getWorkspaceOwnerId(workspaceId);
     if (!ownerId) return blocked("WORKSPACE_OWNER_MISSING", "找不到这个工作区的所有者。");
     const session = store.getOnboardingSession(workspaceId, sessionId);
     const messages = store.listOnboardingMessages(workspaceId, sessionId);
     // Oldest first, a few at a time: a long backlog (a restart, a failing provider) is read over several runs, not in one context.
-    const pendingReplies = messages.filter((message) => message.role === "user" && message.seq > state.upTo).slice(0, REPLIES_PER_RUN);
-    const withFiles = docsSession(sessionId) === sessionId;
+    const pendingReplies = messages.filter((message) => message.role === "user" && message.seq > state.upTo)
+      .slice(0, portraitLane(lane) ? REPLIES_PER_PORTRAIT_RUN : REPLIES_PER_RUN);
+    // Files are the ledger lane's to read; the portrait's lanes look up what they need in them (`search_evidence`).
+    const withFiles = writes("ledger") && docsSession(sessionId) === sessionId;
     const reread = withFiles && store.getSetting(workspaceId, EXTRACT_REREAD_SETTING) === "1";
 
     // The files waiting, as numbered sentences within the run's budget; a line's own interview reads replies only.
@@ -205,11 +238,14 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     const flow = flowOf(session?.coverage);
     const stage = ((session?.coverage as { stage?: OnboardingStage } | undefined)?.stage ?? (focus || notes ? "details" : INTERVIEW_FLOW_STAGES[flow][0]!));
     // Notes add facts; the portrait is the interview's to write, so they owe it nothing.
-    const profileTask = focus || notes ? undefined : portraitTask(stage, session?.state === "complete" || Boolean(finishing), readSectionRecords(store, workspaceId), flow);
+    const profileTask = focus || notes || !writes("sections") ? undefined
+      : portraitTask(stage, session?.state === "complete" || Boolean(finishing), readSectionRecords(store, workspaceId), flow);
     // Card items the person answered in words: the run reads them off the replies (`itemScores`).
-    const cardItems = focus || notes ? [] : pendingItems(readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING)));
+    const cardItems = focus || notes || !writes("ledger") ? [] : pendingItems(readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING)));
+    // The portrait, the person's 准/不准 and the research are what the portrait's lanes reason from; the ledger lane records facts.
+    const readsPortrait = !focus && !notes && (writes("sections") || writes("insights"));
     const context: OnboardingExtractContext = {
-      version: "crossline.onboarding.extract.v1", today, timeZone: personTimeZone(store, workspaceId),
+      version: "crossline.onboarding.extract.v1", ...(lane === "all" ? {} : { lane }), today, timeZone: personTimeZone(store, workspaceId),
       lines: lines.map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [],
         ...(line.domain ? { domain: DOMAIN_PACKS[line.domain].label } : {}) })),
       ...(() => { const guides = domainGuides(lines); return guides.length ? { domainGuides: guides } : {}; })(),
@@ -220,7 +256,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
         attributes: lineAttributes(profiles[line.id], line.label).map((item) => item.text) })),
       candidatesWanted: lines.filter((line) => !(line.goals ?? []).length && profiles[line.id]?.description
         && !lineAttributes(profiles[line.id], line.label).length).map((line) => line.id),
-      profile: focus || notes ? null : readProfileModel(store, workspaceId), profileTask: profileTask ?? null, stage,
+      profile: readsPortrait ? readProfileModel(store, workspaceId) : null, profileTask: profileTask ?? null, stage,
       focusLine: focus ? { id: focus.id, label: focus.label } : null,
       replies, sources, ...(waitingDocs.length > taken.length ? { sourcesWaiting: waitingDocs.length - taken.length } : {}), reread,
       ...(cardItems.length ? { scaleItems: cardItems.map((item) => ({ id: item.id, text: item.text, anchors: item.anchors,
@@ -228,9 +264,9 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       // The person's ratings of the interview's observations: one they called 不准 is wrong about them and does not go into the portrait.
       ...(() => { const rated = Object.values(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS))).filter((rating) => rating.text)
         .slice(-8).map((rating) => `${rating.verdict === "fits" ? "准" : "不准"}：${rating.text!.slice(0, 120)}`);
-        return rated.length && !focus && !notes ? { observations: rated } : {}; })(),
+        return rated.length && readsPortrait ? { observations: rated } : {}; })(),
       // Outside data comes from the research threads alone (decision 22): hypotheses' `external` basis and the careers' job-ad sources.
-      ...(() => { const findings = focus || notes ? [] : researchFindings(readResearch(store, workspaceId, sessionId));
+      ...(() => { const findings = readsPortrait ? researchFindings(readResearch(store, workspaceId, sessionId)) : [];
         return findings.length ? { research: findings } : {}; })()
     };
     const ids = { lines: lines.map((line) => line.id) };
@@ -238,11 +274,16 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     // Read from the answer as the model gave it, before any check prunes it: a list at its cap may have stopped short (W-228).
     let full: Array<{ path: string; max: number }> = [];
     const result = await runCodexSkill<OnboardingExtraction>(client, context, {
-      skillName: ONBOARDING_EXTRACT_SKILL, cwd, developerInstructions: INSTRUCTIONS, outputSchema: onboardingExtractSchema(ids),
+      skillName: ONBOARDING_EXTRACT_SKILL, cwd, developerInstructions: INSTRUCTIONS,
+      outputSchema: onboardingExtractSchema(ids, lane === "all" ? undefined : EXTRACT_LANE_KEYS[lane]),
       prepareInput: () => context, tools,
+      // The ledger lane of an interview under way is what the person waits on (the start standard, the next round's questions): it goes
+      // as a turn, outside the account's two background slots, which the portrait's two lanes may both hold for minutes. They queue as
+      // planning, ahead of discretionary work.
+      ...(portraitLane(lane) ? { priority: "planning" as const } : lane === "ledger" && session?.state === "active" ? { priority: "interactive" as const } : {}),
       // The prompt cache (docs/token-economy.md §2.5): the lines, projects and portrait first, the facts on record (which grow) after
       // them, and this run's replies, files, task and date last.
-      stableKeys: ["version", "timeZone", "lines", "domainGuides", "lineProfiles", "projects", "focusLine", "profile", "facts"],
+      stableKeys: ["version", "lane", "timeZone", "lines", "domainGuides", "lineProfiles", "projects", "focusLine", "profile", "facts"],
       validateOutput: (output) => {
         full = listsAtLimit(output);
         const valid = validateOnboardingExtraction(output, known);
@@ -276,7 +317,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       // The 「符合」 was said in the last reply this run read, and the portrait was rewritten with it in hand: the confirmation holds for the
       // portrait it wrote (before, the person was asked to confirm again every round, 2026-10-16). Not when a correction followed it.
       const lastSeq = pendingReplies.at(-1)?.seq;
-      const confirmedHere = !focus && !notes && lastSeq !== undefined && store.listEvents(workspaceId, { type: "profile.confirmed" })
+      const confirmedHere = writes("sections") && !focus && !notes && lastSeq !== undefined && store.listEvents(workspaceId, { type: "profile.confirmed" })
         .some((event) => (event.payload as { sessionId?: string; replySeq?: number }).sessionId === sessionId && Number((event.payload as { replySeq?: number }).replySeq) === lastSeq);
       if (confirmedHere) store.setSetting(workspaceId, PROFILE_CONFIRMED, JSON.stringify({ fingerprint: portraitFingerprint(readProfileModel(store, workspaceId)), at: new Date().toISOString() }));
       // Read again here, inside the transaction: the dialogue may have queued files while the model ran.
@@ -291,12 +332,12 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       }
       writeExtractDocs(store, workspaceId, docs);
       writeExtractOffsets(store, workspaceId, nextOffsets);
-      writeExtractState(store, workspaceId, sessionId, { upTo, failures: 0, ranAt: new Date().toISOString() });
-      if (finishing) markFinishing(store, workspaceId, sessionId, finishing.runs + 1);
+      writeExtractState(store, workspaceId, laneStateKey(sessionId, lane), { upTo, failures: 0, ranAt: new Date().toISOString() });
+      if (finishing && profileTask) markFinishing(store, workspaceId, sessionId, finishing.runs + 1);
     });
     store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:extracted:${sessionId}:${upTo}:${new Date().toISOString()}`, type: "onboarding.extracted",
       entityId: sessionId, payload: { replies: pendingReplies.length, files: taken.length, facts: result.output.slotUpdates.length,
-        repairs: result.audit.repairs ?? 0, warnings: result.audit.warnings ?? [], pruned } });
+        repairs: result.audit.repairs ?? 0, warnings: result.audit.warnings ?? [], pruned, lane } });
     if (pruned.length) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:unrecorded:${sessionId}:${upTo}:${randomUUID()}`, type: ONBOARDING_UNRECORDED_EVENT,
       entityId: sessionId, payload: { dropped: pruned.map((title) => ({ title, code: "NOT_KEPT" })) } });
     if (full.length) {
@@ -309,7 +350,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       if (rest.length) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:unrecorded:limit:${sessionId}:${upTo}:${randomUUID()}`, type: ONBOARDING_UNRECORDED_EVENT,
         entityId: sessionId, payload: { dropped: limit(rest) } });
     }
-    const more = Boolean(nextSession());
+    const more = Boolean(nextSession([], lane));
     return { state: "done", sessionId, replies: pendingReplies.length, files: taken.length, facts: result.output.slotUpdates.length, more };
   }
   return { runOnce, nextSession };
@@ -399,13 +440,18 @@ export function evidenceTools(corpus: () => Array<StoredSentence & { ref: string
 }
 
 /**
- * One extraction at a time per workspace. A request while one runs adds its conversation to the next round's (so a reply the person just
- * sent skips any backoff) and makes it go round again when this one ends, even after a failure; a run that leaves more waiting (files
- * over the budget, replies that came meanwhile) goes round again at once, unless it failed with nothing new asked for.
+ * One extraction at a time per workspace and lane (a single run and the ledger lane share one slot: they keep one watermark). A request
+ * while one runs adds its conversation to the next round's (so a reply the person just sent skips any backoff) and makes it go round again
+ * when this one ends, even after a failure; a run that leaves more waiting (files over the budget, replies that came meanwhile) goes round
+ * again at once, unless it failed with nothing new asked for.
  */
 const inFlight = new Map<string, { promise: Promise<void>; again: boolean; preferred: Set<string> }>();
-export function requestExtraction(workspaceId: string, run: (preferred: string[]) => Promise<ExtractOutcome>, preferred?: string): Promise<void> {
-  const current = inFlight.get(workspaceId);
+const slotOf = (workspaceId: string, lane: ExtractLane) => portraitLane(lane) ? `${workspaceId}#${lane}` : workspaceId;
+const slotsOf = (workspaceId: string) => [workspaceId, ...EXTRACT_LANES.filter(portraitLane).map((lane) => slotOf(workspaceId, lane))];
+export function requestExtraction(workspaceId: string, run: (preferred: string[]) => Promise<ExtractOutcome>, preferred?: string,
+  lane: ExtractLane = "all"): Promise<void> {
+  const slot = slotOf(workspaceId, lane);
+  const current = inFlight.get(slot);
   if (current) { current.again = true; if (preferred) current.preferred.add(preferred); return current.promise; }
   const entry = { again: false, preferred: new Set<string>(preferred ? [preferred] : []), promise: Promise.resolve() };
   entry.promise = (async () => {
@@ -419,31 +465,44 @@ export function requestExtraction(workspaceId: string, run: (preferred: string[]
         if (entry.again) continue;
         if (!(outcome.state === "done" && outcome.more)) break;
       }
-    } finally { inFlight.delete(workspaceId); }
+    } finally { inFlight.delete(slot); }
   })();
-  inFlight.set(workspaceId, entry);
+  inFlight.set(slot, entry);
   return entry.promise;
 }
 /**
- * Waits until a conversation's replies up to `seq` are extracted (true), or its extraction is failing and backing off (false), asking for
- * a run when none is going; at most `timeoutMs`, after which the caller reads the ledger as it is.
+ * The three lanes at once (2026-11-12): the ledger, the portrait's sections and its inferences each in a run of its own, side by side.
+ * Resolves with the ledger lane, the one the next round and the start standard wait for; the portrait's lanes finish on their own.
+ */
+export function requestAllLanes(workspaceId: string, run: (preferred: string[], lane: ExtractLaneName) => Promise<ExtractOutcome>, preferred?: string): Promise<void> {
+  const ledger = requestExtraction(workspaceId, (asked) => run(asked, "ledger"), preferred, "ledger");
+  for (const lane of EXTRACT_LANES.filter(portraitLane)) void requestExtraction(workspaceId, (asked) => run(asked, lane), preferred, lane);
+  return ledger;
+}
+/**
+ * Waits until a conversation's replies up to `seq` are extracted by a lane (true), or its extraction is failing and backing off (false),
+ * asking for a run when none is going; at most `timeoutMs`, after which the caller reads the ledger as it is.
  */
 export async function extractionReached(store: CrosslineStore, workspaceId: string, sessionId: string, seq: number, request: () => Promise<void>,
-  timeoutMs = Number.POSITIVE_INFINITY): Promise<boolean> {
+  timeoutMs = Number.POSITIVE_INFINITY, lane: ExtractLane = "all"): Promise<boolean> {
   const until = Date.now() + timeoutMs;
   // A failure recorded after this reply was sent is this reply's: it is not retried at once (the backoff holds). One from before is not.
   const sentAt = store.listOnboardingMessages(workspaceId, sessionId).find((message) => message.seq === seq)?.createdAt ?? "";
   const wait = (promise: Promise<void>) => Number.isFinite(timeoutMs)
     ? Promise.race([promise, new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, until - Date.now())))]) : promise;
   for (let attempt = 0; attempt < 4 && Date.now() < until; attempt += 1) {
-    const state = readExtractState(store, workspaceId, sessionId);
+    const state = readLaneState(store, workspaceId, sessionId, lane);
     if (state.upTo >= seq) return true;
     if (state.failures && state.retryAt && Date.parse(state.retryAt) > Date.now() && (attempt > 0 || (state.lastError?.at ?? "") >= sentAt)) return false;
-    await wait(extractionRunning(workspaceId) ? extractionSettled(workspaceId) : request());
+    await wait(extractionRunning(workspaceId, lane) ? extractionSettled(workspaceId, lane) : request());
   }
-  return readExtractState(store, workspaceId, sessionId).upTo >= seq;
+  return readLaneState(store, workspaceId, sessionId, lane).upTo >= seq;
 }
 
-export const extractionRunning = (workspaceId: string) => inFlight.has(workspaceId);
-/** Resolves when the workspace's extraction (if any) has finished. */
-export const extractionSettled = (workspaceId: string): Promise<void> => inFlight.get(workspaceId)?.promise ?? Promise.resolve();
+/** Whether a lane's run is going, or (no lane) any of the workspace's. */
+export const extractionRunning = (workspaceId: string, lane?: ExtractLane) =>
+  lane ? inFlight.has(slotOf(workspaceId, lane)) : slotsOf(workspaceId).some((slot) => inFlight.has(slot));
+/** Resolves when a lane's run (or, no lane, every run of the workspace) has finished. */
+export const extractionSettled = (workspaceId: string, lane?: ExtractLane): Promise<void> => lane
+  ? inFlight.get(slotOf(workspaceId, lane))?.promise ?? Promise.resolve()
+  : Promise.all(slotsOf(workspaceId).map((slot) => inFlight.get(slot)?.promise ?? Promise.resolve())).then(() => undefined);

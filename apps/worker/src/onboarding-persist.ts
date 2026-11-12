@@ -76,15 +76,16 @@ export function persistExtraction(store: CrosslineStore, workspaceId: string, ex
       records[section] = { sentences: written ? sections[section]!.sentences ?? [] : previous?.sentences ?? [], final, at: now, ...(emptyRuns ? { emptyRuns } : {}) };
     }
     store.setSetting(workspaceId, PROFILE_SECTIONS_SETTING, JSON.stringify(records));
-    // The hypothesis log, career directions and dimension notes (contract B): the run sends only what is new or changed, merged by id
-    // (`mergeProfileInsights`, 2026-11-12); what it did not name stays. The person's 准/不准 on a hypothesis stays with its id.
-    const { hypotheses, careers, dimensions, dropCareers } = extraction;
-    if (hypotheses?.length || careers?.length || dimensions?.length || dropCareers?.length) {
-      const profile = readProfileModel(store, workspaceId);
-      store.setSetting(workspaceId, "profile.model", JSON.stringify({ ...profile,
-        ...mergeProfileInsights(profile, { ...(hypotheses ? { hypotheses } : {}), ...(careers ? { careers } : {}), ...(dimensions ? { dimensions } : {}),
-          ...(dropCareers ? { dropCareers } : {}) }) }));
-    }
+  }
+  // The hypothesis log, career directions and dimension notes (contract B): the run sends only what is new or changed, merged by id
+  // (`mergeProfileInsights`, 2026-11-12); what it did not name stays. The person's 准/不准 on a hypothesis stays with its id. Written by
+  // a lane of its own (`EXTRACT_LANE_KEYS.insights`), which owes no portrait section; a line's own interview never touches them.
+  const { hypotheses, careers, dimensions, dropCareers } = extraction;
+  if (!sessionId.startsWith("line-") && (hypotheses?.length || careers?.length || dimensions?.length || dropCareers?.length)) {
+    const profile = readProfileModel(store, workspaceId);
+    store.setSetting(workspaceId, "profile.model", JSON.stringify({ ...profile,
+      ...mergeProfileInsights(profile, { ...(hypotheses ? { hypotheses } : {}), ...(careers ? { careers } : {}), ...(dimensions ? { dimensions } : {}),
+        ...(dropCareers ? { dropCareers } : {}) }) }));
   }
   // Card items the person answered in words: scored as `mapped` only for items still waiting to be read (a tap is never replaced).
   if (!sessionId.startsWith("line-") && extraction.itemScores?.length) {

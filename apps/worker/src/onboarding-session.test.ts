@@ -20,7 +20,7 @@ const fakeRuntime = (answers: string[], options: { lostThreads?: string[] } = {}
 const dialogue = (prompts: () => string[]) => prompts().filter((prompt) => !prompt.includes(EXTRACT) && !prompt.includes("search_evidence"));
 const extraction = (prompts: () => string[]) => prompts().filter((prompt) => prompt.includes(EXTRACT));
 const createOnboardingSessionRunner = (...args: Parameters<typeof createRunner>) =>
-  createRunner(args[0], args[1], args[2], args[3], { extract: "await", ...(args[4] ?? {}) });
+  createRunner(args[0], args[1], args[2], args[3], { extract: "await", lanes: false, ...(args[4] ?? {}) });
 let store: CrosslineStore;
 let workspaceId: string;
 

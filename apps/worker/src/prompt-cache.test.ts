@@ -158,7 +158,7 @@ test("the interview's extraction: the lines, projects and portrait first; the re
     fileDates: { dates: [], recurring: [], questions: [], undated: [] }, availability: { windows: [], why: "" }, profile: null });
   const { client, runs } = capturing(fakeRuntime([round], [ONBOARDING_SKILL, ONBOARDING_EXTRACT_SKILL],
     { routes: [{ match: "crossline.onboarding.extract.v1", answers: [empty] }] }).rpc);
-  const run = createOnboardingSessionRunner(store, ws, "C:\\repo", () => client, { extract: "await" });
+  const run = createOnboardingSessionRunner(store, ws, "C:\\repo", () => client, { extract: "await", lanes: false });
   await run({ sessionId: "s", text: "我在读电子工程硕士，这学期修 ECE 555。" });
   await run({ sessionId: "s", text: "每周大概能投入 40 小时，周日休息。" });
   expectShared(ONBOARDING_EXTRACT_SKILL, runs, ["version", "timeZone", "lines", "domainGuides", "lineProfiles", "projects", "focusLine", "profile", "facts"]);

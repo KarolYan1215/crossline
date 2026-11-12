@@ -20,7 +20,7 @@ import { sourceIds } from "./source-ids";
 import { localeOf } from "./locale";
 import { adoptLineGoal, identityLines } from "./lines";
 import { checklistAnswered, checklistAskable, ledgerForModel, linesAnsweredUnread, recordReplyAnswers, recordRound, resolveRepeats, syncGapQuestions } from "./question-ledger";
-import { createOnboardingExtractor, extractionReached, requestExtraction } from "./onboarding-extract";
+import { createOnboardingExtractor, extractionReached, requestAllLanes, requestExtraction, type ExtractLane } from "./onboarding-extract";
 import { DATES_UNRECORDED_EVENT, ONBOARDING_UNRECORDED_EVENT, personTimeZone, readProfileModel } from "./onboarding-persist";
 import { paceContext, storedProgress } from "./onboarding-pace";
 import { readResearch, researchForDialogue, researchRunnerFor } from "./onboarding-research";
@@ -100,8 +100,14 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
      * (scripts and tests that read the ledger right after). `off`: not started (the sponsor's sample interview measures the dialogue).
      */
     extract?: "background" | "await" | "off";
+    /**
+     * The extraction in three lanes side by side (the app, 2026-11-12): the ledger, which the next round and the start standard wait for,
+     * and the portrait's sections and inferences. `false`: one run writes all of it (tests that count the runs).
+     */
+    lanes?: boolean;
   } = {}) {
   const extractMode = extractModeOf(options);
+  const lanes = options.lanes !== false;
   const identities = () => identityLines(store, workspaceId)
     .map((pack) => ({ id: pack.id, label: pack.label }));
 
@@ -323,7 +329,9 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     if (input.reread) store.setSetting(workspaceId, EXTRACT_REREAD_SETTING, "1");
     queueExtractDocs(store, workspaceId, fresh.map(([, doc]) => doc.id)
       .filter((id) => input.reread || !(extracted[id]! > 0 && firstSentenceOf(store, workspaceId, id) === extracted[id])), { fromStart: Boolean(input.reread) });
-    const ask = () => requestExtraction(workspaceId, (preferred) => extractor.runOnce(preferred), sessionId);
+    // With lanes the promise is the ledger lane's (the watermark both modes share): the portrait's lanes finish on their own.
+    const ask = () => lanes ? requestAllLanes(workspaceId, (preferred, lane) => extractor.runOnce(preferred, lane), sessionId)
+      : requestExtraction(workspaceId, (preferred) => extractor.runOnce(preferred), sessionId);
     const extraction = extractMode === "off" ? Promise.resolve() : ask();
     const caughtUp = (timeoutMs?: number) => extractMode === "off" ? Promise.resolve(false)
       : extractionReached(store, workspaceId, sessionId, userMessage.seq, ask, timeoutMs).catch(() => false);
@@ -831,8 +839,8 @@ export function closingQuestion(locale?: Locale): TurnQuestion {
  * bound) is checked by the web route before it calls this; the interview can be taken up again afterwards, and a new report written.
  */
 export function finishInterview(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined, sessionId: string,
-  /** `extract: false` leaves the extraction alone (tests of the ending itself). */
-  options: { extract?: boolean } = {}):
+  /** `extract: false` leaves the extraction alone (tests of the ending itself); `lanes: false` finishes with single runs. */
+  options: { extract?: boolean; lanes?: boolean } = {}):
   { outcome: { state: "finished"; sessionId: string } | { state: "blocked"; code: string; message: string }; settled: Promise<void> } {
   const session = store.getOnboardingSession(workspaceId, sessionId);
   if (!session) return { outcome: { state: "blocked", code: "ONBOARDING_SESSION_UNKNOWN", message: tFor(localeOf(store, workspaceId))("找不到这次访谈。") }, settled: Promise.resolve() };
@@ -842,13 +850,23 @@ export function finishInterview(store: CrosslineStore, workspaceId: string, cwd:
   store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `onboarding:finish:${sessionId}:${now}`,
     type: "onboarding.finish_requested", entityId: sessionId, payload: {} });
   const extractor = createOnboardingExtractor(store, workspaceId, cwd, getClient);
-  const ask = () => requestExtraction(workspaceId, (preferred) => extractor.runOnce(preferred), sessionId);
+  const lanes = options.lanes !== false;
+  const lane = (which: ExtractLane) => () => requestExtraction(workspaceId, (preferred) => extractor.runOnce(preferred, which), sessionId, which);
+  const ask = lanes ? () => requestAllLanes(workspaceId, (preferred, which) => extractor.runOnce(preferred, which), sessionId)
+    : () => requestExtraction(workspaceId, (preferred) => extractor.runOnce(preferred), sessionId);
   const lastReply = store.listOnboardingMessages(workspaceId, sessionId).filter((message) => message.role === "user").at(-1)?.seq;
   if (options.extract === false) return { outcome: { state: "finished", sessionId }, settled: Promise.resolve() };
   const settled = (async () => {
-    // Every reply recorded first, then the finishing run that writes the synthesis (as a round that ended the interview used to).
-    if (lastReply !== undefined) await extractionReached(store, workspaceId, sessionId, lastReply, ask, 20 * 60_000).catch(() => false);
-    await ask().catch(() => undefined);
+    // Every reply recorded first (the ledger, then the inferences and the sections, within one 20-minute budget), then the finishing run
+    // that writes the synthesis (as a round that ended the interview used to): the sections' lane, with lanes.
+    const until = Date.now() + 20 * 60_000;
+    const left = () => Math.max(0, until - Date.now());
+    if (lastReply !== undefined) {
+      await extractionReached(store, workspaceId, sessionId, lastReply, ask, left()).catch(() => false);
+      if (lanes) for (const which of ["insights", "sections"] as const)
+        await extractionReached(store, workspaceId, sessionId, lastReply, lane(which), left(), which).catch(() => false);
+    }
+    await (lanes ? lane("sections")() : ask()).catch(() => undefined);
   })();
   return { outcome: { state: "finished", sessionId }, settled };
 }

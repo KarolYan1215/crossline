@@ -344,6 +344,8 @@ export type OnboardingTurnContext = {
  */
 export type OnboardingExtractContext = {
   version: "crossline.onboarding.extract.v1";
+  /** Which fields this run writes (`EXTRACT_LANE_KEYS`); absent, all of them. */
+  lane?: ExtractLaneName;
   today: string; timeZone: string;
   /**
    * The weekly hours on record (the last proposal), in minutes, so a run that sends `availability` again keeps what the new replies do
@@ -595,7 +597,19 @@ export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "s
 export const EXTRACT_KEYS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles", "goalEdits", "availability", "settings", "profileSections", "itemScores",
   "hypotheses", "careers", "dimensions", "dropCareers"] as const;
 export const onboardingDialogueSchema = (ids?: TurnIds) => object(pick(turnFields(ids), DIALOGUE_KEYS));
-export const onboardingExtractSchema = (ids?: TurnIds) => object(pick(turnFields(ids), EXTRACT_KEYS));
+/** The extraction's schema; `keys` narrows it to one lane's fields (`EXTRACT_LANE_KEYS`). */
+export const onboardingExtractSchema = (ids?: TurnIds, keys: readonly (typeof EXTRACT_KEYS)[number][] = EXTRACT_KEYS) => object(pick(turnFields(ids), keys));
+/**
+ * The extraction's three lanes (2026-11-12): fields that rest on each other go together, the rest run beside them. The ledger (facts,
+ * projects, dates, line descriptions, hours, settings, card answers in words) is what the start standard and the next round wait for;
+ * the portrait's sections and the inference log (hypotheses, the careers that cite them, the dimensions) are written by runs of their own.
+ */
+export const EXTRACT_LANE_KEYS = {
+  ledger: ["slotUpdates", "projectsDetected", "fileDates", "lineProfiles", "goalEdits", "availability", "settings", "itemScores"],
+  sections: ["profileSections", "flywheelCandidates"],
+  insights: ["hypotheses", "careers", "dimensions", "dropCareers"]
+} as const satisfies Record<string, readonly (typeof EXTRACT_KEYS)[number][]>;
+export type ExtractLaneName = keyof typeof EXTRACT_LANE_KEYS;
 export const ONBOARDING_DIALOGUE_SCHEMA = onboardingDialogueSchema();
 export const ONBOARDING_EXTRACT_SCHEMA = onboardingExtractSchema();
 

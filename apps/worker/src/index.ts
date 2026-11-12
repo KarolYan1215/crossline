@@ -82,7 +82,7 @@ import { createPlanExplainer } from "./plan-explainer-runner";
 import { createWeeklyInsight } from "./weekly-insight-runner";
 import { createOnboardingSessionRunner, finishInterview } from "./onboarding-session";
 import { researchRunnerFor } from "./onboarding-research";
-import { createOnboardingExtractor, extractionRunning, requestExtraction } from "./onboarding-extract";
+import { createOnboardingExtractor, EXTRACT_LANES, extractionRunning, requestExtraction } from "./onboarding-extract";
 import { extractText, reextractForLayout } from "./extract";
 import { WHISPER_MODEL, createTranscriber, createWhisperEngine, modelsDirectory } from "./transcribe";
 import { recordingPass, recordingsOn, transcribeConcurrency } from "./recordings";
@@ -454,14 +454,18 @@ async function firstDraftsPass(workspaceId: string, checkedAt = new Date().toISO
 
 /** Starts the interview's extraction when one of the workspace's conversations has replies or files waiting and is due (not backing off). */
 async function onboardingExtractPass(workspaceId: string): Promise<void> {
-  if (!codexSupervisor || extractionRunning(workspaceId) || paused(workspaceId, "planning")) return;
+  if (!codexSupervisor || paused(workspaceId, "planning")) return;
   // The start-on-use handle: a guest's runtime that went idle after the reply is started again, or the retry fails for want of a client.
   const extractor = createOnboardingExtractor(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId));
-  if (!extractor.nextSession()) return;
+  // Each lane on its own (the ledger, the portrait's sections and its inferences): one that is running or has nothing due is left alone.
+  const due = EXTRACT_LANES.filter((lane) => !extractionRunning(workspaceId, lane) && extractor.nextSession([], lane));
+  if (!due.length) return;
   // A turn starts its own extraction whatever the quota says (the person is there); a retry from the tick is core work like any other.
   if (!spendAllows(await spendFor(workspaceId), "core")) return;
-  void requestExtraction(workspaceId, (preferred) => { enterUsageWorkspace(workspaceId); return extractor.runOnce(preferred); })
-    .then(() => { void firstDraftsPass(workspaceId).catch(() => undefined); });
+  for (const lane of due) {
+    const done = requestExtraction(workspaceId, (preferred) => { enterUsageWorkspace(workspaceId); return extractor.runOnce(preferred, lane); }, undefined, lane);
+    if (lane === "ledger") void done.then(() => { void firstDraftsPass(workspaceId).catch(() => undefined); });
+  }
 }
 
 /**

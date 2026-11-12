@@ -7,10 +7,16 @@ description: 读 Crossline 访谈刚听到的内容（本人的新回答和新�
 
 访谈（`crossline-onboarding`）和本人对话；这个 Skill 记录本人说了什么，并在每次运行时做一轮分析。它在每条回复之后用新线程运行，所以需要的一切都在输入里或两个查询工具后面。这里写的东西不作为对话给本人看；事实部分会成为之后所有计划依据的账本，所以先求准确再求完整。画像部分（假设、职业、维度）是访谈的外部记忆，下一轮访谈和最后的画像报告都读它。
 
-接收 `crossline.onboarding.extract.v1`：`{today, timeZone, lines[], projects[], facts[], lineProfiles[], candidatesWanted, profile, profileTask, stage, focusLine, replies[], sources[], sourcesWaiting?, reread, observations?, scaleItems?, research?}`。
+接收 `crossline.onboarding.extract.v1`：`{lane?, today, timeZone, lines[], projects[], facts[], lineProfiles[], candidatesWanted, profile, profileTask, stage, focusLine, replies[], sources[], sourcesWaiting?, reread, observations?, scaleItems?, research?}`。
+
+- `lane`（有时出现）表示这次运行只负责整理的一部分，另外两部分由并行的运行同时写，返回的 JSON 也只有这一部分的字段：
+  - `"ledger"`：事实、项目、日期、主线描述与定语、目标改动、时间、设置、卡片题的文字回答。`profile` 是 null，**这不表示回复是笔记**，照常按回复记。
+  - `"sections"`：画像各节（`profileSections`）和主线之间的联系（`flywheelCandidates`）。不读文件，需要时用查询工具查。
+  - `"insights"`：假设日志、职业方向和维度（以及 `dropCareers`）。`profileTask` 是 null，不写画像各节。
+  - 没有 `lane` 时一次写全部。各部分的规则都按下文，不变。
 
 - `replies[]` 是本人的新回复，旧的在前：`{id: "reply-N", asked: [这条回复回答的问题], sentences}`。回复常是答题卡的格式，每题一行：「【问题】选择：A；B。补充：文字」，方括号里是问题，所以「【组会是哪天？】」下面的「选择：周三」表示组会在周三。
-- 没有 `profile`、没有 `focusLine`、`stage: "details"` 时，回复可能是**笔记**：本人在应用别处写的话（输入框里的一行、答案旁的备注、进度报告、「完成情况」备注），`asked` 写着它们是关于什么的。像回复一样记下其中关于本人、工作、人和时间的内容；大多数笔记没有新内容，那就什么都不写。笔记不是访谈问题的回答，除非它明说，也不是改主线描述或目标的理由。
+- 没有 `lane`、没有 `profile`、没有 `focusLine`、`stage: "details"` 时，回复可能是**笔记**：本人在应用别处写的话（输入框里的一行、答案旁的备注、进度报告、「完成情况」备注），`asked` 写着它们是关于什么的。像回复一样记下其中关于本人、工作、人和时间的内容；大多数笔记没有新内容，那就什么都不写。笔记不是访谈问题的回答，除非它明说，也不是改主线描述或目标的理由。
 - `sources[]` 是还没读过的文件：`{id: "src-N", fileName, kind, projectId, sentences}`。文件已经归到某个项目时 `projectId` 有值，照用。`sourcesWaiting` 的文件下次运行再来：还有文件在等时，不要断定缺了什么。
 - `sentences` 是编号句子，每行一句：「[41] 论文 12 月中投稿」。**事实、日期、定语只按这些编号在 `refs` 里引用**，不要抄原文；应用会从自己的记录里填入原文。
 - `facts[]` 是账本已有的事实，每行一条：`主线/项目 · 槽位 = 值（确认|推断）`。要改一条事实就把它的槽位再写一次；没变的事实不要重复写。确认过的事实不会被推测覆盖（存储层保留本人的话）。
