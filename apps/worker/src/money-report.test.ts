@@ -25,6 +25,24 @@ test("the weekly report goes out on Monday morning once, with nothing for an emp
   expect(moneyReportPass(store, workspace.id, new Date("2026-11-01T09:00:00Z")).monthly).toBe(true);
 });
 
+test("the monthly report leaves income out when the person keeps spending only, and reads a budget set in another currency in the base one", () => {
+  store = new CrosslineStore(":memory:");
+  const { workspace } = store.createPrincipalWithWorkspace("u", "w");
+  store.setSetting(workspace.id, "schedule.preferences", JSON.stringify({ timeZone: utc }));
+  store.setSetting(workspace.id, "ledger.baseCurrency", "USD");
+  store.setSetting(workspace.id, "ledger.spendingOnly", "1");
+  store.setSetting(workspace.id, "ledger.budget", JSON.stringify({ monthly: 100, currency: "EUR", categories: {} }));
+  store.saveMarketPrices([{ kind: "fx", symbol: "USD", day: "2026-10-30", price: 1.1, currency: "EUR", source: "frankfurter", fetchedAt: "2026-10-30T16:00:00Z" }]);
+  add(workspace.id, "2026-10-20", 30);
+  add(workspace.id, "2026-10-21", 1000, { kind: "income", category: "工资" }); add(workspace.id, "2026-10-28", 1000, { kind: "income", category: "工资" });
+  expect(moneyReportPass(store, workspace.id, new Date("2026-11-01T09:00:00Z")).monthly).toBe(true);
+  const text = store.listRecentNudges(workspace.id, "2000-01-01").map((item) => JSON.stringify(item.payload)).join("\n");
+  expect(text).toContain("10 月花了 30 USD");
+  expect(text).not.toContain("收入");
+  expect(text).not.toContain("储蓄率");
+  expect(text).toContain("还剩 80");
+});
+
 test("old mail records are judged again once: a request is voided, a refund stops being income, a twin is merged", () => {
   store = new CrosslineStore(":memory:");
   const { workspace } = store.createPrincipalWithWorkspace("u", "w");

@@ -47,5 +47,19 @@
   "没做完的话，下次从哪接（可不填）": "If not finished: where to pick it up next time (optional)",
   "下次从哪接": "Where to pick it up next time",
   "平常一天的精力曲线（模型推算）": "Energy over a usual day (model estimate)",
-  "不知道昨晚的睡眠，按近四周 {{nights}} 晚的平常作息（{{from}} 睡、{{to}} 起）推算": "Last night's sleep is unknown: estimated from the usual sleep of the last four weeks ({{nights}} nights, asleep {{from}}, up {{to}})"
+  "不知道昨晚的睡眠，按近四周 {{nights}} 晚的平常作息（{{from}} 睡、{{to}} 起）推算": "Last night's sleep is unknown: estimated from the usual sleep of the last four weeks ({{nights}} nights, asleep {{from}}, up {{to}})",
+  "用屏幕上的应用与窗口起草计时？": "Draft time entries from the apps and windows on screen?",
+  "同意": "Agree",
+  "不用": "No thanks",
+  "已开启「应用与窗口」。": "\"Apps and windows\" is on.",
+  "已关闭「应用与窗口」：忘了开计时的工作时间不会再提出来，也不会算进实测。": "\"Apps and windows\" is off: work time without a timer will not be suggested and will not count as measured time.",
+  "这些时间在做什么？": "What was this time for?",
+  "像是：{{title}}": "Looks like: {{title}}",
+  "这段时间做的任务": "The task this time was for",
+  "选任务…": "Pick a task…",
+  "记上": "Record",
+  "不算工作": "Not work",
+  "以后这类都算这件": "Always count this kind as this task",
+  "按拟计时记 {{minutes}} 分": "Record {{minutes}} min from the draft",
+  "已按拟计时记 {{minutes}} 分": "Recorded {{minutes}} min from the draft"
 }

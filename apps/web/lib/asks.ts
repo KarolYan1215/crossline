@@ -26,6 +26,7 @@ import { recordStepAnswer, requestStepReplan } from "./steps";
 import { unfiledFiles } from "./file-belonging";
 import { decideEvent, eventProposals } from "./fixed-events";
 import { answerMailEvent, mailEventCards } from "./mail-events";
+import { answerExamTime, examTimeAsks } from "./exam-times";
 import { calendarWriteOn } from "./calendar-write";
 import { placesToAsk, setPlaceMinutes } from "./travel";
 import { decidePair, mergePairs, readMerges, timedItemOf } from "./event-merges";
@@ -1151,7 +1152,7 @@ function mergeAsks({ ctx, today, now, t, locale }: Source): Ask[] {
 export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
   const locale = localeFor(ctx);
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now, t: tFor(locale), locale };
-  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskDigestAsks, weeklyCommitAsks, overdueFoldAsks, missedAsks, ledgerDuplicateAsks, wealthBalanceAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, interviewSettingAsks, mergeAsks, eventAsks, mailEventCards, travelAsks, stepQuestionAsks,
+  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskDigestAsks, weeklyCommitAsks, overdueFoldAsks, missedAsks, ledgerDuplicateAsks, wealthBalanceAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, interviewSettingAsks, mergeAsks, eventAsks, mailEventCards, examTimeAsks, travelAsks, stepQuestionAsks,
     ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks, ({ ctx: context, now: at }: Source) => outcomeAsks(context, at),
     ({ ctx: context, now: at }: Source) => progressAsks(context, at), ({ ctx: context, now: at }: Source) => opportunityNeedAsks(context, at),
     ({ ctx: context, now: at }: Source) => opportunityOfferAsks(context, at), ({ ctx: context, now: at }: Source) => opportunityApplyReadyAsks(context, at)]
@@ -1575,6 +1576,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
       return { ok: true };
     }
     case "mail_event": return answerMailEvent(ctx, ask.entityId, optionId);
+    case "exam_time": return answerExamTime(ctx, ask.entityId, optionId, choice.note);
     case "event_propose": {
       decideEvent(ctx, ask.entityId, optionId === "create" ? "create" : optionId === "exists" ? "exists" : "skip");
       // Written now rather than at the next ten-minute pass, so the person sees it on their calendar while they are here.

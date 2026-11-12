@@ -56,12 +56,19 @@ export function mainCurrency(records: LedgerRecord[]): string {
 
 export type LedgerSummary = {
   month: string; currency: string;
-  spent: number; income: number; net: number; savingsRate: number | null;
+  spent: number; income: number; net: number;
+  /** Null unless income is tracked: a rate from one transfer is not a month's savings (2026-11-11). */
+  savingsRate: number | null;
+  /** Booked income entries this month, and whether that is a month's income: not when the person chose 只记开销, nor with fewer than
+   * `MIN_INCOME_ENTRIES` (salary that goes straight into a bank sends no mail, so the ledger sees only stray transfers). */
+  incomeEntries: number; incomeTracked: boolean;
+  /** Days this month with spending booked. */
+  spendDays: number;
   /** Spending to the same day of last month, and the change in percent (null with nothing last month). */
   pace: { day: number; lastMonthToDay: number; changePct: number | null };
   /** Cumulative spending by day of month: this month up to today, last month whole, the average of the three before. */
   cumulative: { thisMonth: number[]; lastMonth: number[]; average3: number[] };
-  /** A projection to the month's end at the pace so far (null before the third day). */
+  /** A projection to the month's end at the pace so far: null until spending is booked on `PROJECTION_MIN_DAYS` days. */
   projected: number | null;
   /** The monthly spending limit read from a wealth milestone, when there is one. */
   limit: number | null;
@@ -75,7 +82,12 @@ export type LedgerSummary = {
 };
 
 /** This month's ledger in the main currency, with last month and the year behind it for comparison. */
-export function ledgerSummary(all: LedgerRecord[], options: { today: string; month?: string; currency?: string; limit?: number | null }): LedgerSummary {
+/** Fewer income entries than this in a month are stray transfers, not the month's income. */
+export const MIN_INCOME_ENTRIES = 2;
+/** A month-end projection extrapolates from spending on at least this many days, never from two or three. */
+export const PROJECTION_MIN_DAYS = 7;
+
+export function ledgerSummary(all: LedgerRecord[], options: { today: string; month?: string; currency?: string; limit?: number | null; spendingOnly?: boolean }): LedgerSummary {
   const today = options.today.slice(0, 10);
   const month = options.month ?? today.slice(0, 7);
   const money = all.filter(isMoney);
@@ -86,6 +98,9 @@ export function ledgerSummary(all: LedgerRecord[], options: { today: string; mon
   const spentOf = (records: LedgerRecord[]) => round(records.reduce((total, record) => total + outflow(record), 0));
   const incomeOf = (records: LedgerRecord[]) => round(records.filter((record) => record.kind === "income").reduce((total, record) => total + record.value, 0));
   const spent = spentOf(current), income = incomeOf(current);
+  const incomeEntries = current.filter((record) => record.kind === "income").length;
+  const incomeTracked = !options.spendingOnly && incomeEntries >= MIN_INCOME_ENTRIES;
+  const spendDays = new Set(current.filter((record) => record.kind === "expense").map((record) => record.at.slice(0, 10))).size;
   const isCurrent = month === today.slice(0, 7);
   const dayOfMonth = isCurrent ? Number(today.slice(8, 10)) : daysIn(month);
   const cumulativeOf = (records: LedgerRecord[], m: string, upTo: number) => {
@@ -124,10 +139,11 @@ export function ledgerSummary(all: LedgerRecord[], options: { today: string; mon
     others.set(record.currency || "CNY", entry);
   }
   return {
-    month, currency, spent, income, net: round(income - spent), savingsRate: income > 0 ? round((1 - spent / income) * 100) : null,
+    month, currency, spent, income, net: round(income - spent), savingsRate: incomeTracked && income > 0 ? round((1 - spent / income) * 100) : null,
+    incomeEntries, incomeTracked, spendDays,
     pace: { day: dayOfMonth, lastMonthToDay: round(lastToDay), changePct: lastToDay > 0 ? round(((spent - lastToDay) / lastToDay) * 100) : null },
     cumulative: { thisMonth: cumulativeOf(current, month, dayOfMonth), lastMonth: lastCumulative, average3 },
-    projected: isCurrent && dayOfMonth >= 3 ? round(spent / dayOfMonth * daysIn(month)) : null,
+    projected: isCurrent && spendDays >= PROJECTION_MIN_DAYS ? round(spent / dayOfMonth * daysIn(month)) : null,
     limit: options.limit ?? null,
     categories: [...new Set([...thisCats.keys(), ...lastCats.keys()])].map((category) => ({ category, amount: round(thisCats.get(category) ?? 0), lastMonth: round(lastCats.get(category) ?? 0) }))
       .filter((item) => item.amount > 0 || item.lastMonth > 0).sort((a, b) => b.amount - a.amount || b.lastMonth - a.lastMonth),
@@ -236,18 +252,18 @@ export function weeklyMoneyReport(all: LedgerRecord[], start: string): WeeklyMon
     largest: largest ? { merchant: merchantName(largest), amount: largest.value } : null, newRecurring };
 }
 
-export type MonthlyMoneyReport = { month: string; currency: string; spent: number; income: number; savingsRate: number | null;
+export type MonthlyMoneyReport = { month: string; currency: string; spent: number; income: number; incomeTracked: boolean; savingsRate: number | null;
   lastMonthSpent: number; changePct: number | null; movers: Array<{ category: string; amount: number; change: number }>;
   subscriptionsAnnual: number; limit: number | null; overLimit: number | null };
 
 /** A finished month against the one before; null when it has no money record. */
-export function monthlyMoneyReport(all: LedgerRecord[], month: string, limit: number | null = null): MonthlyMoneyReport | null {
+export function monthlyMoneyReport(all: LedgerRecord[], month: string, limit: number | null = null, options: { spendingOnly?: boolean } = {}): MonthlyMoneyReport | null {
   const last = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().slice(0, 10);
-  const summary = ledgerSummary(all, { today: last, month, limit });
+  const summary = ledgerSummary(all, { today: last, month, limit, spendingOnly: options.spendingOnly ?? false });
   if (!all.some((record) => isMoney(record) && record.at.slice(0, 7) === month)) return null;
   const lastMonthSpent = summary.months.at(-2)?.expense ?? 0;
   const recurring = recurringCharges(all.filter((record) => record.at.slice(0, 10) <= last), last).filter((item) => item.currency === summary.currency);
-  return { month, currency: summary.currency, spent: summary.spent, income: summary.income, savingsRate: summary.savingsRate, lastMonthSpent,
+  return { month, currency: summary.currency, spent: summary.spent, income: summary.income, incomeTracked: summary.incomeTracked, savingsRate: summary.savingsRate, lastMonthSpent,
     changePct: lastMonthSpent > 0 ? round(((summary.spent - lastMonthSpent) / lastMonthSpent) * 100) : null,
     movers: summary.categories.map((item) => ({ category: item.category, amount: item.amount, change: round(item.amount - item.lastMonth) }))
       .sort((a, b) => Math.abs(b.change) - Math.abs(a.change)).slice(0, 3),

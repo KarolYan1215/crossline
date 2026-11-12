@@ -28,9 +28,10 @@ test("a message opens the page on the address the phone subscribed from; a forgo
   expect(ok).toBe("sent");
   expect(JSON.parse(sent[0]!.payload)).toMatchObject({ title: "今天到期：报告", url: "https://karols-laptop.tailb8a366.ts.net/milestones" });
   expect(sent[0]!.subject).toBe("https://karols-laptop.tailb8a366.ts.net");
-  await sendWebPush(device, { title: "t", body: "b", path: "/workbench/wo-7", start: "wo-7" }, keys,
+  await sendWebPush(device, { title: "t", body: "b", path: "/workbench/wo-7", start: "wo-7", step: "v1s3", snooze: "scheduled:wo-7:v1s3" }, keys,
     (async (sub: { endpoint: string }, payload: string) => { sent.push({ endpoint: sub.endpoint, payload, subject: "" }); return {} as never; }) as never);
-  expect(JSON.parse(sent[1]!.payload)).toMatchObject({ start: "wo-7" });
+  // A block's prompt carries its step (开始计时 times it) and its block (推迟 10 分钟 snoozes it) to the phone's two buttons.
+  expect(JSON.parse(sent[1]!.payload)).toMatchObject({ start: "wo-7", step: "v1s3", snooze: "scheduled:wo-7:v1s3" });
   const gone = await sendWebPush(device, { title: "t", body: "b", path: "/" }, keys, (async () => { throw Object.assign(new Error("gone"), { statusCode: 410 }); }) as never);
   expect(gone).toBe("gone");
   const failed = await sendWebPush(device, { title: "t", body: "b", path: "/" }, keys, (async () => { throw Object.assign(new Error("x"), { statusCode: 500 }); }) as never);

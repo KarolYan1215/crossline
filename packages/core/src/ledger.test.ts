@@ -19,7 +19,8 @@ describe("the ledger's month", () => {
     expect(summary.currency).toBe("USD");
     expect(summary.spent).toBe(150);
     expect(summary.income).toBe(3000);
-    expect(summary.savingsRate).toBe(95);
+    // One income entry is not a month's income (2026-11-11): no savings rate from it.
+    expect(summary.savingsRate).toBeNull();
     expect(summary.others).toEqual([{ currency: "CNY", spent: 500, income: 0 }]);
     expect(summary.categories.find((item) => item.category === "购物")).toEqual({ category: "购物", amount: 100, lastMonth: 200 });
   });
@@ -34,6 +35,30 @@ describe("the ledger's month", () => {
 
   it("the line card's numbers agree", () => {
     expect(recordMetrics(records, "2026-10-28")).toMatchObject({ expense: 150, income: 3000 });
+  });
+});
+
+describe("income that is not tracked (2026-11-11 walkthrough: one 42 USD transfer gave a savings rate of −355%)", () => {
+  const spending = ["2026-11-02", "2026-11-05", "2026-11-09"].map((day) => rec(day, 60));
+  const salary = (day: string, value: number) => rec(day, value, { kind: "income", category: "工资", merchantKey: "" });
+
+  it("one income entry gives no savings rate, and says income is not tracked", () => {
+    const summary = ledgerSummary([...spending, salary("2026-11-03", 42)], { today: "2026-11-11" });
+    expect(summary).toMatchObject({ incomeEntries: 1, incomeTracked: false, savingsRate: null });
+  });
+
+  it("two income entries give the rate; the person's 只记开销 hides it whatever was booked", () => {
+    const records = [...spending, salary("2026-11-01", 1000), salary("2026-11-08", 1000)];
+    expect(ledgerSummary(records, { today: "2026-11-11" })).toMatchObject({ incomeEntries: 2, incomeTracked: true, savingsRate: 91 });
+    expect(ledgerSummary(records, { today: "2026-11-11", spendingOnly: true })).toMatchObject({ incomeTracked: false, savingsRate: null });
+    expect(monthlyMoneyReport(records, "2026-11", null, { spendingOnly: true })!.savingsRate).toBeNull();
+  });
+
+  it("the month-end projection waits for spending on seven days, never extrapolating a few", () => {
+    const few = ledgerSummary(spending, { today: "2026-11-11" });
+    expect(few).toMatchObject({ spendDays: 3, projected: null });
+    const week = ["2026-11-01", "2026-11-02", "2026-11-03", "2026-11-05", "2026-11-07", "2026-11-09", "2026-11-10"].map((day) => rec(day, 11));
+    expect(ledgerSummary(week, { today: "2026-11-11" })).toMatchObject({ spendDays: 7, projected: 210 });
   });
 });
 

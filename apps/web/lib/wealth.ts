@@ -11,6 +11,8 @@ import { personToday } from "./records";
 /** Settings (all under `ledger.`, so an undo puts them back): the person's base currency and budget. */
 export const BASE_CURRENCY_SETTING = "ledger.baseCurrency";
 export const BUDGET_SETTING = "ledger.budget";
+/** 「只记开销」 (2026-11-11): "1" when the person keeps spending only — income reaches the bank with no mail, so it is never a month's. */
+export const SPENDING_ONLY_SETTING = "ledger.spendingOnly";
 /** 「这个月不更新」 on the 更新余额 card, by month. */
 export const BALANCE_SKIP_SETTING = "ledger.balances.skip:";
 
@@ -22,6 +24,7 @@ export function baseCurrency(ctx: AccessContext): { code: string; chosen: boolea
 }
 
 export const budgetOf = (ctx: AccessContext): Budget => parseBudget(getStore().getSetting(ctx.workspaceId, BUDGET_SETTING));
+export const spendingOnly = (ctx: AccessContext): boolean => getStore().getSetting(ctx.workspaceId, SPENDING_ONLY_SETTING) === "1";
 
 /** Every cached FX rate, as one converter (the cache is small: one row per currency per working day). */
 export const fxConverter = (): Converter => converterFrom(getStore().listMarketPrices({ kinds: ["fx"] }));
@@ -78,7 +81,8 @@ export type WealthAction =
   | { action: "holding"; accountId: string; symbol: string; quantity: number; price: number }
   | { action: "holding_delete"; id: string }
   | { action: "base_currency"; currency: string }
-  | { action: "budget"; monthly: number | null; categories: Record<string, number> };
+  | { action: "budget"; monthly: number | null; currency?: string; categories: Record<string, number> }
+  | { action: "spending_only"; on: boolean };
 
 type Result = { ok: true; id?: string } | { ok: false; code: string; message?: string };
 
@@ -151,9 +155,15 @@ export function applyWealthAction(ctx: AccessContext, input: WealthAction, sourc
       const categories = Object.fromEntries(Object.entries(input.categories).filter(([category, cap]) => category.trim() && Number.isFinite(cap) && cap > 0)
         .map(([category, cap]) => [category.trim().slice(0, 20), Math.round(cap * 100) / 100]));
       const monthly = input.monthly !== null && Number.isFinite(input.monthly) && input.monthly > 0 ? Math.round(input.monthly * 100) / 100 : null;
-      store.setSetting(ws, BUDGET_SETTING, JSON.stringify({ monthly, categories }));
+      // The monthly cap keeps the currency it was set in (a save without one keeps the earlier one, else today's base currency).
+      const currency = input.currency?.trim().toUpperCase() || budgetOf(ctx).currency || baseCurrency(ctx).code;
+      if (!isFxCurrency(currency)) return { ok: false, code: "WEALTH_CURRENCY_UNSUPPORTED" };
+      store.setSetting(ws, BUDGET_SETTING, JSON.stringify({ monthly, currency, categories }));
       return { ok: true };
     }
+    case "spending_only":
+      store.setSetting(ws, SPENDING_ONLY_SETTING, input.on ? "1" : "0");
+      return { ok: true };
   }
 }
 

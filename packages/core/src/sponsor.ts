@@ -128,7 +128,7 @@ export function hoursToOffPeakEnd(now: Date): number {
  * mail sorting. The conformance cases measure form, not judgement, so the interview, the input box, analysis, the gate, planning and
  * the reviewer stay on the chosen model.
  */
-export const SPONSOR_SIMPLE_SKILLS: readonly string[] = ["crossline-task-titler", "crossline-calendar-classifier", "crossline-folder-classifier",
+export const SPONSOR_SIMPLE_SKILLS: readonly string[] = ["crossline-task-titler", "crossline-calendar-classifier", "crossline-folder-classifier", "crossline-time-attributor",
   "crossline-goal-splitter", "crossline-background-facts", "crossline-mail-triage"];
 
 /**

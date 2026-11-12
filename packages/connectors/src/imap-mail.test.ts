@@ -131,3 +131,30 @@ test("the person's answers are found in the sent folder, opened read-only, by In
     .toEqual({ matched: [], sentFolder: false });
   expect(opened).toEqual([]);
 });
+
+test("what code reads for the obligation of an event: a list's headers, every recipient, and the calendar invitation inside", async () => {
+  const listed = Buffer.from("From: Dept <events@uni.edu>\r\nTo: grads@uni.edu\r\nList-Id: <grads.uni.edu>\r\nList-Unsubscribe: <mailto:leave@uni.edu>\r\n"
+    + "Subject: Seminar\r\nContent-Type: text/plain\r\n\r\nAttendance is required.\r\n");
+  const ics = ["BEGIN:VCALENDAR", "METHOD:REQUEST", "BEGIN:VEVENT", "ORGANIZER;CN=Prof Lin:mailto:Lin@uni.edu",
+    "ATTENDEE;CN=Me;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:", " me@gmail.com", "ATTENDEE;ROLE=OPT-PARTICIPANT:mailto:x@uni.edu",
+    "DTSTART:20261117T140000Z", "END:VEVENT", "END:VCALENDAR"].join("\r\n");
+  const invite = Buffer.from("From: Prof Lin <lin@uni.edu>\r\nTo: me@gmail.com\r\nCc: TA <ta@uni.edu>\r\nSubject: Invitation: meeting\r\nMIME-Version: 1.0\r\n"
+    + "Content-Type: multipart/alternative; boundary=b1\r\n\r\n--b1\r\nContent-Type: text/plain\r\n\r\nLet us meet.\r\n"
+    + `--b1\r\nContent-Type: text/calendar; method=REQUEST; charset=utf-8\r\n\r\n${ics}\r\n--b1--\r\n`);
+  const sources = new Map([[1, listed], [2, invite]]);
+  const envelopes = new Map<number, Record<string, unknown>>([[1, { subject: "Seminar", from: [{ address: "events@uni.edu" }], to: [{ address: "grads@uni.edu" }] }],
+    [2, { subject: "Invitation: meeting", from: [{ name: "Prof Lin", address: "lin@uni.edu" }], to: [{ address: "Me@gmail.com" }], cc: [{ name: "TA", address: "ta@uni.edu" }] }]]);
+  const factory: ImapFactory = () => ({
+    connect: async () => undefined, logout: async () => undefined,
+    mailboxOpen: async () => ({ uidValidity: 1n, uidNext: 3 }) as never,
+    search: (async () => [1, 2]) as never,
+    fetchAll: (async (uids: number[]) => uids.map((uid) => ({ seq: uid, uid, envelope: { ...envelopes.get(uid), date: new Date("2026-11-10T10:00:00Z") }, source: sources.get(uid) }))) as never,
+    fetchOne: (async () => false) as never
+  });
+  const mail = createImapMail({ host: "imap.gmail.com", port: 993, secure: true }, "me@gmail.com", "app-password", factory);
+  const [list, meeting] = (await mail.newSince({})).messages;
+  expect(list).toMatchObject({ listed: true, recipients: ["grads@uni.edu"] });
+  expect(list!.invite).toBeUndefined();
+  expect(meeting).toMatchObject({ listed: false, recipients: ["me@gmail.com", "ta@uni.edu"], invite: { method: "REQUEST", organizer: "lin@uni.edu",
+    attendees: [{ address: "me@gmail.com", role: "REQ-PARTICIPANT", partstat: "NEEDS-ACTION" }, { address: "x@uni.edu", role: "OPT-PARTICIPANT", partstat: "" }] } });
+});

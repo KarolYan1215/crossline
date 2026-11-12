@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, OVER_CAPACITY_TAG } from "@crossline/core";
+import { ACTIVITY_RULES, AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, OVER_CAPACITY_TAG, TIME_DRAFTS } from "@crossline/core";
 vi.mock("server-only", () => ({}));
 import { ACTIVITY_DETAIL_CONSENT, loadCurrentPlan, loadGoalForecast, toZonedInstant } from "./crossline";
 import { adjustCapacityFactor, blockWorkMinutes, capacityLine, configureMeasuredCapacity, dayCapacityOf, measuredView, readCapacityFactor } from "./measured-capacity";
@@ -67,6 +67,24 @@ test("a block's work minutes: its own task's timer and the screen, not another t
   store.setSetting(ws, ACTIVITY_DETAIL_CONSENT, "granted");
   store.replaceDeviceActivitySegments(ws, iso("2026-10-01", "00:00"), [{ start: iso("2026-11-09", "10:10"), end: iso("2026-11-09", "10:40"), app: "a", category: "coding", idle: false }]);
   expect(blockWorkMinutes(TEST_CTX, "hw", iso("2026-11-09", "10:00"), iso("2026-11-09", "11:00"))).toBe(40);
+});
+
+test("a block's screen minutes are only those attributed to its task: the step's kind, the person's rules and the model's drafts (2026-11-11)", () => {
+  const store = seed();
+  const step = { id: "w1", role: "draft", title: "写引言", deliverable: "d", doneCriterion: "c", share: 1, estimate: { p25Minutes: 30, p50Minutes: 45, p85Minutes: 60 },
+    dependsOn: [], notBefore: "", dueBy: "", schedulable: true, executor: "human" as const, tickOutcome: "" };
+  store.saveStepPlan(ws, "hw", { archetypeId: "paper", quantity: { basis: "篇", amount: 1, unit: "篇" }, rationale: "r", steps: [step] }, TEST_CTX.principalId, "initial");
+  const stepId = store.getStepPlan(ws, "hw")!.steps[0]!.id;
+  store.setSetting(ws, ACTIVITY_DETAIL_CONSENT, "granted");
+  store.setSetting(ws, ACTIVITY_RULES, JSON.stringify([{ match: "typora", category: "writing", workOrderId: "blog" }]));
+  store.setSetting(ws, TIME_DRAFTS, JSON.stringify([{ id: "draft:x", start: iso("2026-11-09", "10:50"), end: iso("2026-11-09", "11:00"), minutes: 10, app: "winword.exe",
+    category: "writing", workOrderId: "other-paper", basis: "model", createdAt: iso("2026-11-09", "12:00") }]));
+  store.replaceDeviceActivitySegments(ws, iso("2026-10-01", "00:00"), [
+    { start: iso("2026-11-09", "10:00"), end: iso("2026-11-09", "10:20"), app: "winword.exe", category: "writing", idle: false },
+    { start: iso("2026-11-09", "10:20"), end: iso("2026-11-09", "10:40"), app: "code.exe", category: "coding", idle: false },
+    { start: iso("2026-11-09", "10:40"), end: iso("2026-11-09", "10:50"), app: "typora.exe", category: "writing", idle: false },
+    { start: iso("2026-11-09", "10:50"), end: iso("2026-11-09", "11:00"), app: "winword.exe", category: "writing", idle: false }]);
+  expect(blockWorkMinutes(TEST_CTX, "hw", iso("2026-11-09", "10:00"), iso("2026-11-09", "11:00"), undefined, stepId)).toBe(20);
 });
 
 test("the plan and the forecast follow the measured cap: a day holds what the person works, deadlines still placed (closed-loop-1030 §1)", async () => {

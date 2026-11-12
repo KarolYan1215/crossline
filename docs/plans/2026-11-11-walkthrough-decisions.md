@@ -14,6 +14,14 @@
 
 第 2 条本人的补充（同日）：本人把关的最后一步若只是形式（「提交 xxx 作业」，不是「完成 xxx 作业」），本人报告完成就算完成，系统不再事后要结果。`completionRule`（`packages/core/src/completion.ts`）：标题以提交、上交、发送、发布、寄出等开头的任务一律「点完成即验收」，即使写任务的模型判了「质量要问」；送去让别人评判的（投稿、考试，成绩之后才出）仍会之后问一句结果，那是消息，不是审批；本人自己选了「完成后再问」的照旧。测试 `completion.test.ts`「a formal last step the person does…」。
 
+本人同日的第二批决定（都已做）：
+
+| # | 本人的决定（原话大意） | 改了什么 | 记在哪 |
+|---|---|---|---|
+| 6 | 初始精力建模要有科学依据、符合大部分成年人，可以引入年龄 | 三过程模型保留 S、C，加大 U 的振幅做出午后低谷（约 15:00）和傍晚第二高点（约 19:00），睡眠惯性时间常数改为 1.17h；相位来源依次是作息 → 本人改过的高精力时段 → 出生年份（Fischer 2017 表 1）→ 默认，实时模型和周建议共用 `priorPhase`；出生年份在 设置 → 时间与提醒 可选填，不填相位为 0 | `docs/energy-and-ecosystem.md` §2.1；`energy-prior.test.ts` |
+| 7 | 拟计时开始时不解释，只问是否同意；不同意就关掉并解释。归属交给模型，窗口标题无所谓 | 见 §1「本人的改动与状态」。设置里「不发给模型」一句已删：没归属的时段会把窗口标题发给模型 | §1；`docs/claude/interface-and-model-routing.md` |
+| 8 | 收入直接进银行、没有邮件时只记开销，由本人设每月预算 | 「只记开销」开关和带币种的月预算，收入少于两笔时不算收入、不显示储蓄率；月底预计要至少 7 天有支出才算。没有新的外部读取 | `docs/ledger-wealth.md` §3.4 |
+
 第 2 条的读法：本人这句话也可以读成「除了 agent 最后提交，其余一律不用批准」，那样连「本人的选择或决定」「要登录」两条也去掉。这次按窄的读法做，因为那两条不是「提交」的问题：一件「选定首轮选题」直接生效，就等于替本人做了选择。要按宽的读法，再说一声。
 
 ## 1. 拟计时：本人忘了开计时，系统在后台推断、本人确认
@@ -52,6 +60,25 @@
 边界：这是现有「应用与窗口」同意范围内的新用途（推断用时），不是新的采集路径；但它会把屏幕记录变成可校准估时的实测，按 CLAUDE.md 的规矩需要本人明确点头，设置的说明要写清。
 
 工作量：规则字段和拟计时生成 M（worker + db 一张表或事件）；收工页 S–M；校准接入 S。
+
+### 本人的改动与状态（2026-11-11，已做）
+
+本人批准上面的设计，改了三处：
+
+- **设置里不加说明。** 通用规矩：功能要授权时，只问本人同不同意；不同意就关掉这项功能，那时再说明少了什么。拟计时照此做：收工页在「应用与窗口」没开时问一次「用屏幕上的应用与窗口起草计时？」，同意就开，不用就关（只关「应用与窗口」，「只记分钟」不动）并说「忘了开计时的工作时间不会再提出来，也不会算进实测」，之后不再问（`activity.drafts.asked`）。设置里原来写的「不发给模型」已不成立，删掉了这四个字，没有加别的话。
+- **窗口标题可以给模型**（本人原话「窗口标题无所谓，都是通用的内容」）。这是一条新的数据路径：归属顺序改为 ① 本人的规则 ② 时间与工作块重叠且类别对得上该步类型 ③ **模型**：规则和块都没归上的整段，把它的应用、类别、窗口标题和本人未完成的任务及其未完成的步骤交给 Skill `crossline-time-attributor`（低档、收集类），模型只提议，代码核对任务存在且未完成、步骤属于该任务且未完成，每段只问一次 ④ 都不中归「未归属的工作时间」。原设计第 2 条的「标题里的专名」一步由模型这一步代替。读标题的只有 worker 的拟计时这一处（`activityEntriesSince`，`activity-privacy.test.ts` 钉住）。
+- **不弹通知**，早报只说「昨天有 N 段没确认的工作时间」。
+
+已做：
+- 纯规则 `packages/core/src/time-drafts.ts`（`attributeSegment`、`draftTimeEntries`、`validateTimeAttribution`、`attributedBlockSpans`）；`ActivityRule` 加 `workOrderId/stepId/identityId`。
+- worker `apps/worker/src/time-drafts.ts`：每个账户每 10 分钟一次，从收集类 tick 跑；拟计时存在 `activity.drafts`（不含标题），14 天不确认就丢，关掉同意就全删。
+- 收工页：每块推断旁「按拟计时记 N 分」；块外的拟计时单列「这些时间在做什么？」：选任务记上 / 不算工作 / 以后这类都算这件（按该段的应用写一条规则）。本人的决定只由 web 写（`activity.drafts.decided`）。
+- 确认后写成执行记录（`recordInferredSession`）：`durationObserved: true`、`source: "inferred_confirmed"`、时长是该段的工作分钟，不会结束正在跑的计时；完成任务时按 `activity` 计入时长观测，进估时校准。未确认的不进。
+- 收工推断的错已改：块内只算归属到该任务的屏幕分钟（规则 → 模型或本人归过的拟计时 → 类别对得上该步类型）。
+
+测试：`packages/core/src/time-drafts.test.ts`、`apps/worker/src/time-drafts.test.ts`、`apps/web/lib/time-drafts.test.ts`、`measured-capacity.test.ts`「a block's screen minutes are only those attributed to its task…」、`duration-observation.test.ts`「a confirmed time draft (拟计时)…」、`activity-segments.test.ts`、`notify.test.ts`「…drafted work stretches (拟计时)…」。
+
+还没做：「以后这类都算 X」的规则按应用名匹配（拟计时不存标题，所以不能按标题关键词生成规则）；按主线的规则（`identityId`）能归属，但收工页还没有按主线筛任务；托管版设备模式上传的分段没有标题，只能靠规则和工作块归属，模型只看到应用和类别。
 
 ## 2. 必须去与不必去：怎么区分
 
@@ -101,14 +128,19 @@
 
 工作量：分拣 schema 和指令 S；结构信号判定（List-Id、收件人、大纲课程）M；大纲考试缺时间的追问 S；规则沉淀 M。
 
+### 状态（2026-11-11 已做）
+
+- **已做**：两个属性和确定性分档（`packages/core/src/obligation.ts` 的 `mailObligation`、`dateItemAttributes`）；连接器从邮件本身读结构信号（`List-Id`/`List-Unsubscribe`/`Precedence`、To+Cc、text/calendar 里的 ORGANIZER 和本人的 `ROLE`/`PARTSTAT`）；分拣只多抽两个字段（`meet.required` 原句、`meet.senderRole`），档位由代码定；群发上限；`required + fixed` 来自已确认来源且不冲突 → 直接成 Crossline 计划里的固定日程（不出卡，不进 `schedule.events`，所以任何日历路径都不写；写日历仍只有「去」）；第一次出现的来源或与已有固定日程冲突 → 仍出「要去吗」卡，推荐「去」并写明为什么像是必须；`likely`（相关度门槛改为 ≥70）→ 卡；`optional` → 周复盘；日期早于邮件发送日或与原文星期几对不上 → 不收；规则沉淀（两次「不去」→ 最高可选；对必须的答「去」→ 以后直接必须），在 设置 → 邮箱 里能看能删；大纲考试/小测只有日期 → 问「几点到几点」，答了写成 `import:` 只读块，答「没有固定时间」不再问。测试：`packages/core/src/mail-events.test.ts`、`packages/connectors/src/imap-mail.test.ts`「what code reads for the obligation of an event…」、`apps/worker/src/mailbox.test.ts`「must-go and may-go…」、`apps/web/lib/mail-obligation.test.ts`。
+- **未做**：日历导入（Graph/ICS 订阅）的事件还没标这两个属性（它们本来就是固定忙碌时间）；`due` 的 `required` 记为「已确认截止」没接到 capture 分析；为考试复习的 `due` 任务（截止 = 考试开始）仍靠分拣模型另出一条 todo，代码没有自动生成；大纲考试在答时间之前不被里程碑链做成可挪动任务——这条链由模型生成，这次没改，只保证考试日本身照旧显示为当天的日期标记；大纲「上课」只有日期的不问时间（避免每节课都问）。
+
 ## 3. 到点提醒（已做的和还缺的）
 
-已做（§0 第 4 条）。还缺：
+已做（§0 第 4 条）。本人批准了本节，2026-11-11 已做：
 
-- **「推迟 10 分钟」按钮**：Chrome 通知一般只显示 2 个按钮（`Notification.maxActions`，<https://developer.mozilla.org/en-US/docs/Web/API/Notification/maxActions_static>）。建议第二个按钮放「推迟 10 分钟」，同一 `tag` 替换原通知；连续推迟两次后不再推，改记进收工页。需要一个新的 `task.op`（`snooze`）和服务端定时再发，工作量 S–M。
-- **iOS / Safari 不支持按钮**（MDN 兼容表）：点开通知进工作台，那里有「开始」。
+- **「推迟 10 分钟」按钮（已做）**：Chrome 通知一般只显示 2 个按钮（`Notification.maxActions`，<https://developer.mozilla.org/en-US/docs/Web/API/Notification/maxActions_static>），顺序是「开始计时」「推迟 10 分钟」；页面里的卡片同样排第二（「推到明天」仍在「更多」里）。按下记一条 `block.snoozed`（新的 `task.op` `snooze`，`text` 带块 id，`snoozeBlock`，`apps/web/lib/task-ops.ts`；通知上的按钮由 `sw.ts` 带登录 cookie POST `/api/work-orders/<id>/execution` `{action: "snooze", blockId}`，走同一个函数）。10 分钟后提醒引擎（每 2 分钟一轮）再说一次，只要块还没结束：页面上是原来那条消息就地重问（指纹 `start:<block>:<day>:1`，`replaces` 记原指纹），不另起一条；推送用原来的 `tag` 替换原通知（`renotify`，仍会响）。推迟两次后不再说，收工页这一块标「推迟两次」（`WrapRow.snoozedTwice`）。推送消息现在也真的带上 `step`（此前 `sendWebPush` 丢了这个字段，手机上的「开始计时」没按步骤计时）。测试：`nudges.test.ts`（core 与 web）、`task-ops.test.ts`、`notify.test.ts`、`web-push.test.ts`、`execution/route.test.ts`。
+- **iOS / Safari 不支持按钮**（MDN 兼容表）：点开通知进工作台，那里有「开始」。没有按钮时 `actions` 被忽略，点开走原来的路径，不受影响。
 - **行内文字回复不要做**：Web Push 的 `type: 'text'` 2018 年提过、没有上线证据（<https://groups.google.com/a/chromium.org/g/blink-dev/c/PNTQCliD2oA>）。
-- **防疲劳**：每个块只发一次（指纹 `start:<block>:<day>`，现状）；已在计时同一任务的不发（现状）；安静时段只排队（现状）；本人选了「少问这类」就不发——这和「确保会弹」有冲突，建议「少问这类」对块开始提醒改成「只在电脑上弹，不推手机」，而不是完全不提醒。这一条要本人定。
+- **防疲劳**：每个块只发一次（指纹 `start:<block>:<day>`，推迟后的再说是同一条），已在计时同一任务的不发，安静时段只排队（现状）。**连续三条没回不再静音块开始提醒（已做）**：本人定了块开始提醒必须可靠弹出，`mutedKinds` 的「沉默三天」对 `block_start` 不生效，其他类照旧。**「少问这类」对块开始提醒只在电脑上弹（本人 2026-11-11 定，已做）**：7 天内块开始照旧在页面和电脑上出现，不推手机（消息带 `desktopOnly`，worker 只走桌面通知）；其他类的「少问这类」照旧整类不发。测试：`apps/web/lib/nudges.test.ts`「after 「少问这类」 a block's start still comes up…」、`apps/worker/src/notify.test.ts`「a block's start after 「少问这类」 goes to the desktop only…」。
 
 ## 4. 账本里仍未解决的发现：分析与方案
 
@@ -159,7 +191,7 @@
 
 ### 4.6 其他
 
-- 总账储蓄率 −355%、月底预计线性外推：收入少于 3 笔或少于月平均的 20% 时不显示储蓄率和预计，写「本月收入记录不足」。S。
+- 总账储蓄率 −355%、月底预计线性外推：已按 §0 第 8 条做（只记开销、月预算、少于两笔收入不算储蓄率、7 天才外推）。
 - W-121（输入框 60 秒才出卡片）、W-188（验证码 4 秒）、W-138（主线页 331KB）：性能，先测再改。
 - W-143、W-146、W-200、W-219、W-220：运维或待本人处理，不改代码。
 
@@ -169,6 +201,6 @@
 
 1. §2 必须与可选的结构信号和大纲考试追问（W-256 的根）。
 2. §4.2 的四个 S（收工一键透明、已开始的口径、过期备考、过去的活动不推到下周）。
-3. §1 拟计时（先改收工推断按任务归属，再做块外拟计时）。
+3. §1 拟计时（先改收工推断按任务归属，再做块外拟计时）。——已做，见 §1「本人的改动与状态」。
 4. §4.5 统一计数和过时提问收起。
 5. §3「推迟 10 分钟」。

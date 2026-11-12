@@ -48,3 +48,10 @@ test("activity is workspace-scoped and a backup carries it without any title", (
   expect(JSON.stringify(snapshot)).not.toContain("activity.ts");
   expect(JSON.stringify(snapshot)).not.toContain("someone else");
 });
+
+test("the drafting pass reads titles since an instant, oldest first", () => {
+  store.recordActivityReading(reading(0));
+  store.recordActivityReading(reading(5, { app: "chrome.exe", title: "arXiv", category: "reading" }));
+  expect(store.activityEntriesSince("w", "2026-10-02T12:03:00.000Z").map((entry) => [entry.app, entry.title])).toEqual([["chrome.exe", "arXiv"]]);
+  expect(store.activityEntriesSince("w", "2026-10-01T00:00:00.000Z").map((entry) => entry.title)).toEqual(["activity.ts - Crossline", "arXiv"]);
+});

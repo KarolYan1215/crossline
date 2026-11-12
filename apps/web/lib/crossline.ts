@@ -9,6 +9,7 @@ import { availableSlots, deriveCapacity, requiredApproval, validateAvailability,
   defaultMilestoneTemplates, computeMilestoneConfidence, PRODUCTIVE, type ActivityCategory, validateSuccessCriteria, goalSettingKey, ANALYSIS_CONTEXT_VERSION, calibrationReport, calibratedEstimate,
   type CalibrationReport, presetImportance, sittingStartOn, taskTitleOf, type ImportancePreset, restoreTargetOf,
   type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion, type ChecklistAnswer, FIXED_EVENTS, fixedEventBlocks, type FixedEvent, readTravelState, travelBlocks,
+  MAIL_EVENTS_SETTING, mailEventsOnSchedule, readMailEvents,
   DELAY_SETTING, FROZEN_SETTING, SHIFT_MINUTES, parseFrozen, settleFrozen, shiftFrozen, withFrozen, withoutFrozen, type FrozenBlock, type RealityChange } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { capacityLine, dailyCapsFor, dayCapacityOf, measuredView } from "./measured-capacity";
@@ -1279,9 +1280,15 @@ export function remainingMinutesOf(ctx: AccessContext, orders: ActionableOrder[]
   return out;
 }
 
-/** The input-box events (`schedule.events`) on these days, as plan blocks. */
+/**
+ * The input-box events (`schedule.events`) on these days, as plan blocks, and the required events from mail (`mail.events` in state
+ * `fixed`, 2026-11-11): busy time on Crossline's own plan only — they are not among the events any calendar path writes.
+ */
 function personEventBlocks(ctx: AccessContext, days: string[]): PersistedScheduleBlock[] {
-  try { return fixedEventBlocks(JSON.parse(getStore().getSetting(ctx.workspaceId, FIXED_EVENTS) ?? "[]") as FixedEvent[], days, localeFor(ctx)); } catch { return []; }
+  let own: FixedEvent[] = [];
+  try { own = JSON.parse(getStore().getSetting(ctx.workspaceId, FIXED_EVENTS) ?? "[]") as FixedEvent[]; } catch { /* none */ }
+  const fromMail = mailEventsOnSchedule(readMailEvents(getStore().getSetting(ctx.workspaceId, MAIL_EVENTS_SETTING)));
+  return fixedEventBlocks([...(Array.isArray(own) ? own : []), ...fromMail], days, localeFor(ctx));
 }
 
 /**

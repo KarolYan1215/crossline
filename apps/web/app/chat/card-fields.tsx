@@ -21,6 +21,8 @@ export function editableFields(item: ProposedAction): string[] {
       if (type === "due" || type === "defer") return ["workOrderId", "date"];
       if (type === "estimate") return ["workOrderId", "stepId", "minutes"];
       if (type === "step_done") return ["workOrderId", "stepId"];
+      // A block prompt's 「推迟 10 分钟」: its block (in `text`) is what was understood, nothing to edit.
+      if (type === "snooze") return [];
       if (type === "waiting") return ["workOrderId", "who", "text", "date"];
       if (type === "energy") return ["workOrderId", "energy", "text"];
       return ["workOrderId", "text"];

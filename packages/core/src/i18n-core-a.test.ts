@@ -64,7 +64,7 @@ describe("core text in English", () => {
         firstAction: "Open the problem set", prepared: ["notes.md", "outline.md"] }], ending: [], slack: [], finished: [], locale: "en" };
     const [start] = nudgeCandidates(input);
     expect(start!.text).toBe('"Homework 3 · Problem 1" at 10:00 (45 min), toward the deadline on 10/18. First step: Open the problem set. Ready: notes.md, outline.md.');
-    expect(start!.buttons.map((button) => button.label)).toEqual(["Start timer", "Postpone to tomorrow", "Ask less about this"]);
+    expect(start!.buttons.map((button) => button.label)).toEqual(["Start timer", "Snooze 10 min", "Postpone to tomorrow", "Ask less about this"]);
     const { locale: _locale, ...zhInput } = input;
     const zh = nudgeCandidates(zhInput)[0]!;
     expect(zh.text).toBe("10:00 做「Homework 3 · Problem 1」（45 分），关系到 10/18 的截止。第一步：Open the problem set。已备好：notes.md、outline.md。");

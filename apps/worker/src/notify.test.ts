@@ -139,6 +139,39 @@ test("a nudge whose button starts a task reaches the phone with that task, so �
   store.close();
 });
 
+test("a block's prompt reaches the phone with 「推迟 10 分钟」's block, and said again after a snooze it keeps the first prompt's tag, so it replaces it (2026-11-11 §3)", async () => {
+  const store = new CrosslineStore(":memory:");
+  store.setSetting("w", "notify.level", "off");
+  const conversation = store.conversationFor("w", "2026-10-12");
+  const actions = [{ action: "task.op", summary: "开始", args: { workOrderId: "wo-7", type: "start", stepId: "v1s3", text: "" } },
+    { action: "task.op", summary: "推迟", args: { workOrderId: "wo-7", type: "snooze", stepId: "v1s3", minutes: 10, text: "scheduled:wo-7:v1s3" } }];
+  store.appendConversationMessage({ id: "n1", workspaceId: "w", conversationId: conversation.id, role: "nudge", text: "", createdAt: "2026-10-12T13:50:00.000Z",
+    payload: { nudge: { kind: "block_start", fingerprint: "start:scheduled:wo-7:v1s3:2026-10-12:1", replaces: "start:scheduled:wo-7:v1s3:2026-10-12",
+      counted: false, urgent: true, delivery: "pending" }, card: { actions, clarify: { question: "09:00 做「作业 2」。", options: [] } } } });
+  const pushed: Array<{ tag: string; start?: string; snooze?: string }> = [];
+  await notifyPass(store, "w", new Date("2026-10-12T14:01:00.000Z"), async () => false, undefined, async (_ws, message) => { pushed.push(message); return true; });
+  expect(pushed).toMatchObject([{ tag: "start:scheduled:wo-7:v1s3:2026-10-12", start: "wo-7", step: "v1s3", snooze: "scheduled:wo-7:v1s3" }]);
+  store.close();
+});
+
+test("a block's start after 「少问这类」 goes to the desktop only, not the phone (the owner's decision of 2026-11-11)", async () => {
+  const store = new CrosslineStore(":memory:");
+  store.setSetting("w", "notify.level", "off");
+  const conversation = store.conversationFor("w", "2026-10-12");
+  store.appendConversationMessage({ id: "n1", workspaceId: "w", conversationId: conversation.id, role: "nudge", text: "", createdAt: "2026-10-12T13:50:00.000Z",
+    payload: { nudge: { kind: "block_start", fingerprint: "start:scheduled:wo-7:v1s3:2026-10-12", counted: false, urgent: true, delivery: "pending", desktopOnly: true },
+      card: { actions: [{ action: "task.op", summary: "开始", args: { workOrderId: "wo-7", type: "start", stepId: "v1s3", text: "" } }],
+        clarify: { question: "09:00 做「作业 2」。", options: [] } } } });
+  const desktop: string[] = [];
+  const pushed: unknown[] = [];
+  const sent = await notifyPass(store, "w", new Date("2026-10-12T13:51:00.000Z"), async (_title, _body, url) => { desktop.push(url); return true; }, "http://127.0.0.1:3210",
+    async (_ws, message) => { pushed.push(message); return true; });
+  expect(sent).toEqual(["nudge:start:scheduled:wo-7:v1s3:2026-10-12"]);
+  expect(desktop).toEqual(["http://127.0.0.1:3210/"]);
+  expect(pushed).toEqual([]);
+  store.close();
+});
+
 test("a completion check goes to the desktop and the phone even with a page open, opening its confirm page, with no 「开始计时」", async () => {
   const store = new CrosslineStore(":memory:");
   store.setSetting("w", "notify.level", "off");
@@ -173,6 +206,21 @@ test("the morning brief says how many of last night's blocks wait to be confirme
   const shown: string[] = [];
   await notifyPass(store, "w", new Date("2026-10-08T14:05:00.000Z"), async (_title, body) => { shown.push(body); return true; });
   expect(shown[0]).toContain("昨晚 1 块待确认");
+  store.close();
+});
+
+test("the morning brief says only how many of yesterday's drafted work stretches (拟计时) wait to be confirmed, and nothing when none do", async () => {
+  expect(planNotifications({ ...base, unconfirmedWork: 2 })[0]!.body).toContain("昨天有 2 段没确认的工作时间");
+  expect(planNotifications(base)[0]!.body).not.toContain("没确认的工作时间");
+  const store = new CrosslineStore(":memory:");
+  store.setSetting("w", "localActivity.consentV2", "granted");
+  store.setSetting("w", "activity.drafts", JSON.stringify([
+    { id: "draft:a", start: "2026-10-07T15:00:00.000Z", end: "2026-10-07T15:40:00.000Z", minutes: 40, app: "code.exe", category: "coding", basis: "none", createdAt: "x" },
+    { id: "draft:b", start: "2026-10-07T18:00:00.000Z", end: "2026-10-07T18:30:00.000Z", minutes: 30, app: "code.exe", category: "coding", basis: "none", createdAt: "x" }]));
+  store.setSetting("w", "activity.drafts.decided", JSON.stringify({ "draft:b": { decision: "not_work", at: "x" } }));
+  const shown: string[] = [];
+  await notifyPass(store, "w", new Date("2026-10-08T14:05:00.000Z"), async (_title, body) => { shown.push(body); return true; });
+  expect(shown[0]).toContain("昨天有 1 段没确认的工作时间");
   store.close();
 });
 

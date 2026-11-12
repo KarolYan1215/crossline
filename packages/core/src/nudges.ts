@@ -48,6 +48,11 @@ export type PlannedNudge = {
   block?: NudgeEnding;
   /** `timer_overrun`: the step the timer ran over, kept so adaptive granularity can count it (`packages/core/src/granularity.ts`). */
   step?: { orderId: string; stepId: string };
+  /**
+   * A block's start said again after 「推迟 10 分钟」: the fingerprint of the first prompt, whose message is rewritten in place and whose
+   * push `tag` is reused, so the prompt replaces the earlier one instead of stacking beside it.
+   */
+  replaces?: string;
 };
 
 /** The page a confirm question opens; `{message}` is replaced by the id of the message the question is written into. */
@@ -63,6 +68,8 @@ export type NudgeBlock = {
   firstAction?: string;
   /** Deadline work placed past the day's measured cap: the start message says it may not be finished in time (closed-loop-1030). */
   overCapacity?: boolean;
+  /** 「推迟 10 分钟」 pressed on this block today: how many times, and until when (`HH:mm`, the last one). */
+  snoozed?: { count: number; until: string };
 };
 /**
  * Any of today's scheduled blocks, for the completion check (docs/loop-and-scout.md §3). `endedTimerAt`: when this order's timer was
@@ -134,6 +141,9 @@ const START_LEAD_MINUTES = 15;
 const START_LATE_MINUTES = 10;
 /** A block is asked about within this many minutes of its end; after that the next day's `missed_block` question covers it. */
 const CONFIRM_WINDOW_MINUTES = 30;
+/** 「推迟 10 分钟」 (2026-11-11 §3): the block is said again after this long; after `MAX_SNOOZES` it is not said again. */
+export const SNOOZE_MINUTES = 10;
+export const MAX_SNOOZES = 2;
 const OVERRUN_RATIO = 1.5;
 
 const minutesOf = (clock: string) => { const [h, m] = clock.split(":").map(Number); return (h ?? 0) * 60 + (m ?? 0); };
@@ -141,8 +151,10 @@ const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10
 const hours = (t: Translate, minutes: number) => minutes >= 60 ? t("{{hours}} 小时", { hours: Math.round(minutes / 6) / 10 }) : t("{{minutes}} 分钟", { minutes: Math.max(0, Math.round(minutes)) });
 /** 「title · step」 in the language's quotes. */
 const quoted = (t: Translate, title: string, step?: string) => t("「{{text}}」", { text: `${title}${step ? ` · ${step}` : ""}` });
-const op = (orderId: string, type: "start" | "defer" | "step_done" | "due", summary: string, extra: { date?: string; stepId?: string } = {}): ProposedAction =>
-  ({ action: "task.op", summary, args: { workOrderId: orderId, type, date: extra.date ?? "", minutes: 0, stepId: extra.stepId ?? "", text: "", who: "", energy: "", outcome: "" } });
+const op = (orderId: string, type: "start" | "defer" | "step_done" | "due" | "snooze", summary: string,
+  extra: { date?: string; stepId?: string; minutes?: number; text?: string } = {}): ProposedAction =>
+  ({ action: "task.op", summary, args: { workOrderId: orderId, type, date: extra.date ?? "", minutes: extra.minutes ?? 0, stepId: extra.stepId ?? "", text: extra.text ?? "",
+    who: "", energy: "", outcome: "" } });
 /** What would be said now, before the person's quiet hours, mutes and the day's cap are applied. */
 export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
   const t = tFor(input.locale);
@@ -153,7 +165,11 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
   for (const block of input.blocks) {
     const start = minutesOf(block.start), end = minutesOf(block.end);
     const label = quoted(t, block.title, block.step);
-    if (now >= start - START_LEAD_MINUTES && now < start + START_LATE_MINUTES && input.timer?.orderId !== block.orderId) {
+    // Snoozed: said again once the snooze runs out, while the block lasts; snoozed twice, not again (the wrap-up notes it).
+    const snoozes = block.snoozed?.count ?? 0;
+    const due = snoozes ? snoozes < MAX_SNOOZES && now >= minutesOf(block.snoozed!.until) && now < end
+      : now >= start - START_LEAD_MINUTES && now < start + START_LATE_MINUTES;
+    if (due && input.timer?.orderId !== block.orderId) {
       const prepared = block.prepared?.length ? block.prepared.slice(0, 3).join(en ? ", " : "、") : "";
       const text = [
         block.dueDay ? t("{{start}} 做{{label}}（{{minutes}} 分），关系到 {{due}} 的截止。", { start: block.start, label, minutes: end - start, due: md(block.dueDay) })
@@ -163,8 +179,12 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
         !prepared ? "" : block.prepared!.length > 3 ? t("已备好：{{items}} 等 {{count}} 份。", { items: prepared, count: block.prepared!.length })
           : t("已备好：{{items}}。", { items: prepared })
       ].filter(Boolean).join(en ? " " : "");
-      out.push({ kind: "block_start", fingerprint: `start:${block.id}:${input.today}`, urgent: true, counted: false, text,
+      const first = `start:${block.id}:${input.today}`;
+      out.push({ kind: "block_start", fingerprint: snoozes ? `${first}:${snoozes}` : first, ...(snoozes ? { replaces: first } : {}), urgent: true, counted: false, text,
         buttons: [{ kind: "action", label: t("开始计时"), action: op(block.orderId, "start", t("开始{{label}}", { label }), block.stepId ? { stepId: block.stepId } : {}) },
+          // The block's id rides in `text`: a snooze is about this block, not the whole task.
+          { kind: "action", label: t("推迟 10 分钟"), action: op(block.orderId, "snooze", t("{{label}}推迟 10 分钟", { label }),
+            { minutes: SNOOZE_MINUTES, text: block.id, ...(block.stepId ? { stepId: block.stepId } : {}) }) },
           { kind: "action", label: t("推到明天"), action: op(block.orderId, "defer", t("{{label}}推到明天", { label }), { date: input.tomorrow }), more: true }, mute] });
     }
   }

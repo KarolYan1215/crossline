@@ -1,5 +1,5 @@
 import { mctqLite, type MctqLiteResult } from "./assess";
-import { alertnessAt, sleepDebt, type EnergyCalibration, type SleepEpisode } from "./energy-model";
+import { alertnessAt, shiftedDefaultNight, sleepDebt, type EnergyCalibration, type SleepEpisode } from "./energy-model";
 import type { EnergyLevel } from "./index";
 
 /** Re-exported so the static quick test can reach it through `@crossline/core/energy-rhythm` alone. */
@@ -45,6 +45,26 @@ export function statedSleep(facts: Array<{ identityId: string; slot: string; sta
   return { from: onsetHour(from), to };
 }
 
+/**
+ * The mid-sleep the prior's circadian phase is read from (`priorPhase`): from the last four weeks' nights MCTQ's MSF_sc when there are two
+ * workday and two free-day nights, else the median night's mid-sleep; with none on record, the night the person stated; else undefined.
+ */
+export function usualMidSleep(input: { episodes: SleepEpisode[]; hourOf: (iso: string) => number; weekdayOf: (iso: string) => number; now: string;
+  stated?: { from: number; to: number } | undefined }): { hours: number; source: "chronotype" | "sleep" } | undefined {
+  const since = Date.parse(input.now) - 28 * 24 * HOUR;
+  const nights = input.episodes.filter((episode) => Date.parse(episode.wakeAt) >= since && Date.parse(episode.wakeAt) <= Date.parse(input.now))
+    .map((episode) => ({ onset: onsetHour(input.hourOf(episode.sleepAt)), wake: input.hourOf(episode.wakeAt), free: input.weekdayOf(episode.wakeAt) >= 6 }));
+  const middleOf = (from: number, to: number) => ((from + (to + 24 - from) / 2) % 24 + 24) % 24;
+  if (!nights.length) return input.stated ? { hours: middleOf(input.stated.from, input.stated.to), source: "sleep" } : undefined;
+  const work = nights.filter((night) => !night.free), free = nights.filter((night) => night.free);
+  if (work.length >= 2 && free.length >= 2) {
+    const middle = (list: typeof nights) => ({ sleep: clock(median(list.map((night) => night.onset))), wake: clock(median(list.map((night) => night.wake))) });
+    const msfSc = mctqLite({ workdays: 5, work: middle(work), free: middle(free) }).msfSc;
+    if (msfSc !== null) return { hours: msfSc, source: "chronotype" };
+  }
+  return { hours: middleOf(median(nights.map((night) => night.onset)), median(nights.map((night) => night.wake))), source: "sleep" };
+}
+
 export function energyRhythm(input: {
   episodes: SleepEpisode[]; hourOf: (iso: string) => number;
   /** ISO weekday of a moment in the person's zone, 1 = Monday … 7 = Sunday. */
@@ -56,7 +76,9 @@ export function energyRhythm(input: {
   const since = Date.parse(input.now) - 28 * 24 * HOUR;
   const nights = input.episodes.filter((episode) => Date.parse(episode.wakeAt) >= since && Date.parse(episode.wakeAt) <= Date.parse(input.now))
     .map((episode) => ({ onset: onsetHour(input.hourOf(episode.sleepAt)), wake: input.hourOf(episode.wakeAt), free: input.weekdayOf(episode.wakeAt) >= 6 }));
-  const usual = nights.length ? { from: median(nights.map((night) => night.onset)), to: median(nights.map((night) => night.wake)) } : input.stated ?? { from: 23.5, to: 7.5 };
+  // With no night known, the default night moves with the phase (an age or stated best hours), so the whole day shifts, not only C.
+  const usual = nights.length ? { from: median(nights.map((night) => night.onset)), to: median(nights.map((night) => night.wake)) }
+    : input.stated ?? shiftedDefaultNight(input.phaseShift);
 
   // Two weeks of the usual night on a synthetic UTC calendar, read with the UTC hour, then one day after the last waking.
   const day0 = Date.parse("2000-01-01T00:00:00Z");

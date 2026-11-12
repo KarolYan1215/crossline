@@ -62,7 +62,8 @@ describe("energy advice rule", () => {
 
   test("with no night on record the person's stated best hours place the peak; recorded nights outrank them", () => {
     const reports = [{ at: "2026-10-07T21:30:00Z", level: "high" as const }, { at: "2026-10-09T22:00:00Z", level: "high" as const }];
-    const stated = energyAdviceRule({ now, zone, episodes: [], reports, worked: none, statedPeak: { start: 9, end: 12 } });
+    // 7–10 is earlier than the default day's late-morning peak (9–12 is about where it already is).
+    const stated = energyAdviceRule({ now, zone, episodes: [], reports, worked: none, statedPeak: { start: 7, end: 10 }, age: 20 });
     const generic = energyAdviceRule({ now, zone, episodes: [], reports, worked: none });
     if (!("levels" in stated) || !("levels" in generic)) throw new Error("expected advice");
     expect(stated.evidence.phaseSource).toBe("stated");
@@ -70,6 +71,17 @@ describe("energy advice rule", () => {
     expect(stated.basis[2]).toContain("按本人所述高效时段");
     const measured = energyAdviceRule({ now, zone, episodes: nights([23.5, 7.5], [23.5, 7.5]), reports: [], worked: none, statedPeak: { start: 9, end: 12 } });
     expect(measured.evidence.phaseSource).toBe("chronotype");
+  });
+
+  test("with neither a night nor best hours, an age the person gave places the phase, and the generic night moves with it", () => {
+    const reports = [{ at: "2026-10-07T21:30:00Z", level: "high" as const }, { at: "2026-10-09T22:00:00Z", level: "high" as const }];
+    const young = energyAdviceRule({ now, zone, episodes: [], reports, worked: none, age: 20 });
+    const older = energyAdviceRule({ now, zone, episodes: [], reports, worked: none, age: 60 });
+    if (!("levels" in young) || !("levels" in older)) throw new Error("expected advice");
+    expect(young.evidence.phaseSource).toBe("age");
+    expect(young.basis[2]).toContain("同龄人");
+    expect(firstHigh(young.levels)).toBeGreaterThan(firstHigh(older.levels));
+    expect(young.summary).toMatch(/^尚无睡眠记录，按通用作息（0:3\d 入睡、8:3\d 醒）/);
   });
 
   test("timed work in an hour read as low is flagged, not used to raise it", () => {

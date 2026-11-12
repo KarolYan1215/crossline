@@ -51,6 +51,8 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-task-titler": "low",
   "crossline-calendar-classifier": "low",
   "crossline-folder-classifier": "low",
+  // 拟计时: which open task a stretch of screen time was for, from its window titles (time-drafts.ts). A filing, not a judgement.
+  "crossline-time-attributor": "low",
   "crossline-recording-digest": "low",
   // A note's pictures and video frames into words and their visible text, many small runs (note-media.ts): the cheap tier.
   "crossline-media-describer": "low",

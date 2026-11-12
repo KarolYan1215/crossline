@@ -1,5 +1,6 @@
 import { expect, test, vi } from "vitest";
-import { MAIL_ACCOUNTS_SETTING, MAIL_EVENTS_SETTING, MAIL_LOG_SETTING, MAIL_TRIPS_SETTING, mailEventAsks, mailEventDigest, readMailEvents } from "@crossline/core";
+import { FIXED_EVENTS, MAIL_ACCOUNTS_SETTING, MAIL_EVENT_RULES_SETTING, MAIL_EVENTS_SETTING, MAIL_LOG_SETTING, MAIL_TRIPS_SETTING, mailEventAsks, mailEventDigest,
+  mailEventsOnSchedule, readMailEvents } from "@crossline/core";
 import type { ImapFactory, SecretStore } from "@crossline/connectors";
 import { CrosslineStore } from "@crossline/db";
 import { addMailAccount, createMailService, MAIL_TRIAGE_SKILL, mailLookupFor, readNewMail, removeMailAccount, requeueReplies, setMailBookkeeping, triageMail } from "./mailbox";
@@ -10,17 +11,22 @@ const memorySecrets = (): SecretStore & { values: Map<string, string> } => {
   const values = new Map<string, string>();
   return { values, read: async (w, n) => values.get(`${w}/${n}`), write: async (w, n, v) => { values.set(`${w}/${n}`, v); }, remove: (w, n) => { values.delete(`${w}/${n}`); } };
 };
-const raw = (subject: string, body: string) => Buffer.from(`From: Prof Lin <lin@uni.edu>\r\nSubject: ${subject}\r\nContent-Type: text/plain\r\n\r\n${body}\r\n`);
+/** `headers`: extra header lines (a list's List-Id); `calendar`: a text/calendar part carried beside the text. */
+const raw = (subject: string, body: string, headers = "", calendar = "") => Buffer.from(calendar
+  ? `From: Prof Lin <lin@uni.edu>\r\nSubject: ${subject}\r\n${headers}MIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=b1\r\n\r\n`
+    + `--b1\r\nContent-Type: text/plain\r\n\r\n${body}\r\n--b1\r\nContent-Type: text/calendar; method=REQUEST\r\n\r\n${calendar}\r\n--b1--\r\n`
+  : `From: Prof Lin <lin@uni.edu>\r\nSubject: ${subject}\r\n${headers}Content-Type: text/plain\r\n\r\n${body}\r\n`);
 /** A mailbox whose contents a test can grow; a wrong password is refused. */
 function mailbox(password = "app-pass") {
-  const messages: Array<{ uid: number; subject: string; body: string }> = [];
+  const messages: Array<{ uid: number; subject: string; body: string; headers?: string; calendar?: string; to?: string[] }> = [];
   const factory: ImapFactory = (options) => ({
     connect: async () => { if (options.auth?.pass !== password) throw new Error("AUTHENTICATIONFAILED"); },
     logout: async () => undefined,
     mailboxOpen: async () => ({ uidValidity: 1n, uidNext: (messages.at(-1)?.uid ?? 0) + 1 }) as never,
     search: (async (query: { uid?: string }) => query.uid ? messages.filter((m) => m.uid >= Number(query.uid!.split(":")[0])).map((m) => m.uid) : messages.map((m) => m.uid)) as never,
     fetchAll: (async (uids: number[]) => messages.filter((m) => uids.includes(m.uid)).map((m) => ({ seq: m.uid, uid: m.uid,
-      envelope: { subject: m.subject, from: [{ name: "Prof Lin", address: "lin@uni.edu" }], date: new Date("2026-10-19T08:00:00Z") }, source: raw(m.subject, m.body) }))) as never,
+      envelope: { subject: m.subject, from: [{ name: "Prof Lin", address: "lin@uni.edu" }], date: new Date("2026-10-19T08:00:00Z"),
+        ...(m.to ? { to: m.to.map((address) => ({ address })) } : {}) }, source: raw(m.subject, m.body, m.headers, m.calendar) }))) as never,
     fetchOne: (async () => false) as never
   });
   return { messages, factory };
@@ -298,4 +304,43 @@ test("a mail sorted as a to-do that is only going to something is never a task (
   expect(mailEventAsks(readMailEvents(store.getSetting(workspaceId, MAIL_EVENTS_SETTING)), "2026-11-10").map((event) => [event.title, event.date, event.start]))
     .toEqual([["参加 ECE 548 期中考试 2", "2026-11-24", "12:45"]]);
   expect(JSON.parse(store.getSetting(workspaceId, MAIL_LOG_SETTING)!).map((entry: { kind: string }) => entry.kind)).toEqual(["event", "info", "todo"]);
+});
+
+test("must-go and may-go (2026-11-11 §2): structure decides required, a list caps at optional, a confirmed source goes on the schedule, a clash is asked", async () => {
+  const { store, workspaceId, secrets, resolve } = setup();
+  const box = mailbox();
+  let now = new Date("2026-11-10T09:00:00Z");
+  const deps = { store, secrets, resolve, factory: box.factory, now: () => now };
+  await addMailAccount(deps, workspaceId, { address: "me@qq.com", password: "app-pass" });
+  await readNewMail(deps, workspaceId);
+  // The person said 去 to a required meeting of this sender before.
+  store.setSetting(workspaceId, MAIL_EVENT_RULES_SETTING, JSON.stringify([{ source: "lin@uni.edu", cap: "required", why: "went", at: "2026-11-01T00:00:00Z", example: "组会" }]));
+  const invite = (start: string) => ["BEGIN:VCALENDAR", "METHOD:REQUEST", "BEGIN:VEVENT", "ORGANIZER:mailto:lin@uni.edu",
+    "ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION:mailto:me@qq.com", `DTSTART:20261117T${start}00Z`, "END:VEVENT", "END:VCALENDAR"].join("\r\n");
+  box.messages.push({ uid: 1, subject: "Group meeting", body: "Group meeting on Tuesday, Nov 17, 14:00-15:00.", to: ["me@qq.com"], calendar: invite("1400") },
+    { uid: 2, subject: "Department seminar", body: "Attendance is required for all students. Seminar on Thursday, Nov 12 at 4pm.",
+      headers: "List-Id: <grads.uni.edu>\r\n", to: ["grads@uni.edu"] },
+    { uid: 3, subject: "Thesis review", body: "Review on Tuesday, Nov 17, 14:30-15:30.", to: ["me@qq.com"], calendar: invite("1430") });
+  now = new Date("2026-11-10T09:20:00Z");
+  const fresh = await readNewMail(deps, workspaceId);
+  const empty = { event: "", amount: 0, amountLabel: "", currency: "", merchant: "", category: "", occurredOn: "", refs: [], last4: "", instrument: "" };
+  const meet = (date: string, start: string, end: string, quote: string, over: Record<string, unknown> = {}) =>
+    ({ date, start, end, location: "", lineId: "", relevance: 50, personal: false, quote, required: "", senderRole: "advisor", ...over });
+  const answer = JSON.stringify({ items: [
+    { uid: 1, kind: "event", title: "组会", waitingId: "", why: "组会", money: empty, meet: meet("2026-11-17", "14:00", "15:00", "Group meeting on Tuesday, Nov 17, 14:00-15:00") },
+    // The body says required and the model rates it high: a list's notice stays optional all the same.
+    { uid: 2, kind: "event", title: "Department seminar", waitingId: "", why: "讲座", money: empty, meet: meet("2026-11-12", "16:00", "", "Seminar on Thursday, Nov 12 at 4pm",
+      { relevance: 95, personal: true, required: "Attendance is required for all students.", senderRole: "course_staff" }) },
+    { uid: 3, kind: "event", title: "论文审阅", waitingId: "", why: "审阅", money: empty, meet: meet("2026-11-17", "14:30", "15:30", "Review on Tuesday, Nov 17, 14:30-15:30") }] });
+  const { rpc } = fakeRuntime([answer], MAIL_TRIAGE_SKILL);
+  expect(await triageMail({ ...deps, client: rpc, cwd: "/repo" }, workspaceId, fresh)).toMatchObject({ state: "done", events: 3 });
+  const events = readMailEvents(store.getSetting(workspaceId, MAIL_EVENTS_SETTING));
+  expect(events.map((event) => [event.title, event.timing, event.obligation, event.basis, event.state])).toEqual([
+    ["组会", "fixed", "required", "required_participant", "fixed"],
+    ["Department seminar", "fixed", "optional", "list", "digest"],
+    // Required too, but it clashes with the meeting already on the schedule: asked, not placed.
+    ["论文审阅", "fixed", "required", "required_participant", "asked"]]);
+  // On Crossline's own schedule as busy time; on no calendar (only 去 writes the person's fixed events).
+  expect(mailEventsOnSchedule(events).map((event) => [event.title, event.date, event.start, event.end])).toEqual([["组会", "2026-11-17", "14:00", "15:00"]]);
+  expect(store.getSetting(workspaceId, FIXED_EVENTS)).toBeUndefined();
 });

@@ -3,13 +3,15 @@
  * 下周二」). Carried out by `applyTaskOp` (apps/web/lib/task-ops.ts) after the person confirms the card, undoable like any other operation.
  * The site-wide assistant Skill that first returned these was replaced by `crossline-concierge` (docs/one-input.md).
  */
-export type TaskOpType = "due" | "defer" | "estimate" | "step_done" | "step_add" | "replan" | "waiting" | "energy" | "note" | "progress" | "archive" | "start" | "tutorial" | "complete";
+export type TaskOpType = "due" | "defer" | "estimate" | "step_done" | "step_add" | "replan" | "waiting" | "energy" | "note" | "progress" | "archive" | "start" | "tutorial" | "complete"
+  /** 「推迟 10 分钟」 on a block's start prompt only (2026-11-11): it names one block, so it is not among the box's `TASK_OP_TYPES`. */
+  | "snooze";
 export type TaskOp = {
   type: TaskOpType;
   /** due/defer/waiting: YYYY-MM-DD. */ date: string;
-  /** estimate: usual minutes. */ minutes: number;
+  /** estimate: usual minutes; snooze: minutes until the block is said again. */ minutes: number;
   /** estimate (one step), step_done: a step id of the task; otherwise "". */ stepId: string;
-  /** step_add: the new step; replan: what to change; waiting: what is awaited; note/progress: the record; archive: why. */ text: string;
+  /** step_add: the new step; replan: what to change; waiting: what is awaited; note/progress: the record; archive: why; snooze: the block's id. */ text: string;
   /** waiting: who provides it. */ who: string;
   /** energy: low | medium | high; otherwise "". */ energy: string;
   /** One line saying the change. */ summary: string;

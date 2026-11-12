@@ -588,7 +588,7 @@
   "订阅日历": "Subscribed calendars",
   "记录中": "Recording",
   "记录为可信身份": "Record as trusted",
-  "记录应用与窗口标题；标题只存本机，14 天后抹除，不发给模型": "Records apps and window titles; titles stay on this computer, are wiped after 14 days and never go to a model",
+  "记录应用与窗口标题；标题只存本机，14 天后抹除": "Records apps and window titles; titles stay on this computer and are wiped after 14 days",
   "记录级别": "Recording level",
   "许可证": "License",
   "设备 {{n}}": "Device {{n}}",
@@ -1221,5 +1221,8 @@
   "未报名称": "No name given",
   "节点 {{version}}": "Node {{version}}",
   "以上是那台电脑自己报的信息。只配对自己的电脑：别人发来的配对码不要填。配对后：": "This is what that computer says about itself. Pair only your own computer; never enter a code someone sent you. Once paired:",
-  "摘要已整理进材料；有些内容没有建成收集或没读到，摘要末尾写了是哪些": "Summary added to materials; some of it was not made a capture or not read, listed at the summary's end"
+  "摘要已整理进材料；有些内容没有建成收集或没读到，摘要末尾写了是哪些": "Summary added to materials; some of it was not made a capture or not read, listed at the summary's end",
+  "出生年份": "Year of birth",
+  "愿意填写出生年份吗？": "Would you like to give your year of birth?",
+  "不填": "Skip"
 }

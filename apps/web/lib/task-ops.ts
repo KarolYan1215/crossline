@@ -1,8 +1,8 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { formatInTimeZone } from "date-fns-tz";
-import type { AccessContext, TaskOp } from "@crossline/core";
-import { addWaitingForOrder, archiveWorkOrder, effectiveSchedulePreferences, focusStep, getStore, planToday, startWorkOrderExecution } from "./crossline";
+import { SNOOZE_MINUTES, type AccessContext, type TaskOp } from "@crossline/core";
+import { addWaitingForOrder, appNow, archiveWorkOrder, effectiveSchedulePreferences, focusStep, getStore, planToday, startWorkOrderExecution } from "./crossline";
 import { applyChange } from "./impact";
 import { editSteps, recordStepProgress, reportProgress, requestStepReplan } from "./steps";
 import { requestTutorial } from "./tutorial";
@@ -63,8 +63,21 @@ export async function applyTaskOp(ctx: AccessContext, workOrderId: string, op: T
       return result;
     }
     case "tutorial": return requestTutorial(ctx, workOrderId);
+    case "snooze": return snoozeBlock(ctx, workOrderId, op.text, op.minutes);
     default: return { ok: false, code: "TASK_OP_UNKNOWN" };
   }
+}
+
+/**
+ * 「推迟 10 分钟」 on a block's start prompt (2026-11-11 §3): the block is said again once the snooze runs out (`lib/nudges.ts` reads these
+ * events for today); after two snoozes it is not said again and the wrap-up marks it. Only a block of this task.
+ */
+export function snoozeBlock(ctx: AccessContext, workOrderId: string, blockId: string, minutes: number, now = appNow()): Result {
+  if (!blockId.startsWith(`scheduled:${workOrderId}:`) && blockId !== `scheduled:${workOrderId}`) return { ok: false, code: "SNOOZE_BLOCK_INVALID" };
+  const length = Number.isFinite(minutes) && minutes > 0 ? Math.min(60, Math.round(minutes)) : SNOOZE_MINUTES;
+  getStore().appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `block.snoozed:${blockId}:${randomUUID()}`,
+    type: "block.snoozed", entityId: workOrderId, payload: { blockId, day: planToday(ctx, now), until: new Date(now.getTime() + length * 60_000).toISOString() } });
+  return { ok: true };
 }
 
 export type PostponeReason = "waiting" | "energy" | "conflict" | "time" | "other";

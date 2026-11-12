@@ -1,12 +1,12 @@
 import "server-only";
 import {
-  budgetLines, convertRecords, ledgerCategory, ledgerSummary, monthlyLimitFrom, recurringCharges, spendingAnomalies, INCOME_CATEGORIES, SPEND_CATEGORIES, type AccessContext,
-  type Budget, type BudgetLine, type LedgerSummary, type RecurringCharge, type SpendingAnomaly, type StoredDomainRecord
+  budgetLines, budgetPace, convertRecords, ledgerCategory, ledgerSummary, monthlyCap, monthlyLimitFrom, recurringCharges, spendingAnomalies, FX_CURRENCIES, INCOME_CATEGORIES, SPEND_CATEGORIES,
+  type AccessContext, type Budget, type BudgetLine, type BudgetPace, type Converter, type LedgerSummary, type RecurringCharge, type SpendingAnomaly, type StoredDomainRecord
 } from "@crossline/core";
 import { merchantRules, mergeRecords, resolvePossibleDuplicate, setRecordCategory, splitRecordEvidence, MERCHANT_RULES_SETTING } from "@crossline/db";
 import { appNow, getStore } from "./crossline";
 import { lineOfDomain, personToday } from "./records";
-import { baseCurrency, budgetOf, fxConverter } from "./wealth";
+import { baseCurrency, budgetOf, fxConverter, spendingOnly } from "./wealth";
 
 /** One piece of evidence behind a ledger row, as the page shows it. */
 export type LedgerEvidence = { id: string; source: string; role: string; at: string; amount: number; merchant: string };
@@ -24,20 +24,25 @@ export type LedgerView = {
   rules: Array<{ merchantKey: string; category: string }>;
   spendCategories: string[]; incomeCategories: string[];
   /** Totals are in `base`, each record converted at its own day's rate; `rateDay`: the latest rate used ("" when nothing needed one). */
-  fx: { base: string; rateDay: string };
-  /** The capped categories against the month (docs/ledger-wealth.md §4); `limitFrom` says whose monthly cap it is. */
-  budget: { lines: BudgetLine[]; limitFrom: "person" | "milestone" | null; own: Budget };
+  fx: { base: string; rateDay: string; currencies: string[] };
+  /**
+   * The capped categories against the month (docs/ledger-wealth.md §3.4); `limitFrom` says whose monthly cap it is; `monthly`: the month's
+   * spending against that cap, in the base currency; `unconverted`: the person's cap is in a currency with no rate yet, so it is not compared.
+   */
+  budget: { lines: BudgetLine[]; limitFrom: "person" | "milestone" | null; own: Budget; monthly: BudgetPace | null; unconverted: boolean };
+  /** 「只记开销」: the person keeps spending only, so no income figure is shown whatever was booked. */
+  spendingOnly: boolean;
 };
 
 const MONEY = new Set(["income", "expense", "refund"]);
 
 /**
- * The monthly spending limit: the person's own budget cap (docs/ledger-wealth.md §4) when set, else the wealth line's approved milestones
- * (§5.3), shared with the reports.
+ * The monthly spending limit in the base currency: the person's own budget cap (docs/ledger-wealth.md §3.4) when set, at `day`'s rate (null
+ * while its currency has no rate), else the wealth line's approved milestones (§5.3), shared with the reports.
  */
-export function ledgerLimit(ctx: AccessContext): number | null {
-  const own = budgetOf(ctx).monthly;
-  if (own !== null) return own;
+export function ledgerLimit(ctx: AccessContext, base: string, fx: Converter, day: string): number | null {
+  const own = budgetOf(ctx);
+  if (own.monthly !== null) return monthlyCap(own, base, fx, day);
   return milestoneLimit(ctx);
 }
 
@@ -76,11 +81,14 @@ export function loadLedger(ctx: AccessContext, month?: string): LedgerView {
   const named = (key: string) => names.get(key) ?? key;
   // One currency for the totals (docs/ledger-wealth.md §3): each record at its own day's rate; one with no rate stays beside them.
   const base = baseCurrency(ctx).code;
-  const converted = convertRecords(all, base, fxConverter());
-  const limit = ledgerLimit(ctx);
-  const summary = ledgerSummary(converted.records, { today: summaryDay, month: chosen, currency: base, limit });
+  const fx = fxConverter();
+  const converted = convertRecords(all, base, fx);
+  const limit = ledgerLimit(ctx, base, fx, summaryDay);
+  const only = spendingOnly(ctx);
+  const summary = ledgerSummary(converted.records, { today: summaryDay, month: chosen, currency: base, limit, spendingOnly: only });
   const isCurrent = chosen === today.slice(0, 7);
   const daysInMonth = new Date(Date.UTC(Number(chosen.slice(0, 4)), Number(chosen.slice(5, 7)), 0)).getUTCDate();
+  const own = budgetOf(ctx);
   return {
     today, month: chosen, months, hasRecords: all.length > 0,
     summary: { ...summary, merchants: summary.merchants.map((item) => ({ ...item, merchant: named(item.merchant) })) },
@@ -90,9 +98,11 @@ export function loadLedger(ctx: AccessContext, month?: string): LedgerView {
     pending: waiting.map((record) => ({ row: byId.get(record.id)!, other: byId.get(record.possibleDupOf) ?? null })),
     rules: Object.entries(merchantRules(store, ctx.workspaceId)).map(([merchantKey, category]) => ({ merchantKey, category })),
     spendCategories: [...SPEND_CATEGORIES], incomeCategories: [...INCOME_CATEGORIES],
-    fx: { base, rateDay: converted.rateDay },
-    budget: { lines: budgetLines(budgetOf(ctx), summary.categories, summary.pace.day, daysInMonth, isCurrent),
-      limitFrom: limit === null ? null : budgetOf(ctx).monthly !== null ? "person" : "milestone", own: budgetOf(ctx) }
+    fx: { base, rateDay: converted.rateDay, currencies: [...FX_CURRENCIES] },
+    budget: { lines: budgetLines(own, summary.categories, summary.pace.day, daysInMonth, isCurrent, summary.spendDays),
+      limitFrom: limit === null ? null : own.monthly !== null ? "person" : "milestone", own,
+      monthly: limit === null ? null : budgetPace(summary.spent, limit, summary.pace.day, daysInMonth, isCurrent), unconverted: own.monthly !== null && limit === null },
+    spendingOnly: only
   };
 }
 
