@@ -69,20 +69,42 @@ test("above the memory mark a person's turn waits first in line, ahead of every 
   expect(order).toEqual(["a", "i", "b"]);
 });
 
-test("accounts take turns within a priority, and one account holds at most its share of background slots", async () => {
-  configureModelGate({ limit: 4, perTenant: 2, log: () => {} });
+test("accounts take turns within a priority: a slot that frees goes to an account within its share before one that borrowed", async () => {
+  configureModelGate({ limit: 2, perTenant: 1, log: () => {} });
   const order: string[] = [];
-  const gate = deferred();
-  const runs = [
-    ...["w1-a", "w1-b", "w1-c", "w1-d"].map((name) => withModelSlot({ skill: "crossline-step-planner", tenant: "w1" }, async () => { order.push(name); await gate.promise; })),
-    withModelSlot({ skill: "crossline-step-planner", tenant: "w2" }, async () => { order.push("w2-a"); await gate.promise; })
-  ];
+  const gates = [deferred(), deferred()];
+  const running = [0, 1].map((index) => withModelSlot({ skill: "crossline-step-planner", tenant: "w1" }, async () => { order.push(`w1-${index}`); await gates[index]!.promise; }));
   await tick();
-  // Four slots, but the first account holds only two of them, and the second account's run did not wait behind its backlog.
-  expect(order.sort()).toEqual(["w1-a", "w1-b", "w2-a"]);
-  gate.resolve();
-  await Promise.all(runs);
+  // Nobody else was waiting: the first account took both slots, one of them borrowed.
+  expect(order).toEqual(["w1-0", "w1-1"]);
+  const backlog = ["w1-2", "w1-3"].map((name) => withModelSlot({ skill: "crossline-step-planner", tenant: "w1" }, async () => { order.push(name); }));
+  const other = withModelSlot({ skill: "crossline-step-planner", tenant: "w2" }, async () => { order.push("w2-0"); });
+  gates[0]!.resolve();
+  await running[0];
+  await tick();
+  // The second account's run did not wait behind the first's backlog.
+  expect(order[2]).toBe("w2-0");
+  gates[1]!.resolve();
+  await Promise.all([...running, ...backlog, other]);
   expect(order).toHaveLength(5);
+});
+
+test("one account alone uses every background slot; a slot it borrowed goes, once free, to another account that queued meanwhile", async () => {
+  configureModelGate({ limit: 3, perTenant: 2, log: () => {} });
+  const order: string[] = [];
+  const gates = [deferred(), deferred(), deferred()];
+  const mine = [0, 1, 2].map((index) => withModelSlot({ skill: "crossline-step-planner", tenant: "w1" }, async () => { order.push(`w1-${index}`); await gates[index]!.promise; }));
+  await tick();
+  expect(order).toEqual(["w1-0", "w1-1", "w1-2"]);
+  const later = withModelSlot({ skill: "crossline-step-planner", tenant: "w1" }, async () => { order.push("w1-3"); });
+  const other = withModelSlot({ skill: "crossline-step-planner", tenant: "w2" }, async () => { order.push("w2-0"); });
+  gates[0]!.resolve();
+  await mine[0];
+  await tick();
+  expect(order[3]).toBe("w2-0");
+  gates[1]!.resolve(); gates[2]!.resolve();
+  await Promise.all([...mine, later, other]);
+  expect(order.slice(3)).toEqual(["w2-0", "w1-3"]);
 });
 
 test("a tenant given its own limit (the candidates' measurement) may take every free background slot", async () => {

@@ -21,8 +21,9 @@
  * Who goes next (decided with the owner on 2026-10-19, docs/model-scheduling.md):
  * - A person's turn starts at once while memory is below the mark, whatever else runs: the slots count background work only; above the
  *   mark it waits first in line.
- * - Background work of one account holds at most `CROSSLINE_ACCOUNT_CONCURRENCY` (2) slots, and accounts take turns within a priority, so
- *   one person approving twelve milestones does not fill every slot ahead of another person's capture.
+ * - Background work of one account holds at most `CROSSLINE_ACCOUNT_CONCURRENCY` (2) slots while another account waits, and accounts take
+ *   turns within a priority, so one person approving twelve milestones does not fill every slot ahead of another person's capture. With
+ *   nobody else waiting an account may borrow the free slots (2026-11-12); the next slot that frees goes to whoever queues next.
  * - Background work goes in three priorities: intake (what arrived is read and recorded), then planning, then everything else
  *   (preparation: tutorials, research, the assistant) — `INTAKE_SKILLS`, `PLANNING_SKILLS` (2026-10-21).
  * - Within a priority and an account the shorter job goes first, by the Skill's recent service times here; anything that has waited
@@ -78,7 +79,7 @@ export function interactiveReserve(env: NodeJS.ProcessEnv = process.env): number
   return env.CROSSLINE_PUBLIC_BETA === "1" ? 1 : 0;
 }
 
-/** Background runs one account may hold at once (`CROSSLINE_ACCOUNT_CONCURRENCY`, default 2; the owner's decision of 2026-10-19). */
+/** Background runs one account may hold while another account waits (`CROSSLINE_ACCOUNT_CONCURRENCY`, default 2; the owner's decision of 2026-10-19). */
 export function accountConcurrency(env: NodeJS.ProcessEnv = process.env): number {
   const raw = Number(env.CROSSLINE_ACCOUNT_CONCURRENCY);
   return Number.isInteger(raw) && raw > 0 ? raw : 2;
@@ -260,7 +261,13 @@ function backgroundLimit(): number {
 function eligible(waiter: Waiter): boolean {
   if (waiter.priority === "interactive") return true;
   const extra = extraFor(waiter.tenant);
-  return activeBackground < backgroundLimit() + extra && (activeByTenant.get(waiter.tenant) ?? 0) < (config.tenantLimits?.[waiter.tenant] ?? config.perTenant) + extra;
+  if (activeBackground >= backgroundLimit() + extra) return false;
+  if ((activeByTenant.get(waiter.tenant) ?? 0) < (config.tenantLimits?.[waiter.tenant] ?? config.perTenant) + extra) return true;
+  // Over its share an account may borrow a slot no other account is waiting for (the owner, 2026-11-12: one person alone is not held
+  // to two runs while the others stand empty). Once another account queues, every slot that frees is the others' until the borrower is
+  // back within its share; no run is stopped.
+  const base = waiter.tenant.replace(/#.*$/, "");
+  return !waiters.some((other) => other.priority !== "interactive" && other.tenant.replace(/#.*$/, "") !== base);
 }
 
 function pump(): void {

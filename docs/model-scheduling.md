@@ -18,7 +18,7 @@
 
 | 方面 | 规则 | 代码 |
 |---|---|---|
-| 账号内并行 | 每个账号的后台调用最多 2 个同时（`CROSSLINE_ACCOUNT_CONCURRENCY`）；助手另走一条队，不占这 2 个名额；同一线程的连续回合仍一个接一个 | `model-gate.ts` `accountConcurrency`、`skill-runner.ts` `agentLanes`/`threadLanes` |
+| 账号内并行 | 有别的账号在排队时，每个账号的后台调用最多 2 个同时（`CROSSLINE_ACCOUNT_CONCURRENCY`）；没有别人排队时可以借用全部空闲的后台槽位（2026-11-12，本人：「我希望每个用户使用时不受限」），借来的槽位空出后先给排队的别的账号，在跑的不打断；助手另走一条队，不占这 2 个名额；同一线程的连续回合仍一个接一个 | `model-gate.ts` `accountConcurrency`、`skill-runner.ts` `agentLanes`/`threadLanes` |
 | Skill 开关 | 按引用计数：第一个用到的运行打开，最后一个用完的关回去（原先是关着的才关），同一 Skill 可同时跑两次 | `skill-runner.ts` `holdSkill`/`releaseSkill` |
 | 账号间 | 同一优先级里，账号轮流拿位置（上次被服务最早的先） | `model-gate.ts` `ordered` |
 | 先短后长 | 同一优先级、同一账号里，按各 Skill 最近 20 次用时的中位数，短的先跑 | `expectedServiceMs` |
