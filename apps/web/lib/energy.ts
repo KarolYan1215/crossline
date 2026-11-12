@@ -2,10 +2,10 @@ import "server-only";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { formatInTimeZone } from "date-fns-tz";
 import {
-  ACTIVITY_LONG_GAPS, CAMERA_ENERGY_CONSENT, INPUT_RHYTHM_BUCKETS, INPUT_RHYTHM_CONSENT, PHONE_HEALTH_CONSENT, SELF_SLEEP_SETTING, SLEEP_TRACKING_CONSENT, phoneHealthGranted, readSelfSleep, calibrate, covariateShift, inputRhythmAt, judgeCovariate, dayCapacity, mergeSleep, phaseShiftFromPeak, predictEnergy, sleepFromGaps, sleepFromPhoneEvents, alertnessAt,
-  type AccessContext, type AdmittedActivity, type AvailabilityWindow, type DailyActivityId, type CovariateVerdict, type DailyPhysiology, type InputRhythmBucket, type DayCapacity, type EnergyCalibration, type EnergyLevel, type EnergyPrediction, type EnergySource, type PhoneSleepEvent, type SleepEpisode
+  ACTIVITY_LONG_GAPS, BIRTH_YEAR_SETTING, CAMERA_ENERGY_CONSENT, INPUT_RHYTHM_BUCKETS, INPUT_RHYTHM_CONSENT, PHONE_HEALTH_CONSENT, SELF_SLEEP_SETTING, SLEEP_TRACKING_CONSENT, ageFromBirthYear, phoneHealthGranted, priorPhase, readSelfSleep, calibrate, covariateShift, inputRhythmAt, judgeCovariate, dayCapacity, mergeSleep, predictEnergy, sleepFromGaps, sleepFromPhoneEvents, alertnessAt, statedPeakOf, statedSleep, usualMidSleep,
+  type AccessContext, type AdmittedActivity, type AvailabilityWindow, type DailyActivityId, type CovariateVerdict, type DailyPhysiology, type InputRhythmBucket, type DayCapacity, type EnergyCalibration, type EnergyLevel, type EnergyPrediction, type EnergySource, type PhaseSource, type PhoneSleepEvent, type SleepEpisode
 } from "@crossline/core";
-import { effectiveSchedulePreferences, getStore } from "./crossline";
+import { appNow, effectiveSchedulePreferences, getStore } from "./crossline";
 import { localeFor, tOf } from "./locale";
 import { tFor } from "./i18n";
 
@@ -57,6 +57,8 @@ function phoneSource(ctx: AccessContext): EnergySource {
 
 export type EnergyModel = {
   episodes: SleepEpisode[]; calibration: EnergyCalibration; phaseShift: number;
+  /** Where the phase came from: sleep timing, painted best hours, an age the person gave, or the default adult. */
+  phaseSource: PhaseSource;
   hourOf: (iso: string) => number;
   predict: (at: string) => EnergyPrediction;
   /** How much of the person's local `day` can be filled (only ever below 1), from sleep debt and the phone's readings. */
@@ -114,10 +116,14 @@ export function energyModel(ctx: AccessContext, windows: AvailabilityWindow[]): 
   const hourOf = (iso: string) => { const [h, m] = formatInTimeZone(new Date(iso), zone, "HH:mm").split(":").map(Number); return (h ?? 0) + (m ?? 0) / 60; };
   const phone = phoneSource(ctx);
   const episodes = mergeSleep(screenSource(ctx, hourOf).sleep(), phone.sleep(), readSelfSleep(store.getSetting(ctx.workspaceId, SELF_SLEEP_SETTING)));
-  // The circadian peak sits where the person said their best hours are (the high-energy windows of the availability pattern).
-  const peak = windows.find((window) => window.energy === "high");
-  const toHour = (clock: string) => { const [h, m] = clock.split(":").map(Number); return (h ?? 0) + (m ?? 0) / 60; };
-  const phaseShift = peak ? phaseShiftFromPeak(toHour(peak.start), toHour(peak.end)) : 0;
+  // The prior's circadian phase (docs/energy-and-ecosystem.md §2.1): the person's sleep timing (recorded nights, else the night they told
+  // the interview), else the best hours they painted, else the age they chose to give, else the default adult's.
+  const now = appNow().toISOString();
+  const phase = priorPhase({
+    midSleep: usualMidSleep({ episodes, hourOf, weekdayOf: (iso) => Number(formatInTimeZone(new Date(iso), zone, "i")), now,
+      stated: statedSleep(store.listProfileFacts(ctx.workspaceId)) }),
+    statedPeak: statedPeakOf(windows), age: ageFromBirthYear(store.getSetting(ctx.workspaceId, BIRTH_YEAR_SETTING), now) });
+  const phaseShift = phase.shift;
   const reports = store.listEnergyObservations(ctx.workspaceId).filter((item) => item.source === "self_report" && item.level !== "uncalibrated");
   const calibration = calibrate(reports.flatMap((report) => {
     const value = alertnessAt(report.observedAt, episodes, hourOf, phaseShift);
@@ -152,7 +158,7 @@ export function energyModel(ctx: AccessContext, windows: AvailabilityWindow[]): 
     const daily = signals.find((item) => item.id === verdict.id)?.daily;
     if (daily && verdict.enabled && verdict.fit) admitted[daily] = verdict.fit.beta;
   }
-  return { episodes, calibration, phaseShift, hourOf, lastReportAt, covariates, predict,
+  return { episodes, calibration, phaseShift, phaseSource: phase.source, hourOf, lastReportAt, covariates, predict,
     capacity: (at, day) => dayCapacity(at, day, episodes, physiology, admitted, locale) };
 }
 

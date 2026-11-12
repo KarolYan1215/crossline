@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 vi.mock("server-only", () => ({}));
 vi.mock("./codex-runtime", () => ({ requestCodexSupervisor: vi.fn(async () => ({})), CodexSupervisorRequestError: class extends Error {} }));
-import { DEFAULT_AVAILABILITY } from "@crossline/core";
+import { BIRTH_YEAR_SETTING, DEFAULT_AVAILABILITY } from "@crossline/core";
 import { HEALTH_SLEEP_SETTING, energyModel, issueHealthToken, phoneDailyLatest, phoneHealthOn, setPhoneHealth, slotEnergy, storeHealthSummary, workspaceForHealthToken } from "./energy";
 import { nudgesFor } from "./nudges";
 import { ENERGY_VOI_SETTING } from "./crossline";
@@ -215,4 +215,17 @@ test("Today's energy curve is drawn with no sleep record: a typical adult's day,
   // The usual afternoon lies above the hour after waking and the hour before sleep (inertia and the homeostat).
   const at = (minute: number) => curve!.points.find((point) => point.minute === minute)!.alertness;
   expect(at(16 * 60)).toBeGreaterThan(at(23 * 60));
+});
+
+test("the live model's phase: the default pattern and no age leave the default adult's; an age moves it; a night on record outranks the age", () => {
+  vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-11-11T12:00:00Z");
+  const store = setup();
+  // The default 9–12 pattern states nothing (it used to push every phase to the −6 h bound).
+  expect(energyModel(TEST_CTX, DEFAULT_AVAILABILITY)).toMatchObject({ phaseShift: 0, phaseSource: "default" });
+  store.setSetting(ws, BIRTH_YEAR_SETTING, "2006");
+  const young = energyModel(TEST_CTX, DEFAULT_AVAILABILITY);
+  expect(young.phaseSource).toBe("age");
+  expect(young.phaseShift).toBeGreaterThan(1);
+  store.setSetting(ws, "energy.sleepReports", JSON.stringify([{ sleepAt: "2026-11-10T23:00:00Z", wakeAt: "2026-11-11T07:00:00Z" }]));
+  expect(energyModel(TEST_CTX, DEFAULT_AVAILABILITY).phaseSource).toBe("sleep");
 });

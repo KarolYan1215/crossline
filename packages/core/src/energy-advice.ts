@@ -1,5 +1,5 @@
 import { mctqLite, CHRONOTYPE_LABEL } from "./assess";
-import { alertnessAt, phaseShiftFromPeak, type SleepEpisode } from "./energy-model";
+import { alertnessAt, priorPhase, shiftedDefaultNight, type PhaseSource, type SleepEpisode } from "./energy-model";
 import type { EnergyLevel } from "./index";
 import { tFor, type Locale } from "./i18n";
 
@@ -26,9 +26,7 @@ export const ADVICE_MIN_REPORTS = 2;
 
 const SLOTS = 48;
 const HOUR = 3_600_000;
-const DEFAULT_NIGHT = { from: 23.5, to: 7.5 };
-/** The mid-sleep the model's published acrophase (16.8 h) corresponds to: the default night's. */
-const DEFAULT_MID_SLEEP = 3.5;
+const DEFAULT_NIGHT = shiftedDefaultNight(0);
 const LEVEL_OF: Record<EnergyLevel, number> = { low: 1, medium: 2, high: 3 };
 const LEVEL_LABEL: Record<number, string> = { 1: "低", 2: "中", 3: "高" };
 
@@ -125,7 +123,8 @@ function levelsOf(curve: Array<number | null>): number[] {
   return levels;
 }
 const QUARTER_SHARE = 0.25;
-const PHASE_BASIS = { chronotype: "按时型", sleep: "按睡眠中点", stated: "按本人所述高效时段", default: "无记录，按通用曲线" } as const;
+const PHASE_BASIS: Record<PhaseSource, string> = { chronotype: "按时型", sleep: "按睡眠中点", stated: "按本人所述高效时段", age: "按本人所填出生年份的同龄人平均",
+  default: "无记录，按通用曲线" };
 
 /** A run shorter than an hour takes its neighbour's level, so the advice saves as a few windows rather than a scatter of half hours. */
 function smooth(levels: number[]): number[] {
@@ -163,7 +162,7 @@ export type EnergyAdviceEvidence = {
   /** MCTQ's sleep-corrected free-day mid-sleep and its reading, when there are two workday and two free-day nights. */
   chronotype: { msfSc: number; label: string } | null;
   /** Hours the circadian peak moved from the model's published one, and from what: MSF_sc, the median night, the person's stated best hours. */
-  phaseShift: number; phaseSource: "chronotype" | "sleep" | "stated" | "default";
+  phaseShift: number; phaseSource: PhaseSource;
   reports: number;
   /** Two-hour bands where the person's reports overrode the model. */
   reportBands: Array<{ from: number; to: number; level: EnergyLevel; count: number }>;
@@ -182,6 +181,8 @@ export function energyAdviceRule(input: { now: string; zone: string; episodes: S
   worked: number[][];
   /** The person's own best hours (their high-energy window), local hours: the phase when no night is on record. */
   statedPeak?: { start: number; end: number } | null;
+  /** The age the person chose to give (`ageFromBirthYear`): the phase when neither a night nor best hours are known. */
+  age?: number | undefined;
   /** The language the summary and basis are written in (the plan page shows them). */
   locale?: Locale }): EnergyAdviceRule {
   const t = tFor(input.locale);
@@ -198,7 +199,8 @@ export function energyAdviceRule(input: { now: string; zone: string; episodes: S
   const workN = nights.filter((night) => !night.free), freeN = nights.filter((night) => night.free);
   const split = workN.length >= 2 && freeN.length >= 2;
   const usualOf = (list: Night[]): UsualNight => list.length ? { from: median(list.map((night) => night.onset)), to: median(list.map((night) => night.wake)) } : DEFAULT_NIGHT;
-  const workdays = usualOf(split ? workN : nights), free = split ? usualOf(freeN) : null;
+  let workdays = usualOf(split ? workN : nights);
+  const free = split ? usualOf(freeN) : null;
 
   // The circadian phase follows sleep timing: MSF_sc when there are both kinds of night, else the median mid-sleep, else the default.
   const midOf = (night: UsualNight) => wrap24(night.from + (night.to + 24 - night.from) / 2);
@@ -207,12 +209,12 @@ export function energyAdviceRule(input: { now: string; zone: string; episodes: S
     const mctq = mctqLite({ workdays: 5, work: { sleep: hhmm(workdays.from), wake: hhmm(workdays.to) }, free: { sleep: hhmm(free.from), wake: hhmm(free.to) } });
     if (mctq.msfSc !== null) chronotype = { msfSc: Math.round(mctq.msfSc * 100) / 100, label: mctq.chronotype ? CHRONOTYPE_LABEL[mctq.chronotype] : "" };
   }
-  // With no night on record the person's own statement of their best hours places the peak (as the energy model does); measured sleep
-  // timing outranks it.
-  const phaseSource: EnergyAdviceEvidence["phaseSource"] = chronotype ? "chronotype" : nights.length ? "sleep" : input.statedPeak ? "stated" : "default";
-  const signed = phaseSource === "stated" ? phaseShiftFromPeak(input.statedPeak!.start, input.statedPeak!.end)
-    : ((((chronotype?.msfSc ?? (nights.length ? midOf(workdays) : DEFAULT_MID_SLEEP)) - DEFAULT_MID_SLEEP + 36) % 24) - 12);
-  const phaseShift = Math.round(Math.max(-6, Math.min(6, signed)) * 100) / 100;
+  // With no night on record the person's own statement of their best hours places the peak (as the energy model does), else their age;
+  // measured sleep timing outranks both. The generic night then moves with that phase.
+  const { shift: phaseShift, source: phaseSource } = priorPhase({
+    midSleep: chronotype ? { hours: chronotype.msfSc, source: "chronotype" } : nights.length ? { hours: midOf(workdays), source: "sleep" } : undefined,
+    statedPeak: input.statedPeak, age: input.age });
+  if (!nights.length) workdays = shiftedDefaultNight(phaseShift);
 
   const workedHours = Math.round(input.worked.flat().reduce((sum, value) => sum + value, 0) / 6) / 10;
   const evidenceBase = { nights: nights.length, usual: { workdays, free }, chronotype, phaseShift, phaseSource, reports: reports.length, workedHours };
@@ -247,7 +249,7 @@ export function energyAdviceRule(input: { now: string; zone: string; episodes: S
 
   const lead = nights.length
     ? t("按近四周 {{count}} 晚睡眠（通常 {{sleep}} 入睡、{{wake}} 醒）", { count: nights.length, sleep: clockLabel(wrap24(workdays.from)), wake: clockLabel(workdays.to) })
-    : t("尚无睡眠记录，按通用作息（23:30 入睡、7:30 醒）");
+    : t("尚无睡眠记录，按通用作息（{{sleep}} 入睡、{{wake}} 醒）", { sleep: clockLabel(wrap24(workdays.from)), wake: clockLabel(wrap24(workdays.to)) });
   const high = levelRanges(workRow, 3), low = levelRanges(workRow, 1);
   const list = (items: string[]) => items.join(en ? ", " : "、");
   const summary = [

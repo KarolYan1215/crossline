@@ -20,7 +20,8 @@ test("a rested morning reads high for a morning person and a short night's late 
   const night = [{ sleepAt: "2026-10-10T04:00:00Z", wakeAt: "2026-10-10T12:00:00Z", source: "screen" }]; // 23:00–07:00
   expect(predictEnergy("2026-10-10T15:00:00Z", night, DEFAULT_CALIBRATION, hour, shift).level).toBe("high"); // 10:00
   const short = [{ sleepAt: "2026-10-10T07:00:00Z", wakeAt: "2026-10-10T12:00:00Z", source: "screen" }]; // 02:00–07:00
-  expect(predictEnergy("2026-10-11T03:00:00Z", short, DEFAULT_CALIBRATION, hour, shift).level).toBe("low"); // 22:00
+  // 23:00: an hour earlier the evening wake-maintenance zone still holds a short-slept person at medium.
+  expect(predictEnergy("2026-10-11T04:00:00Z", short, DEFAULT_CALIBRATION, hour, shift).level).toBe("low");
   expect(predictEnergy("2026-10-12T15:00:00Z", night, DEFAULT_CALIBRATION, hour, shift)).toMatchObject({ confidence: "low", basis: ["不知道最近一次睡眠"] });
 });
 
