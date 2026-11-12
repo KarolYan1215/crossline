@@ -71,6 +71,17 @@ export const DEFAULT_AVAILABILITY: AvailabilityWindow[] = [
   { days: [0, 6], start: "10:00", end: "12:00", energy: "low" }
 ];
 
+/**
+ * The person's stated best hours, as local hours: the first high-energy window of their pattern. Null while the pattern is still the
+ * default above, which is a starting point nobody stated (until 2026-11-11 its 9–12 set everyone's circadian phase).
+ */
+export function statedPeakOf(windows: AvailabilityWindow[]): { start: number; end: number } | null {
+  if (JSON.stringify(windows) === JSON.stringify(DEFAULT_AVAILABILITY)) return null;
+  const peak = windows.find((window) => window.energy === "high");
+  const hours = (clock: string) => { const [h, m] = clock.split(":").map(Number); return (h ?? 0) + (m ?? 0) / 60; };
+  return peak ? { start: hours(peak.start), end: hours(peak.end) } : null;
+}
+
 /** Rejects a window that cannot mean anything, so a typo cannot silently empty the plan. */
 export function validateAvailability(value: unknown): AvailabilityWindow[] {
   if (!Array.isArray(value)) throw new Error("AVAILABILITY_INVALID");

@@ -1,4 +1,4 @@
-import { readSelfCheck, SELF_CHECK_SETTING, ACTIVITY_HOURLY, BRIEF_TIME_SETTING, DEFAULT_QUIET, QUIET_HOURS_SETTING, atComputerByHour, type ActivityHour, AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, activityCategoryLabel, SLEEP_TRACKING_CONSENT, TELEMETRY_ENABLED_SETTING, type ActivityCategory, type AgentHistorySummary } from "@crossline/core";
+import { BIRTH_YEAR_SETTING, readSelfCheck, SELF_CHECK_SETTING, ACTIVITY_HOURLY, BRIEF_TIME_SETTING, DEFAULT_QUIET, QUIET_HOURS_SETTING, atComputerByHour, type ActivityHour, AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, activityCategoryLabel, SLEEP_TRACKING_CONSENT, TELEMETRY_ENABLED_SETTING, type ActivityCategory, type AgentHistorySummary } from "@crossline/core";
 import { assistantAvailable, nodeShellHost } from "@crossline/db";
 import { AppShell } from "../app-shell";
 import { LocalActivityToggle } from "./local-activity-toggle";
@@ -27,6 +27,7 @@ import { readQuota } from "../../lib/quota";
 import { NotifyLevel, NotifyTimes } from "./notify-level";
 import { TravelCard } from "./travel-card";
 import { DeviceLocationCard } from "./device-location-card";
+import { BirthYearCard } from "./birth-year-card";
 import { deviceLocationState } from "../../lib/device-location";
 import { PhonePush } from "./phone-push";
 import { EffectivenessCard } from "./effectiveness-card";
@@ -228,6 +229,7 @@ export default async function SettingsPage({ searchParams }: { searchParams?: Pr
             </section>
             <TravelCard initial={travelStateOf(ctx).settings} />
             <DeviceLocationCard initial={deviceLocationState(ctx)} />
+            <BirthYearCard initial={Number(setting(BIRTH_YEAR_SETTING)) || null} />
           </div>
         </section>
 

@@ -42,10 +42,16 @@ export interface EnergySource {
 
 // Three-process model constants, as published in Åkerstedt, Folkard & Portin 2004 (Aviat Space Environ Med 75(3) A75–A83):
 // S = (Sa − L)·e^(−0.0353t) + L awake; S′ = U − (U − Sr)·e^(−0.381t) asleep, recovering no faster below 12.5 than at 12.5;
-// C = 2.5·cos(2π(t − p)/24); the ultradian dip has amplitude 0.5 on a 12-hour period, phased 3 h before C's peak;
-// W = −5.7·e^(−0.65692t) after waking (the paper keeps W out of its fitted predictions; here the person's own cut points absorb it).
+// C = 2.5·cos(2π(t − p)/24); W = −5.7·e^(−kt) after waking.
+// Two terms differ from the paper (2026-11-11, docs/energy-and-ecosystem.md §2.1), because with the published ones a usual day had no
+// afternoon dip at all — alertness rose from waking to a single peak at 17:00:
+// - the ultradian term U (12-hour period) has amplitude 1.5, not 0.5, with its trough 1.8 h before C's peak (15:00 on a 23:30–7:30
+//   night), not 3 h: that gives the mid-afternoon dip in sleep propensity (Monk 2005; Carskadon & Dement 1992) and, at its crest six
+//   hours later, the evening wake-maintenance zone 1–3 h before habitual bedtime (Strogatz 1987);
+// - W fades with Jewett et al. 1999's time constant for cognitive throughput, 1.17 h (k = 0.855/h), not the paper's 1.52 h, which the
+//   paper kept out of its fitted predictions anyway.
 const S_LOWER = 2.4, S_UPPER = 14.3, AWAKE_DECAY = 0.0353, SLEEP_RECOVERY = 0.381, C_AMPLITUDE = 2.5, C_ACROPHASE = 16.8;
-const S_CRITICAL = 12.5, U_AMPLITUDE = 0.5, U_LEAD = 3, W_INIT = 5.7, W_DECAY = 0.65692;
+const S_CRITICAL = 12.5, U_AMPLITUDE = 1.5, U_LEAD = 1.8, W_INIT = 5.7, W_DECAY = 1 / 1.17;
 const HOUR = 3_600_000;
 /** How far back the homeostat is carried. */
 const HISTORY_DAYS = 14;
@@ -335,11 +341,82 @@ export function dayCapacity(at: string, day: string, episodes: SleepEpisode[], p
 }
 
 /**
- * The person's stated best hours (「上午 9–12 点效率最高」) move the circadian peak: the default peak is late afternoon, and a person at
- * their best in the morning peaks earlier. Returns the shift in hours, bounded to ±6.
+ * The middles of the default day's two good stretches (23:30–7:30, no shift): the late-morning peak and the early-evening one. Pinned by
+ * energy-prior.test.ts against the curve itself.
+ */
+export const DEFAULT_PEAKS = [10.75, 19] as const;
+const clampShift = (hours: number) => Math.max(-6, Math.min(6, hours));
+const round2 = (hours: number) => Math.round(hours * 100) / 100;
+
+/**
+ * The person's stated best hours (「上午 9–12 点效率最高」) move the circadian phase so that the default day's nearer good stretch lands on
+ * them: best hours of 9–12 barely move it, 7–10 move it earlier. Returns the shift in hours, bounded to ±6. (Until 2026-11-11 this
+ * aimed C's acrophase, 16.8, at the window, which put anyone keeping the default 9–12 pattern at the −6 bound.)
  */
 export function phaseShiftFromPeak(peakStartHour: number | undefined, peakEndHour: number | undefined): number {
   if (peakStartHour === undefined || peakEndHour === undefined) return 0;
   const mid = (peakStartHour + peakEndHour) / 2;
-  return Math.max(-6, Math.min(6, mid - C_ACROPHASE));
+  const nearest = DEFAULT_PEAKS.reduce((best, peak) => Math.abs(mid - peak) < Math.abs(mid - best) ? peak : best, DEFAULT_PEAKS[0]);
+  return round2(clampShift(mid - nearest));
 }
+
+/** The mid-sleep of the default night (23:30–7:30), where the published acrophase applies unshifted. */
+export const DEFAULT_MID_SLEEP = 3.5;
+/** A mid-sleep (local hours) as a phase shift from the default night's: 5:30 is +2, 1:00 is −2.5; bounded to ±6. */
+export const phaseShiftFromMidSleep = (midSleep: number): number => round2(clampShift(((((midSleep - DEFAULT_MID_SLEEP) % 24) + 36) % 24) - 12));
+
+/**
+ * Mid-sleep on work-free days by age, decimal hours (Fischer, Lombardi, Marucci-Wellman & Roenneberg 2017, PLoS ONE 12(6):e0178782,
+ * Table 1, all respondents, n = 53,689 US time-use diaries; each point the mean of the five single years around it, 80 the 80+ row). The
+ * latest is around 19–20; it moves about an hour earlier by 30 and slowly after. The same shape as the European MCTQ data (Roenneberg et
+ * al. 2004, Curr Biol 14:R1038), whose swing with age is larger.
+ */
+const MID_SLEEP_BY_AGE: ReadonlyArray<readonly [number, number]> = [
+  [17, 4.44], [19, 4.66], [22, 4.43], [25, 4.01], [30, 3.71], [35, 3.40], [40, 3.34], [45, 3.21], [50, 3.13], [55, 3.07], [60, 3.01],
+  [65, 2.94], [70, 2.90], [75, 2.87], [80, 2.83]
+];
+/** The same survey's mean over every age (3:26), within five minutes of the default night's mid-sleep. */
+export const POPULATION_MID_SLEEP = 3.43;
+
+/** The typical free-day mid-sleep at `age`, interpolated, held at the table's ends. */
+export function typicalMidSleep(age: number): number {
+  const first = MID_SLEEP_BY_AGE[0]!, last = MID_SLEEP_BY_AGE[MID_SLEEP_BY_AGE.length - 1]!;
+  if (age <= first[0]) return first[1];
+  if (age >= last[0]) return last[1];
+  const upper = MID_SLEEP_BY_AGE.findIndex(([at]) => at >= age);
+  const [a0, m0] = MID_SLEEP_BY_AGE[upper - 1]!, [a1, m1] = MID_SLEEP_BY_AGE[upper]!;
+  return m0 + ((m1 - m0) * (age - a0)) / (a1 - a0);
+}
+/**
+ * The phase an age alone suggests: its typical mid-sleep against the population's. Small next to how people of one age differ (the
+ * survey's SD is about 2 h at every age), so any measured sleep timing or stated best hours outrank it.
+ */
+export const phaseShiftFromAge = (age: number): number => round2(typicalMidSleep(age) - POPULATION_MID_SLEEP);
+
+/**
+ * The birth year the person chose to give (Settings → 时间与提醒, optional, never asked again): a plain setting, kept apart from the
+ * registration forms' secret items.
+ */
+export const BIRTH_YEAR_SETTING = "profile.birthYear";
+/** Age in whole years from a stored birth year, or undefined when none was given or it is not a plausible adult's (14–100). */
+export function ageFromBirthYear(raw: string | null | undefined, now: string): number | undefined {
+  if (!raw || !/^\d{4}$/.test(raw.trim())) return undefined;
+  const age = new Date(now).getUTCFullYear() - Number(raw.trim());
+  return age >= 14 && age <= 100 ? age : undefined;
+}
+
+export type PhaseSource = "chronotype" | "sleep" | "stated" | "age" | "default";
+/**
+ * Where the prior's circadian phase comes from, the most personal first: the person's measured or stated sleep timing (MCTQ's MSF_sc, else
+ * the usual night's mid-sleep), then their stated best hours, then their age, else the default adult's (0).
+ */
+export function priorPhase(input: { midSleep?: { hours: number; source: "chronotype" | "sleep" } | undefined;
+  statedPeak?: { start: number; end: number } | null | undefined; age?: number | undefined }): { shift: number; source: PhaseSource } {
+  if (input.midSleep) return { shift: phaseShiftFromMidSleep(input.midSleep.hours), source: input.midSleep.source };
+  if (input.statedPeak) return { shift: phaseShiftFromPeak(input.statedPeak.start, input.statedPeak.end), source: "stated" };
+  if (input.age !== undefined) return { shift: phaseShiftFromAge(input.age), source: "age" };
+  return { shift: 0, source: "default" };
+}
+
+/** The default night moved with the phase, for a person whose own night is not known: the whole usual day shifts, not only C. */
+export const shiftedDefaultNight = (shift: number) => ({ from: 23.5 + shift, to: 7.5 + shift });
