@@ -14,6 +14,7 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createNodeHub } from "../apps/worker/src/node/hub";
+import { listenForBrowser } from "../apps/worker/src/browser-port";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const args = process.argv.slice(2);
@@ -47,8 +48,7 @@ site.on("upgrade", (request, socket, head) => {
   });
   upstream.on("error", () => socket.destroy());
 });
-await new Promise<void>((resolve) => site.listen(0, "127.0.0.1", resolve));
-const siteUrl = `http://127.0.0.1:${(site.address() as { port: number }).port}`;
+const siteUrl = `http://127.0.0.1:${await listenForBrowser(site)}`;
 
 const main = option("main");
 const launch = (): ChildProcess => spawn(main ? process.execPath : path.join(repoRoot, "node_modules", ".bin", "tsx.cmd"),

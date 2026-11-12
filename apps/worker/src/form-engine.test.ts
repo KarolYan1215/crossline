@@ -3,13 +3,13 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { AddressInfo } from "node:net";
 import type { ApplicationSlot, FormAction, FormBrowserInput, FormCheckContext, FormFillAnswer, FormFillContext, FormObserveAnswer, FormObserveInput, Opportunity, StoredFormRun } from "@crossline/core";
 import { fillForm, type EngineDeps, type FormFallback, type ProfileValues } from "./form-engine";
 import { openFormBrowser, type FormBrowser } from "./form-browser";
 import { browserUseFallback, stagehandFallback } from "./form-fallbacks";
 import { hashForm } from "./form-profile";
 import { findBrowser } from "./node/browser";
+import { listenForBrowser } from "./browser-port";
 
 /**
  * The form engine end to end against fake registration pages served here (docs/opportunity-agent.md §14, standards 3 and 5): a real
@@ -90,8 +90,7 @@ beforeAll(async () => {
       response.writeHead(404); response.end();
     });
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  base = `http://127.0.0.1:${await listenForBrowser(server)}`;
 });
 afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
 

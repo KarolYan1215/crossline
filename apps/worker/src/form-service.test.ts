@@ -1,6 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -9,6 +8,7 @@ import type { SecretStore } from "@crossline/connectors";
 import { CrosslineStore, applicationProfile, formRunOf, queueFormRun, readFormRuns, saveFormRun } from "@crossline/db";
 import { openFormBrowser } from "./form-browser";
 import { createFormService } from "./form-service";
+import { listenForBrowser } from "./browser-port";
 import { createNodeBrowsers, findBrowser } from "./node/browser";
 import type { NodeBrowserLink } from "./node/hub";
 
@@ -25,8 +25,7 @@ beforeAll(async () => {
       response.end(`<h1>AI Night</h1><form method="post" action="/done"><label>Email <input name="email"></label><button type="submit">Register</button></form>`);
     });
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  base = `http://127.0.0.1:${await listenForBrowser(server)}`;
 });
 afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
 

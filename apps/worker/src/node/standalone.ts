@@ -10,6 +10,7 @@ import { startNodeAgent, type AppServerLines, type NodeAgentStatus } from "./age
 import { API_KEY_SHAPE, loginNodeWithApiKey, withControl } from "./control";
 import { NODE_RUNTIME_FLAGS, TOKEN_GONE } from "./protocol";
 import { createNodeBrowsers } from "./browser";
+import { listenForBrowser } from "../browser-port";
 // The launcher's updater and its signature check, bundled in as they are (scripts/package-node.ts allows exactly these two files).
 import { checkForUpdate, downloadInstaller, type UpdateManifest } from "../../../launcher/src/update";
 
@@ -338,7 +339,8 @@ try {
 } catch { /* no lock: this is the one */ }
 
 await new Promise<void>((resolve) => {
-  server.once("error", () => { server.listen(0, "127.0.0.1", resolve); });
+  // Taken: any free port a browser will open (port 0 alone can draw one it refuses, such as 6665).
+  server.once("error", () => { void listenForBrowser(server).then(() => resolve()); });
   server.listen(PREFERRED_PORT, "127.0.0.1", resolve);
 });
 port = (server.address() as { port: number }).port;

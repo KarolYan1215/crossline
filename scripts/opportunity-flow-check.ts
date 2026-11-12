@@ -18,7 +18,7 @@
 import { register } from "node:module";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
+import { listenForBrowser } from "../apps/worker/src/browser-port";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -59,8 +59,7 @@ const server = createServer((request, response) => {
       <label>Full name <input name="name"></label><label>Email <input name="email"></label><button type="submit">Register</button></form>`);
   });
 });
-await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+const base = `http://127.0.0.1:${await listenForBrowser(server)}`;
 
 const store = new CrosslineStore(path.join(dataDir, "crossline.db"));
 globalThis.crosslineStore = store;
