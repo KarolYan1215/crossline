@@ -16,13 +16,20 @@ describe("interviewCompleteness", () => {
     expect(partial.score).toBeGreaterThan(0);
     expect(partial.score).toBeLessThan(1);
     expect(partial.missing).toContain("还没谈到「能量」");
-    expect(partial.missing).toContain("还有 1 条推断没有验证或推翻");
+    expect(partial.missing).toContain(`验证或推翻的推断还不到 ${HYPOTHESES_WANTED} 条（现有 1 条）`);
     expect(partial.missing).toContain("还没有带试做的职业方向");
 
     const full = interviewCompleteness({ lowerBound: true, stagesSeen: [...COMPLETENESS_PARTS], dimensions: allDimensions,
       hypotheses: Array.from({ length: HYPOTHESES_WANTED }, (_, index) => ({ status: index % 2 ? "refuted" : "undecided" })),
       careers: [{ trial: { task: "四周内复现一篇论文的性能模型" } }] });
     expect(full).toEqual({ lowerBound: true, score: 1, full: true, missing: [] });
+  });
+
+  it("counts hypotheses settled, so open ones added later do not hold it below full", () => {
+    const many = [...Array.from({ length: 12 }, () => ({ status: "supported" })), ...Array.from({ length: 13 }, () => ({ status: "open" }))];
+    const result = interviewCompleteness({ lowerBound: true, stagesSeen: [...COMPLETENESS_PARTS], dimensions: allDimensions, hypotheses: many,
+      careers: [{ trial: { task: "两周内写一篇财经短稿" } }] });
+    expect(result).toEqual({ lowerBound: true, score: 1, full: true, missing: [] });
   });
 
   it("never reads full on the lower bound alone", () => {

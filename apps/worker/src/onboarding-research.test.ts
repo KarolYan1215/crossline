@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import type { ResearchThread } from "@crossline/core";
-import { createResearchRunner, newResearchQuestions, profileBrief, readResearch, RESEARCH_OPEN_MAX, RESEARCH_RUNS_PER_STEP, RESEARCH_SKILL, researchForDialogue } from "./onboarding-research";
+import { createResearchRunner, newResearchQuestions, profileBrief, readResearch, RESEARCH_OPEN_MAX, RESEARCH_RUNS_PER_STEP, RESEARCH_SKILL, researchFindings, researchForDialogue } from "./onboarding-research";
 import { fakeRuntime } from "./testing/fake-runtime";
 
 let store: CrosslineStore;
@@ -62,4 +62,11 @@ test("the portrait brief puts the question's dimension first and names the caree
   expect(brief[0]).toContain("成就动机强");
   expect(brief.findIndex((line) => line.includes("h2"))).toBeLessThan(brief.findIndex((line) => line.includes("h1")));
   expect(brief.at(-1)).toBe("职业候选：管理咨询分析师");
+});
+
+test("the extraction and the portrait get only finished threads with a sourced conclusion", () => {
+  const findings = researchFindings([thread({ id: "a", status: "done", conclusion: "Excel 9/10", sources: [source] }),
+    thread({ id: "b", status: "done", messages: [{ role: "agent", text: "查不到", at: "2026-11-12T00:00:00.000Z" }] }),
+    thread({ id: "c", status: "running", conclusion: "未完", sources: [source] })]);
+  expect(findings).toEqual([{ question: "q", conclusion: "Excel 9/10", sources: [source] }]);
 });

@@ -13,7 +13,10 @@ export const COMPLETENESS_PARTS = ["narrative", "compass", "energy", "situation"
 const PART_NAME: Record<(typeof COMPLETENESS_PARTS)[number], string> = {
   narrative: "经历与转折", compass: "指南针", energy: "能量", situation: "处境", orientation: "主线", lines: "主线细节"
 };
-/** At least this many hypotheses before the portrait's inferences count as tested. */
+/**
+ * This many hypotheses settled (supported, refuted, undecided) and the portrait's inferences count as tested. Counted, not a share: the
+ * extraction keeps adding hypotheses, and on the 2026-11-12 replay 25 of them with 13 open held the button at 85% for good.
+ */
 export const HYPOTHESES_WANTED = 5;
 
 export type CompletenessInput = {
@@ -38,7 +41,7 @@ export function interviewCompleteness(input: CompletenessInput): InterviewComple
   const dimensionsLeft = DIMENSIONS.filter((id) => !evidenced.has(id));
   const hypotheses = input.hypotheses ?? [];
   const settled = hypotheses.filter((item) => item.status !== "open").length;
-  const tested = Math.min(1, hypotheses.length / HYPOTHESES_WANTED) * (hypotheses.length ? settled / hypotheses.length : 0);
+  const tested = Math.min(1, settled / HYPOTHESES_WANTED);
   const trials = (input.careers ?? []).filter((career) => Boolean(career.trial?.task)).length;
   const score = input.lowerBound
     ? 0.3 * (1 - partsLeft.length / COMPLETENESS_PARTS.length) + 0.4 * (1 - dimensionsLeft.length / DIMENSIONS.length) + 0.2 * tested + 0.1 * Math.min(1, trials)
@@ -48,8 +51,7 @@ export function interviewCompleteness(input: CompletenessInput): InterviewComple
     : [
       ...partsLeft.map((part) => t("还没谈到「{{part}}」", { part: t(PART_NAME[part]) })),
       ...(dimensionsLeft.length ? [t("画像还有 {{count}} 个维度缺本人的话或行为作证据", { count: dimensionsLeft.length })] : []),
-      ...(hypotheses.length < HYPOTHESES_WANTED ? [t("推断还不到 {{count}} 条", { count: HYPOTHESES_WANTED })] : []),
-      ...(hypotheses.length - settled > 0 ? [t("还有 {{count}} 条推断没有验证或推翻", { count: hypotheses.length - settled })] : []),
+      ...(settled < HYPOTHESES_WANTED ? [t("验证或推翻的推断还不到 {{count}} 条（现有 {{settled}} 条）", { count: HYPOTHESES_WANTED, settled })] : []),
       ...(trials ? [] : [t("还没有带试做的职业方向")])
     ];
   const full = input.lowerBound && missing.length === 0;

@@ -48,6 +48,16 @@ export function researchForDialogue(threads: ResearchThread[]) {
   });
 }
 
+/**
+ * The finished threads' sourced conclusions, for the extraction and the portrait writer: the only outside data they cite. They do not
+ * search themselves (2026-11-12 replay: with the web on, the extraction searched job ads for 8–41 minutes a run and the portrait writer
+ * spent its whole answer reasoning and returned nothing).
+ */
+export function researchFindings(threads: ResearchThread[]) {
+  return threads.flatMap(({ status, question, conclusion, sources }) =>
+    status === "done" && conclusion && sources?.length ? [{ question, conclusion, sources }] : []);
+}
+
 /** The questions of `asked` that are new: not the same as a thread already kept (by their words), within the open threads allowed. */
 export function newResearchQuestions(threads: ResearchThread[], asked: Array<{ question: string; why: string; dimension: DimensionId }>) {
   const seen = new Set(threads.map((thread) => normalized(thread.question)));

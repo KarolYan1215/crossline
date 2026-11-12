@@ -5,6 +5,7 @@ import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { interviewLocale, sayDoFor, type CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
 import { ownerOf } from "./owner";
+import { readResearch, researchFindings } from "./onboarding-research";
 import { localeOf } from "./locale";
 
 export const PORTRAIT_WRITER = "crossline:crossline-portrait-writer";
@@ -96,7 +97,7 @@ export function createPortraitWriter(store: CrosslineStore, workspaceId: string,
       if (!previous) return { state: "blocked", code: "PORTRAIT_NONE", message: t("还没有画像报告。") };
       const merged = (output: unknown) => ({ ...previous.report, gap: (output as { gap: PortraitReport["gap"] }).gap });
       const context = { version: "crossline.portrait.v1", only: "gap", previous: previous.report, lines, doing };
-      const result = await runCodexSkill<PortraitReport>(client, context, { skillName: PORTRAIT_WRITER, cwd, allowWebSearch: true, secondPerson: ["type.summary"], tier: "mid", ...languageOf(),
+      const result = await runCodexSkill<PortraitReport>(client, context, { skillName: PORTRAIT_WRITER, cwd, secondPerson: ["type.summary"], tier: "mid", ...languageOf(),
         developerInstructions: GAP_INSTRUCTIONS,
         outputSchema: PORTRAIT_GAP_SCHEMA, prepareInput: () => context, validateOutput: (output) => validatePortrait(merged(output), lineIds),
         softAccept: (rejection, output) => keepIncomplete(rejection, () => validatePortrait(merged(output), lineIds, { lenient: true })),
@@ -138,10 +139,12 @@ export function createPortraitWriter(store: CrosslineStore, workspaceId: string,
       .filter((item) => item.rated === "fits" || item.rated === "off").map((item) => [String(item.id), item.rated as "fits" | "off"]));
     const replyText = Object.fromEntries(replies.map((reply) => [reply.id, reply.text]));
     const check = { replies: replyText, ratedOf: (id: string) => rated.get(id) };
+    // Outside data comes from the interview's research threads alone: the writer does not search (see `researchFindings`).
+    const research = session ? researchFindings(readResearch(store, workspaceId, session.id)) : [];
     const context = { version: "crossline.portrait.v1", lines, profile, facts, replies, documents, doing,
-      ...(workHistory.length ? { workHistory } : {}), ...(cards.length ? { cards } : {}),
+      ...(workHistory.length ? { workHistory } : {}), ...(cards.length ? { cards } : {}), ...(research.length ? { research } : {}),
       ...(rejected.length ? { rejectedClaims: rejected.map(([, entry]) => entry.statement).filter(Boolean).slice(0, 30) } : {}) };
-    const result = await runCodexSkill<PortraitReport>(client, context, { skillName: PORTRAIT_WRITER, cwd, allowWebSearch: true, secondPerson: ["type.summary"], ...languageOf(),
+    const result = await runCodexSkill<PortraitReport>(client, context, { skillName: PORTRAIT_WRITER, cwd, secondPerson: ["type.summary"], ...languageOf(),
       developerInstructions: INSTRUCTIONS,
       outputSchema: PORTRAIT_SCHEMA, prepareInput: () => context, validateOutput: (output) => checked(output, lineIds, check),
       softAccept: (rejection, output) => keepIncomplete(rejection, () => checked(output, lineIds, { ...check, lenient: true })),

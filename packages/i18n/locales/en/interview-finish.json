@@ -11,8 +11,7 @@
   "开始使用前还需要的几项": "What is still needed before starting",
   "还没谈到「{{part}}」": "“{{part}}” not discussed yet",
   "画像还有 {{count}} 个维度缺本人的话或行为作证据": "{{count}} portrait dimensions still lack the person's own words or behaviour as evidence",
-  "推断还不到 {{count}} 条": "Fewer than {{count}} inferences so far",
-  "还有 {{count}} 条推断没有验证或推翻": "{{count}} inferences not yet supported or refuted",
+  "验证或推翻的推断还不到 {{count}} 条（现有 {{settled}} 条）": "Fewer than {{count}} inferences supported or refuted ({{settled}} so far)",
   "还没有带试做的职业方向": "No career direction with a trial yet",
   "访谈调研": "Interview research"
 }

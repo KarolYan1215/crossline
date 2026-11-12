@@ -24,6 +24,7 @@ function hoursOnRecord(store: CrosslineStore, workspaceId: string): NonNullable<
   } catch { return []; }
 }
 import { DATES_UNRECORDED_EVENT, ONBOARDING_UNRECORDED_EVENT, persistExtraction, personTimeZone, readProfileModel, readSectionRecords } from "./onboarding-persist";
+import { readResearch, researchFindings } from "./onboarding-research";
 import { sourceIds } from "./source-ids";
 import { DOMAIN_PACKS, domainGuides } from "@crossline/identity-packs";
 
@@ -226,7 +227,10 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       // The person's ratings of the interview's observations: one they called 不准 is wrong about them and does not go into the portrait.
       ...(() => { const rated = Object.values(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS))).filter((rating) => rating.text)
         .slice(-8).map((rating) => `${rating.verdict === "fits" ? "准" : "不准"}：${rating.text!.slice(0, 120)}`);
-        return rated.length && !focus && !notes ? { observations: rated } : {}; })()
+        return rated.length && !focus && !notes ? { observations: rated } : {}; })(),
+      // Outside data comes from the research threads alone (decision 22): hypotheses' `external` basis and the careers' job-ad sources.
+      ...(() => { const findings = focus || notes ? [] : researchFindings(readResearch(store, workspaceId, sessionId));
+        return findings.length ? { research: findings } : {}; })()
     };
     const ids = { lines: lines.map((line) => line.id) };
     let pruned: string[] = [];
@@ -235,9 +239,6 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     const result = await runCodexSkill<OnboardingExtraction>(client, context, {
       skillName: ONBOARDING_EXTRACT_SKILL, cwd, developerInstructions: INSTRUCTIONS, outputSchema: onboardingExtractSchema(ids),
       prepareInput: () => context, tools,
-      // Hypotheses may cite external data (2026-11-12, decision 22): the web is offered, never required (on a provider without search the
-      // run goes on without it).
-      allowWebSearch: true,
       // The prompt cache (docs/token-economy.md §2.5): the lines, projects and portrait first, the facts on record (which grow) after
       // them, and this run's replies, files, task and date last.
       stableKeys: ["version", "timeZone", "lines", "domainGuides", "lineProfiles", "projects", "focusLine", "profile", "facts"],
