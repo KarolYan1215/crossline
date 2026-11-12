@@ -15,7 +15,14 @@ export type MailHeader = { uid: number; from: string; fromAddress: string; to: s
   /** The message's own Message-ID and the one it answers (In-Reply-To), "" when absent: how a sent answer is matched to its message. */
   messageId?: string; inReplyTo?: string;
   /** The first `BODY` characters of the text, for checking what a model read (an amount, an order number) against the mail itself; never sent to a model and never stored. */
-  body?: string };
+  body?: string;
+  /**
+   * Structure for an event's obligation (core `obligation.ts`), read by code from the message itself: sent through a list or bulletin
+   * board (List-Id, List-Unsubscribe, Precedence bulk/list/junk), every To and Cc address, and the calendar invitation it carries.
+   */
+  listed?: boolean; recipients?: string[]; invite?: MailInvite };
+/** A text/calendar part: its METHOD, the organizer and each attendee's ROLE and PARTSTAT (addresses lowercased). */
+export type MailInvite = { method: string; organizer: string; attendees: Array<{ address: string; role: string; partstat: string }> };
 /** A message the person was asked to answer, as the sent-mail check looks for it. */
 export type ReplyThread = { messageId: string; fromAddress: string; subject: string; date: string };
 export type MailMessage = MailHeader & { text: string };
@@ -90,11 +97,34 @@ export type ImapFactory = (options: ImapFlowOptions) => ImapLike;
 const realFactory: ImapFactory = (options) => new ImapFlow(options);
 
 async function textOf(source: Buffer | undefined): Promise<string> {
-  if (!source?.length) return "";
+  return (await partsOf(source)).text;
+}
+
+/** A calendar file's METHOD, ORGANIZER and ATTENDEE lines (folded lines joined); undefined without a VEVENT. */
+export function inviteOf(ics: string): MailInvite | undefined {
+  const lines = ics.replace(/\r?\n[ \t]/g, "").split(/\r?\n/);
+  if (!lines.some((line) => /^BEGIN:VEVENT/i.test(line))) return undefined;
+  const address = (line: string) => (/mailto:([^;:\s]+)\s*$/i.exec(line)?.[1] ?? "").trim().toLowerCase();
+  const param = (line: string, name: string) => (new RegExp(`;${name}=([^;:]+)`, "i").exec(line.split(/:mailto:/i)[0] ?? "")?.[1] ?? "").replace(/"/g, "").toUpperCase();
+  return { method: (lines.find((line) => /^METHOD:/i.test(line))?.slice(7) ?? "").trim().toUpperCase(),
+    organizer: address(lines.find((line) => /^ORGANIZER[;:]/i.test(line)) ?? ""),
+    attendees: lines.filter((line) => /^ATTENDEE[;:]/i.test(line)).map((line) => ({ address: address(line), role: param(line, "ROLE"), partstat: param(line, "PARTSTAT") }))
+      .filter((attendee) => attendee.address).slice(0, 50) };
+}
+
+/** The text, and the structure an event's obligation is read from: list headers and the calendar part. */
+async function partsOf(source: Buffer | undefined): Promise<{ text: string; listed: boolean; invite?: MailInvite }> {
+  if (!source?.length) return { text: "", listed: false };
   try {
     const parsed = await simpleParser(source, { skipImageLinks: true, skipTextToHtml: true });
-    return plain(parsed.text || (typeof parsed.html === "string" ? parsed.html.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ") : ""));
-  } catch { return ""; }
+    const text = plain(parsed.text || (typeof parsed.html === "string" ? parsed.html.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ") : ""));
+    // The raw header lines: mailparser folds every List-* header into one `list` object.
+    const listed = parsed.headerLines.some((header) => header.key === "list-id" || header.key === "list-unsubscribe"
+      || (header.key === "precedence" && /:\s*(bulk|list|junk)\s*$/i.test(header.line)));
+    const calendar = parsed.attachments.find((part) => /^text\/calendar/i.test(part.contentType ?? ""));
+    const invite = calendar ? inviteOf(calendar.content.toString("utf8")) : undefined;
+    return { text, listed, ...(invite ? { invite } : {}) };
+  } catch { return { text: "", listed: false }; }
 }
 
 /**
@@ -163,10 +193,12 @@ export function createImapMail(server: MailServer, user: string, rawPassword: st
     }
   }
   const header = async (message: Pick<FetchMessageObject, "uid" | "envelope" | "internalDate" | "source">): Promise<MailHeader> => {
-    const text = await textOf(message.source);
+    const { text, listed, invite } = await partsOf(message.source);
+    const recipients = [...new Set([...(message.envelope?.to ?? []), ...(message.envelope?.cc ?? [])].map((item) => (item.address ?? "").trim().toLowerCase()).filter(Boolean))];
     return { uid: message.uid, from: addressText(message.envelope?.from), fromAddress: (message.envelope?.from?.[0]?.address ?? "").toLowerCase(),
       to: addressText(message.envelope?.to), subject: (message.envelope?.subject ?? "").slice(0, 300), date: iso(message.envelope?.date ?? message.internalDate),
-      snippet: text.slice(0, SNIPPET), body: text.slice(0, BODY), messageId: message.envelope?.messageId ?? "", inReplyTo: message.envelope?.inReplyTo ?? "" };
+      snippet: text.slice(0, SNIPPET), body: text.slice(0, BODY), messageId: message.envelope?.messageId ?? "", inReplyTo: message.envelope?.inReplyTo ?? "",
+      listed, recipients: recipients.slice(0, 50), ...(invite ? { invite } : {}) };
   };
   const QUERY = { uid: true, envelope: true, internalDate: true, source: { start: 0, maxLength: PARTIAL_BYTES } } as const;
 
