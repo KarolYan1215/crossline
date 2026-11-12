@@ -588,7 +588,7 @@
   "订阅日历": "Subscribed calendars",
   "记录中": "Recording",
   "记录为可信身份": "Record as trusted",
-  "记录应用与窗口标题；标题只存本机，14 天后抹除，不发给模型": "Records apps and window titles; titles stay on this computer, are wiped after 14 days and never go to a model",
+  "记录应用与窗口标题；标题只存本机，14 天后抹除": "Records apps and window titles; titles stay on this computer and are wiped after 14 days",
   "记录级别": "Recording level",
   "许可证": "License",
   "设备 {{n}}": "Device {{n}}",

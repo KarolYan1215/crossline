@@ -354,6 +354,8 @@ export type StoredExecution = {
    * lives here rather than as a column on `evidence_claims`. Absent when the order had no checklist or
    * the person answered none of it. */
   checklistAnswers?: ChecklistAnswer[];
+  /** A 拟计时 draft the person confirmed (`recordInferredSession`); absent for a timer or a reported session. */
+  source?: "inferred_confirmed";
 };
 
 export type StoredPlanVersion = {
@@ -1904,7 +1906,7 @@ export class CrosslineStore {
     const rows = (this.#prepare(
       "SELECT id, started_at, ended_at, pause_minutes, payload_json FROM executions WHERE workspace_id = ? AND work_order_id = ? AND ended_at IS NOT NULL ORDER BY started_at"
     ).all(workspaceId, workOrderId) as Session[])
-      .map((row) => ({ row, payload: JSON.parse(row.payload_json) as { durationObserved: boolean; reportedMinutes?: number; reportedSource?: "one_tap" | "activity" } }))
+      .map((row) => ({ row, payload: JSON.parse(row.payload_json) as { durationObserved: boolean; reportedMinutes?: number; reportedSource?: "one_tap" | "activity" | "inferred_confirmed" } }))
       .filter(({ payload }) => payload.durationObserved || (payload.reportedMinutes ?? 0) > 0);
     const last = rows.at(-1)?.row;
     if (!last) return;
@@ -1913,7 +1915,8 @@ export class CrosslineStore {
     const observedMinutes = rows.reduce((sum, { row, payload }) => sum + ((payload.reportedMinutes ?? 0) > 0 ? payload.reportedMinutes!
       : Math.round((Date.parse(row.ended_at) - Date.parse(row.started_at)) / 60_000) - row.pause_minutes), 0);
     const reported = rows.map(({ payload }) => payload.reportedSource).filter(Boolean);
-    const actualSource = reported.includes("one_tap") ? "one_tap" as const : reported.includes("activity") ? "activity" as const : "timer" as const;
+    // A confirmed 拟计时 draft is the screen record's suggestion confirmed: `activity`.
+    const actualSource = reported.includes("one_tap") ? "one_tap" as const : reported.includes("activity") || reported.includes("inferred_confirmed") ? "activity" as const : "timer" as const;
     if (observedMinutes < 1) return;
     // One observation per work order. A revoke-then-reaccept with no new session is a no-op; one with a new
     // session replaces the earlier row, whose minutes the new sum already contains — inserting beside it
@@ -1976,6 +1979,29 @@ export class CrosslineStore {
   }
 
   /**
+   * A 拟计时 draft the person confirmed (docs/plans/2026-11-11-walkthrough-decisions.md §1): a closed session over the drafted stretch,
+   * observed (`durationObserved`) with the drafted work minutes as its length and marked `inferred_confirmed`, so it is measured time and
+   * counts towards the task's duration observation (as `activity`). Unlike `recordConfirmedSession` it never touches a running timer: the
+   * stretch is in the past, the timer is now. Once per `key`.
+   */
+  recordInferredSession(workspaceId: string, workOrderId: string, ownerId: string,
+    session: { startedAt: string; endedAt: string; minutes: number; key: string; stepId?: string }): { executionId: string; changed: boolean } {
+    return this.#db.transaction(() => {
+      const minutes = Math.round(Math.min(24 * 60, Math.max(1, session.minutes)));
+      const appended = this.appendEvent({ ownerId, workspaceId, idempotencyKey: session.key, type: "execution.confirmed", entityId: workOrderId,
+        payload: { startedAt: session.startedAt, endedAt: session.endedAt, minutes, source: "inferred_confirmed", ...(session.stepId ? { stepId: session.stepId } : {}) } });
+      if (!appended.inserted) return { executionId: "", changed: false };
+      const id = randomUUID();
+      this.#prepare(`
+        INSERT INTO executions (id, owner_id, workspace_id, work_order_id, started_at, ended_at, pause_minutes, outcome, payload_json)
+        VALUES (?, ?, ?, ?, ?, ?, 0, 'confirmed', ?)
+      `).run(id, ownerId, workspaceId, workOrderId, session.startedAt, notBefore(session.endedAt, session.startedAt),
+        JSON.stringify({ durationObserved: true, interruptions: [], reportedMinutes: minutes, reportedSource: "inferred_confirmed", source: "inferred_confirmed" }));
+      return { executionId: id, changed: true };
+    }).immediate();
+  }
+
+  /**
    * Opens a timed session on an order already `active` with none open: after a confirmed session closed the last one, pressing start
    * again has to time something (the state machine has no transition for it — the order never left `active`).
    */
@@ -2025,7 +2051,7 @@ export class CrosslineStore {
       : this.#prepare("SELECT * FROM executions WHERE workspace_id = ? ORDER BY started_at, id").all(workspaceId)) as Array<Record<string, string | number | null>>;
     return rows.map((row) => {
       const payload = JSON.parse(String(row.payload_json)) as {
-        durationObserved?: boolean; interruptions?: StoredExecution["interruptions"]; checklistAnswers?: ChecklistAnswer[];
+        durationObserved?: boolean; interruptions?: StoredExecution["interruptions"]; checklistAnswers?: ChecklistAnswer[]; source?: string;
       };
       return {
         id: String(row.id), ownerId: String(row.owner_id), workspaceId: String(row.workspace_id),
@@ -2034,7 +2060,8 @@ export class CrosslineStore {
         pauseMinutes: Number(row.pause_minutes), durationObserved: payload.durationObserved === true,
         ...(row.outcome ? { outcome: String(row.outcome) as NonNullable<StoredExecution["outcome"]> } : {}),
         interruptions: payload.interruptions ?? [],
-        ...(payload.checklistAnswers?.length ? { checklistAnswers: payload.checklistAnswers } : {})
+        ...(payload.checklistAnswers?.length ? { checklistAnswers: payload.checklistAnswers } : {}),
+        ...(payload.source === "inferred_confirmed" ? { source: "inferred_confirmed" as const } : {})
       };
     });
   }
@@ -2735,6 +2762,16 @@ export class CrosslineStore {
   recentActivityEntries(workspaceId: string, limit: number): RecentActivityEntry[] {
     const rows = this.#prepare("SELECT start_at, end_at, app, title, category, idle FROM activity_segments WHERE workspace_id = ? ORDER BY id DESC LIMIT ?")
       .all(workspaceId, limit) as Array<{ start_at: string; end_at: string; app: string; title: string; category: string; idle: number }>;
+    return rows.map((row) => ({ workspaceId, start: row.start_at, end: row.end_at, app: row.app, title: row.title, category: row.category, idle: Boolean(row.idle) }));
+  }
+
+  /**
+   * Entries with their titles since an instant, oldest first, for the worker's 拟计时 pass only (`apps/worker/src/time-drafts.ts`): the
+   * titles of stretches no rule or block placed go to the attribution model (the owner's decision of 2026-11-11).
+   */
+  activityEntriesSince(workspaceId: string, sinceIso: string): RecentActivityEntry[] {
+    const rows = this.#prepare("SELECT start_at, end_at, app, title, category, idle FROM activity_segments WHERE workspace_id = ? AND end_at > ? ORDER BY start_at, id")
+      .all(workspaceId, sinceIso) as Array<{ start_at: string; end_at: string; app: string; title: string; category: string; idle: number }>;
     return rows.map((row) => ({ workspaceId, start: row.start_at, end: row.end_at, app: row.app, title: row.title, category: row.category, idle: Boolean(row.idle) }));
   }
 

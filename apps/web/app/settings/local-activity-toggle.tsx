@@ -17,7 +17,7 @@ const send = (body: Record<string, unknown>) => fetch("/api/settings/local-activ
 const PRIVACY: Record<Privacy, { body: Record<string, unknown>; label: string; title: string }> = {
   off: { body: { consent: "denied" }, label: "关闭", title: "不读取屏幕活动" },
   minutes: { body: { consent: "granted", detail: "denied" }, label: "只记分钟", title: "只记每天的活跃分钟数，不记应用与窗口" },
-  detail: { body: { detail: "granted" }, label: "应用与窗口", title: "记录应用与窗口标题；标题只存本机，14 天后抹除，不发给模型" }
+  detail: { body: { detail: "granted" }, label: "应用与窗口", title: "记录应用与窗口标题；标题只存本机，14 天后抹除" }
 };
 
 /**

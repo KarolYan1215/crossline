@@ -53,6 +53,25 @@
 
 工作量：规则字段和拟计时生成 M（worker + db 一张表或事件）；收工页 S–M；校准接入 S。
 
+### 本人的改动与状态（2026-11-11，已做）
+
+本人批准上面的设计，改了三处：
+
+- **设置里不加说明。** 通用规矩：功能要授权时，只问本人同不同意；不同意就关掉这项功能，那时再说明少了什么。拟计时照此做：收工页在「应用与窗口」没开时问一次「用屏幕上的应用与窗口起草计时？」，同意就开，不用就关（只关「应用与窗口」，「只记分钟」不动）并说「忘了开计时的工作时间不会再提出来，也不会算进实测」，之后不再问（`activity.drafts.asked`）。设置里原来写的「不发给模型」已不成立，删掉了这四个字，没有加别的话。
+- **窗口标题可以给模型**（本人原话「窗口标题无所谓，都是通用的内容」）。这是一条新的数据路径：归属顺序改为 ① 本人的规则 ② 时间与工作块重叠且类别对得上该步类型 ③ **模型**：规则和块都没归上的整段，把它的应用、类别、窗口标题和本人未完成的任务及其未完成的步骤交给 Skill `crossline-time-attributor`（低档、收集类），模型只提议，代码核对任务存在且未完成、步骤属于该任务且未完成，每段只问一次 ④ 都不中归「未归属的工作时间」。原设计第 2 条的「标题里的专名」一步由模型这一步代替。读标题的只有 worker 的拟计时这一处（`activityEntriesSince`，`activity-privacy.test.ts` 钉住）。
+- **不弹通知**，早报只说「昨天有 N 段没确认的工作时间」。
+
+已做：
+- 纯规则 `packages/core/src/time-drafts.ts`（`attributeSegment`、`draftTimeEntries`、`validateTimeAttribution`、`attributedBlockSpans`）；`ActivityRule` 加 `workOrderId/stepId/identityId`。
+- worker `apps/worker/src/time-drafts.ts`：每个账户每 10 分钟一次，从收集类 tick 跑；拟计时存在 `activity.drafts`（不含标题），14 天不确认就丢，关掉同意就全删。
+- 收工页：每块推断旁「按拟计时记 N 分」；块外的拟计时单列「这些时间在做什么？」：选任务记上 / 不算工作 / 以后这类都算这件（按该段的应用写一条规则）。本人的决定只由 web 写（`activity.drafts.decided`）。
+- 确认后写成执行记录（`recordInferredSession`）：`durationObserved: true`、`source: "inferred_confirmed"`、时长是该段的工作分钟，不会结束正在跑的计时；完成任务时按 `activity` 计入时长观测，进估时校准。未确认的不进。
+- 收工推断的错已改：块内只算归属到该任务的屏幕分钟（规则 → 模型或本人归过的拟计时 → 类别对得上该步类型）。
+
+测试：`packages/core/src/time-drafts.test.ts`、`apps/worker/src/time-drafts.test.ts`、`apps/web/lib/time-drafts.test.ts`、`measured-capacity.test.ts`「a block's screen minutes are only those attributed to its task…」、`duration-observation.test.ts`「a confirmed time draft (拟计时)…」、`activity-segments.test.ts`、`notify.test.ts`「…drafted work stretches (拟计时)…」。
+
+还没做：「以后这类都算 X」的规则按应用名匹配（拟计时不存标题，所以不能按标题关键词生成规则）；按主线的规则（`identityId`）能归属，但收工页还没有按主线筛任务；托管版设备模式上传的分段没有标题，只能靠规则和工作块归属，模型只看到应用和类别。
+
 ## 2. 必须去与不必去：怎么区分
 
 ### 现在为什么分不清
@@ -174,6 +193,6 @@
 
 1. §2 必须与可选的结构信号和大纲考试追问（W-256 的根）。
 2. §4.2 的四个 S（收工一键透明、已开始的口径、过期备考、过去的活动不推到下周）。
-3. §1 拟计时（先改收工推断按任务归属，再做块外拟计时）。
+3. §1 拟计时（先改收工推断按任务归属，再做块外拟计时）。——已做，见 §1「本人的改动与状态」。
 4. §4.5 统一计数和过时提问收起。
 5. §3「推迟 10 分钟」。

@@ -4,7 +4,9 @@
  * A window title can name a person, a page, a document or an account, so nothing here lets one travel: the only type
  * the rest of the system sees (`ActivitySegment`) has an app and a category and no title at all, and the title is used
  * once, locally, to pick the category and then stays in the store the person can read and clear. A model context built
- * from segments therefore cannot contain a title, because there is no field to put it in.
+ * from segments therefore cannot contain a title, because there is no field to put it in. The one exception is the owner's decision of
+ * 2026-11-11 (拟计时, `time-drafts.ts`): the worker's drafting pass reads titles and sends those of a stretch no
+ * rule or block placed to the attribution model.
  */
 import { tFor, type Locale } from "./i18n";
 export const ACTIVITY_CATEGORIES = ["coding", "research_tool", "writing", "reading", "communication", "meeting", "browsing", "leisure", "other"] as const;
@@ -109,7 +111,12 @@ export interface ActivitySource {
 
 /** What may leave the store: no title. */
 export type ActivitySegment = { start: string; end: string; app: string; category: ActivityCategory; idle: boolean };
-export type ActivityRule = { match: string; category: ActivityCategory };
+/**
+ * The person's own rule (`activity.rules`): words in the app or title → a category, and optionally whose time it is — a task (and step)
+ * or a line — for 拟计时 (`time-drafts.ts`). 「以后这类都算 X」 on the wrap-up writes one.
+ */
+export type ActivityRule = { match: string; category: ActivityCategory; workOrderId?: string; stepId?: string; identityId?: string };
+export const ACTIVITY_RULES = "activity.rules";
 
 // ---------------------------------------------------------------------------------------------------------------------
 // What is never recorded

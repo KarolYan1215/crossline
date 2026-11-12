@@ -133,7 +133,7 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
     const end = minutesOf(block.end);
     let inferred: InferredOutcome | undefined;
     if (nowMinute >= end && nowMinute < end + 30) {
-      try { inferred = inferBlockOutcome(blockWorkMinutes(ctx, block.orderId, toZonedInstant(today, block.start, zone), toZonedInstant(today, block.end, zone), now), end - minutesOf(block.start)); }
+      try { inferred = inferBlockOutcome(blockWorkMinutes(ctx, block.orderId, toZonedInstant(today, block.start, zone), toZonedInstant(today, block.end, zone), now, block.stepId || undefined), end - minutesOf(block.start)); }
       catch { inferred = undefined; }
     }
     return { ...block, endedTimerAt: lastStopped.get(block.orderId)?.slice(11, 16) ?? "", ...(due ? { dueDay: due } : {}), ...(inferred ? { inferred } : {}) };

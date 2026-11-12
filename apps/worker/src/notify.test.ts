@@ -191,6 +191,21 @@ test("the morning brief says how many of last night's blocks wait to be confirme
   store.close();
 });
 
+test("the morning brief says only how many of yesterday's drafted work stretches (拟计时) wait to be confirmed, and nothing when none do", async () => {
+  expect(planNotifications({ ...base, unconfirmedWork: 2 })[0]!.body).toContain("昨天有 2 段没确认的工作时间");
+  expect(planNotifications(base)[0]!.body).not.toContain("没确认的工作时间");
+  const store = new CrosslineStore(":memory:");
+  store.setSetting("w", "localActivity.consentV2", "granted");
+  store.setSetting("w", "activity.drafts", JSON.stringify([
+    { id: "draft:a", start: "2026-10-07T15:00:00.000Z", end: "2026-10-07T15:40:00.000Z", minutes: 40, app: "code.exe", category: "coding", basis: "none", createdAt: "x" },
+    { id: "draft:b", start: "2026-10-07T18:00:00.000Z", end: "2026-10-07T18:30:00.000Z", minutes: 30, app: "code.exe", category: "coding", basis: "none", createdAt: "x" }]));
+  store.setSetting("w", "activity.drafts.decided", JSON.stringify({ "draft:b": { decision: "not_work", at: "x" } }));
+  const shown: string[] = [];
+  await notifyPass(store, "w", new Date("2026-10-08T14:05:00.000Z"), async (_title, body) => { shown.push(body); return true; });
+  expect(shown[0]).toContain("昨天有 1 段没确认的工作时间");
+  store.close();
+});
+
 test("away from the computer by the screen record, a nudge goes to the phone only, and to the desktop only when no phone takes it", async () => {
   const store = new CrosslineStore(":memory:");
   store.setSetting("w", "notify.level", "off");

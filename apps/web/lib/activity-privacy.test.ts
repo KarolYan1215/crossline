@@ -9,6 +9,10 @@ import { expect, test } from "vitest";
  *
  * Titles are readable through exactly one store method, `recentActivityEntries`, and written through one,
  * `recordActivityReading`. Anything else asking for them is a new path that has to be argued for here.
+ *
+ * One such path, the owner's decision of 2026-11-11 (「窗口标题无所谓，都是通用的内容」, docs/plans/2026-11-11-walkthrough-decisions.md §1):
+ * the worker's 拟计时 pass reads titles through `activityEntriesSince` and sends the titles of a stretch that no rule or block placed to
+ * the attribution model (Skill `crossline-time-attributor`). Nowhere else.
  */
 const ROOTS = ["apps/web", "apps/worker/src", "packages"];
 const SKIP = new Set(["node_modules", ".next", ".next-e2e", "dist"]);
@@ -30,6 +34,7 @@ const using = (needle: string) => files.filter((file) => readFileSync(file, "utf
 
 test("window titles are readable from one place only: the settings route that shows the person what is kept", () => {
   expect(using("recentActivityEntries")).toEqual(["apps/web/app/api/settings/local-activity/route.ts", "packages/db/src/index.ts"]);
+  expect(using("activityEntriesSince")).toEqual(["apps/worker/src/time-drafts.ts", "packages/db/src/index.ts"]);
 });
 
 test("only the tracker writes readings, and nothing that builds a model context touches segments at all", () => {

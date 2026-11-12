@@ -226,3 +226,19 @@ test("sessions confirmed after the fact count towards the observation written at
   const [observation] = store.listDurationObservations("w", "research", "deep_work");
   expect(observation).toMatchObject({ observedMinutes: 120, actualSource: "one_tap" });
 });
+
+test("a confirmed time draft (拟计时) is a closed, observed session marked inferred_confirmed; it never ends a running timer and counts as activity", () => {
+  const store = new CrosslineStore(":memory:");
+  seed(store);
+  store.transitionWorkOrder("w", "w1", { type: "human.started" }, "start:w1", { durationObserved: true, occurredAt: "2026-09-15T09:00:00.000Z" });
+  // Yesterday's untimed stretch, 09:00–09:50 with 45 minutes of work in it, confirmed while today's timer runs.
+  const first = store.recordInferredSession("w", "w1", "o", { startedAt: "2026-09-14T09:00:00.000Z", endedAt: "2026-09-14T09:50:00.000Z", minutes: 45, key: "draft:a", stepId: "s1" });
+  expect(first.changed).toBe(true);
+  expect(store.recordInferredSession("w", "w1", "o", { startedAt: "2026-09-14T09:00:00.000Z", endedAt: "2026-09-14T09:50:00.000Z", minutes: 45, key: "draft:a" }).changed).toBe(false);
+  const executions = store.listExecutions("w", "w1");
+  expect(executions.find((item) => item.id === first.executionId)).toMatchObject({ endedAt: "2026-09-14T09:50:00.000Z", durationObserved: true, source: "inferred_confirmed" });
+  expect(executions.filter((item) => !item.endedAt)).toHaveLength(1);
+  expect(store.listEvents("w", { type: "execution.confirmed" }).map((event) => event.payload)).toEqual([expect.objectContaining({ minutes: 45, source: "inferred_confirmed", stepId: "s1" })]);
+  store.transitionWorkOrder("w", "w1", { type: "human.completed" }, "done:w1", { occurredAt: "2026-09-15T09:30:00.000Z", durationCalibrationBaseline: BASELINE });
+  expect(store.listDurationObservations("w", "research", "deep_work")).toMatchObject([{ observedMinutes: 75, actualSource: "activity" }]);
+});

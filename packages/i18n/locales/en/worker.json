@@ -139,6 +139,8 @@
   "还有 {{count}} 件": "{{count}} more",
   "昨晚 {{count}} 块待确认_one": "{{count}} block from last night to confirm",
   "昨晚 {{count}} 块待确认_other": "{{count}} blocks from last night to confirm",
+  "昨天有 {{count}} 段没确认的工作时间_one": "{{count}} stretch of work time from yesterday not yet confirmed",
+  "昨天有 {{count}} 段没确认的工作时间_other": "{{count}} stretches of work time from yesterday not yet confirmed",
   "{{count}} 项待决定_one": "{{count}} decision waiting",
   "{{count}} 项待决定_other": "{{count}} decisions waiting",
   "今日无到期事项。": "Nothing due today.",

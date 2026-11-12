@@ -12,6 +12,7 @@ import { ICON } from "../ui/icon-button";
 import { useLocale, useT } from "../locale-context";
 import { PENDING_CHANGED } from "../pending-badge";
 import { Figure, RitualHead } from "../ritual-head";
+import { intlLocale } from "../../lib/i18n";
 
 /** One of tomorrow's first blocks, for the wrap-up's landing. */
 export type NextDayBlock = { start: string; title: string; step?: string; line?: string };
@@ -84,6 +85,16 @@ export function WrapBoard({ view, labels, tomorrow }: { view: WrapView; labels: 
     setBusy(undefined);
     window.dispatchEvent(new Event(PENDING_CHANGED));
   };
+  // 「按拟计时记 N 分」: the block's own drafts recorded as measured time (lib/time-drafts.ts); the block's answer stays its own.
+  const [drafted, setDrafted] = useState<Record<string, number>>({});
+  const recordDraft = async (row: WrapRow) => {
+    if (!row.draft) return;
+    setBusy(row.blockId);
+    setFailed(false);
+    const ok = await postDrafts({ ids: row.draft.ids, action: "confirm" });
+    setBusy(undefined);
+    if (ok) setDrafted((current) => ({ ...current, [row.blockId]: row.draft!.minutes })); else setFailed(true);
+  };
   const finish = async () => {
     setBusy("finish");
     const response = await fetch("/api/wrap", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ finish: true }) }).catch(() => undefined);
@@ -127,12 +138,14 @@ export function WrapBoard({ view, labels, tomorrow }: { view: WrapView; labels: 
             <Check {...ICON} />{t("做过的块按预估完成（不足七成记部分）")}</button>}
         </header>
         {view.rows.length ? <ul className="wr-rows">{view.rows.map((row) => <Block key={row.blockId} row={row} label={row.line ? labels[row.line] : undefined}
-          chosen={answers[row.blockId]} disabled={Boolean(busy)} timed={timed(row.timedMinutes)} onAnswer={(outcome) => void answer(row.blockId, outcome)} />)}</ul>
+          chosen={answers[row.blockId]} disabled={Boolean(busy)} timed={timed(row.timedMinutes)} onAnswer={(outcome) => void answer(row.blockId, outcome)}
+          drafted={drafted[row.blockId]} onDraft={() => void recordDraft(row)} />)}</ul>
           : <p className="rd-empty-line">{view.today ? t("今天没有开始过的工作块；没开始的已顺延，不用记。") : t("那天没有开始过的工作块。")}</p>}
         {failed && <p role="alert" className="rd-alert">{t("没有成功，请稍后再试。")}</p>}
       </section>
 
       <div className="wr-side">
+        <TimeDrafts view={view} />
         <section className="rd-card" aria-labelledby="wr-all-title">
           <header className="rd-card-head"><h2 id="wr-all-title" className="ds-serif"><Sparkles {...ICON} />{t("可按推荐处理")}</h2></header>
           <AnswerAll />
@@ -151,14 +164,81 @@ export function WrapBoard({ view, labels, tomorrow }: { view: WrapView; labels: 
   </>;
 }
 
+/** The drafts call (`/api/wrap/drafts`); true when it was written. */
+async function postDrafts(body: Record<string, unknown>): Promise<boolean> {
+  const response = await fetch("/api/wrap/drafts", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => undefined);
+  const answer = await response?.json().catch(() => undefined) as { ok?: boolean } | undefined;
+  return Boolean(answer?.ok);
+}
+
+/**
+ * 拟计时 beside the blocks (docs/plans/2026-11-11-walkthrough-decisions.md §1): with 「应用与窗口」 off, the one question that turns it on
+ * (a no turns it off and says what is then missing); with it on, the day's drafts outside the blocks — 「这些时间在做什么？」 — each with a
+ * task to pick, 记上, 不算工作 and 以后这类都算这件.
+ */
+function TimeDrafts({ view }: { view: WrapView }) {
+  const t = useT(), locale = useLocale();
+  const [consent, setConsent] = useState(view.draftConsent);
+  const [note, setNote] = useState("");
+  const [left, setLeft] = useState(view.drafts);
+  const [picked, setPicked] = useState<Record<string, string>>(() => Object.fromEntries(view.drafts.map((draft) => [draft.id, draft.workOrderId ?? ""])));
+  const [busy, setBusy] = useState(false);
+  const answerConsent = async (yes: boolean) => {
+    setBusy(true);
+    const ok = await postDrafts({ consent: yes });
+    setBusy(false);
+    if (!ok) { setNote(t("没有成功，请稍后再试。")); return; }
+    setConsent(yes ? "on" : "off");
+    setNote(yes ? t("已开启「应用与窗口」。") : t("已关闭「应用与窗口」：忘了开计时的工作时间不会再提出来，也不会算进实测。"));
+  };
+  const decide = async (id: string, action: "confirm" | "not_work" | "rule") => {
+    const workOrderId = picked[id];
+    setBusy(true);
+    const ok = await postDrafts({ ids: [id], action, ...(action !== "not_work" && workOrderId ? { workOrderId } : {}) });
+    setBusy(false);
+    if (ok) setLeft((current) => current.filter((draft) => draft.id !== id)); else setNote(t("没有成功，请稍后再试。"));
+  };
+  const clock = (iso: string) => new Date(iso).toLocaleTimeString(intlLocale(locale), { hour: "2-digit", minute: "2-digit", hour12: false });
+  if (consent === "ask") return <section className="rd-card" aria-labelledby="wr-drafts-ask">
+    <header className="rd-card-head"><h2 id="wr-drafts-ask" className="ds-serif">{t("用屏幕上的应用与窗口起草计时？")}</h2></header>
+    <div className="wr-draft-actions">
+      <button type="button" className="primary-button" disabled={busy} onClick={() => void answerConsent(true)}>{t("同意")}</button>
+      <button type="button" className="secondary-button" disabled={busy} onClick={() => void answerConsent(false)}>{t("不用")}</button>
+    </div>
+  </section>;
+  if (!left.length) return note ? <p role="status" className="rd-note">{note}</p> : null;
+  return <section className="rd-card" aria-labelledby="wr-drafts-title">
+    <header className="rd-card-head"><h2 id="wr-drafts-title" className="ds-serif">{t("这些时间在做什么？")}</h2></header>
+    <ul className="wr-drafts">{left.map((draft) => <li key={draft.id}>
+      <span><b className="ds-serif">{clock(draft.start)}–{clock(draft.end)}</b> <small>{t("{{minutes}} 分", { minutes: draft.minutes })}</small></span>
+      {draft.title && <small title={draft.why}>{t("像是：{{title}}", { title: draft.title })}</small>}
+      <select aria-label={t("这段时间做的任务")} value={picked[draft.id] ?? ""} disabled={busy}
+        onChange={(event) => setPicked((current) => ({ ...current, [draft.id]: event.target.value }))}>
+        <option value="">{t("选任务…")}</option>
+        {view.tasks.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}
+      </select>
+      <div className="wr-draft-actions">
+        <button type="button" className="secondary-button" disabled={busy || !picked[draft.id]} onClick={() => void decide(draft.id, "confirm")}>{t("记上")}</button>
+        <button type="button" className="secondary-button" disabled={busy} onClick={() => void decide(draft.id, "not_work")}>{t("不算工作")}</button>
+        <button type="button" className="secondary-button" disabled={busy || !picked[draft.id]} onClick={() => void decide(draft.id, "rule")}>{t("以后这类都算这件")}</button>
+      </div>
+    </li>)}</ul>
+    {note && <p role="alert" className="rd-alert">{note}</p>}
+  </section>;
+}
+
 /** One block: its time and timer, line, task and step, and the three-part control (the chosen one filled). */
-function Block({ row, label, chosen, disabled, timed, onAnswer }: { row: WrapRow; label: string | undefined; chosen: WrapOutcome | undefined;
-  disabled: boolean; timed: string; onAnswer: (outcome: WrapOutcome) => void }) {
+function Block({ row, label, chosen, disabled, timed, onAnswer, drafted, onDraft }: { row: WrapRow; label: string | undefined; chosen: WrapOutcome | undefined;
+  disabled: boolean; timed: string; onAnswer: (outcome: WrapOutcome) => void;
+  /** Minutes recorded from this block's drafts, once 「按拟计时记」 was pressed. */
+  drafted: number | undefined; onDraft: () => void }) {
   const t = useT();
   return <li data-line={row.line ?? "none"}>
     <div className="wr-when"><b className="ds-serif">{row.start}–{row.end}</b><small>{timed}</small>
       {!chosen && <small className="wr-inferred" data-inferred={row.inferred}>{t(INFERRED[row.inferred])}</small>}
-      {row.snoozedTwice && <small className="wr-snoozed">{t("推迟两次")}</small>}</div>
+      {row.snoozedTwice && <small className="wr-snoozed">{t("推迟两次")}</small>}
+      {row.draft && (drafted !== undefined ? <small role="status">{t("已按拟计时记 {{minutes}} 分", { minutes: drafted })}</small>
+        : <button type="button" className="secondary-button" disabled={disabled} onClick={onDraft}>{t("按拟计时记 {{minutes}} 分", { minutes: row.draft.minutes })}</button>)}</div>
     <div className="wr-what">
       <div className="wr-title">{label && <LineTag line={row.line}>{label}</LineTag>}
         <a href={`/workbench/${encodeURIComponent(row.orderId)}`} title={row.title}>{row.title}</a></div>
