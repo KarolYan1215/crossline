@@ -7,12 +7,14 @@ const replies = { "reply-2": "最投入的两次都是和同学一起赶比赛�
 
 describe("观察卡", () => {
   const falsifier = "如果一个人赶的项目也让你同样投入，这条就不准";
-  it("有证伪条件、每段引文都在所引回答里时保留；一条回答也可以", () => {
+  it("有证伪条件、每段引文都在所引回答里、连着至少两条不同的回答时保留", () => {
     const kept = checkInsight({ text: "有人等着结果的事更容易让你投入。", falsifier,
       refs: [{ replyId: "reply-2", quote: "和同学一起赶比赛项目" }, { replyId: "reply-6", quote: "一个人做的研究" }] }, replies, "energy");
     expect(kept?.refs).toHaveLength(2);
     expect(kept?.falsifier).toBe(falsifier);
-    expect(checkInsight({ text: "x", falsifier, refs: [{ replyId: "reply-2", quote: "熬夜也不累" }] }, replies, "lines")?.refs).toHaveLength(1);
+    // 只引一条回答的不留，同一条回答引两段也不算连接（2026-11-12：观察要连接本人说过的事，不读一条回答缺什么）。
+    expect(checkInsight({ text: "x", falsifier, refs: [{ replyId: "reply-2", quote: "熬夜也不累" }] }, replies, "lines")).toBeUndefined();
+    expect(checkInsight({ text: "x", falsifier, refs: [{ replyId: "reply-2", quote: "熬夜也不累" }, { replyId: "reply-2", quote: "赶比赛项目" }] }, replies, "lines")).toBeUndefined();
   });
   it("引文不在原文、没有证伪条件、没有引文、空文本或在单条主线访谈里时丢掉", () => {
     const refs = [{ replyId: "reply-2", quote: "和同学一起赶比赛项目" }, { replyId: "reply-6", quote: "一个人做的实验" }];
@@ -23,7 +25,7 @@ describe("观察卡", () => {
     expect(checkInsight({ text: "", falsifier, refs: [] }, replies, "compass")).toBeUndefined();
   });
   it("外部数据只留带网址的", () => {
-    const kept = checkInsight({ text: "x", falsifier, refs: [{ replyId: "reply-2", quote: "熬夜也不累" }],
+    const kept = checkInsight({ text: "x", falsifier, refs: [{ replyId: "reply-2", quote: "熬夜也不累" }, { replyId: "reply-6", quote: "一个人做的研究" }],
       external: [{ text: "内隐与外显动机相关 r = .13", url: "https://www.frontiersin.org/articles/10.3389/fpsyg.2014.00826/full" }, { text: "没有出处", url: "某论文" }] }, replies, "compass");
     expect(kept?.external).toEqual([{ text: "内隐与外显动机相关 r = .13", url: "https://www.frontiersin.org/articles/10.3389/fpsyg.2014.00826/full" }]);
   });

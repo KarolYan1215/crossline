@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { cleanProfileInsights } from "./onboarding-turn-schema";
 import { validateResearchTurn } from "./onboarding-research";
-import { cleanCareers, cleanDimensionNotes, cleanHypotheses } from "./profile-hypotheses";
+import { cleanCareers, cleanDimensionNotes, cleanHypotheses, mergeProfileInsights, type CareerOption, type Hypothesis } from "./profile-hypotheses";
 
 const replies = { "reply-1": "组会前一晚我基本都在通宵改图，导师等着看。", "reply-2": "没人催的事我一般拖到最后。" };
 const hypothesis = (over: Record<string, unknown> = {}) => ({
@@ -75,4 +75,31 @@ test("a research run: a conclusion needs an opened web source; sources are web U
   expect(turn.sources).toEqual([{ title: "A", url: "https://a.example/jd" }]);
   expect(turn.ask).toBe("你说的建模是性能还是功耗？");
   expect(turn.conclusion).toBe("9/10 要求 Python");
+});
+
+test("a run's changes merge into what is on record: by id for hypotheses and dimensions, by role for careers; the rest stays", () => {
+  const h = (id: string, statement: string, over: Partial<Hypothesis> = {}): Hypothesis => ({ id, dimension: "D2", statement, basis: [{ kind: "behavior", text: "x", ref: "reply-1" }],
+    falsifier: "f", alternative: "", status: "open", ...over });
+  const c = (role: string, task = "t"): CareerOption => ({ role, why: "", hypothesisIds: [], requirements: [], sources: [], trial: { weeks: 2, task, supportsIf: "s", refutesIf: "r" }, lineId: "" });
+  const onRecord = { hypotheses: [h("h1", "旧一", { rated: "fits" }), h("h2", "旧二")], careers: [c("活动运营实习"), c("咨询助理")],
+    dimensions: [{ id: "D0" as const, summary: "旧", evidenced: true }, { id: "D2" as const, summary: "旧", evidenced: false }] };
+  const merged = mergeProfileInsights(onRecord, { hypotheses: [h("h1", "新一", { status: "supported" }), h("h3", "新三")],
+    careers: [c("活动运营 实习", "新试做"), c("财经采编")], dimensions: [{ id: "D2", summary: "新", evidenced: true }], dropCareers: ["咨询助理"] });
+  // h1 replaced in place and keeps the person's 准; h2 untouched; h3 joins the end.
+  expect(merged.hypotheses.map((item) => [item.id, item.statement, item.status, item.rated ?? ""])).toEqual([
+    ["h1", "新一", "supported", "fits"], ["h2", "旧二", "open", ""], ["h3", "新三", "open", ""]]);
+  // The same role (spacing aside) replaced; a dropped one gone; a new one added.
+  expect(merged.careers.map((item) => [item.role, item.trial.task])).toEqual([["活动运营 实习", "新试做"], ["财经采编", "t"]]);
+  expect(merged.dimensions).toEqual([{ id: "D0", summary: "旧", evidenced: true }, { id: "D2", summary: "新", evidenced: true }]);
+  // Nothing changed: everything stays as it was.
+  expect(mergeProfileInsights(onRecord, {})).toEqual({ ...onRecord });
+});
+
+test("a career changed this run may rest on a hypothesis on record that the run did not rewrite", () => {
+  const career = { role: "活动运营实习", why: "h7", hypothesisIds: ["h7", "h99"], requirements: [], sources: [],
+    trial: { weeks: 2, task: "t", supportsIf: "s", refutesIf: "r" }, lineId: "" };
+  const kept = cleanProfileInsights({ careers: [career] as never, dropCareers: [" 咨询助理 ", "咨询助理", ""] },
+    { replies, sources: {}, identities: [], hypothesesOnRecord: ["h7"] });
+  expect(kept.careers?.[0]?.hypothesisIds).toEqual(["h7"]);
+  expect(kept.dropCareers).toEqual(["咨询助理"]);
 });

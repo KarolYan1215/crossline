@@ -1,6 +1,6 @@
 ---
 name: crossline-onboarding-extract
-description: 读 Crossline 访谈刚听到的内容（本人的新回答和新文件，按句编号），按句子编号引用，记入账本：事实、项目、日期、每条主线的描述和目标定语、每周可用时间、主线之间的关系、画像各节；每次把假设日志、职业方向和十个维度整份重写，比较已抓到的事实和推断，产出新一轮洞察。和访谈对话并行运行，不和本人说话。
+description: 读 Crossline 访谈刚听到的内容（本人的新回答和新文件，按句编号），按句子编号引用，记入账本：事实、项目、日期、每条主线的描述和目标定语、每周可用时间、主线之间的关系、画像各节；假设日志、职业方向和十个维度只写这一轮新增或改动的条目，比较新内容和已有推断，产出新一轮洞察。和访谈对话并行运行，不和本人说话。
 ---
 
 # Crossline 访谈整理：记下访谈听到的，并做一轮分析
@@ -19,7 +19,7 @@ description: 读 Crossline 访谈刚听到的内容（本人的新回答和新�
 - `research`（有时出现）是本场访谈已完成的调研子线程的结论和来源 `{question, conclusion, sources[]}`：这是你唯一的外部材料，可以作为假设的 `external` 依据和 `reference`、职业方向的 JD 要求和 `sources`，网址照抄它的。
 - `lines[]` 是本人的主线（身份名词、固定安排、已采纳的目标、健康 / 财富主线的 `domain`）；`projects[]` 是已记录的项目。
 
-返回符合 `OnboardingExtraction`（`packages/core/src/onboarding-turn-schema.ts`）的 JSON：`{slotUpdates[], projectsDetected[], flywheelCandidates[], fileDates, lineProfiles[], goalEdits[], availability, settings[], profileSections, itemScores[], hypotheses[], careers[], dimensions[]}`。新材料对某个列表没说什么时，那个列表留空。
+返回符合 `OnboardingExtraction`（`packages/core/src/onboarding-turn-schema.ts`）的 JSON：`{slotUpdates[], projectsDetected[], flywheelCandidates[], fileDates, lineProfiles[], goalEdits[], availability, settings[], profileSections, itemScores[], hypotheses[], careers[], dimensions[], dropCareers[]}`。新材料对某个列表没说什么时，那个列表留空。
 
 ## 查询工具
 
@@ -145,7 +145,13 @@ description: 读 Crossline 访谈刚听到的内容（本人的新回答和新�
 
 ## 假设日志、职业方向和维度（`hypotheses`、`careers`、`dimensions`）
 
-**每次运行都整份重写这三个列表**（单条主线的访谈和笔记除外，它们三个都留 `[]`）。这就是每轮的分析：把目前抓到的事实（`facts`、新回复、文件、`observations`、`research`）和已有的推断（`profile.hypotheses`）放在一起比较，哪条被新证据支持、哪条被推翻、哪里冒出了新的模式，写出新一轮的洞察。没有新材料涉及画像时，照抄 `profile` 里的三个列表（保持 id 和内容），不要返回空列表把它们清掉。
+**这三个列表只写这一轮新增或改动的条目**（单条主线的访谈和笔记三个都留 `[]`）。这就是每轮的分析：把新材料（新回复、文件、`observations`、`research`）和已有的推断（`profile` 里的 `hypotheses`、`careers`、`dimensions`，每次都给你看全部）放在一起比较，哪条被新证据支持、哪条被推翻、哪里冒出了新的模式。
+
+- 改动的条目写整条，用原来的 `id`（假设）、原来的 `role`（职业方向）或原来的维度 id；应用按它们合并进账本，你没写到的条目保持原样。
+- 新的条目接着编号写。
+- 状态变了（比如 `open` 变 `supported` 或 `refuted`）也算改动，要写整条。
+- 不再成立的职业方向，把它的 `role` 原样写进 `dropCareers`。
+- 没有新材料涉及画像时三个列表都留 `[]`：留空就是「不变」，不会清掉已有的。不要把没变的条目照抄一遍（2026-11-12 回放：每次重抄 40 条假设和全部招聘要求矩阵，一次整理用了 27 分钟）。
 
 框架是十个维度（D0 背景与约束、D1 行为签名、D2 内隐动机、D3 基本需求、D4 价值与三观、D5 理想与应该自我、D6 核心信念、D7 情绪模式、D8 叙事身份、D9 维持循环），各自的问法和行为线索见访谈 Skill `crossline-onboarding` 的「画像框架」。
 
@@ -186,7 +192,7 @@ description: 读 Crossline 访谈刚听到的内容（本人的新回答和新�
 
 - `role`：具体岗位名（「芯片架构建模实习（performance modeling）」），不写「技术类工作」。
 - `why`：从画像推出的理由，引用假设的 id（「h3、h5：……」）。
-- `hypothesisIds`：它依据的假设 id，必须是本次 `hypotheses` 里有的。
+- `hypothesisIds`：它依据的假设 id，本次写的或 `profile.hypotheses` 里已有的。
 - `requirements[]`：公开招聘（JD）的要求频率矩阵，每项 `{requirement, share, has, evidence}`：`share` 是这项要求在你看过的招聘里出现的比例（「8/10」「约 70%」），`has` 是本人目前 `yes` / `partial` / `no`，`evidence` 是本人的证据或缺什么。`has` 为 `partial` 或 `no` 的就是缺口，缺口对应试做。
 - `sources[]`：你打开过的招聘页或 JD 汇总的网址。**没有网址就不写 `requirements`**（写了也会被丢掉）；还没查到时 `requirements` 和 `sources` 都留空，`why` 里说明要查什么。
 - `trial`：2–4 周、低成本、可证伪的试做：`weeks`（2–4）、`task`（做什么，具体到能排进日程）、`supportsIf`（如果画像对，会看到什么：在哪个环节自发多投入、做完是满足而不是松口气）、`refutesIf`（看到什么说明这个方向不对）。
@@ -196,7 +202,7 @@ description: 读 Crossline 访谈刚听到的内容（本人的新回答和新�
 
 ### `dimensions[]`
 
-十个维度各一项 `{id, summary, evidenced}`：`summary` 一两句写这个维度目前知道了什么；`evidenced` 只有在这个维度有本人原话或行为作证据时为 true。还没谈到的维度 `summary` 写还缺什么，`evidenced` 为 false。
+每个维度一项 `{id, summary, evidenced}`，只写这一轮有变化的维度：`summary` 一两句写这个维度目前知道了什么；`evidenced` 只有在这个维度有本人原话或行为作证据时为 true。还没谈到的维度 `summary` 写还缺什么，`evidenced` 为 false。
 
 ## 卡片题的文字回答（`itemScores`）
 

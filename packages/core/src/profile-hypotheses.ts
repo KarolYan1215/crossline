@@ -144,3 +144,35 @@ export function cleanDimensionNotes(list: unknown[]): DimensionNote[] {
   }
   return DIMENSION_IDS.flatMap((id) => byId.get(id) ?? []);
 }
+
+// ── Merging a run's changes ──────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A run's changes merged into what is on record (2026-11-12): the extraction writes only the hypotheses, careers and dimension notes that
+ * are new or changed, instead of the whole lists every run (a run rewrote 40 hypotheses and every requirement matrix to change one or two;
+ * replay 3 spent 27 minutes and 26k output tokens on one run). A hypothesis replaces the one with its id, or joins the end; the person's
+ * 准/不准 stays with the id. A career replaces the one with the same role (letters and digits compared), or joins the end; `dropCareers`
+ * removes by role. A dimension note replaces the one with its id. What the run did not name stays as it was.
+ */
+export function mergeProfileInsights(
+  onRecord: { hypotheses?: Hypothesis[]; careers?: CareerOption[]; dimensions?: DimensionNote[] },
+  changes: { hypotheses?: Hypothesis[]; careers?: CareerOption[]; dimensions?: DimensionNote[]; dropCareers?: string[] }
+): { hypotheses: Hypothesis[]; careers: CareerOption[]; dimensions: DimensionNote[] } {
+  const hypotheses = [...(onRecord.hypotheses ?? [])];
+  for (const item of changes.hypotheses ?? []) {
+    const at = hypotheses.findIndex((other) => other.id === item.id);
+    const rated = at >= 0 ? hypotheses[at]!.rated : undefined;
+    const next = rated ? { ...item, rated } : item;
+    if (at >= 0) hypotheses[at] = next; else hypotheses.push(next);
+  }
+  const role = (value: string) => loose(value).toLowerCase();
+  const dropped = new Set((changes.dropCareers ?? []).map(role));
+  const careers = (onRecord.careers ?? []).filter((item) => !dropped.has(role(item.role)));
+  for (const item of changes.careers ?? []) {
+    const at = careers.findIndex((other) => role(other.role) === role(item.role));
+    if (at >= 0) careers[at] = item; else careers.push(item);
+  }
+  const notes = new Map((onRecord.dimensions ?? []).map((item) => [item.id, item]));
+  for (const item of changes.dimensions ?? []) notes.set(item.id, item);
+  return { hypotheses, careers, dimensions: DIMENSION_IDS.flatMap((id) => notes.get(id) ?? []) };
+}

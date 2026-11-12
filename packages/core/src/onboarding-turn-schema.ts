@@ -199,10 +199,14 @@ export type OnboardingTurn = {
   progress?: TurnProgress;
   /** Questions the dialogue hands to research threads this round (contract C); the worker opens one thread per question. */
   research?: ResearchRequest[];
-  /** The extraction's hypothesis log, career directions and dimension notes, each list rewritten whole (contract B). */
+  /**
+   * The extraction's hypothesis log, career directions and dimension notes (contract B): only the items new or changed this run, merged
+   * into the ones on record by id (`mergeProfileInsights`, 2026-11-12); a direction that no longer holds is named in `dropCareers`.
+   */
   hypotheses?: Hypothesis[];
   careers?: CareerOption[];
   dimensions?: DimensionNote[];
+  dropCareers?: string[];
   /**
    * The instrument cards the app put beside the round's questions (`cardsFor`; flow v2, profile stages): never written by the model, so
    * their wording and keys stay the published items'.
@@ -244,6 +248,8 @@ export type OnboardingTurnContext = {
   version: "crossline.onboarding.turn.v1";
   /** `YYYY-MM-DD` in the person's zone, so a date written without a year lands in the right one. */
   today?: string; timeZone?: string;
+  /** The lower bound: `met` once every start item stands, else the start items still open (a line's own interview has none). */
+  startStandard?: { met: boolean; missing: string[] };
   identities: Array<{ id: string; label: string }>;
   projects: Array<{ id: string; identityId: string; name: string; summary: string }>;
   facts: Array<{ identityId: string; projectId: string; slot: string; value: string; status: string }>;
@@ -403,6 +409,8 @@ export type KnownSources = {
   attributesOnRecord?: Record<string, number>;
   /** Each line's name, so a candidate that only repeats it is refused (`attributeProblem`). */
   lineLabels?: Record<string, string>;
+  /** The hypothesis ids on record: a career changed this run may rest on hypotheses the run did not rewrite. */
+  hypothesesOnRecord?: string[];
 };
 /** One citable sentence: the reply (`reply-N`) or file (`src-N`) it is in, and its offsets in that text. */
 export type EvidenceSentence = { ref: string; start: number; end: number; text: string };
@@ -548,10 +556,12 @@ function turnFields(ids?: TurnIds) {
       falsifier: { type: "string", maxLength: 200 } }),
     // Questions for research threads (contract C): what needs the web to answer, why it matters, the dimension it bears on.
     research: { type: "array", maxItems: 3, items: object({ question: text(300), why: text(300), dimension: DIMENSION_FIELD }) },
-    // The hypothesis log, career directions and dimension notes (contract B), each list rewritten whole by the extraction.
+    // The hypothesis log, career directions and dimension notes (contract B): only what is new or changed this run, merged by id.
     hypotheses: { type: "array", maxItems: 40, items: HYPOTHESIS_ITEM_FIELD },
     careers: { type: "array", maxItems: 6, items: careerItemSchema(line) },
     dimensions: { type: "array", maxItems: 10, items: DIMENSION_NOTE_FIELD },
+    // Career directions on record that no longer hold, by their `role`.
+    dropCareers: { type: "array", maxItems: 6, items: text(120) },
     // The interview's own progress record, rewritten every round and handed back at the start of the next (`TurnProgress`).
     progress: object({ part: { type: "string", enum: [...ONBOARDING_STAGES] }, covered: { type: "array", maxItems: 8, items: text(60) },
       open: { type: "array", maxItems: 8, items: text(60) }, partDone: { type: "boolean" }, next: text(160) }),
@@ -583,7 +593,7 @@ function turnFields(ids?: TurnIds) {
  */
 export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage", "insight", "progress", "research"] as const;
 export const EXTRACT_KEYS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles", "goalEdits", "availability", "settings", "profileSections", "itemScores",
-  "hypotheses", "careers", "dimensions"] as const;
+  "hypotheses", "careers", "dimensions", "dropCareers"] as const;
 export const onboardingDialogueSchema = (ids?: TurnIds) => object(pick(turnFields(ids), DIALOGUE_KEYS));
 export const onboardingExtractSchema = (ids?: TurnIds) => object(pick(turnFields(ids), EXTRACT_KEYS));
 export const ONBOARDING_DIALOGUE_SCHEMA = onboardingDialogueSchema();
@@ -616,7 +626,7 @@ export function listsAtLimit(output: unknown, schema: unknown = ONBOARDING_EXTRA
 export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage" | "insight" | "progress" | "research">;
 /** What the background run writes to the ledger. */
 export type OnboardingExtraction = Pick<OnboardingTurn, "slotUpdates" | "projectsDetected" | "flywheelCandidates" | "lineProfiles" | "goalEdits"
-  | "availability" | "settings" | "hypotheses" | "careers" | "dimensions"> & { fileDates?: DateExtraction; profileSections?: ProfileSections; itemScores?: ItemScore[] };
+  | "availability" | "settings" | "hypotheses" | "careers" | "dimensions" | "dropCareers"> & { fileDates?: DateExtraction; profileSections?: ProfileSections; itemScores?: ItemScore[] };
 
 const SLOT = /^[a-z][a-z0-9_]{1,39}$/;
 const ID = /^[a-zA-Z0-9_-]{1,80}$/;
@@ -747,14 +757,18 @@ function cleanResearch(list: unknown[]): ResearchRequest[] {
  * `cleanHypotheses`, `cleanCareers`): never a refusal, an item that does not hold is dropped and the rest kept, like the dates. A quote a
  * hypothesis rests on must be verbatim in the reply or file it names; a career's hypothesis ids are the ones this answer keeps.
  */
-export function cleanProfileInsights(value: Partial<Pick<OnboardingTurn, "hypotheses" | "careers" | "dimensions">>, sources: Pick<KnownSources, "replies" | "sources" | "identities">):
-  Partial<Pick<OnboardingTurn, "hypotheses" | "careers" | "dimensions">> {
+export function cleanProfileInsights(value: Partial<Pick<OnboardingTurn, "hypotheses" | "careers" | "dimensions" | "dropCareers">>,
+  sources: Pick<KnownSources, "replies" | "sources" | "identities" | "hypothesesOnRecord">): Partial<Pick<OnboardingTurn, "hypotheses" | "careers" | "dimensions" | "dropCareers">> {
   const hypotheses = Array.isArray(value.hypotheses) ? cleanHypotheses(value.hypotheses, (ref) => sources.replies[ref] ?? sources.sources[ref]) : undefined;
+  // A career may rest on hypotheses this run did not rewrite (the run writes only what changed).
+  const hypothesisIds = new Set([...(hypotheses ?? []).map((item) => item.id), ...(sources.hypothesesOnRecord ?? [])]);
+  const dropCareers = Array.isArray(value.dropCareers) ? [...new Set(value.dropCareers.map((role) => str(role, 120)).filter(Boolean))].slice(0, 6) : undefined;
   return {
     ...(hypotheses ? { hypotheses } : {}),
-    ...(Array.isArray(value.careers) ? { careers: cleanCareers(value.careers, new Set((hypotheses ?? []).map((item) => item.id)),
+    ...(Array.isArray(value.careers) ? { careers: cleanCareers(value.careers, hypothesisIds,
       new Set(sources.identities.filter((id) => id !== PERSON_LINE))) } : {}),
-    ...(Array.isArray(value.dimensions) ? { dimensions: cleanDimensionNotes(value.dimensions) } : {})
+    ...(Array.isArray(value.dimensions) ? { dimensions: cleanDimensionNotes(value.dimensions) } : {}),
+    ...(dropCareers ? { dropCareers } : {})
   };
 }
 

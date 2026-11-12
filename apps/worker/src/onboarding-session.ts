@@ -351,6 +351,10 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const research = focusLine ? undefined : researchRunnerFor(store, workspaceId, cwd, getClient);
     research?.resume(sessionId);
     const researchNow = () => researchForDialogue(readResearch(store, workspaceId, sessionId));
+    // Whether the lower bound stands, said outright every round (2026-11-12 replay 4: the model told the person 「你可以开始使用应用了」
+    // seven rounds before it did, reading the open items of `checklist` as settled). Only a line's own interview goes without.
+    const startStandard = () => focusLine ? {} : { startStandard: { met: !startOpen(),
+      missing: checklistNow().filter((item) => item.start && !item.done).map((item) => item.label) } };
     const outputSchema = onboardingDialogueSchema(ids);
     const validateOutput = (output: unknown) => validateOnboardingDialogue(output, known);
     const softAccept = (_rejection: Error, output: unknown) => keepOnboardingDialogue(output, known);
@@ -383,7 +387,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         today, timeZone, sources: clipDocuments(documents), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}), ...(history ? { history } : {}), reply: { id: replyId, text: replyText },
         focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : INTERVIEW_FLOW_STAGES[flow][0]!)),
         ...(focusLine ? {} : { stageOrder: stageOrderFor(flow, tier) }),
-        checklist: openChecklist(8, undefined, sessionId), ...stagePace(messages, { startOpen: startOpen(), after: tier.moveOnAfter }), tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)),
+        checklist: openChecklist(8, undefined, sessionId), ...startStandard(), ...stagePace(messages, { startOpen: startOpen(), after: tier.moveOnAfter }), tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)),
         ...(focusLine ? {} : { depth: depthNow() }),
         questionLedger: ledgerForModel(store, workspaceId, sessionId, LEDGER_SHOWN), ...pace(), ...roundNotes(),
         ...(workHistory().length ? { workHistory: workHistory() } : {}), ...(week.length ? { calendar: week } : {}),
@@ -437,7 +441,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         // The completion list goes with every turn, so the model knows what it still owes without being told twice in prose.
         const rounds = stagePace(messages, { startOpen: startOpen(), after: tier.moveOnAfter });
         // The tier and the order of parts go with every turn: the person may change the tier between rounds.
-        const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(8, undefined, sessionId), ...rounds,
+        const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(8, undefined, sessionId), ...startStandard(), ...rounds,
           ...(focusLine ? {} : { depth: depthNow(), stageOrder: stageOrderFor(flow, tier) }),
           questionLedger: ledgerForModel(store, workspaceId, sessionId, LEDGER_SHOWN), ...pace(), ...roundNotes(),
           tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)), ...(calendarChanged ? { calendar: week } : {}),

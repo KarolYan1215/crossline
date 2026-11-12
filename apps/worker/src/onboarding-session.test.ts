@@ -172,13 +172,15 @@ test("the main interview never ends itself: a model that is done asks whether th
 });
 
 test("before the start standard stands, a model that is done is not shown 「可以按结束」: the round asks what is still owed", async () => {
-  const { rpc } = fakeRuntime([turn({ questions: [], nextAction: "ready_for_milestones" })]);
+  const { rpc, prompts } = fakeRuntime([turn({ questions: [], nextAction: "ready_for_milestones" })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });
   expect(await run({ sessionId: "s", text: "都说完了" })).toEqual({ state: "asked", sessionId: "s" });
   const last = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { questions: Array<{ id: string; text: string }> };
   expect(last.questions.length).toBeGreaterThan(0);
   expect(last.questions[0]!.id).toMatch(/^checklist-open-/);
   expect(last.questions.some((question) => question.text.includes("结束并出报告"))).toBe(false);
+  // The model is told outright that the lower bound does not stand yet, and what it lacks.
+  expect(dialogue(prompts)[0]).toContain('"startStandard":{"met":false,"missing":[');
 });
 
 test("once every open question is used up, the round asks whether there is more instead of the stage's own question again", () => {

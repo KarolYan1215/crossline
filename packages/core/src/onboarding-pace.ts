@@ -46,6 +46,8 @@ export function portraitConfirmedByInsights(ratings: InsightRatings): boolean {
  * An observation is kept only when it is what it claims to be (contract A, 2026-11-12): text, a falsifier (「如果……，这条就不准」), and at
  * least one of the person's replies quoted, each quote found in the reply it names; outside data only with a web URL. Any part of the main
  * interview may give one (a line's own interview, `details`, does not). Anything else is dropped, never repaired: a round is not held up for it.
+ * The quotes come from at least two different replies (the owner, 2026-11-12): an observation connects things the person said. Of the
+ * replay's cards judged 「不准」, most read one answer for what it lacked (「你还举不出一件」).
  */
 export function checkInsight(insight: TurnInsight | undefined, replies: Record<string, string>, stage: string | undefined): TurnInsight | undefined {
   const text = insight?.text?.trim() ?? "";
@@ -53,7 +55,7 @@ export function checkInsight(insight: TurnInsight | undefined, replies: Record<s
   if (!text || !falsifier || stage === "details" || !(ONBOARDING_STAGES as readonly string[]).includes(stage ?? "")) return undefined;
   const refs = (insight?.refs ?? []).filter((ref) => typeof ref?.replyId === "string" && typeof ref.quote === "string" && ref.quote.trim()
     && ref.replyId in replies && Boolean(locateQuote(replies[ref.replyId]!, ref.quote)));
-  if (!refs.length || refs.length < (insight?.refs ?? []).length) return undefined;
+  if (!refs.length || refs.length < (insight?.refs ?? []).length || new Set(refs.map((ref) => ref.replyId)).size < 2) return undefined;
   const external = (insight?.external ?? []).filter((item) => typeof item?.text === "string" && item.text.trim() && isWebUrl(item.url))
     .slice(0, 3).map((item) => ({ text: item.text.trim(), url: item.url.trim() }));
   return { text, refs: refs.slice(0, 4).map((ref) => ({ replyId: ref.replyId, quote: ref.quote.trim() })), ...(external.length ? { external } : {}), falsifier };
