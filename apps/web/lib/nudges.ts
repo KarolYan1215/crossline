@@ -44,7 +44,9 @@ export type NudgePayload = { kind: NudgeKind | "opener"; fingerprint: string; co
   /** `timer_overrun`: the step that ran over, read by the worker's adaptive granularity. */
   step?: { orderId: string; stepId: string };
   /** A block's start said again after a snooze: the first prompt's fingerprint, kept as the push `tag` so the phone replaces it. */
-  replaces?: string };
+  replaces?: string;
+  /** A block's start after 「少问这类」: still said on the page and the desktop, not pushed to the phone (the owner's decision of 2026-11-11). */
+  desktopOnly?: true };
 
 /** Runs the engine for every workspace (the web's timer). A workspace that fails is skipped until the next interval. */
 export async function nudgePass(now = new Date()): Promise<number> {
@@ -77,6 +79,8 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
   const recent = store.listRecentNudges(ctx.workspaceId, new Date(now.getTime() - 3 * DAY).toISOString());
   const payloadOf = (message: StoredConversationMessage) => message.payload.nudge as NudgePayload | undefined;
   const muted = mutedKinds(ctx, recent, today, now);
+  // 「少问这类」 on a block's start keeps it off the phone only: the block must still come up (the owner's decision of 2026-11-11).
+  const startsDesktopOnly = (store.getSetting(ctx.workspaceId, muteKey("block_start")) ?? "") >= today;
   const all = store.listWorkOrders(ctx.workspaceId);
   // Only the person's own work is reminded about (docs/work-split.md): the assistant's preparation and the questions to the person are
   // neither started, nor confirmed, nor late in the person's day.
@@ -206,7 +210,7 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
   });
   for (const nudge of planned) say(ctx, nudge.text, nudge.buttons, { kind: nudge.kind, fingerprint: nudge.fingerprint, counted: nudge.counted, urgent: nudge.urgent,
     ...(nudge.covers ? { covers: nudge.covers } : {}), ...(nudge.block ? { block: nudge.block } : {}), ...(nudge.step ? { step: nudge.step } : {}),
-    ...(nudge.replaces ? { replaces: nudge.replaces } : {}) }, now);
+    ...(nudge.replaces ? { replaces: nudge.replaces } : {}), ...(nudge.kind === "block_start" && startsDesktopOnly ? { desktopOnly: true as const } : {}) }, now);
   return planned;
 }
 
@@ -284,17 +288,17 @@ function backgroundDone(ctx: AccessContext, now: Date, locale?: Locale): Array<{
 
 /**
  * Kinds the person said to ask about less (「少问这类」, a week), and kinds left unanswered three times running (three days — the
- * person's silence is an answer too; not a block's start). Both expire by themselves.
+ * person's silence is an answer too). Both expire by themselves. A block's start is never muted: 「少问这类」 only keeps it off the phone.
  */
 function mutedKinds(ctx: AccessContext, recent: StoredConversationMessage[], today: string, now: Date): Set<NudgeKind> {
   const store = getStore();
   const kinds: NudgeKind[] = ["block_start", "block_confirm", "latest_start", "timer_overrun", "background_done", "energy_check", "outcome_check", "progress_check"];
   const muted = new Set<NudgeKind>();
   for (const kind of kinds) {
+    // A block's start must reliably appear (the owner's decision of 2026-11-11): neither silence nor 「少问这类」 mutes it (see `desktopOnly`).
+    if (kind === "block_start") continue;
     const until = store.getSetting(ctx.workspaceId, muteKey(kind));
     if (until && until >= today) { muted.add(kind); continue; }
-    // A block's start must reliably appear (the owner's decision of 2026-11-11): silence does not mute it, only 「少问这类」 does.
-    if (kind === "block_start") continue;
     const lastThree = recent.filter((message) => (message.payload.nudge as NudgePayload | undefined)?.kind === kind).slice(-3);
     const ignored = lastThree.length === 3 && lastThree.every((message) => (message.payload.card as Card | undefined)?.clarify.chosen === undefined
       && now.getTime() - Date.parse(message.createdAt) > 30 * 60_000);
@@ -303,7 +307,7 @@ function mutedKinds(ctx: AccessContext, recent: StoredConversationMessage[], tod
   return muted;
 }
 
-/** 「少问这类」: this kind is not said for a week. */
+/** 「少问这类」: this kind is not said for a week (a block's start: not pushed to the phone for a week). */
 export function muteNudgeKind(ctx: AccessContext, kind: string, now = new Date()): void {
   getStore().setSetting(ctx.workspaceId, muteKey(kind), addDays(planToday(ctx, now), 7));
 }

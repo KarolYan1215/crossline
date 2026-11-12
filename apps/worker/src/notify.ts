@@ -235,7 +235,7 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
   const visibleAt = store.getSetting(workspaceId, "presence.visibleAt");
   const pageShown = Boolean(visibleAt) && now.getTime() - Date.parse(visibleAt!) <= PRESENCE_FRESH_MS;
   for (const message of store.listRecentNudges(workspaceId, new Date(now.getTime() - 3_600_000).toISOString())) {
-    const nudge = message.payload.nudge as { delivery?: string; fingerprint?: string; kind?: string; replaces?: string } | undefined;
+    const nudge = message.payload.nudge as { delivery?: string; fingerprint?: string; kind?: string; replaces?: string; desktopOnly?: boolean } | undefined;
     const text = (message.payload.card as { clarify?: { question?: string } } | undefined)?.clarify?.question ?? "";
     if (nudge?.delivery !== "pending" || !text) continue;
     const confirm = nudge.kind === "block_confirm";
@@ -258,10 +258,12 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
     const path = confirm ? `/confirm/${encodeURIComponent(message.id)}` : wrap ? "/wrap" : start ? `/workbench/${encodeURIComponent(start)}` : "/";
     // Said again after a snooze: the first prompt's tag, so the phone replaces that notification instead of adding a second.
     const tag = nudge.replaces ?? nudge.fingerprint ?? message.id;
-    if (!await both("Crossline", body, `${baseUrl}${confirm || wrap ? path : "/"}`, { title: "Crossline", body, path, tag, ...(start ? { start } : {}), ...(start && step ? { step } : {}),
+    const url = `${baseUrl}${confirm || wrap ? path : "/"}`;
+    // A block's start after 「少问这类」 goes to the desktop only (the owner's decision of 2026-11-11).
+    if (!await (nudge.desktopOnly ? deliver("Crossline", body, url) : both("Crossline", body, url, { title: "Crossline", body, path, tag, ...(start ? { start } : {}), ...(start && step ? { step } : {}),
       ...(snooze ? { snooze } : {}),
       // A completion check carries its message: the phone answers 做了 / 没做 in place (docs/plans/closed-loop-1030.md §2).
-      ...(confirm ? { confirm: message.id } : {}) })) continue;
+      ...(confirm ? { confirm: message.id } : {}) }))) continue;
     store.updateConversationPayload(workspaceId, message.id, { ...message.payload, nudge: { ...nudge, delivery: "pushed" } });
     delivered.push(`nudge:${nudge.fingerprint ?? message.id}`);
   }

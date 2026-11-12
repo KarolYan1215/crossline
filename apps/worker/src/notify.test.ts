@@ -154,6 +154,24 @@ test("a block's prompt reaches the phone with 「推迟 10 分钟」's block, an
   store.close();
 });
 
+test("a block's start after 「少问这类」 goes to the desktop only, not the phone (the owner's decision of 2026-11-11)", async () => {
+  const store = new CrosslineStore(":memory:");
+  store.setSetting("w", "notify.level", "off");
+  const conversation = store.conversationFor("w", "2026-10-12");
+  store.appendConversationMessage({ id: "n1", workspaceId: "w", conversationId: conversation.id, role: "nudge", text: "", createdAt: "2026-10-12T13:50:00.000Z",
+    payload: { nudge: { kind: "block_start", fingerprint: "start:scheduled:wo-7:v1s3:2026-10-12", counted: false, urgent: true, delivery: "pending", desktopOnly: true },
+      card: { actions: [{ action: "task.op", summary: "开始", args: { workOrderId: "wo-7", type: "start", stepId: "v1s3", text: "" } }],
+        clarify: { question: "09:00 做「作业 2」。", options: [] } } } });
+  const desktop: string[] = [];
+  const pushed: unknown[] = [];
+  const sent = await notifyPass(store, "w", new Date("2026-10-12T13:51:00.000Z"), async (_title, _body, url) => { desktop.push(url); return true; }, "http://127.0.0.1:3210",
+    async (_ws, message) => { pushed.push(message); return true; });
+  expect(sent).toEqual(["nudge:start:scheduled:wo-7:v1s3:2026-10-12"]);
+  expect(desktop).toEqual(["http://127.0.0.1:3210/"]);
+  expect(pushed).toEqual([]);
+  store.close();
+});
+
 test("a completion check goes to the desktop and the phone even with a page open, opening its confirm page, with no 「开始计时」", async () => {
   const store = new CrosslineStore(":memory:");
   store.setSetting("w", "notify.level", "off");

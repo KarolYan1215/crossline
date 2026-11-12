@@ -51,10 +51,18 @@ test("ten minutes before the scheduler's block for work due in two days, it says
   expect(message.card!.clarify.question).toContain("关系到 10/14 的截止");
   // No page has been seen: it waits for the worker to send it.
   expect(store.getConversationMessage(ws, message.id)!.payload.nudge).toMatchObject({ delivery: "pending" });
-  // 「少问这类」 is the answer, and the kind is quiet for a week.
+  // 「少问这类」 is the answer, and for a week a block's start is still said, but kept off the phone (the owner's decision of 2026-11-11).
   const mute = message.card!.clarify.options.findIndex((option) => option.kind === "mute");
   expect(await decideCard(TEST_CTX, message.id, { option: mute }, NOW)).toMatchObject({ ok: true });
   expect(store.getSetting(ws, "nudge.mute.block_start")).toBe("2026-10-19");
+});
+
+test("after 「少问这类」 a block's start still comes up, marked for the desktop only (the owner's decision of 2026-11-11)", async () => {
+  const store = setup();
+  store.setSetting(ws, "nudge.mute.block_start", "2026-10-19");
+  expect((await nudgesFor(TEST_CTX, NOW)).map((item) => item.kind)).toContain("block_start");
+  const message = nudges().find((item) => item.card?.nudgeKind === "block_start")!;
+  expect(store.getConversationMessage(ws, message.id)!.payload.nudge).toMatchObject({ delivery: "pending", desktopOnly: true });
 });
 
 test("block-start prompts are not silenced by three unanswered in a row (the owner wants them to appear, 2026-11-11); other kinds still are", async () => {
