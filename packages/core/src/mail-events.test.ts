@@ -115,5 +115,8 @@ test("an event is named by what it is: no verb, no leading day, no 「在…举�
   expect(attendedName("参加 11 月 2 日晚间 BadgerShop 排练")).toBe("BadgerShop 排练");
   expect(attendedName("参加 11 月 5 日 ECE 研究系列讲座")).toBe("ECE 研究系列讲座");
   expect(attendedName("出席组会")).toBe("组会");
+  // What follows the first clause is about the task (seen on the owner's card the day it shipped).
+  expect(attendedName("参加 11 月 5 日 ECE 研究系列讲座，并保留参会记录。")).toBe("ECE 研究系列讲座");
+  expect(attendedName("参加 11 月 2 日晚间 BadgerShop 排练。")).toBe("BadgerShop 排练");
   expect(attendedName("参加")).toBe("参加");
 });

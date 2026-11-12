@@ -33,12 +33,15 @@ export function isAttending(text: string): boolean {
 const LEADING_DAY = /^\s*(\d{1,2}\s*月\s*\d{1,2}\s*[日号]|\d{1,2}\/\d{1,2})\s*(上午|中午|下午|傍晚|晚上|晚间|早上)?\s*(在\s*)?/;
 /**
  * What is attended, as a list names it: without the verb, the day (said beside it from the task's own date) and 「在…举行的」, so the part
- * that tells one event from another comes first. Cut from the front, 「参加 11 月 6 日在 Lev…」 named nothing (2026-11-11).
+ * that tells one event from another comes first. Cut from the front, 「参加 11 月 6 日在 Lev…」 named nothing (2026-11-11). Only the first
+ * clause: what follows (「，并保留参会记录。」) is about the task, not the event.
  */
 export function attendedName(text: string): string {
   const rest = text.trim().replace(ATTENDING, "").replace(LEADING_DAY, "").trim();
   const held = /^.*?(举行|召开|举办)的\s*(.+)$/.exec(rest);
-  return (held?.[2] ?? rest).trim() || text.trim();
+  const name = (held?.[2] ?? rest).trim();
+  const clause = name.search(/[，。；;！？]/);
+  return (clause > 0 ? name.slice(0, clause) : name).trim() || text.trim();
 }
 
 /** What the triage model read about an event in the mail; empty strings and 0 when the mail is not one. */
