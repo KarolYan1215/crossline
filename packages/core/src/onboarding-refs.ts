@@ -116,6 +116,10 @@ export function resolveOnboardingRefs(value: unknown, known: { replies: Record<s
     return [section, { ...Object.fromEntries(SECTION_FIELDS[section].filter((field) => fields[field] !== undefined).map((field) => [field, fields[field]])),
       sentences: cited.ids }];
   })) : undefined;
+  // A point rests on the sentences it cites, each kept whole with its reply or file; a number the run was not shown is left out (the point
+  // with nothing left is not kept, `applyPointChanges`).
+  const pointChanges = list(turn.pointChanges).map(({ refs, ...change }) => ({ ...change,
+    quotes: citedSpan(refs, index, texts).ids.map((id) => ({ ref: index.get(id)!.ref, text: index.get(id)!.text })) }));
   // A card item read off the person's words rests on the sentences that say it; no citation is no reading (the item is left unanswered).
   const itemScores = list(turn.itemScores).flatMap(({ refs, ...item }) => {
     /* i18n-ignore-start */
@@ -124,7 +128,7 @@ export function resolveOnboardingRefs(value: unknown, known: { replies: Record<s
     return cited.ids.length ? [{ ...item, sentences: cited.ids }] : [];
   });
   return { ...turn, slotUpdates, flywheelCandidates, lineProfiles, goalEdits, settings, availability, ...(sections ? { profileSections: sections } : {}),
-    ...(Array.isArray(turn.itemScores) ? { itemScores } : {}),
+    ...(Array.isArray(turn.itemScores) ? { itemScores } : {}), ...(Array.isArray(turn.pointChanges) ? { pointChanges } : {}),
     ...(turn.fileDates && typeof turn.fileDates === "object" ? { fileDates: resolveDateRefs(turn.fileDates, index, texts) } : {}) };
 }
 
@@ -185,7 +189,7 @@ const asDialogue = (value: unknown) => value && typeof value === "object" ? { ..
  * Chat Completions provider in JSON mode), drops keys it had nothing for, and the whole answer used to be refused for it as
  * 「输出结构不符合要求」 — repeatedly, so nothing from the interview's deep stages was recorded (2026-10-19 walkthrough, the developer's model).
  */
-const EXTRACT_LISTS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "lineProfiles", "goalEdits", "settings", "hypotheses", "careers", "dimensions", "dropCareers"] as const;
+const EXTRACT_LISTS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "lineProfiles", "goalEdits", "settings", "hypotheses", "careers", "dimensions", "dropCareers", "pointChanges"] as const;
 // A slot built from a line id that has a hyphen in it (「flywheel_line-x-3_informs」) was refused and the whole answer with it: slots are
 // normalised to their own alphabet instead.
 const slotName = (slot: unknown) => typeof slot === "string" ? slot.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) : slot;

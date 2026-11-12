@@ -74,3 +74,27 @@ Costs and open points:
 - Two portrait-lane runs waited 2.5–3.5 min in the gate, behind research threads.
 - Careers whose names differ slightly are kept twice (merged by role name).
 - Next to measure: sections as deltas, lower effort for the inferences lane.
+
+**The points ledger (2026-11-12, after the fifth replay; the owner's decisions).** Record and reasons: `docs/onboarding-v3.md` 「要点账本」.
+- New main interviews carry `coverage.rules = "points"` (`POINTS_RULES`, `pointsRules`). Older interviews keep their paragraphs.
+- The sections lane writes only `pointChanges` (add / revise / retract).
+  - Each point is a paragraph at most `POINT_TEXT_MAX` long and quotes the person (`quotes`).
+  - A point may cite `external` pages, taken only from the research threads' URLs.
+  - `applyPointChanges` refuses a point without a quote.
+  - Only a `stated` point can be revised or retracted, and only with a reason in its `log`.
+  - A section's paragraph is written once, when the section is finalized.
+- An observation card is one hypothesis of the log (`hypothesisId`). The dialogue gets `hypothesisLog` and `points`.
+  - A card with no hypothesis on record creates `c<seq>`.
+  - A card for a hypothesis already asked, rated or refuted is dropped.
+- `rateInsight` (`packages/db/src/insight-rating.ts`) is shared by the route and `persona-eval.ts`:
+  - 准 → `supported` plus a `confirmed` point.
+  - 不准 → `refuted`.
+  - 部分对 → the correction becomes a `corrected` point, and the hypothesis stays open.
+  - A changed or cleared rating first undoes the earlier one.
+  - A hypothesis rated on a card is frozen against later merges (`settledOnCard`).
+- Careers have two layers: one direction per industry + function (`k<n>`), with jobs as `entries`. A direction is replaced only with a `change` reason. A new direction states `differs`.
+- The page shows confirmed points and hypotheses during the interview, and a stage's view only once its section is final (`sectionsFinal`).
+- `scripts/points-migrate.ts` moves a named account:
+  - `--split` sets the rules and `profile.points.split`, so the sections lane splits the old paragraphs into cited points once and keeps the paragraphs.
+  - `--export` writes the interview out.
+  - `--reset` is 「清空数据重新开始」 (`RESET_KEEPS` now lives in `@crossline/db`).

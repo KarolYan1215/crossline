@@ -14,6 +14,8 @@ export type ProfileModelView = {
   hypotheses?: import("./interview-contract").Hypothesis[];
   careers?: import("./interview-contract").CareerOption[];
   dimensions?: import("./interview-contract").DimensionNote[];
+  /** The points ledger (the points rules, 2026-11-12); absent or empty on a portrait written in paragraphs. */
+  points?: import("@crossline/core").ProfilePoint[];
 };
 export type LineView = { id: string; label: string; rank: number | null; hard: boolean; goals: string[]; goalParts: string[] };
 

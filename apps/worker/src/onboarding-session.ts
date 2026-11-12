@@ -23,6 +23,7 @@ import { checklistAnswered, checklistAskable, ledgerForModel, linesAnsweredUnrea
 import { createOnboardingExtractor, extractionReached, requestAllLanes, requestExtraction, type ExtractLane } from "./onboarding-extract";
 import { DATES_UNRECORDED_EVENT, ONBOARDING_UNRECORDED_EVENT, personTimeZone, readProfileModel } from "./onboarding-persist";
 import { paceContext, storedProgress } from "./onboarding-pace";
+import { hypothesisFromCard, POINTS_RULES, pointsRules } from "@crossline/core";
 import { readResearch, researchForDialogue, researchRunnerFor } from "./onboarding-research";
 import { DOMAIN_PACKS, domainGuides } from "@crossline/identity-packs";
 
@@ -226,12 +227,13 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // flow, and a line's own interview has none.
     const lineInterview = sessionId.startsWith("line-");
     if (!session) {
-      session = { id: sessionId, ownerId, workspaceId, state: "active", coverage: lineInterview ? {} : { flow: "v2" }, createdAt: now, updatedAt: now };
+      // A new main interview runs under the points rules (2026-11-12, `profile-points.ts`); one begun before keeps its paragraphs.
+      session = { id: sessionId, ownerId, workspaceId, state: "active", coverage: lineInterview ? {} : { flow: "v2", rules: POINTS_RULES }, createdAt: now, updatedAt: now };
       store.saveOnboardingSession(session);
     }
     let messages = store.listOnboardingMessages(workspaceId, sessionId);
     if (!lineInterview && !(session.coverage as { flow?: unknown }).flow && !messages.some((message) => message.role === "assistant")) {
-      session = { ...session, coverage: { ...session.coverage, flow: "v2" } };
+      session = { ...session, coverage: { ...session.coverage, flow: "v2", rules: POINTS_RULES } };
       store.saveOnboardingSession(session);
     }
     const flow: InterviewFlow = flowOf(session.coverage);
@@ -348,6 +350,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const recorded = recordedSince(coverage.heardAt);
     // The short ledger the round starts from: the last round's progress record, an abstract of the ledger, and the latest ratings.
     const pace = () => paceContext(store, workspaceId, sessionId, { today, recent: recorded.lines, progress: storedProgress(session!.coverage), flow, depth: depthNow(),
+      rules: !focusLine && pointsRules(session!.coverage),
       lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, goals: line.goals ?? [] })) });
     // What the app did to the last round and which replies the ledger lags behind: sent with every turn, only when there is something.
     const lastRound = coverage.lastRound;
@@ -596,7 +599,22 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const shownInsights = new Set(messages.filter((message) => message.role === "assistant")
       .map((message) => squeeze(String((message.content as { insight?: { text?: string } }).insight?.text ?? ""))).filter(Boolean));
     const checkedInsight = checkInsight(result.output.insight, replies, output.stage);
-    const insight = checkedInsight && !shownInsights.has(squeeze(checkedInsight.text)) ? checkedInsight : undefined;
+    const newCard = checkedInsight && !shownInsights.has(squeeze(checkedInsight.text)) ? checkedInsight : undefined;
+    // Under the points rules every card is one hypothesis of the log (2026-11-12): one on record by its id, never one a card already asked
+    // about; else a new one, added to the log here under the reply's number, so 准 / 不准 lands on the inference it rates.
+    const insight = newCard && !focusLine && pointsRules(session.coverage) ? (() => {
+      const asked = new Set(messages.filter((message) => message.role === "assistant")
+        .map((message) => String((message.content as { insight?: { hypothesisId?: string } }).insight?.hypothesisId ?? "")).filter(Boolean));
+      const profile = readProfile();
+      const named = result.output.insight?.hypothesisId?.trim() ?? "";
+      const onRecord = named ? profile.hypotheses.find((item) => item.id === named) : undefined;
+      if (onRecord) return onRecord.cardKey || asked.has(onRecord.id) || onRecord.status === "refuted" ? undefined
+        : { ...newCard, hypothesisId: onRecord.id, dimension: onRecord.dimension };
+      const id = `c${userMessage.seq}`;
+      const made = hypothesisFromCard(newCard, id, result.output.insight?.dimension);
+      store.setSetting(workspaceId, "profile.model", JSON.stringify({ ...profile, hypotheses: [...profile.hypotheses.filter((item) => item.id !== id), made] }));
+      return { ...newCard, hypothesisId: id, dimension: made.dimension };
+    })() : newCard;
     const progress = readTurnProgress(result.output.progress);
     const { insight: _raw, progress: _rawProgress, ...rest } = output;
     const stored = { ...rest, ...(insight ? { insight } : {}), ...(progress ? { progress } : {}) };

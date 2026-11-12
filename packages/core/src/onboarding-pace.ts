@@ -26,10 +26,15 @@ export const PART_LABEL: Record<OnboardingStage, string> = {
 /** The three deep stages every flow has: 「准」 in each confirms the portrait (the life story's observation is welcome, not required). */
 const CONFIRMING_STAGES: OnboardingStage[] = ["situation", "compass", "energy"];
 
-/** Where the person's ratings of observations are kept: `{ "<session>#<round seq>": { verdict, stage, at, text } }`. */
+/**
+ * Where the person's ratings of observations are kept: `{ "<session>#<round seq>": { verdict, stage, at, text } }`. Under the points
+ * rules (2026-11-12) a rating also names the hypothesis it rated, the point it made, and the hypothesis as it was (to take it back), and
+ * 「部分对」 keeps the person's correction.
+ */
 export const ONBOARDING_INSIGHTS = "onboarding.insights";
-export type InsightVerdict = "fits" | "off";
-export type InsightRatings = Record<string, { verdict: InsightVerdict; stage: string; at: string; text?: string }>;
+export type InsightVerdict = "fits" | "off" | "partial";
+export type InsightRatings = Record<string, { verdict: InsightVerdict; stage: string; at: string; text?: string; correction?: string;
+  hypothesisId?: string; pointId?: string; prior?: { status: "open" | "supported" | "refuted" | "undecided"; rated?: "fits" | "off" | "partial" } }>;
 export function readInsightRatings(raw: string | null | undefined): InsightRatings {
   try {
     const value = JSON.parse(raw ?? "{}") as InsightRatings;

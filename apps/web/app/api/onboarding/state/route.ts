@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { PROFILE_SECTIONS_SETTING, sectionClosed, type SectionRecord } from "@crossline/core";
 import { INTERVIEW_FLOW_STAGES, flowOf, ONBOARDING_INSIGHTS, progressView, readInsightRatings, readTurnProgress, FIRST_DRAFTS_SETTING, ONBOARDING_LAST_FAILURE, readOnboardingFailure, ONBOARDING_TONE_SETTING, ONBOARDING_DEPTH_SETTING, readDepth, firstDraftsState, interviewCompleteness, openStageQuestion, questionKind, readTone, sameQuestion, screenQuestions, unsureAnswer, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
 import { INTERVIEW_LOCALE_SETTING, extractBacklog, interviewLocale, questionScreenFor } from "@crossline/db";
 import { isLocale } from "@crossline/i18n";
@@ -93,6 +94,8 @@ export async function GET(request: Request) {
     flow,
     capacity, skeleton: start.readyToStart ? draft : [],
     insightRatings: ratings,
+    // The portrait's sections whose stage is over: under the points rules a stage's view is shown only then (2026-11-12).
+    sectionsFinal: Object.entries(json<Record<string, SectionRecord>>(PROFILE_SECTIONS_SETTING, {})).filter(([, record]) => sectionClosed(record)).map(([section]) => section),
     // The 「结束并出报告」 button (2026-11-12): off below the start standard, filled by how complete the portrait is, full well above it.
     completeness: (() => {
       const model = json<{ dimensions?: Array<{ id: string; evidenced: boolean }>; hypotheses?: Array<{ status: string }>; careers?: Array<{ trial?: { task?: string } }> } | null>("profile.model", null);

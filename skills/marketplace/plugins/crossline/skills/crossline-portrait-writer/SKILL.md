@@ -8,7 +8,7 @@ description: 根据 Crossline 访谈写本人的画像报告：具体、可画�
 接收 `{version: "crossline.portrait.v1", lines[], profile, facts[], replies[], documents[], doing, workHistory?, cards?, rejectedClaims?, research?}`：
 
 - `lines[]`：本人的主线（身份名词；`rank` 为 1 是底座主线，null 是并行；`hard` 约束；已选的 `goals`；访谈写的 `description`）。
-- `profile`：访谈的画像草稿。可能带 `narrative`（`careerTheme`、`roleModels`、`motto`、`turningPoints`、`futureScript`，访谈的人生故事部分），以及契约 B 的三份记录：`hypotheses`（假设日志，每条带 `basis`、`falsifier`、`alternative`、`status`、可能的 `reference`，本人评过的带 `rated`：`fits` 是本人说「准」，`off` 是「不准」）、`careers`（职业方向，带 JD 要求矩阵和试做）、`dimensions`（D0–D9 各维度目前知道了什么）。
+- `profile`：访谈的画像草稿。可能带 `narrative`（`careerTheme`、`roleModels`、`motto`、`turningPoints`、`futureScript`，访谈的人生故事部分），以及契约 B 的三份记录：`hypotheses`（假设日志，每条带 `basis`、`falsifier`、`alternative`、`status`、可能的 `reference`，本人评过的带 `rated`：`fits` 是本人说「准」，`off` 是「不准」，`partial` 是「部分对」）、`careers`（职业方向，带 JD 要求矩阵和试做；新访谈的方向有 `id`、`industry`、`function` 和进入途径 `entries`，同一个方向的不同途径写在一项里，不拆成几个方向）、`dimensions`（D0–D9 各维度目前知道了什么）。新访谈还有 `points`（要点账本）：已经确定的关于本人的事，一条一项，`source` 是 `stated`（本人原话）、`confirmed`（本人在观察卡上说「准」的推断）或 `corrected`（本人写的更正），每条带它依据的原话 `quotes` 和外部来源 `external`；`retracted` 的已撤回，不用。
 - `facts[]`：确认过的事实。
 - `replies[]`：本人的全部回复，按顺序，每条 `{id: "reply-N", text}`。
 - `documents[]`：本人交来的关于自己的文件（简介、简历、笔记），当本人的话读，全文给出。
@@ -28,7 +28,8 @@ description: 根据 Crossline 访谈写本人的画像报告：具体、可画�
 
 - **可以下判断，但要有证据。** 报告可以写本人没意识到的问题、行为背后的动机、本人自己没说出口的前提，可以直说代价。前提是证据写在同一处：引用本人的话、本人做过的事、或带网址的外部数据，推断链条写得出来。证据只有一个渠道时用「可能 / 倾向」；两个以上独立渠道指向同一处时才说得肯定。内心感受以本人为准，不推翻本人说的感受。
 - **不用修辞代替证据。** 不用比喻，不「点破」，不「反转」（「其实」「原来」式的揭示），不和本人没说过的主张对比。对比句（「不是……而是……」「真正的……是……」）只在对比本身就是结论、两边证据都写出来时用。
-- **本人评过的优先。** `profile.hypotheses` 里 `rated: "fits"`（本人说「准」）的假设是报告最有分量的依据：在 `cover`、`gap`、`formulation` 和 `careers` 里优先用它们，并在 `hypotheses` 里保留。`rated: "off"`（「不准」）的假设不能作为任何结论的依据，报告里不重复它的意思；它在 `hypotheses` 里保留为 `refuted`。`status: "refuted"` 的同样不作依据。
+- **有要点账本时，从要点写。** `profile.points` 是这份报告的主要材料：成段的叙述把要点连起来，不新增要点里没有依据的结论；`confirmed` 和 `corrected` 的要点是本人自己定的，最有分量，`corrected` 以本人的更正为准，不写回原来的推断。各节的成段字段（`problem`、`workView` 等）是阶段结束时写的看法，和要点冲突时以要点为准。
+- **本人评过的优先。** `profile.hypotheses` 里 `rated: "fits"`（本人说「准」）的假设是报告最有分量的依据：在 `cover`、`gap`、`formulation` 和 `careers` 里优先用它们，并在 `hypotheses` 里保留。`rated: "off"`（「不准」）的假设不能作为任何结论的依据，报告里不重复它的意思；它在 `hypotheses` 里保留为 `refuted`。`rated: "partial"` 的按本人的更正（`points` 里 `corrected` 的那条）写。`status: "refuted"` 的同样不作依据。
 - **只写关于本人的。** `documents` 是没有归到项目下的文件：本人写的简介或简历，也可能是下载的论文、课件、模板。只在文件说的是本人时才用它；一篇论文或一次工作坊的内容不是本人的处境或观点。
 - **同一个说法只出现一次。** 一个抽象说法（持续收敛、外部可验收、跨主线复用、复利）在整份报告里最多出现一次，其余地方写它具体指什么（「投稿前把图交给师兄」「每周 2–3 条笔记里用到研究素材」）。
 - **不贴标签、不诊断。** 不写人格类型、图式名、发展阶段、职业锚类型，不做临床判断。对中文用户不默认「追求钱和地位有害」。

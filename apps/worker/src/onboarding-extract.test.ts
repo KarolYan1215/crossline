@@ -343,3 +343,42 @@ test("a portrait lane that never ran starts at the single run's watermark: an in
   expect(extractor.nextSession(["line-research"], "sections")).toBe("s");
   expect(extractor.nextSession(["line-research"], "ledger")).toBe("line-research");
 });
+
+test("under the points rules the sections' lane writes points with their quotes, and a stage's view only once the stage is over", async () => {
+  const now = "2026-11-12T00:00:00.000Z";
+  const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
+  store.saveOnboardingSession({ id: "s", ownerId, workspaceId, state: "active", coverage: { stage: "situation", flow: "v1", rules: "points" }, createdAt: now, updatedAt: now });
+  const sections = facts({ profileSections: { situation: { problem: "改写成段的处境", gravity: [], designable: [], reframes: [], refs: [1] }, compass: null, energy: null, synthesis: null },
+    pointChanges: [
+      { op: "add", id: "", section: "situation", text: "论文 12 月中投稿，和产品抢同一段时间", refs: [1], external: [], why: "" },
+      { op: "add", id: "", section: "situation", text: "没有引用的要点", refs: [], external: [], why: "" }] });
+  const { rpc, prompts } = fakeRuntime([round], [ONBOARDING_SKILL, ONBOARDING_EXTRACT_SKILL], { routes: [
+    { match: '"lane":"sections"', answers: [sections] },
+    { match: '"lane":"insights"', answers: [JSON.stringify({ hypotheses: [], careers: [], dimensions: [], dropCareers: [] })] },
+    { match: EXTRACT, answers: [deadline([1])] }] });
+  const run = createRunner(store, workspaceId, "C:\repo", () => rpc);
+  expect((await run({ sessionId: "s", text: "论文 12 月中投稿，和产品在抢同一段时间。" })).state).toBe("asked");
+  await extractionSettled(workspaceId);
+  const prompt = prompts().find((item) => item.includes('"lane":"sections"'))!;
+  expect(prompt).toContain('"rules":"points"');
+  const profile = JSON.parse(store.getSetting(workspaceId, "profile.model")!) as { problem: string; points: Array<{ id: string; text: string; quotes: unknown[]; source: string }> };
+  // The stage is under way: no paragraph, only the point that cites a sentence.
+  expect(profile.problem).toBe("");
+  expect(profile.points).toEqual([expect.objectContaining({ id: "p1", source: "stated", text: "论文 12 月中投稿，和产品抢同一段时间",
+    quotes: [{ ref: "reply-1", text: "论文 12 月中投稿，和产品在抢同一段时间。" }] })]);
+});
+
+test("under the points rules a card that names no hypothesis on record becomes one in the log, and its round says which", async () => {
+  const card = JSON.stringify({ reply: "收到。", questions: [{ id: "q2", text: "还有别的吗？", kind: "free", options: [], allowOther: true, identityId: "", projectId: "", repeats: 0 }],
+    coverage: [], nextAction: "ask", stage: "energy",
+    insight: { hypothesisId: "", dimension: "D2", text: "两次投入都和有人等结果有关", refs: [{ replyId: "reply-1", quote: "和同学赶比赛" }, { replyId: "reply-5", quote: "导师等着看图" }],
+      external: [], falsifier: "没人等时也一样投入" } });
+  const { rpc } = runtime([round, round, card], [facts(), facts(), facts()]);
+  const run = createRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });
+  for (const text of ["和同学赶比赛那次最投入。", "还有一门课。", "组会前导师等着看图，那晚写到三点。"]) await run({ sessionId: "s", text });
+  expect((store.getOnboardingSession(workspaceId, "s")!.coverage as { rules?: string }).rules).toBe("points");
+  const last = store.listOnboardingMessages(workspaceId, "s").filter((message) => message.role === "assistant").at(-1)!;
+  expect((last.content as { insight?: { hypothesisId?: string } }).insight?.hypothesisId).toBe("c5");
+  const profile = JSON.parse(store.getSetting(workspaceId, "profile.model")!) as { hypotheses: Array<{ id: string; status: string; basis: Array<{ ref: string }> }> };
+  expect(profile.hypotheses).toEqual([expect.objectContaining({ id: "c5", status: "open", basis: [expect.objectContaining({ ref: "reply-1" }), expect.objectContaining({ ref: "reply-5" })] })]);
+});

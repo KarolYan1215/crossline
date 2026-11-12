@@ -28,13 +28,32 @@ export type Hypothesis = {
   alternative: string;
   status: (typeof HYPOTHESIS_STATUSES)[number];
   reference?: { text: string; url: string };
-  rated?: "fits" | "off";
+  rated?: "fits" | "off" | "partial";
+  /**
+   * The observation card that asked the person about it (`session#seq`, 2026-11-12: every card is one hypothesis of this log) and, when
+   * they said 「准」 or 「部分对」, the point it put in the ledger. A hypothesis the person rated 准 or 不准 on a card is theirs: the
+   * extraction no longer rewrites it.
+   */
+  cardKey?: string;
+  pointId?: string;
 };
 /**
  * A career direction drawn from the portrait: the role, why (citing hypothesis ids), how often public job ads ask for each requirement
  * against the person's evidence (`sources` the ads' URLs), and a 2–4 week trial that can refute it, hung on one of their lines.
+ *
+ * Two layers since 2026-11-12 (replay 5 listed 四大审计寒假实习 and 四大审计日常实习 as two directions): the direction is an industry and
+ * a function under a stable `id`; the ways in (a winter internship, a part-time one, graduate hiring) are its `entries`. A run changes a
+ * direction by its id and says why (`change`); a new one says how it differs from the others (`differs`), and one whose industry and
+ * function are already on record joins that one. `log` is each change with its reason. All optional: a direction written before has none.
  */
 export type CareerOption = {
+  id?: string;
+  industry?: string;
+  function?: string;
+  entries?: string[];
+  change?: string;
+  differs?: string;
+  log?: Array<{ at: string; why: string }>;
   role: string;
   why: string;
   hypothesisIds: string[];
@@ -70,6 +89,8 @@ export const HYPOTHESIS_ITEM_FIELD = object({
 });
 /** A career direction; `line` is the field a line id is written in (an enum of the person's lines when the caller knows them). */
 export const careerItemSchema = (line: unknown = { type: "string", maxLength: 80 }) => object({
+  id: { type: "string", maxLength: 12 }, industry: { type: "string", maxLength: 60 }, function: { type: "string", maxLength: 60 },
+  entries: { type: "array", maxItems: 6, items: text(120) }, change: { type: "string", maxLength: 300 }, differs: { type: "string", maxLength: 300 },
   role: text(120), why: text(600), hypothesisIds: { type: "array", maxItems: 8, items: HYPOTHESIS_REF },
   requirements: { type: "array", maxItems: 12, items: object({ requirement: text(200), share: { type: "string", maxLength: 40 },
     has: { type: "string", enum: ["yes", "partial", "no"] }, evidence: { type: "string", maxLength: 300 } }) },
@@ -127,7 +148,10 @@ export function cleanCareers(list: unknown[], hypothesisIds: ReadonlySet<string>
       return requirement && oneOf(["yes", "partial", "no"] as const, entry?.has)
         ? [{ requirement, share: str(entry.share, 40), has: entry.has, evidence: str(entry.evidence, 300) }] : [];
     }) : [];
-    return [{ role, why: str(item.why, 600), hypothesisIds: (Array.isArray(item.hypothesisIds) ? item.hypothesisIds : []).filter((id) => hypothesisIds.has(id)),
+    const id = str(item.id, 12), industry = str(item.industry, 60), func = str(item.function, 60), change = str(item.change, 300), differs = str(item.differs, 300);
+    const entries = [...new Set((Array.isArray(item.entries) ? item.entries : []).map((entry) => str(entry, 120)).filter(Boolean))].slice(0, 6);
+    return [{ ...(HYPOTHESIS_ID.test(id) ? { id } : {}), ...(industry ? { industry } : {}), ...(func ? { function: func } : {}), ...(entries.length ? { entries } : {}),
+      ...(change ? { change } : {}), ...(differs ? { differs } : {}), role, why: str(item.why, 600), hypothesisIds: (Array.isArray(item.hypothesisIds) ? item.hypothesisIds : []).filter((id) => hypothesisIds.has(id)),
       requirements, sources: urls,
       trial: { weeks: Math.max(2, Math.min(4, Math.round(Number(item.trial.weeks) || 2))), task: str(item.trial.task, 400),
         supportsIf: str(item.trial.supportsIf, 300), refutesIf: str(item.trial.refutesIf, 300) },
@@ -147,30 +171,53 @@ export function cleanDimensionNotes(list: unknown[]): DimensionNote[] {
 
 // ── Merging a run's changes ──────────────────────────────────────────────────────────────────────────────────────────
 
+/** Whether the person settled a hypothesis on its card (准 or 不准): the extraction leaves it as it is. */
+export const settledOnCard = (item: Pick<Hypothesis, "cardKey" | "rated">): boolean => Boolean(item.cardKey && (item.rated === "fits" || item.rated === "off"));
+
 /**
  * A run's changes merged into what is on record (2026-11-12): the extraction writes only the hypotheses, careers and dimension notes that
  * are new or changed, instead of the whole lists every run (a run rewrote 40 hypotheses and every requirement matrix to change one or two;
  * replay 3 spent 27 minutes and 26k output tokens on one run). A hypothesis replaces the one with its id, or joins the end; the person's
- * 准/不准 stays with the id. A career replaces the one with the same role (letters and digits compared), or joins the end; `dropCareers`
- * removes by role. A dimension note replaces the one with its id. What the run did not name stays as it was.
+ * rating and its card stay with the id, and one they settled on its card is not rewritten (`settledOnCard`). A dimension note replaces the
+ * one with its id. What the run did not name stays as it was.
+ *
+ * A career is matched by its id, else by its industry and function, else by its role (letters and digits compared): a match is replaced
+ * only with a reason (`change`, kept in its `log`), and keeps its id and every entry either side named; without a reason only the entries
+ * are added. No match joins the end under a new id (`k<n>`), with `differs` as its first log line. A direction on record without an id is
+ * given one here. `dropCareers` removes by id or role.
  */
 export function mergeProfileInsights(
   onRecord: { hypotheses?: Hypothesis[]; careers?: CareerOption[]; dimensions?: DimensionNote[] },
-  changes: { hypotheses?: Hypothesis[]; careers?: CareerOption[]; dimensions?: DimensionNote[]; dropCareers?: string[] }
+  changes: { hypotheses?: Hypothesis[]; careers?: CareerOption[]; dimensions?: DimensionNote[]; dropCareers?: string[] },
+  at: string = new Date().toISOString()
 ): { hypotheses: Hypothesis[]; careers: CareerOption[]; dimensions: DimensionNote[] } {
   const hypotheses = [...(onRecord.hypotheses ?? [])];
   for (const item of changes.hypotheses ?? []) {
-    const at = hypotheses.findIndex((other) => other.id === item.id);
-    const rated = at >= 0 ? hypotheses[at]!.rated : undefined;
-    const next = rated ? { ...item, rated } : item;
-    if (at >= 0) hypotheses[at] = next; else hypotheses.push(next);
+    const index = hypotheses.findIndex((other) => other.id === item.id);
+    const old = index >= 0 ? hypotheses[index]! : undefined;
+    if (old && settledOnCard(old)) continue;
+    const next = { ...item, ...(old?.rated ? { rated: old.rated } : {}), ...(old?.cardKey ? { cardKey: old.cardKey } : {}), ...(old?.pointId ? { pointId: old.pointId } : {}) };
+    if (old) hypotheses[index] = next; else hypotheses.push(next);
   }
-  const role = (value: string) => loose(value).toLowerCase();
+  const role = (value: string | undefined) => loose(value ?? "").toLowerCase();
+  const keyOf = (item: CareerOption) => role(item.industry) && role(item.function) ? `${role(item.industry)}|${role(item.function)}` : "";
+  let last = Math.max(0, ...(onRecord.careers ?? []).map((item) => Number(/^k(\d+)$/.exec(item.id ?? "")?.[1] ?? 0)));
   const dropped = new Set((changes.dropCareers ?? []).map(role));
-  const careers = (onRecord.careers ?? []).filter((item) => !dropped.has(role(item.role)));
-  for (const item of changes.careers ?? []) {
-    const at = careers.findIndex((other) => role(other.role) === role(item.role));
-    if (at >= 0) careers[at] = item; else careers.push(item);
+  const careers = (onRecord.careers ?? []).map((item) => item.id ? item : { ...item, id: `k${++last}` })
+    .filter((item) => !dropped.has(role(item.role)) && !dropped.has(role(item.id)));
+  for (const raw of changes.careers ?? []) {
+    const { change, differs, ...item } = raw;
+    const index = [(other: CareerOption) => Boolean(item.id) && other.id === item.id, (other: CareerOption) => Boolean(keyOf(item)) && keyOf(other) === keyOf(item),
+      (other: CareerOption) => role(other.role) === role(item.role)].map((match) => careers.findIndex(match)).find((found) => found >= 0) ?? -1;
+    if (index < 0) {
+      careers.push({ ...item, id: `k${++last}`, ...(differs ? { differs } : {}), log: [{ at, why: differs || item.why.slice(0, 300) }] });
+      continue;
+    }
+    const old = careers[index]!;
+    const entries = [...new Set([...(old.entries ?? []), ...(item.entries ?? [])])].slice(0, 8);
+    careers[index] = change?.trim()
+      ? { ...item, id: old.id!, ...(entries.length ? { entries } : {}), ...(old.differs ? { differs: old.differs } : {}), log: [...(old.log ?? []), { at, why: change.trim() }] }
+      : { ...old, ...(entries.length ? { entries } : {}) };
   }
   const notes = new Map((onRecord.dimensions ?? []).map((item) => [item.id, item]));
   for (const item of changes.dimensions ?? []) notes.set(item.id, item);

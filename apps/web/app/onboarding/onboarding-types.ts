@@ -31,6 +31,8 @@ export type AssistantTurn = {
   cards?: import("@crossline/core").ProfileCard[];
 };
 export type TurnInsightView = {
+  /** The hypothesis it asks about (the points rules); 「部分对」 is offered only then. */
+  hypothesisId?: string;
   text: string; refs: Array<{ replyId: string; quote: string }>;
   external?: Array<{ text: string; url: string }>; falsifier?: string;
 };
@@ -92,7 +94,9 @@ export type OnboardingState = {
   /** The research threads the interview opened (contract C), each with its own conversation; absent before the route sends them. */
   research?: import("./interview-contract").ResearchThread[];
   /** The person's 准 / 不准 per round (round seq → verdict). */
-  insightRatings?: Record<string, "fits" | "off">;
+  insightRatings?: Record<string, "fits" | "off" | "partial">;
+  /** The portrait's sections whose stage is over (under the points rules, a stage's view is shown only then). */
+  sectionsFinal?: string[];
   identities: Identity[];
   session: { id: string; state: "active" | "complete"; coverage: { coverage?: AssistantTurn["coverage"]; stage?: string } } | null;
   /** A new account sets its lines before the conversation starts. */

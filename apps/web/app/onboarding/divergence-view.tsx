@@ -5,6 +5,8 @@ import { useT } from "../locale-context";
 import { buildDivergenceGraph, fitsEntries, fitsFirst, isUrl, type FitsEntry, type GraphNode } from "./divergence-graph";
 import { falsifierCondition } from "./insight-card";
 import { DIMENSION_IDS, DIMENSION_LABEL, type DimensionId, type Hypothesis } from "./interview-contract";
+import { PointsList } from "./points-list";
+import type { ProfilePoint } from "@crossline/core";
 
 const STATUS_LABEL: Record<Hypothesis["status"], string> = { open: "待验证", supported: "已支持", refuted: "已推翻", undecided: "未定论" };
 const BASIS_LABEL: Record<Hypothesis["basis"][number]["kind"], string> = { quote: "原话", behavior: "行为", external: "外部" };
@@ -14,12 +16,14 @@ const BASIS_LABEL: Record<Hypothesis["basis"][number]["kind"], string> = { quote
  * the stages drew before stay, as the details of their dimensions (`detail`: D4 the values radar, D1 and D7 the energy plane, D5 the lines).
  * What the person rated 准 is listed first and drawn heavier (decision 23).
  */
-export function DivergenceView({ hypotheses, dimensions, insights, ratings, initial, detail }: {
+export function DivergenceView({ hypotheses, dimensions, insights, ratings, initial, detail, points }: {
   hypotheses: Hypothesis[] | undefined;
   dimensions: import("./interview-contract").DimensionNote[] | undefined;
   /** The observation cards of the conversation, by round, for the 「准」 list. */
   insights: Array<{ seq: number; text: string }>;
-  ratings: Record<string, "fits" | "off"> | undefined;
+  ratings: Record<string, "fits" | "off" | "partial"> | undefined;
+  /** Under the points rules, the points ledger: listed above the map in place of the 「准」 list (a confirmed inference is one of them). */
+  points?: ProfilePoint[];
   /** The dimension opened first (the one the current stage is about), if any. */
   initial?: DimensionId | undefined;
   detail: (dimension: DimensionId) => ReactNode;
@@ -34,7 +38,7 @@ export function DivergenceView({ hypotheses, dimensions, insights, ratings, init
   const select = (id: string) => setSelected((current) => current === id ? undefined : id);
   const label = (item: GraphNode) => item.kind === "dimension" ? `${item.id} ${t(item.label)}` : item.kind === "hypothesis" ? item.hypothesis.statement : item.basis.text;
   return <div className="ob-view ob-map">
-    {fits.length > 0 && <FitsList entries={fits} onOpen={(entry) => entry.hypothesisId && setSelected(entry.hypothesisId)} />}
+    {points ? <PointsList points={points} /> : fits.length > 0 && <FitsList entries={fits} onOpen={(entry) => entry.hypothesisId && setSelected(entry.hypothesisId)} />}
     <svg className="ob-map-svg" viewBox={`0 0 ${graph.size} ${graph.size}`} role="group" aria-label={t("画像发散图：维度、假设与证据")}>
       <circle cx={graph.centre} cy={graph.centre} r={graph.size * 0.27} className="ob-map-ring" />
       {graph.edges.map((edge) => <line key={edge.id} x1={edge.x1} y1={edge.y1} x2={edge.x2} y2={edge.y2} className="ob-map-edge" data-kind={edge.kind}
@@ -97,7 +101,7 @@ function NodeDetail({ node, hypotheses, detail, onOpen }: { node: GraphNode; hyp
     const item = node.hypothesis;
     return <section className="ob-map-detail" aria-label={t("假设")} data-fits={node.fits || undefined}>
       <header><b>{t("假设 {{n}}", { n: node.number })}</b><small>{item.dimension} {t(DIMENSION_LABEL[item.dimension])} · {t(STATUS_LABEL[item.status])}
-        {item.rated === "fits" ? t(" · 本人标为准") : item.rated === "off" ? t(" · 本人标为不准") : ""}</small></header>
+        {item.rated === "fits" ? t(" · 本人标为准") : item.rated === "off" ? t(" · 本人标为不准") : item.rated === "partial" ? t(" · 本人说部分对") : ""}</small></header>
       <p className="gen ob-map-statement">{item.statement}</p>
       {item.basis.length > 0 && <ul className="ob-map-basis">{item.basis.map((basis, index) => <li key={index} data-basis={basis.kind}>
         <small>{t(BASIS_LABEL[basis.kind])}</small>

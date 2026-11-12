@@ -4,7 +4,7 @@ import {
   type ProfileSection, type SectionRecord, GOAL_EDITS_SETTING, SECTION_EMPTY_RUNS_MAX, sectionClosed, citationWarnings, duplicateAttributes, mergeDateExtractions,
   resolveAvailability, sanitizeDateExtraction, withContentIds, withoutDecidedDates, withoutOffHours,
   type DateDrop, type DateExtraction, type OnboardingExtraction, type PendingGoalEdit, type ProfileModel, type StoredLineProfile,
-  PROFILE_INSTRUMENTS_SETTING, mergeInstrumentAnswers, mergeProfileInsights, readInstrumentAnswers
+  PROFILE_INSTRUMENTS_SETTING, mergeInstrumentAnswers, mergeProfileInsights, readInstrumentAnswers, applyPointChanges, readPoints
 } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
@@ -43,6 +43,11 @@ export type PersistContext = {
   reread: boolean;
   /** The portrait's sections this run was to rewrite whole because their stage is over, and whether it was to write the synthesis. */
   profileTask?: { finalize: ProfileSection[]; synthesize: boolean };
+  /**
+   * The points rules (2026-11-12): a section is written only when its stage is over (or the synthesis when owed); what the replies settle
+   * until then goes into the points ledger (`pointChanges`).
+   */
+  rules?: boolean;
 };
 
 export function readSectionRecords(store: CrosslineStore, workspaceId: string): Partial<Record<ProfileSection, SectionRecord>> {
@@ -57,7 +62,8 @@ export function persistExtraction(store: CrosslineStore, workspaceId: string, ex
   // A line's own interview adds to the facts but does not touch the person's portrait.
   if (!sessionId.startsWith("line-") && context.profileTask) {
     const task = context.profileTask;
-    const allowed = new Set<ProfileSection>([...DEEP_SECTIONS, ...(task.synthesize ? ["synthesis" as const] : [])]);
+    // Under the points rules a stage's view is written once, when it is over: not reworded every run while the stage is under way.
+    const allowed = new Set<ProfileSection>([...(context.rules ? task.finalize : DEEP_SECTIONS), ...(task.synthesize ? ["synthesis" as const] : [])]);
     const sections = extraction.profileSections ?? {};
     if (PROFILE_SECTIONS.some((section) => sections[section] && allowed.has(section)))
       store.setSetting(workspaceId, "profile.model", JSON.stringify(mergeProfileSections(readProfileModel(store, workspaceId), sections, allowed)));
@@ -77,6 +83,13 @@ export function persistExtraction(store: CrosslineStore, workspaceId: string, ex
     }
     store.setSetting(workspaceId, PROFILE_SECTIONS_SETTING, JSON.stringify(records));
   }
+  // The points ledger (the points rules): added, revised and retracted points, each resting on the person's words; a change that does not
+  // hold is left out (`applyPointChanges`). A line's own interview never touches it.
+  if (context.rules && !sessionId.startsWith("line-") && extraction.pointChanges?.length) {
+    const profile = readProfileModel(store, workspaceId);
+    const { points } = applyPointChanges(readPoints(profile.points), extraction.pointChanges, now);
+    store.setSetting(workspaceId, "profile.model", JSON.stringify({ ...profile, points }));
+  }
   // The hypothesis log, career directions and dimension notes (contract B): the run sends only what is new or changed, merged by id
   // (`mergeProfileInsights`, 2026-11-12); what it did not name stays. The person's 准/不准 on a hypothesis stays with its id. Written by
   // a lane of its own (`EXTRACT_LANE_KEYS.insights`), which owes no portrait section; a line's own interview never touches them.
@@ -85,7 +98,7 @@ export function persistExtraction(store: CrosslineStore, workspaceId: string, ex
     const profile = readProfileModel(store, workspaceId);
     store.setSetting(workspaceId, "profile.model", JSON.stringify({ ...profile,
       ...mergeProfileInsights(profile, { ...(hypotheses ? { hypotheses } : {}), ...(careers ? { careers } : {}), ...(dimensions ? { dimensions } : {}),
-        ...(dropCareers ? { dropCareers } : {}) }) }));
+        ...(dropCareers ? { dropCareers } : {}) }, now) }));
   }
   // Card items the person answered in words: scored as `mapped` only for items still waiting to be read (a tap is never replaced).
   if (!sessionId.startsWith("line-") && extraction.itemScores?.length) {

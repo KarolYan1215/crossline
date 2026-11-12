@@ -77,22 +77,42 @@ test("a research run: a conclusion needs an opened web source; sources are web U
   expect(turn.conclusion).toBe("9/10 要求 Python");
 });
 
-test("a run's changes merge into what is on record: by id for hypotheses and dimensions, by role for careers; the rest stays", () => {
+test("a run's changes merge into what is on record: by id for hypotheses and dimensions; the rest stays", () => {
   const h = (id: string, statement: string, over: Partial<Hypothesis> = {}): Hypothesis => ({ id, dimension: "D2", statement, basis: [{ kind: "behavior", text: "x", ref: "reply-1" }],
     falsifier: "f", alternative: "", status: "open", ...over });
-  const c = (role: string, task = "t"): CareerOption => ({ role, why: "", hypothesisIds: [], requirements: [], sources: [], trial: { weeks: 2, task, supportsIf: "s", refutesIf: "r" }, lineId: "" });
-  const onRecord = { hypotheses: [h("h1", "旧一", { rated: "fits" }), h("h2", "旧二")], careers: [c("活动运营实习"), c("咨询助理")],
-    dimensions: [{ id: "D0" as const, summary: "旧", evidenced: true }, { id: "D2" as const, summary: "旧", evidenced: false }] };
-  const merged = mergeProfileInsights(onRecord, { hypotheses: [h("h1", "新一", { status: "supported" }), h("h3", "新三")],
-    careers: [c("活动运营 实习", "新试做"), c("财经采编")], dimensions: [{ id: "D2", summary: "新", evidenced: true }], dropCareers: ["咨询助理"] });
-  // h1 replaced in place and keeps the person's 准; h2 untouched; h3 joins the end.
+  const onRecord = { hypotheses: [h("h1", "旧一", { rated: "fits" }), h("h2", "旧二"), h("h4", "卡上说准", { rated: "fits", cardKey: "s#3", pointId: "p1", status: "supported" })],
+    careers: [], dimensions: [{ id: "D0" as const, summary: "旧", evidenced: true }, { id: "D2" as const, summary: "旧", evidenced: false }] };
+  const merged = mergeProfileInsights(onRecord, { hypotheses: [h("h1", "新一", { status: "supported" }), h("h3", "新三"), h("h4", "改写本人定过的")],
+    dimensions: [{ id: "D2", summary: "新", evidenced: true }] });
+  // h1 replaced in place and keeps the person's 准; h2 untouched; h3 joins the end; h4, settled on its card, is not rewritten.
   expect(merged.hypotheses.map((item) => [item.id, item.statement, item.status, item.rated ?? ""])).toEqual([
-    ["h1", "新一", "supported", "fits"], ["h2", "旧二", "open", ""], ["h3", "新三", "open", ""]]);
-  // The same role (spacing aside) replaced; a dropped one gone; a new one added.
-  expect(merged.careers.map((item) => [item.role, item.trial.task])).toEqual([["活动运营 实习", "新试做"], ["财经采编", "t"]]);
+    ["h1", "新一", "supported", "fits"], ["h2", "旧二", "open", ""], ["h4", "卡上说准", "supported", "fits"], ["h3", "新三", "open", ""]]);
   expect(merged.dimensions).toEqual([{ id: "D0", summary: "旧", evidenced: true }, { id: "D2", summary: "新", evidenced: true }]);
   // Nothing changed: everything stays as it was.
   expect(mergeProfileInsights(onRecord, {})).toEqual({ ...onRecord });
+});
+
+test("careers in two layers: one industry and function is one direction, its ways in are entries; a change needs a reason; ids are stable", () => {
+  const at = "2026-11-12T00:00:00.000Z";
+  const c = (role: string, over: Partial<CareerOption> = {}): CareerOption => ({ role, why: "w", hypothesisIds: [], requirements: [], sources: [],
+    trial: { weeks: 2, task: "t", supportsIf: "s", refutesIf: "r" }, lineId: "", ...over });
+  // A direction from before has no id: it is given one.
+  const onRecord = { careers: [c("咨询助理"), c("四大审计寒假实习", { id: "k3", industry: "会计师事务所", function: "审计", entries: ["寒假实习"] })] };
+  const merged = mergeProfileInsights(onRecord, { careers: [
+    c("四大审计日常实习", { industry: "会计师事务所 ", function: "审计", entries: ["日常实习"] }),
+    c("财经采编", { differs: "和审计不同：写稿而不是核账" }),
+    // The same id without a reason changes nothing but its entries.
+    c("四大审计", { id: "k3", industry: "会计师事务所", function: "审计" })
+  ], dropCareers: ["k4"] }, at);
+  // 咨询助理 was given k4 and dropped by it; 日常实习 joined k3 as an entry; 财经采编 is new.
+  expect(merged.careers.map((item) => [item.id, item.role, item.entries ?? []])).toEqual([
+    ["k3", "四大审计寒假实习", ["寒假实习", "日常实习"]], ["k5", "财经采编", []]]);
+  expect(merged.careers[1]!.log).toEqual([{ at, why: "和审计不同：写稿而不是核账" }]);
+  // With a reason the same id is rewritten, keeping its entries and logging why.
+  const changed = mergeProfileInsights(merged, { careers: [c("四大审计（审计助理）", { id: "k3", change: "她说更想做全职校招", entries: ["校招"] })] }, at);
+  expect(changed.careers[0]).toMatchObject({ id: "k3", role: "四大审计（审计助理）", entries: ["寒假实习", "日常实习", "校招"] });
+  expect(changed.careers[0]!.log?.at(-1)).toEqual({ at, why: "她说更想做全职校招" });
+  expect("change" in changed.careers[0]!).toBe(false);
 });
 
 test("a career changed this run may rest on a hypothesis on record that the run did not rewrite", () => {

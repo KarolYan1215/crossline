@@ -7,11 +7,11 @@ description: 读 Crossline 访谈刚听到的内容（本人的新回答和新�
 
 访谈（`crossline-onboarding`）和本人对话；这个 Skill 记录本人说了什么，并在每次运行时做一轮分析。它在每条回复之后用新线程运行，所以需要的一切都在输入里或两个查询工具后面。这里写的东西不作为对话给本人看；事实部分会成为之后所有计划依据的账本，所以先求准确再求完整。画像部分（假设、职业、维度）是访谈的外部记忆，下一轮访谈和最后的画像报告都读它。
 
-接收 `crossline.onboarding.extract.v1`：`{lane?, today, timeZone, lines[], projects[], facts[], lineProfiles[], candidatesWanted, profile, profileTask, stage, focusLine, replies[], sources[], sourcesWaiting?, reread, observations?, scaleItems?, research?}`。
+接收 `crossline.onboarding.extract.v1`：`{lane?, rules?, points?, split?, today, timeZone, lines[], projects[], facts[], lineProfiles[], candidatesWanted, profile, profileTask, stage, focusLine, replies[], sources[], sourcesWaiting?, reread, observations?, scaleItems?, research?}`。
 
 - `lane`（有时出现）表示这次运行只负责整理的一部分，另外两部分由并行的运行同时写，返回的 JSON 也只有这一部分的字段：
   - `"ledger"`：事实、项目、日期、主线描述与定语、目标改动、时间、设置、卡片题的文字回答。`profile` 是 null，**这不表示回复是笔记**，照常按回复记。
-  - `"sections"`：画像各节（`profileSections`）和主线之间的联系（`flywheelCandidates`）。不读文件，需要时用查询工具查。
+  - `"sections"`：画像各节（`profileSections`）、主线之间的联系（`flywheelCandidates`），新访谈还有要点账本（`pointChanges`）。不读文件，需要时用查询工具查。
   - `"insights"`：假设日志、职业方向和维度（以及 `dropCareers`）。`profileTask` 是 null，不写画像各节。
   - 没有 `lane` 时一次写全部。各部分的规则都按下文，不变。
 
@@ -25,7 +25,7 @@ description: 读 Crossline 访谈刚听到的内容（本人的新回答和新�
 - `research`（有时出现）是本场访谈已完成的调研子线程的结论和来源 `{question, conclusion, sources[]}`：这是你唯一的外部材料，可以作为假设的 `external` 依据和 `reference`、职业方向的 JD 要求和 `sources`，网址照抄它的。
 - `lines[]` 是本人的主线（身份名词、固定安排、已采纳的目标、健康 / 财富主线的 `domain`）；`projects[]` 是已记录的项目。
 
-返回符合 `OnboardingExtraction`（`packages/core/src/onboarding-turn-schema.ts`）的 JSON：`{slotUpdates[], projectsDetected[], flywheelCandidates[], fileDates, lineProfiles[], goalEdits[], availability, settings[], profileSections, itemScores[], hypotheses[], careers[], dimensions[], dropCareers[]}`。新材料对某个列表没说什么时，那个列表留空。
+返回符合 `OnboardingExtraction`（`packages/core/src/onboarding-turn-schema.ts`）的 JSON：`{slotUpdates[], projectsDetected[], flywheelCandidates[], fileDates, lineProfiles[], goalEdits[], availability, settings[], profileSections, itemScores[], hypotheses[], careers[], dimensions[], dropCareers[], pointChanges[]}`（`pointChanges` 只在新访谈的 schema 里有）。新材料对某个列表没说什么时，那个列表留空。
 
 ## 查询工具
 
@@ -127,7 +127,23 @@ description: 读 Crossline 访谈刚听到的内容（本人的新回答和新�
 
 其他 `agent.category` 目标：`files_calendar_prep`、`data_code_sim`、`media_edit`（各为 `on` 或 `off`）。只记本人明说的：你推断出的偏好是事实，不是设置。休息日和工作时间属于 `availability`，不是设置。
 
+## 要点账本（`pointChanges`，有 `rules: "points"` 时）
+
+新访谈（`rules: "points"`）不再每轮改写成段的画像。本人说定了的事记成**要点**，进账本；成段的「当前看法」只在一个阶段结束时写一次（见下一节），报告最后才写。`points` 是账本现在的样子，一行一条：`p3 [compass·原话] ……`（`原话` 是从本人的话记下的，`本人确认` 是本人在观察卡上点了「准」的推断，`本人更正` 是本人在卡上写的更正）。
+
+每项 `{op, id, section, text, refs, external, why}`：
+
+- `add`：一条新要点。`section` 是它属于的部分（`narrative` 经历、`situation` 处境、`compass` 指南针、`energy` 能量）；`text` 写清楚一件事，可以是一句，也可以是一段（把相关的原话、背景、本人自己的解释写进去，逻辑清楚）；`refs` 写它依据的句子编号，**至少一个**，没有引用的要点不收；`external` 只用 `research` 里的结论和它们的网址（`{text, url}`），没有就 `[]`；`id` 写 `""`（应用编号）；`why` 写 `""`。
+- `revise`：本人后来的话改变了一条 `原话` 要点。`id` 写原要点的 id，`text` 写改后的整条，`refs` 写新的依据（至少一个），`why` 写为什么改（「她第 12 条回复改口说先保论文」）。没有新依据、没有理由的修订不收。
+- `retract`：一条 `原话` 要点不再成立（本人否认了、说错了）。`id` 和 `why` 必填。
+- `本人确认` 和 `本人更正` 的要点是本人自己定的，不要修订或撤回；本人后来又改口时，记一条新的 `add`。
+- 要点只记本人说的和本人确认的。**你的推断不进账本**，写进 `hypotheses`（假设日志），由对话做成观察卡去问本人。
+- 已经在账本里的不要重复记；同一件事有了新细节，用 `revise`。没有新内容时 `pointChanges` 留 `[]`。
+- 有 `split`（老账号迁移）时：`profile` 里这些节是以前写成段的画像。把每段拆成要点，每条用 `search_evidence` / `read_sentences` 找到本人说过的原话作为 `refs`；找不到原话的那部分是当时的推断，不进账本（需要时写成一条假设）。这次运行可以写很多条 `add`，每条仍要有引用。
+
 ## 画像各节（`profileSections`）
+
+有 `rules: "points"` 时：深的几节**只在 `profileTask.finalize` 列出它时写一次**（这个阶段结束时的「当前看法」，从要点账本和本人原话写出，不新增账本里没有依据的结论），其余时候都写 `null`；`synthesis` 照下面的规则。下面关于「新回复涉及时写」的规则只适用于没有 `rules` 的旧访谈。
 
 画像草稿分五节（从没有经历部分的访谈是四节），每节要么整节写，要么保持原样（`null`），每节的 `refs` 写它依据的句子（是你自己的解读时留空）：
 
@@ -153,10 +169,11 @@ description: 读 Crossline 访谈刚听到的内容（本人的新回答和新�
 
 **这三个列表只写这一轮新增或改动的条目**（单条主线的访谈和笔记三个都留 `[]`）。这就是每轮的分析：把新材料（新回复、文件、`observations`、`research`）和已有的推断（`profile` 里的 `hypotheses`、`careers`、`dimensions`，每次都给你看全部）放在一起比较，哪条被新证据支持、哪条被推翻、哪里冒出了新的模式。
 
-- 改动的条目写整条，用原来的 `id`（假设）、原来的 `role`（职业方向）或原来的维度 id；应用按它们合并进账本，你没写到的条目保持原样。
+- 改动的条目写整条，用原来的 `id`（假设、职业方向）或原来的维度 id；应用按它们合并进账本，你没写到的条目保持原样。
 - 新的条目接着编号写。
 - 状态变了（比如 `open` 变 `supported` 或 `refuted`）也算改动，要写整条。
-- 不再成立的职业方向，把它的 `role` 原样写进 `dropCareers`。
+- 不再成立的职业方向，把它的 `id` 写进 `dropCareers`。
+- 有 `rules: "points"` 时：`points` 里已经有的（本人说过或确认过的）不要再写成假设；本人在观察卡上答过的假设（`rated` 有值、`cardKey` 有值）不要改写。
 - 没有新材料涉及画像时三个列表都留 `[]`：留空就是「不变」，不会清掉已有的。不要把没变的条目照抄一遍（2026-11-12 回放：每次重抄 40 条假设和全部招聘要求矩阵，一次整理用了 27 分钟）。
 
 框架是十个维度（D0 背景与约束、D1 行为签名、D2 内隐动机、D3 基本需求、D4 价值与三观、D5 理想与应该自我、D6 核心信念、D7 情绪模式、D8 叙事身份、D9 维持循环），各自的问法和行为线索见访谈 Skill `crossline-onboarding` 的「画像框架」。
@@ -178,7 +195,7 @@ description: 读 Crossline 访谈刚听到的内容（本人的新回答和新�
 - `alternative`：另一种解释（处境、能力、偶然、别的动机），至少一个。
 - `status`：`open`（还在验证）、`supported`（被后来的回答或本人的「准」支持）、`refuted`（被推翻；保留在日志里，不删）、`undecided`（证据到头了还分不出）。
 - `reference`：同类人群的数据（同专业、同阶段、同城市的人里有多少这样），`{text, url}`，必须带你打开过的网址；没有就写 `null`。
-- 不写 `rated`：本人的「准 / 不准」由应用填。
+- 不写 `rated`、`cardKey`、`pointId`：本人的「准 / 不准 / 部分对」由应用填。
 
 推断的规则：
 
@@ -194,8 +211,15 @@ description: 读 Crossline 访谈刚听到的内容（本人的新回答和新�
 
 ### `careers[]`
 
-职业候选方向，两到五个，从画像推出（不从测评结果推）。推导步骤：约束过滤（D0、D1 的精力和时段）→ 核心匹配（D2 内隐动机 × D4 最看重的价值 × D3 需求从哪里满足）→ 能力证据（D1 稳定的 if-then 加已完成的作品）→ 叙事契合（D8 的下一章）→ 翻成具体岗位。每项：
+职业候选方向，两到五个，从画像推出（不从测评结果推）。推导步骤：约束过滤（D0、D1 的精力和时段）→ 核心匹配（D2 内隐动机 × D4 最看重的价值 × D3 需求从哪里满足）→ 能力证据（D1 稳定的 if-then 加已完成的作品）→ 叙事契合（D8 的下一章）→ 翻成具体岗位。
 
+**方向分两层，不重复。** 一个方向是一个行业加一个职能（`industry` + `function`：「会计师事务所」+「审计」）；进入它的不同途径（寒假实习、日常实习、校招、转岗）是这个方向的 `entries`，不是另外的方向（2026-11-12 回放把「四大审计寒假实习」和「四大审计日常实习」列成了两个方向）。
+
+- `id`：已有方向写它的 id（`profile.careers` 里的 `k1`、`k2`……），新方向写 `""`（应用编号）。行业和职能都和已有方向一样的，应用会把它并进那个方向。
+- `change`：改已有方向时必填，写这次改动依据的新证据和理由（「她第 15 条回复说不考虑出国」）；没有理由的改动只会加进 `entries`，其他不改。新方向写 `""`。
+- `differs`：新方向必填，一句话写它和每个已有方向的区别（「和 k1 审计不同：写稿而不是核账」）。改已有方向时写 `""`。
+- `industry`、`function`：行业、职能，用常见的叫法，同一个方向每次写法一致。
+- `entries[]`：进入途径，短语（「寒假实习」「日常实习」「校招」）。
 - `role`：具体岗位名（「芯片架构建模实习（performance modeling）」），不写「技术类工作」。
 - `why`：从画像推出的理由，引用假设的 id（「h3、h5：……」）。
 - `hypothesisIds`：它依据的假设 id，本次写的或 `profile.hypotheses` 里已有的。

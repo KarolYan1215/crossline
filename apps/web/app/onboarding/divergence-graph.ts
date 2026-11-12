@@ -71,7 +71,7 @@ export type FitsEntry = { key: string; text: string; source: "hypothesis" | "ins
  * already says.
  */
 export function fitsEntries(hypotheses: Hypothesis[] | undefined, insights: Array<{ seq: number; text: string }>,
-  ratings: Record<string, "fits" | "off"> | undefined): FitsEntry[] {
+  ratings: Record<string, "fits" | "off" | "partial"> | undefined): FitsEntry[] {
   const entries: FitsEntry[] = (hypotheses ?? []).filter((item) => item.rated === "fits")
     .map((item) => ({ key: `h:${item.id}`, text: item.statement, source: "hypothesis", hypothesisId: item.id, dimension: item.dimension }));
   const said = new Set(entries.map((entry) => entry.text.trim()));
@@ -85,7 +85,7 @@ export function fitsEntries(hypotheses: Hypothesis[] | undefined, insights: Arra
 }
 
 /** Hypotheses in reading order for a list: the ones rated 准 first, then by id as the model numbered them. */
-export function fitsFirst<T extends { rated?: "fits" | "off" | undefined }>(items: T[]): T[] {
+export function fitsFirst<T extends { rated?: "fits" | "off" | "partial" | undefined }>(items: T[]): T[] {
   return items.map((item, index) => ({ item, index }))
     .sort((a, b) => Number(b.item.rated === "fits") - Number(a.item.rated === "fits") || a.index - b.index)
     .map(({ item }) => item);

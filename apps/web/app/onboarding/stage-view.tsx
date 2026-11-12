@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Check, Circle } from "lucide-react";
-import { depthPace, interviewParts, SCHWARTZ_VALUES, type InterviewFlow, type OnboardingDepth } from "@crossline/core";
+import { depthPace, interviewParts, pointsRules, SCHWARTZ_VALUES, type InterviewFlow, type OnboardingDepth } from "@crossline/core";
 import { ValuesRadar } from "../portrait/portrait-charts";
 import { FlywheelPreview, type Link } from "./flywheel-preview";
 import { StartConfirm } from "./start-confirm";
@@ -96,6 +96,10 @@ export function StageView({ state, stage, complete, onChanged }: {
   }).filter((group) => group.items.length > 0);
   // A state read before the items were sent lists what is missing as before.
   const loose = state.startItems ? [] : missing;
+  // Under the points rules (2026-11-12) the map lists the points, and a stage's view appears once that stage is over, written once.
+  const rules = pointsRules(state.session?.coverage);
+  const viewOnce = (section: string, view: React.ReactNode) => !rules || state.sectionsFinal?.includes(section) ? view
+    : <p className="ob-muted">{t("这一部分结束后，在这里写一次当前看法。")}</p>;
   return <aside className="ob-stage" aria-label={t("正在成形")}>
     {/* The start standard only (2026-10-28): the old ring read 100% beside the time the rest of the interview still takes. */}
     <section className="ob-start" aria-label={t("开始使用的进度")}>
@@ -149,8 +153,9 @@ export function StageView({ state, stage, complete, onChanged }: {
       {shown === "lines" && <LinesView state={state} onChanged={onChanged} />}
       {shown === "week" && <WeekView week={state.week} draft={state.skeleton ?? []} lines={state.lines} />}
       {shown === "map" && <DivergenceView hypotheses={state.profile?.hypotheses} dimensions={state.profile?.dimensions} insights={insightsOf(state)}
-        ratings={state.insightRatings} initial={dimensionForStage(stage)} detail={(dimension) => dimension === "D4" ? <CompassView profile={state.profile} />
-          : dimension === "D1" || dimension === "D7" ? <EnergyView profile={state.profile} /> : dimension === "D5" ? <LinesView state={state} onChanged={onChanged} /> : null} />}
+        ratings={state.insightRatings} initial={dimensionForStage(stage)} {...(rules ? { points: state.profile?.points ?? [] } : {})}
+        detail={(dimension) => dimension === "D4" ? viewOnce("compass", <CompassView profile={state.profile} />)
+          : dimension === "D1" || dimension === "D7" ? viewOnce("energy", <EnergyView profile={state.profile} />) : dimension === "D5" ? <LinesView state={state} onChanged={onChanged} /> : null} />}
       {shown === "projects" && <ProjectsView timeline={state.timeline} lines={state.lines} />}
       {shown === "structure" && <StructureView state={state} />}
     </div>

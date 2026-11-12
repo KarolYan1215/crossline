@@ -413,3 +413,16 @@ html:has(.ob-page){background:var(--ds-bg)}/* The profile module's cards (flow v
 .ob-research-messages small{font-size:12px;color:var(--graphite)}
 .ob-research-sources{margin:0;padding:0;list-style:none;display:grid;gap:2px;font-size:12px;overflow-wrap:anywhere}
 .ob-research-conclusion{display:grid;gap:4px;padding:8px 10px;border-left:3px solid var(--ink)}
+/* The points ledger beside the interview (the points rules, 2026-11-12). */
+.ob-points{display:grid;gap:10px;padding:8px 10px;border-left:3px solid var(--ds-accent);background:var(--ds-accent-soft);border-radius:0 8px 8px 0}
+.ob-points-part{display:grid;gap:4px}
+.ob-points-part>b{font-size:12px;color:var(--graphite)}
+.ob-points ul{margin:0;padding:0;list-style:none;display:grid;gap:6px;font-size:13px}
+.ob-points p{margin:0}
+.ob-points-source{font-size:11px;color:var(--graphite);border:1px solid var(--ds-line);border-radius:4px;padding:0 4px;white-space:nowrap}
+.ob-points li[data-source="confirmed"] .ob-points-source,.ob-points li[data-source="corrected"] .ob-points-source{color:var(--ds-accent);border-color:var(--ds-accent)}
+.ob-points details{font-size:12px;color:var(--graphite)}
+.ob-points details ul{gap:2px;font-size:12px;padding-left:8px}
+.ob-points summary{cursor:pointer}
+.ob-insight-correction{display:grid;gap:6px}
+.ob-insight-correction textarea{font:inherit;min-height:56px;padding:6px 8px;border:1px solid var(--ds-line);border-radius:6px;background:var(--ds-surface,transparent);color:inherit}

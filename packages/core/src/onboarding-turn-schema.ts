@@ -4,8 +4,9 @@ import { SCHWARTZ_VALUES } from "./portrait";
 import type { ProfileCard } from "./profile-instruments";
 import type { OnboardingDepth } from "./onboarding-depth";
 import { INTERVIEW_SETTING_KEYS } from "./interview-settings";
-import { DIMENSION_FIELD, DIMENSION_IDS, DIMENSION_NOTE_FIELD, HYPOTHESIS_ITEM_FIELD, URL_FIELD, careerItemSchema, cleanCareers, cleanDimensionNotes, cleanHypotheses, oneOf,
+import { DIMENSION_FIELD, DIMENSION_IDS, DIMENSION_NOTE_FIELD, HYPOTHESIS_ITEM_FIELD, URL_FIELD, careerItemSchema, cleanCareers, cleanDimensionNotes, cleanHypotheses, isWebUrl, oneOf,
   type CareerOption, type DimensionId, type DimensionNote, type Hypothesis } from "./profile-hypotheses";
+import { POINT_CHANGE_FIELD, POINT_OPS, POINT_SECTIONS, POINT_TEXT_MAX, type PointChange, type ProfilePoint } from "./profile-points";
 import {
   ATTRIBUTE_CANDIDATES_MAX, ATTRIBUTE_CANDIDATES_MIN, ATTRIBUTE_KIND_FIELD, ATTRIBUTE_KINDS, ATTRIBUTE_MAX_LENGTH, attributeProblem, cleanAttribute, duplicateAttributes,
   guessKind, notAtomic, type AttributeCandidate, type AttributeKind
@@ -102,6 +103,7 @@ export function readTone(_value?: string | null): OnboardingTone {
 }
 
 export * from "./profile-hypotheses";
+export * from "./profile-points";
 /** A question the dialogue hands to a research thread (contract C): it needs the web, and the dialogue leaves it alone until it is done. */
 export type ResearchRequest = { question: string; why: string; dimension: DimensionId };
 export const RESEARCH_STATUSES = ["running", "asking", "done", "failed"] as const;
@@ -151,10 +153,12 @@ export type ProfileModel = {
    * the interview's external memory and the side panel's data. Empty on a portrait written before.
    */
   hypotheses: Hypothesis[]; careers: CareerOption[]; dimensions: DimensionNote[];
+  /** The points ledger (`profile-points.ts`, 2026-11-12): what is settled about the person; empty outside the points rules. */
+  points: ProfilePoint[];
 };
 export const EMPTY_PROFILE_MODEL: ProfileModel = { portrait: "", coreConflict: "", problem: "", gravity: [], designable: [], reframes: [], workView: "",
   lifeView: "", consistency: "", trueNorth: "", energyMap: [], flow: [], says: "", does: "", anchor: "", realWant: "", allocation: "", values: [],
-  careerTheme: "", roleModels: [], motto: "", turningPoints: [], futureScript: "", hypotheses: [], careers: [], dimensions: [] };
+  careerTheme: "", roleModels: [], motto: "", turningPoints: [], futureScript: "", hypotheses: [], careers: [], dimensions: [], points: [] };
 /**
  * For each line: a personal description from what was said, and 3–12 mutually independent attributes (`attributeCandidates`) the person
  * builds a long-term goal 「成为 A 的、B 的<身份>」 from — each cited to the reply or file it came from, labelled with its kind, and an
@@ -207,6 +211,8 @@ export type OnboardingTurn = {
   careers?: CareerOption[];
   dimensions?: DimensionNote[];
   dropCareers?: string[];
+  /** The points ledger's changes (the points rules): added, revised and retracted points, each resting on the person's words. */
+  pointChanges?: PointChange[];
   /**
    * The instrument cards the app put beside the round's questions (`cardsFor`; flow v2, profile stages): never written by the model, so
    * their wording and keys stay the published items'.
@@ -225,6 +231,12 @@ export type ItemScore = { itemId: string; score: number; confidence: number; sen
  * has a falsifier and every span is in its reply.
  */
 export type TurnInsight = {
+  /**
+   * The hypothesis it asks about (2026-11-12): one on record by id, or, written "" by the dialogue, a new one the app adds to the log
+   * under the round's own id (`c<seq>`). Absent on a card from before.
+   */
+  hypothesisId?: string;
+  dimension?: DimensionId;
   text: string;
   refs: Array<{ replyId: string; quote: string }>;
   external?: Array<{ text: string; url: string }>;
@@ -335,6 +347,12 @@ export type OnboardingTurnContext = {
    * used from this round on.
    */
   research?: Array<{ id: string; question: string; status: ResearchThread["status"]; conclusion?: string }>;
+  /**
+   * The points rules (2026-11-12): the hypothesis log as cards may ask about it (`hypothesisLogLines`: the open ones by id, and how the
+   * person rated the others), and the points ledger (`pointLines`): what is settled, not to be asked again or contradicted.
+   */
+  hypothesisLog?: string[];
+  points?: string[];
 };
 
 /**
@@ -346,6 +364,14 @@ export type OnboardingExtractContext = {
   version: "crossline.onboarding.extract.v1";
   /** Which fields this run writes (`EXTRACT_LANE_KEYS`); absent, all of them. */
   lane?: ExtractLaneName;
+  /**
+   * The points rules (2026-11-12): the portrait's sections are written only when their stage is over; until then what the replies settle
+   * goes into the points ledger (`pointChanges`). `points` is the ledger as it stands, one line each. `split` asks for the sections on
+   * record (written as paragraphs before the rules) to be split into points, each resting on the person's words.
+   */
+  rules?: "points";
+  points?: string[];
+  split?: ProfileSection[];
   today: string; timeZone: string;
   /**
    * The weekly hours on record (the last proposal), in minutes, so a run that sends `availability` again keeps what the new replies do
@@ -413,6 +439,8 @@ export type KnownSources = {
   lineLabels?: Record<string, string>;
   /** The hypothesis ids on record: a career changed this run may rest on hypotheses the run did not rewrite. */
   hypothesesOnRecord?: string[];
+  /** The research threads' source URLs: the only outside data a point may cite. Absent, any web URL. */
+  researchUrls?: string[];
 };
 /** One citable sentence: the reply (`reply-N`) or file (`src-N`) it is in, and its offsets in that text. */
 export type EvidenceSentence = { ref: string; start: number; end: number; text: string };
@@ -552,7 +580,7 @@ function turnFields(ids?: TurnIds) {
     // The round's observation (contract A, 2026-11-12): an inference that may judge, resting on the person's verbatim words, with outside
     // data when there is any and what would show it wrong. `text` empty for none. Checked in code (`checkInsight`): a falsifier, and each
     // quote in the reply it names.
-    insight: object({ text: { type: "string", maxLength: 400 },
+    insight: object({ hypothesisId: { type: "string", maxLength: 12 }, dimension: DIMENSION_FIELD, text: { type: "string", maxLength: 400 },
       refs: { type: "array", maxItems: 4, items: object({ replyId: { type: "string", maxLength: 20 }, quote: { type: "string", maxLength: 80 } }) },
       external: { type: "array", maxItems: 3, items: object({ text: text(300), url: URL_FIELD }) },
       falsifier: { type: "string", maxLength: 200 } }),
@@ -562,8 +590,10 @@ function turnFields(ids?: TurnIds) {
     hypotheses: { type: "array", maxItems: 40, items: HYPOTHESIS_ITEM_FIELD },
     careers: { type: "array", maxItems: 6, items: careerItemSchema(line) },
     dimensions: { type: "array", maxItems: 10, items: DIMENSION_NOTE_FIELD },
-    // Career directions on record that no longer hold, by their `role`.
+    // Career directions on record that no longer hold, by their `id` (or `role`).
     dropCareers: { type: "array", maxItems: 6, items: text(120) },
+    // The points ledger's changes (the points rules): what the replies settle, each resting on sentence numbers.
+    pointChanges: { type: "array", maxItems: 20, items: POINT_CHANGE_FIELD },
     // The interview's own progress record, rewritten every round and handed back at the start of the next (`TurnProgress`).
     progress: object({ part: { type: "string", enum: [...ONBOARDING_STAGES] }, covered: { type: "array", maxItems: 8, items: text(60) },
       open: { type: "array", maxItems: 8, items: text(60) }, partDone: { type: "boolean" }, next: text(160) }),
@@ -595,7 +625,7 @@ function turnFields(ids?: TurnIds) {
  */
 export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage", "insight", "progress", "research"] as const;
 export const EXTRACT_KEYS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles", "goalEdits", "availability", "settings", "profileSections", "itemScores",
-  "hypotheses", "careers", "dimensions", "dropCareers"] as const;
+  "hypotheses", "careers", "dimensions", "dropCareers", "pointChanges"] as const;
 export const onboardingDialogueSchema = (ids?: TurnIds) => object(pick(turnFields(ids), DIALOGUE_KEYS));
 /** The extraction's schema; `keys` narrows it to one lane's fields (`EXTRACT_LANE_KEYS`). */
 export const onboardingExtractSchema = (ids?: TurnIds, keys: readonly (typeof EXTRACT_KEYS)[number][] = EXTRACT_KEYS) => object(pick(turnFields(ids), keys));
@@ -606,7 +636,7 @@ export const onboardingExtractSchema = (ids?: TurnIds, keys: readonly (typeof EX
  */
 export const EXTRACT_LANE_KEYS = {
   ledger: ["slotUpdates", "projectsDetected", "fileDates", "lineProfiles", "goalEdits", "availability", "settings", "itemScores"],
-  sections: ["profileSections", "flywheelCandidates"],
+  sections: ["profileSections", "flywheelCandidates", "pointChanges"],
   insights: ["hypotheses", "careers", "dimensions", "dropCareers"]
 } as const satisfies Record<string, readonly (typeof EXTRACT_KEYS)[number][]>;
 export type ExtractLaneName = keyof typeof EXTRACT_LANE_KEYS;
@@ -640,7 +670,7 @@ export function listsAtLimit(output: unknown, schema: unknown = ONBOARDING_EXTRA
 export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage" | "insight" | "progress" | "research">;
 /** What the background run writes to the ledger. */
 export type OnboardingExtraction = Pick<OnboardingTurn, "slotUpdates" | "projectsDetected" | "flywheelCandidates" | "lineProfiles" | "goalEdits"
-  | "availability" | "settings" | "hypotheses" | "careers" | "dimensions" | "dropCareers"> & { fileDates?: DateExtraction; profileSections?: ProfileSections; itemScores?: ItemScore[] };
+  | "availability" | "settings" | "hypotheses" | "careers" | "dimensions" | "dropCareers" | "pointChanges"> & { fileDates?: DateExtraction; profileSections?: ProfileSections; itemScores?: ItemScore[] };
 
 const SLOT = /^[a-z][a-z0-9_]{1,39}$/;
 const ID = /^[a-zA-Z0-9_-]{1,80}$/;
@@ -749,10 +779,28 @@ function checkTurn(value: unknown, known: KnownSources, minimumCandidates: numbe
     availability: turn.availability ?? { windows: [], why: "" },
     profile: withValues({ ...EMPTY_PROFILE_MODEL, ...(turn.profile ?? {}) }),
     ...(Array.isArray(turn.research) ? { research: cleanResearch(turn.research) } : {}),
+    ...(Array.isArray(turn.pointChanges) ? { pointChanges: cleanPointChanges(turn.pointChanges, known.researchUrls) } : {}),
     ...cleanProfileInsights(turn, known) };
 }
 
 const str = (value: unknown, max: number) => typeof value === "string" ? value.trim().slice(0, max) : "";
+
+/**
+ * The points ledger's changes as far as they are well formed: a known op and section, outside data only from the research threads
+ * (`researchUrls`) when they are given. Whether each holds (a quote, a reason) is `applyPointChanges`'s to decide.
+ */
+function cleanPointChanges(list: unknown[], researchUrls?: string[]): PointChange[] {
+  const allowed = researchUrls ? new Set(researchUrls.map((url) => url.trim())) : undefined;
+  return list.flatMap((raw) => {
+    const item = raw as Partial<PointChange> | null;
+    if (!oneOf(POINT_OPS, item?.op) || !oneOf(POINT_SECTIONS, item?.section)) return [];
+    return [{ op: item!.op!, id: str(item!.id, 12), section: item!.section!, text: str(item!.text, POINT_TEXT_MAX),
+      quotes: (Array.isArray(item!.quotes) ? item!.quotes : []).filter((quote) => typeof quote?.ref === "string" && typeof quote.text === "string" && quote.text.trim()),
+      external: (Array.isArray(item!.external) ? item!.external : []).filter((entry) => typeof entry?.text === "string" && isWebUrl(entry.url)
+        && (!allowed || allowed.has(entry.url.trim()))).map((entry) => ({ text: entry.text.trim(), url: entry.url.trim() })),
+      why: str(item!.why, 300) }];
+  });
+}
 
 /** The dialogue's research questions: each with a question and a known dimension, each question once. */
 function cleanResearch(list: unknown[]): ResearchRequest[] {

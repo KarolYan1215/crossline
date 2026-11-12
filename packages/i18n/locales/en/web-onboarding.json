@@ -919,5 +919,15 @@
   "已加入日历 {{count}} 项。_one": "Added {{count}} date to the calendar.",
   "已加入日历 {{count}} 项。_other": "Added {{count}} dates to the calendar.",
   "这批日期没有加入。": "None of these dates were added.",
-  "已移除这份测评结果。": "The quick test's result is removed."
+  "已移除这份测评结果。": "The quick test's result is removed.",
+  "已记下你的更正，画像按你说的写。": "Your correction is noted; the portrait will follow it.",
+  "部分对": "Partly right",
+  "哪部分对？用你的话说一句": "Which part is right? Say it in a sentence of your own",
+  "记下更正": "Save correction",
+  "本人更正": "Their correction",
+  "要点会在你回答后列在这里，每条都附原话。": "Points appear here as you answer, each with your own words.",
+  "要点": "Points",
+  "这一部分结束后，在这里写一次当前看法。": "When this part is over, a view of it is written here once.",
+  "依据 {{count}} 条_one": "{{count}} piece of evidence",
+  "依据 {{count}} 条_other": "{{count}} pieces of evidence"
 }

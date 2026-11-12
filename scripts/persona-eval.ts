@@ -32,7 +32,7 @@ import {
   composeGoal, instrumentClaims, interviewCompleteness, instrumentReadings, interviewComplete, parseSponsorModels, readInsightRatings, readInstrumentAnswers, readyToStart,
   scaleAnswerLine, screenQuestions, sponsorSpend, type AccessContext, type OnboardingTone, type ProfileCard, type StoredLineProfile
 } from "../packages/core/src/index";
-import { CrosslineStore, interviewChecklistFor, questionScreenFor } from "../packages/db/src/index";
+import { CrosslineStore, interviewChecklistFor, questionScreenFor, rateInsight } from "../packages/db/src/index";
 import { composeAnswers, type Question } from "../apps/web/app/onboarding/onboarding-types";
 import { openingReply } from "../apps/web/app/onboarding/opening-card";
 import { identityLines } from "../apps/worker/src/lines";
@@ -115,7 +115,7 @@ function cost(key: string) {
 }
 
 // ---- the player ----
-const PLAYER_SCHEMA = { type: "object", additionalProperties: false, required: ["answers", "freeText", "upload", "cardTaps", "cardWords", "insight"], properties: {
+const PLAYER_SCHEMA = { type: "object", additionalProperties: false, required: ["answers", "freeText", "upload", "cardTaps", "cardWords", "insight", "correction"], properties: {
   answers: { type: "array", maxItems: 16, items: { type: "object", additionalProperties: false, required: ["questionId", "picked", "other"], properties: {
     questionId: { type: "string", minLength: 1, maxLength: 120 }, picked: { type: "array", maxItems: 6, items: { type: "string", minLength: 1, maxLength: 200 } },
     other: { type: "string", minLength: 0, maxLength: 600 } } } },
@@ -124,9 +124,9 @@ const PLAYER_SCHEMA = { type: "object", additionalProperties: false, required: [
     itemId: { type: "string", minLength: 1, maxLength: 80 }, score: { type: "integer", minimum: 0, maximum: 5 } } } },
   cardWords: { type: "array", maxItems: 8, items: { type: "object", additionalProperties: false, required: ["cardId", "words"], properties: {
     cardId: { type: "string", minLength: 1, maxLength: 80 }, words: { type: "string", minLength: 0, maxLength: 400 } } } },
-  insight: { type: "string", enum: ["fits", "off", ""] } } };
+  insight: { type: "string", enum: ["fits", "off", "partial", ""] }, correction: { type: "string", maxLength: 300 } } };
 type Played = { answers: Array<{ questionId: string; picked: string[]; other: string }>; freeText: string; upload: string[];
-  cardTaps: Array<{ itemId: string; score: number }>; cardWords: Array<{ cardId: string; words: string }>; insight: "fits" | "off" | "" };
+  cardTaps: Array<{ itemId: string; score: number }>; cardWords: Array<{ cardId: string; words: string }>; insight: "fits" | "off" | "partial" | ""; correction?: string };
 
 /** The cards' part of the reply, as the screen sends it (`cardReplyLines` in profile-cards.tsx, which the worker reads back without a model). */
 function cardLines(cards: readonly ProfileCard[], taps: Record<string, number>, words: Record<string, string>): string[] {
@@ -272,14 +272,12 @@ async function runPerson(name: string, opening: Opening) {
       const itemIds = new Set(cards.flatMap((card) => card.items.map((item) => item.id)));
       const taps = Object.fromEntries((answer.cardTaps ?? []).filter((tap) => itemIds.has(tap.itemId) && tap.score >= 1 && tap.score <= 5).map((tap) => [tap.itemId, tap.score]));
       const words = Object.fromEntries((answer.cardWords ?? []).filter((said) => cards.some((card) => card.id === said.cardId) && said.words.trim()).map((said) => [said.cardId, said.words]));
-      if (answer.insight && turn.insight?.text) {
-        const ratings = readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS));
-        ratings[`eval#${last.seq}`] = { verdict: answer.insight, stage: turn.stage ?? "", at: new Date().toISOString(), text: turn.insight.text.slice(0, 300) };
-        store.setSetting(workspaceId, ONBOARDING_INSIGHTS, JSON.stringify(ratings));
-      }
+      // Rated as the card's route rates (`rateInsight`): under the points rules 准 puts the hypothesis in the ledger, 部分对 the correction.
+      if (answer.insight && turn.insight?.text) rateInsight(store, workspaceId, { sessionId: "eval", seq: last.seq,
+        verdict: answer.insight === "partial" && !answer.correction?.trim() ? "off" : answer.insight, ...(answer.correction ? { correction: answer.correction } : {}) });
       text = [composeAnswers(batch, answers, answer.freeText), ...cardLines(cards, taps, words)].filter((part) => part.trim()).join("\n") || "不确定。";
       earlier.push({ interviewer: turn.reply.slice(0, 600), me: text.slice(0, 600) });
-      transcript.push("**回答**", "", text, ...(answer.insight ? ["", `（洞察：${answer.insight === "fits" ? "准" : "不准"}）`] : []), "");
+      transcript.push("**回答**", "", text, ...(answer.insight ? ["", `（洞察：${answer.insight === "fits" ? "准" : answer.insight === "partial" ? `部分对：${answer.correction ?? ""}` : "不准"}）`] : []), "");
     }
     // The interview said it is done (or ran out of rounds): the extraction's finishing runs write the synthesis, as the worker's tick asks
     // for them in the app; then the portrait writer, as the worker runs it once the interview is complete.

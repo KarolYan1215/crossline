@@ -1,7 +1,7 @@
 // i18n-exempt: the short ledger handed to the interview model each round (model-facing)
 import {
   AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, ONBOARDING_INSIGHTS, fixedScheduleLines, interviewAbstract, lineAttributes, progressLines, readInsightRatings, readTurnProgress,
-  resolveAvailability, type InterviewFlow, type OnboardingDepth, type StoredLineProfile, type TurnProgress
+  resolveAvailability, type InterviewFlow, type OnboardingDepth, type StoredLineProfile, type TurnProgress, hypothesisLogLines, pointLines
 } from "@crossline/core";
 import { datedItems, type CrosslineStore } from "@crossline/db";
 import { readProfileModel } from "./onboarding-persist";
@@ -19,7 +19,9 @@ export function paceContext(store: CrosslineStore, workspaceId: string, sessionI
   flow?: InterviewFlow;
   /** The tier the person chose: the thorough one has a sixth part. */
   depth?: OnboardingDepth;
-}): { progress?: string[]; abstract: string[]; observations?: string[]; goalPicker?: string[]; fixedSchedule?: string[] } {
+  /** The points rules: the hypothesis log and the points ledger go with every round. */
+  rules?: boolean;
+}): { progress?: string[]; abstract: string[]; observations?: string[]; goalPicker?: string[]; fixedSchedule?: string[]; hypothesisLog?: string[]; points?: string[] } {
   const profiles = (() => { try { return JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") as Record<string, StoredLineProfile>; } catch { return {}; } })();
   const facts = store.listProfileFacts(workspaceId);
   const deadlineOf = (projectId: string) => {
@@ -50,7 +52,7 @@ export function paceContext(store: CrosslineStore, workspaceId: string, sessionI
   });
   const ratings = Object.entries(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS)))
     .filter(([key]) => key.startsWith(`${sessionId}#`)).sort((a, b) => a[1].at.localeCompare(b[1].at)).slice(-4)
-    .map(([, rating]) => `观察「${(rating.text ?? "").slice(0, 60)}」：本人说${rating.verdict === "fits" ? "准" : "不准"}`);
+    .map(([, rating]) => `观察「${(rating.text ?? "").slice(0, 60)}」：本人说${rating.verdict === "fits" ? "准" : rating.verdict === "partial" ? `部分对，更正为「${(rating.correction ?? "").slice(0, 60)}」` : "不准"}`);
   const progress = progressLines(input.progress, input.flow, input.depth);
   // Lines with no long-term goal yet, and whether the picker beside the conversation already offers candidates for one: the dialogue asks
   // what the person wants to become on a line only while it offers none (W-8: asking beside the picker asked the same thing twice).
@@ -61,7 +63,11 @@ export function paceContext(store: CrosslineStore, workspaceId: string, sessionI
   });
   // Each weekly arrangement with its own weekday and time, every round: the abstract has only their number (W-183).
   const fixedSchedule = fixedScheduleLines(weekly);
+  // Under the points rules (2026-11-12): what cards may ask about, and what is settled.
+  const log = input.rules ? hypothesisLogLines(profile.hypotheses ?? []) : [];
+  const points = input.rules ? pointLines(profile.points ?? []).slice(-30) : [];
   return { abstract, ...(progress.length ? { progress } : {}), ...(ratings.length ? { observations: ratings } : {}),
+    ...(log.length ? { hypothesisLog: log } : {}), ...(points.length ? { points } : {}),
     ...(goalPicker.length ? { goalPicker } : {}), ...(fixedSchedule.length ? { fixedSchedule } : {}) };
 }
 

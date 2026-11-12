@@ -5,7 +5,7 @@ import {
   AVAILABILITY_PROPOSED_SETTING, ONBOARDING_KEEP_EARLY_MAX, type ProfileSection, PROFILE_CONFIRMED, droppedOnboardingItems, keepOnboardingExtraction, LIMITED_LISTS, listsAtLimit, prunedOnboardingItems, lineAttributes, numberedText, onboardingExtractSchema,
   portraitFingerprint, sectionClosed, validateOnboardingExtraction, type SectionRecord,
   type EvidenceSentence, type KnownSources, type OnboardingExtractContext, type OnboardingExtraction, type OnboardingStage, type StoredLineProfile,
-  ONBOARDING_INSIGHTS, readInsightRatings, EXTRACT_LANE_KEYS, type ExtractLaneName
+  ONBOARDING_INSIGHTS, readInsightRatings, EXTRACT_LANE_KEYS, EXTRACT_KEYS, type ExtractLaneName, pointLines, pointsRules
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary, type SkillTools } from "@crossline/codex";
 import {
@@ -85,6 +85,16 @@ export type ExtractOutcome =
 
 const textOf = (message: StoredOnboardingMessage) => String((message.content as { text?: string }).text ?? "");
 
+/**
+ * The portrait's sections on record to split into points (the points rules, 2026-11-12), set when an account written in paragraphs is
+ * moved over: the next run of the sections' lane owes them, whatever new replies there are, and clears it when its answer lands.
+ */
+export const POINTS_SPLIT_SETTING = "profile.points.split";
+export function readPointsSplit(store: CrosslineStore, workspaceId: string): ProfileSection[] {
+  try { const value = JSON.parse(store.getSetting(workspaceId, POINTS_SPLIT_SETTING) ?? "[]") as unknown; return Array.isArray(value) ? value as ProfileSection[] : []; }
+  catch { return []; }
+}
+
 export function createOnboardingExtractor(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined) {
   /** The conversation files are extracted with: the main interview, or the one asking when there is no main one yet. */
   // Not the notes either (`NOTES_SESSION`): they are words said elsewhere, read for facts only.
@@ -114,6 +124,10 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     if (replies) return replies.id;
     const owed = sessions.find((session) => finishing(session.id) && due(session.id));
     if (owed) return owed.id;
+    // An account moved to the points rules owes one run of the sections' lane that splits its paragraphs into points.
+    const split = (lane === "all" || lane === "sections") && readPointsSplit(store, workspaceId).length
+      ? sessions.find((session) => pointsRules(session.coverage) && !session.id.startsWith("line-") && session.id !== NOTES_SESSION && due(session.id)) : undefined;
+    if (split) return split.id;
     if (portraitLane(lane) || !pendingExtractDocs(store, workspaceId).length) return undefined;
     const files = docsSession();
     return files && due(files) ? files : undefined;
@@ -213,9 +227,12 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       if (rest) continuesAt[doc.id] = rest.start;
       return { id: ref, fileName: doc.fileName, kind: doc.kind, projectId: doc.projectId ?? "", sentences: numberedText(sentences) };
     });
-    // A run owed to an ended interview (`markFinishing`) reads nothing new: it finalizes the portrait from what is on record.
+    // A run owed to an ended interview (`markFinishing`) reads nothing new: it finalizes the portrait from what is on record. So does one
+    // owed a split of the paragraphs on record into points.
     const finishing = readFinishing(store, workspaceId, sessionId);
-    if (!replies.length && !sources.length && !(finishing && finishing.runs < FINISH_RUNS_MAX)) return { state: "idle" };
+    const rules = pointsRules(session?.coverage) && !sessionId.startsWith("line-") && sessionId !== NOTES_SESSION;
+    const split = rules && writes("sections") ? readPointsSplit(store, workspaceId) : [];
+    if (!replies.length && !sources.length && !(finishing && finishing.runs < FINISH_RUNS_MAX) && !split.length) return { state: "idle" };
 
     // Everything the run may look up: this conversation's replies and every file read, as numbered sentences in order.
     const corpus = (): Array<StoredSentence & { ref: string; label: string }> => [
@@ -244,8 +261,14 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     const cardItems = focus || notes || !writes("ledger") ? [] : pendingItems(readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING)));
     // The portrait, the person's 准/不准 and the research are what the portrait's lanes reason from; the ledger lane records facts.
     const readsPortrait = !focus && !notes && (writes("sections") || writes("insights"));
+    const portrait = readsPortrait ? readProfileModel(store, workspaceId) : null;
+    // Outside data comes from the research threads alone (decision 22): hypotheses' `external` basis, the careers' job-ad sources, and a
+    // point's outside evidence, whose URLs must be among theirs.
+    const findings = readsPortrait ? researchFindings(readResearch(store, workspaceId, sessionId)) : [];
+    if (rules) known.researchUrls = findings.flatMap((finding) => finding.sources.map((source) => source.url));
     const context: OnboardingExtractContext = {
       version: "crossline.onboarding.extract.v1", ...(lane === "all" ? {} : { lane }), today, timeZone: personTimeZone(store, workspaceId),
+      ...(rules && readsPortrait ? { rules: "points" as const, points: pointLines(portrait?.points ?? []), ...(split.length ? { split } : {}) } : {}),
       lines: lines.map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [],
         ...(line.domain ? { domain: DOMAIN_PACKS[line.domain].label } : {}) })),
       ...(() => { const guides = domainGuides(lines); return guides.length ? { domainGuides: guides } : {}; })(),
@@ -256,7 +279,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
         attributes: lineAttributes(profiles[line.id], line.label).map((item) => item.text) })),
       candidatesWanted: lines.filter((line) => !(line.goals ?? []).length && profiles[line.id]?.description
         && !lineAttributes(profiles[line.id], line.label).length).map((line) => line.id),
-      profile: readsPortrait ? readProfileModel(store, workspaceId) : null, profileTask: profileTask ?? null, stage,
+      profile: portrait, profileTask: profileTask ?? null, stage,
       focusLine: focus ? { id: focus.id, label: focus.label } : null,
       replies, sources, ...(waitingDocs.length > taken.length ? { sourcesWaiting: waitingDocs.length - taken.length } : {}), reread,
       ...(cardItems.length ? { scaleItems: cardItems.map((item) => ({ id: item.id, text: item.text, anchors: item.anchors,
@@ -265,9 +288,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       ...(() => { const rated = Object.values(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS))).filter((rating) => rating.text)
         .slice(-8).map((rating) => `${rating.verdict === "fits" ? "准" : "不准"}：${rating.text!.slice(0, 120)}`);
         return rated.length && readsPortrait ? { observations: rated } : {}; })(),
-      // Outside data comes from the research threads alone (decision 22): hypotheses' `external` basis and the careers' job-ad sources.
-      ...(() => { const findings = readsPortrait ? researchFindings(readResearch(store, workspaceId, sessionId)) : [];
-        return findings.length ? { research: findings } : {}; })()
+      ...(findings.length ? { research: findings } : {})
     };
     const ids = { lines: lines.map((line) => line.id) };
     let pruned: string[] = [];
@@ -275,7 +296,8 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     let full: Array<{ path: string; max: number }> = [];
     const result = await runCodexSkill<OnboardingExtraction>(client, context, {
       skillName: ONBOARDING_EXTRACT_SKILL, cwd, developerInstructions: INSTRUCTIONS,
-      outputSchema: onboardingExtractSchema(ids, lane === "all" ? undefined : EXTRACT_LANE_KEYS[lane]),
+      // The points ledger is written only under the points rules: an interview from before keeps its paragraphs.
+      outputSchema: onboardingExtractSchema(ids, (lane === "all" ? EXTRACT_KEYS : EXTRACT_LANE_KEYS[lane]).filter((key) => rules || key !== "pointChanges")),
       prepareInput: () => context, tools,
       // The ledger lane of an interview under way is what the person waits on (the start standard, the next round's questions): it goes
       // as a turn, outside the account's two background slots, which the portrait's two lanes may both hold for minutes. They queue as
@@ -312,7 +334,8 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     const upTo = Math.max(state.upTo, ...pendingReplies.map((message) => message.seq));
     store.atomically(() => {
       persistExtraction(store, workspaceId, result.output, { sessionId, ownerId, documentIds: taken.map(([, doc]) => doc.id),
-        sources: { ...known.sources, ...known.replies }, today, reread, ...(profileTask ? { profileTask } : {}) });
+        sources: { ...known.sources, ...known.replies }, today, reread, ...(profileTask ? { profileTask } : {}), rules });
+      if (split.length) store.deleteSetting(workspaceId, POINTS_SPLIT_SETTING);
       if (reread) store.deleteSetting(workspaceId, EXTRACT_REREAD_SETTING);
       // The 「符合」 was said in the last reply this run read, and the portrait was rewritten with it in hand: the confirmation holds for the
       // portrait it wrote (before, the person was asked to confirm again every round, 2026-10-16). Not when a correction followed it.

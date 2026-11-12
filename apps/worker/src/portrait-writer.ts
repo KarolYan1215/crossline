@@ -136,7 +136,7 @@ export function createPortraitWriter(store: CrosslineStore, workspaceId: string,
     const profile = json<Record<string, unknown>>("profile.model", {});
     // The person's 准/不准 on each hypothesis is the interview's record, never the model's word (contract B).
     const rated = new Map((Array.isArray(profile.hypotheses) ? profile.hypotheses as Array<{ id?: unknown; rated?: unknown }> : [])
-      .filter((item) => item.rated === "fits" || item.rated === "off").map((item) => [String(item.id), item.rated as "fits" | "off"]));
+      .filter((item) => item.rated === "fits" || item.rated === "off" || item.rated === "partial").map((item) => [String(item.id), item.rated as "fits" | "off" | "partial"]));
     const replyText = Object.fromEntries(replies.map((reply) => [reply.id, reply.text]));
     const check = { replies: replyText, ratedOf: (id: string) => rated.get(id) };
     // Outside data comes from the interview's research threads alone: the writer does not search (see `researchFindings`).
