@@ -82,6 +82,12 @@ test("可开始标准不认「假设：」：硬约束日程与截止只认本�
   expect(readyToStart(interviewChecklist(assumed))).toBe(false);
 });
 
+test("本人用汉字说的钟点也算固定日程（「早八点到晚九点」）", () => {
+  const said = { ...full, dates: full.dates.filter((entry) => !entry.recurring),
+    facts: [...full.facts, { identityId: "research", projectId: "", slot: "weekly_hours", status: "confirmed", sourceRef: "reply-7", value: "周一到周五按课表走，课在早八点到晚九点之间随机分布，周二没课" }] };
+  expect(interviewChecklist(said).find((item) => item.id === "hard_schedule:research")?.done).toBe(true);
+});
+
 test("每条主线至少一个当前项目且知道截止；「没有截止」也算", () => {
   const undated = { ...full, dates: full.dates.filter((entry) => entry.recurring) };
   expect(interviewChecklist(undated).find((item) => item.id === "line_project:research")).toMatchObject({ done: false, owner: "interview" });

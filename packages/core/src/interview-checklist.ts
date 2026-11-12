@@ -115,7 +115,9 @@ const MEETING_SLOTS = /^(meeting|class)_?(times?|schedule)$|^no_meetings$|^fixed
  */
 const SCHEDULE_SLOT = /schedule|routine|meeting|class|shift|timetable/i;
 const WEEKDAY = /周[一二三四五六日天末]|星期|礼拜|工作日|每天|每晚|每早|weekday|weekend|daily|monday|tuesday|wednesday|thursday|friday|saturday|sunday/i;
-const CLOCK = /\d{1,2}\s*[:：点]|[上下]午|早上|晚上|凌晨|\b\d{1,2}\s?(am|pm)\b/i;
+// 「早八点到晚九点」 in Chinese numerals is a time too (2026-11-12 replay: a student's class hours said so stayed 「not collected」, and the
+// interview asked for her fixed schedule again sixteen rounds after she gave it).
+const CLOCK = /\d{1,2}\s*[:：点]|[零一二两三四五六七八九十]{1,3}\s*点|[上下]午|早上|晚上|凌晨|\b\d{1,2}\s?(am|pm)\b/i;
 const statesSchedule = (fact: { slot: string; value?: string }) =>
   SCHEDULE_SLOT.test(fact.slot) ? Boolean(fact.value?.trim()) : WEEKDAY.test(fact.value ?? "") && CLOCK.test(fact.value ?? "");
 /** What a line is about, said by the person: enough to stand for its description while the extraction has not written one. */
