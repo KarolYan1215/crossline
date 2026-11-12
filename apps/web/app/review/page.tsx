@@ -232,7 +232,9 @@ export default async function ReviewPage() {
     </section>}
 
     {money.hasRecords && <section className="rd-card review-block rv-money" aria-label={t("本月花钱")}>
-      <p>{t("本月花钱：{{month}} 已花 {{spent}} {{currency}}，收入 {{income}}", { month: money.month, spent: money.summary.spent, currency: money.summary.currency, income: money.summary.income })}
+      <p>{money.summary.incomeTracked
+        ? t("本月花钱：{{month}} 已花 {{spent}} {{currency}}，收入 {{income}}", { month: money.month, spent: money.summary.spent, currency: money.summary.currency, income: money.summary.income })
+        : t("本月花钱：{{month}} 已花 {{spent}} {{currency}}", { month: money.month, spent: money.summary.spent, currency: money.summary.currency })}
         {money.summary.savingsRate !== null ? t("，储蓄率 {{rate}}%", { rate: Math.round(money.summary.savingsRate) }) : ""}{t("。")}</p>
       <p className="review-note">{t("明细和趋势在主线页的线卡上。")} <a href={wealthLine ? `/milestones?line=${encodeURIComponent(wealthLine.id)}` : "/milestones"}>{t("看线卡")}</a>
         {" · "}<a href="/ledger">{t("看总账")}</a></p>

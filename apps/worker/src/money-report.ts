@@ -1,4 +1,4 @@
-import { baseCurrencyFor, convertRecords, converterFrom, isFxCurrency, monthlyLimitFrom, monthlyMoneyReport, parseBudget, weeklyMoneyReport, type LedgerRecord } from "@crossline/core";
+import { baseCurrencyFor, convertRecords, converterFrom, isFxCurrency, monthlyCap, monthlyLimitFrom, monthlyMoneyReport, parseBudget, weeklyMoneyReport, type Converter, type LedgerRecord } from "@crossline/core";
 import { settleStaleDuplicates, type CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
 import { localeOf, tOfWorkspace } from "./locale";
@@ -22,10 +22,13 @@ const localParts = (now: Date, zone: string) => {
 const addDays = (day: string, days: number) => new Date(Date.parse(`${day}T12:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 const money = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: 2 });
 
-/** The monthly spending limit: the person's own budget cap (`ledger.budget`, docs/ledger-wealth.md §4), else the wealth line's approved milestones. */
-export function monthlyLimit(store: CrosslineStore, workspaceId: string): number | null {
-  const own = parseBudget(store.getSetting(workspaceId, "ledger.budget")).monthly;
-  if (own !== null) return own;
+/**
+ * The monthly spending limit: the person's own budget cap (`ledger.budget`, docs/ledger-wealth.md §3.4) in the base currency at `day`'s
+ * rate, else the wealth line's approved milestones.
+ */
+export function monthlyLimit(store: CrosslineStore, workspaceId: string, base: string, fx: Converter, day: string): number | null {
+  const budget = parseBudget(store.getSetting(workspaceId, "ledger.budget"));
+  if (budget.monthly !== null) return monthlyCap(budget, base, fx, day);
   const line = identityLines(store, workspaceId).find((item) => item.domain === "wealth");
   if (!line) return null;
   return monthlyLimitFrom(store.listMilestones(workspaceId).filter((milestone) => milestone.identityId === line.id && milestone.status === "approved")
@@ -45,8 +48,8 @@ export function moneyReportPass(store: CrosslineStore, workspaceId: string, now 
   // The totals in the base currency, each record at its day's rate (docs/ledger-wealth.md §3), as the ledger page shows them.
   const chosen = store.getSetting(workspaceId, "ledger.baseCurrency") ?? "";
   const base = isFxCurrency(chosen) ? chosen : baseCurrencyFor(zoneOf(store, workspaceId), localeOf(store, workspaceId));
-  const records = convertRecords(store.listRecords(workspaceId, { domain: "wealth", since: addDays(local.day, -400) }) as LedgerRecord[], base,
-    converterFrom(store.listMarketPrices({ kinds: ["fx"] }))).records;
+  const fx = converterFrom(store.listMarketPrices({ kinds: ["fx"] }));
+  const records = convertRecords(store.listRecords(workspaceId, { domain: "wealth", since: addDays(local.day, -400) }) as LedgerRecord[], base, fx).records;
   if (!records.length) return sent;
   const t = tOfWorkspace(store, workspaceId);
   const open = (path: string) => [{ label: t("看总账"), href: path }, { label: t("少问这类"), kind: "mute" as const }];
@@ -69,10 +72,14 @@ export function moneyReportPass(store: CrosslineStore, workspaceId: string, now 
   if (local.day.endsWith("-01")) {
     const month = addDays(local.day, -1).slice(0, 7);
     const marker = `money.report.month:${month}`;
-    const report = store.getSetting(workspaceId, marker) ? null : monthlyMoneyReport(records, month, monthlyLimit(store, workspaceId));
+    // 只记开销 (docs/ledger-wealth.md §3.4): income is neither said nor turned into a savings rate.
+    const report = store.getSetting(workspaceId, marker) ? null : monthlyMoneyReport(records, month, monthlyLimit(store, workspaceId, base, fx, addDays(local.day, -1)),
+      { spendingOnly: store.getSetting(workspaceId, "ledger.spendingOnly") === "1" });
     store.setSetting(workspaceId, marker, now.toISOString());
     if (report) {
-      const head = t("{{month}} 月花了 {{spent}} {{currency}}，收入 {{income}}", { month: Number(month.slice(5, 7)), spent: money(report.spent), currency: report.currency, income: money(report.income) });
+      const head = report.incomeTracked
+        ? t("{{month}} 月花了 {{spent}} {{currency}}，收入 {{income}}", { month: Number(month.slice(5, 7)), spent: money(report.spent), currency: report.currency, income: money(report.income) })
+        : t("{{month}} 月花了 {{spent}} {{currency}}", { month: Number(month.slice(5, 7)), spent: money(report.spent), currency: report.currency });
       let text = report.savingsRate !== null ? `${head}${t("，储蓄率 {{rate}}%", { rate: Math.round(report.savingsRate) })}${t("。")}` : `${head}${t("。")}`;
       if (report.changePct !== null) text += report.changePct >= 0 ? t("比上月多花 {{pct}}%。", { pct: Math.round(report.changePct) }) : t("比上月少花 {{pct}}%。", { pct: Math.round(-report.changePct) });
       const movers = report.movers.filter((item) => item.change !== 0);

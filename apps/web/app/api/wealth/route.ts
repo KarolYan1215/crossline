@@ -32,14 +32,15 @@ export async function POST(request: Request) {
     : action === "holding" ? { action, accountId: str(body.accountId), symbol: str(body.symbol, 20), quantity: num(body.quantity), price: Number.isFinite(num(body.price)) ? num(body.price) : 0 }
     : action === "holding_delete" ? { action, id: str(body.id) }
     : action === "base_currency" ? { action, currency: str(body.currency, 3) }
-    : action === "budget" ? { action, monthly: Number.isFinite(num(body.monthly)) ? num(body.monthly) : null,
+    : action === "spending_only" ? { action, on: body.on === true }
+    : action === "budget" ? { action, monthly: Number.isFinite(num(body.monthly)) ? num(body.monthly) : null, ...(str(body.currency, 3) ? { currency: str(body.currency, 3) } : {}),
       categories: Object.fromEntries(Object.entries(body.categories && typeof body.categories === "object" ? body.categories as Record<string, unknown> : {}).map(([key, value]) => [key, num(value)])) }
     : undefined;
   if (!input) return Response.json({ ok: false, code: "WEALTH_ACTION_UNKNOWN" }, { status: 400 });
   const t = tOf(access.ctx);
   const label = {
     account_add: t("新增账户"), account_edit: t("修改账户"), account_archive: t("归档账户"), account_delete: t("删除账户"), snapshot: t("记一次余额"),
-    snapshot_delete: t("删除一次余额"), holding: t("修改持仓"), holding_delete: t("删除持仓"), base_currency: t("修改本位币"), budget: t("修改预算")
+    snapshot_delete: t("删除一次余额"), holding: t("修改持仓"), holding_delete: t("删除持仓"), base_currency: t("修改本位币"), budget: t("修改预算"), spending_only: t("切换「只记开销」")
   }[input.action];
   const result = await withUndo(access.ctx, label, () => applyWealthAction(access.ctx, input));
   return Response.json(result, { status: result.ok ? 200 : 400 });

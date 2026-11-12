@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
-  accountValues, baseCurrencyFor, budgetLines, convertRecords, converterFrom, holdingPrice, netWorthOn, netWorthSeries, parseBudget, staleAccounts, valueHoldings, wealthProblem, QUOTE_MAX_AGE_DAYS,
+  accountValues, baseCurrencyFor, budgetLines, budgetPace, convertRecords, converterFrom, holdingPrice, monthlyCap, netWorthOn, netWorthSeries, parseBudget, staleAccounts, valueHoldings, wealthProblem, QUOTE_MAX_AGE_DAYS,
   type MarketPrice, type WealthAccount, type WealthHolding, type WealthSnapshot
 } from "./wealth";
 
@@ -105,16 +105,33 @@ describe("the 更新余额 card", () => {
 
 describe("budgets", () => {
   test("each capped category against the month, projected at the pace so far", () => {
-    const lines = budgetLines({ monthly: 5000, categories: { 餐饮: 1000, 交通: 300, 购物: 0 } }, [{ category: "餐饮", amount: 600 }, { category: "购物", amount: 50 }], 10, 30, true);
+    const lines = budgetLines({ monthly: 5000, currency: null, categories: { 餐饮: 1000, 交通: 300, 购物: 0 } }, [{ category: "餐饮", amount: 600 }, { category: "购物", amount: 50 }], 10, 30, true, 8);
     expect(lines).toEqual([
       { category: "餐饮", cap: 1000, spent: 600, pct: 60, projected: 1800, over: false, projectedOver: true },
       { category: "交通", cap: 300, spent: 0, pct: 0, projected: 0, over: false, projectedOver: false }
     ]);
-    expect(budgetLines({ monthly: null, categories: { 餐饮: 100 } }, [{ category: "餐饮", amount: 120 }], 31, 31, false)[0]).toMatchObject({ over: true, projected: null });
+    expect(budgetLines({ monthly: null, currency: null, categories: { 餐饮: 100 } }, [{ category: "餐饮", amount: 120 }], 31, 31, false, 20)[0]).toMatchObject({ over: true, projected: null });
+  });
+  test("no category projection from spending on fewer than seven days", () => {
+    expect(budgetLines({ monthly: null, currency: null, categories: { 餐饮: 1000 } }, [{ category: "餐饮", amount: 600 }], 10, 30, true, 3)[0]).toMatchObject({ projected: null, projectedOver: false });
   });
   test("a malformed setting reads as no budget", () => {
-    expect(parseBudget("{oops")).toEqual({ monthly: null, categories: {} });
-    expect(parseBudget(JSON.stringify({ monthly: -1, categories: { 餐饮: 800, 交通: "x" } }))).toEqual({ monthly: null, categories: { 餐饮: 800 } });
+    expect(parseBudget("{oops")).toEqual({ monthly: null, currency: null, categories: {} });
+    expect(parseBudget(JSON.stringify({ monthly: -1, categories: { 餐饮: 800, 交通: "x" } }))).toEqual({ monthly: null, currency: null, categories: { 餐饮: 800 } });
+    expect(parseBudget(JSON.stringify({ monthly: 2000, currency: "USD", categories: {} }))).toEqual({ monthly: 2000, currency: "USD", categories: {} });
+    expect(parseBudget(JSON.stringify({ monthly: 2000, currency: "rmb", categories: {} })).currency).toBeNull();
+  });
+  test("the monthly budget in its own currency, read in the base one at the latest rate on or before the day", () => {
+    const rates = converterFrom(fx("2026-11-09", { USD: 1.1, CNY: 7.7 }));
+    expect(monthlyCap({ monthly: 1000, currency: "USD", categories: {} }, "CNY", rates, "2026-11-11")).toBe(7000);
+    expect(monthlyCap({ monthly: 1000, currency: "CNY", categories: {} }, "CNY", rates, "2026-11-11")).toBe(1000);
+    expect(monthlyCap({ monthly: 1000, currency: null, categories: {} }, "CNY", rates, "2026-11-11")).toBe(1000);
+    expect(monthlyCap({ monthly: 1000, currency: "JPY", categories: {} }, "CNY", rates, "2026-11-11")).toBeNull();
+    expect(monthlyCap({ monthly: null, currency: "USD", categories: {} }, "CNY", rates, "2026-11-11")).toBeNull();
+  });
+  test("the month's spending against the budget: what is left, and the pace against the share of days gone", () => {
+    expect(budgetPace(1500, 3000, 10, 30, true)).toEqual({ cap: 3000, spent: 1500, left: 1500, pct: 50, over: false, day: 10, expected: 1000, ahead: 500 });
+    expect(budgetPace(3200, 3000, 30, 30, false)).toMatchObject({ left: -200, pct: 107, over: true, expected: 3000, ahead: 200 });
   });
 });
 
