@@ -95,6 +95,6 @@ Costs and open points:
 - Careers have two layers: one direction per industry + function (`k<n>`), with jobs as `entries`. A direction is replaced only with a `change` reason. A new direction states `differs`.
 - The page shows confirmed points and hypotheses during the interview, and a stage's view only once its section is final (`sectionsFinal`).
 - `scripts/points-migrate.ts` moves a named account:
-  - `--split` sets the rules and `profile.points.split`, so the sections lane splits the old paragraphs into cited points once and keeps the paragraphs.
+  - `--split` sets the rules and `profile.points.split`, so the sections lane splits the old paragraphs into cited points once and keeps the paragraphs. The split run is asked for no section (`profileTask` undefined), and `--split` closes every section that holds a paragraph. The first run on the owner's finished interview had finalized every open section and rewritten the paragraphs; they were put back from the backup.
   - `--export` writes the interview out.
   - `--reset` is 「清空数据重新开始」 (`RESET_KEEPS` now lives in `@crossline/db`).

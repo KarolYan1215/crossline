@@ -382,3 +382,23 @@ test("under the points rules a card that names no hypothesis on record becomes o
   const profile = JSON.parse(store.getSetting(workspaceId, "profile.model")!) as { hypotheses: Array<{ id: string; status: string; basis: Array<{ ref: string }> }> };
   expect(profile.hypotheses).toEqual([expect.objectContaining({ id: "c5", status: "open", basis: [expect.objectContaining({ ref: "reply-1" }), expect.objectContaining({ ref: "reply-5" })] })]);
 });
+
+test("a split run of an account moved to the points rules writes points only and leaves its paragraphs as they are", async () => {
+  const { POINTS_SPLIT_SETTING } = await import("./onboarding-extract");
+  const now = "2026-11-12T00:00:00.000Z";
+  const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
+  store.saveOnboardingSession({ id: "s", ownerId, workspaceId, state: "complete", coverage: { stage: "energy", flow: "v1", rules: "points" }, createdAt: now, updatedAt: now });
+  store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text: "论文 12 月中投稿，和产品在抢同一段时间。" }, createdAt: now });
+  store.setSetting(workspaceId, "profile.model", JSON.stringify({ problem: "旧段落" }));
+  store.setSetting(workspaceId, POINTS_SPLIT_SETTING, JSON.stringify(["situation"]));
+  const { rpc, prompts } = runtime([], [facts({ profileSections: { situation: { problem: "改写成段的处境", gravity: [], designable: [], reframes: [], refs: [1] }, compass: null, energy: null, synthesis: null },
+    pointChanges: [{ op: "add", id: "", section: "situation", text: "论文 12 月中投稿，和产品抢同一段时间", refs: [1], external: [], why: "" }] })]);
+  const extractor = createOnboardingExtractor(store, workspaceId, "C:\repo", () => rpc);
+  expect(extractor.nextSession([], "sections")).toBe("s");
+  expect(await extractor.runOnce([], "sections")).toMatchObject({ state: "done" });
+  expect(prompts().find((prompt) => prompt.includes(EXTRACT))).toContain('"split":["situation"]');
+  const profile = JSON.parse(store.getSetting(workspaceId, "profile.model")!) as { problem: string; points: Array<{ text: string }> };
+  expect(profile.problem).toBe("旧段落");
+  expect(profile.points.map((point) => point.text)).toEqual(["论文 12 月中投稿，和产品抢同一段时间"]);
+  expect(store.getSetting(workspaceId, POINTS_SPLIT_SETTING)).toBeUndefined();
+});

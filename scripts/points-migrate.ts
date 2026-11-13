@@ -5,7 +5,8 @@
  *   pnpm exec tsx scripts/points-migrate.ts --email someone@example.com --split [--data /data] [--apply]
  *     The account's main interview runs under the points rules from now on, and its paragraphs (the portrait's sections) are split into
  *     points: the worker's sections lane owes one run for it (`profile.points.split`) and does it with the account's own model, each point
- *     resting on the person's own words. The paragraphs stay as they are.
+ *     resting on the person's own words. The paragraphs stay as they are: the split run is asked for no section, and every section that
+ *     holds one is closed so no later run finalizes it again.
  *
  *   pnpm exec tsx scripts/points-migrate.ts --email someone@example.com --export <file> [--data /data]
  *     Writes the account's interview (every conversation's messages, the observation ratings) to <file>, outside the ledger, so a replay can
@@ -21,10 +22,10 @@
 import { rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEEP_SECTIONS, POINTS_RULES, SECTION_FIELDS, ONBOARDING_INSIGHTS, readInsightRatings } from "../packages/core/src/index";
+import { DEEP_SECTIONS, POINTS_RULES, PROFILE_SECTIONS, PROFILE_SECTIONS_SETTING, SECTION_FIELDS, ONBOARDING_INSIGHTS, readInsightRatings } from "../packages/core/src/index";
 import { CrosslineStore, RESET_KEEPS } from "../packages/db/src/index";
 import { POINTS_SPLIT_SETTING } from "../apps/worker/src/onboarding-extract";
-import { readProfileModel } from "../apps/worker/src/onboarding-persist";
+import { readProfileModel, readSectionRecords } from "../apps/worker/src/onboarding-persist";
 
 const arg = (name: string) => { const index = process.argv.indexOf(`--${name}`); return index > 0 ? process.argv[index + 1] : undefined; };
 const email = arg("email")?.trim().toLowerCase();
@@ -66,14 +67,21 @@ try {
   } else if (mode === "split") {
     if (!main) throw new Error("NO_MAIN_INTERVIEW");
     const profile = readProfileModel(store, ws);
-    // The deep sections that hold something: the ones a run splits into points.
-    const sections = DEEP_SECTIONS.filter((section) => SECTION_FIELDS[section].some((field) => {
+    const holds = (section: (typeof PROFILE_SECTIONS)[number]) => SECTION_FIELDS[section].some((field) => {
       const value = profile[field] as unknown;
       return Array.isArray(value) ? value.length > 0 : typeof value === "string" && value.trim().length > 0;
-    }));
+    });
+    // The deep sections that hold something are the ones a run splits into points. Every section that holds a paragraph is closed, so
+    // no later run is asked to finalize it: the paragraphs stay read-only.
+    const sections = DEEP_SECTIONS.filter(holds);
+    const written = PROFILE_SECTIONS.filter(holds);
     console.log(JSON.stringify({ ...found, session: main.id, rulesAlready: (main.coverage as { rules?: unknown }).rules === POINTS_RULES,
-      pointsAlready: profile.points.length, split: sections, apply }));
+      pointsAlready: profile.points.length, split: sections, closed: written, apply }));
     if (apply) store.atomically(() => {
+      const records = readSectionRecords(store, ws);
+      const at = new Date().toISOString();
+      for (const section of written) records[section] = { sentences: records[section]?.sentences ?? [], ...records[section], final: true, at };
+      store.setSetting(ws, PROFILE_SECTIONS_SETTING, JSON.stringify(records));
       store.saveOnboardingSession({ ...main, coverage: { ...main.coverage, rules: POINTS_RULES }, updatedAt: new Date().toISOString() });
       if (sections.length) store.setSetting(ws, POINTS_SPLIT_SETTING, JSON.stringify(sections));
       store.appendEvent({ ownerId: found.principalId, workspaceId: ws, idempotencyKey: `profile.points.migrated:${ws}:${Date.now()}`,

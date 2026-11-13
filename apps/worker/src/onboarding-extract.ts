@@ -255,7 +255,9 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     const flow = flowOf(session?.coverage);
     const stage = ((session?.coverage as { stage?: OnboardingStage } | undefined)?.stage ?? (focus || notes ? "details" : INTERVIEW_FLOW_STAGES[flow][0]!));
     // Notes add facts; the portrait is the interview's to write, so they owe it nothing.
-    const profileTask = focus || notes || !writes("sections") ? undefined
+    // A split run writes points only: the paragraphs on record stay as they are (the owner's decision, 2026-11-12), so it is asked for
+    // no section even when the interview is over and every open section would otherwise be finalized.
+    const profileTask = focus || notes || !writes("sections") || split.length ? undefined
       : portraitTask(stage, session?.state === "complete" || Boolean(finishing), readSectionRecords(store, workspaceId), flow);
     // Card items the person answered in words: the run reads them off the replies (`itemScores`).
     const cardItems = focus || notes || !writes("ledger") ? [] : pendingItems(readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING)));
