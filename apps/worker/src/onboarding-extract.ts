@@ -70,11 +70,13 @@ const portraitLane = (lane: ExtractLane) => lane === "sections" || lane === "ins
 export const laneStateKey = (sessionId: string, lane: ExtractLane = "all") => portraitLane(lane) ? `${sessionId}#${lane}` : sessionId;
 /**
  * A lane's watermark. A portrait lane that has never run starts where the single run (and the ledger lane, which shares its watermark)
- * got to: an interview already under way, or long finished, when the lanes came is not read again from its first reply.
+ * got to: an interview already under way, or long finished, when the lanes came is not read again from its first reply. The ledger
+ * lane pins that starting point the first time it moves on (`pinned`): read live, it moved with every reply, so in the eighth replay
+ * (2026-11-13) the sections' lane never had three replies waiting and read none of the interview.
  */
 export function readLaneState(store: CrosslineStore, workspaceId: string, sessionId: string, lane: ExtractLane = "all"): ExtractState {
   const own = readExtractState(store, workspaceId, laneStateKey(sessionId, lane));
-  return portraitLane(lane) && own.ranAt === undefined && !own.failures ? { ...own, upTo: readExtractState(store, workspaceId, sessionId).upTo } : own;
+  return portraitLane(lane) && own.ranAt === undefined && !own.failures && !own.pinned ? { ...own, upTo: readExtractState(store, workspaceId, sessionId).upTo } : own;
 }
 /** The fact index shown to a run: enough to update rather than repeat, short enough not to crowd out the new sentences. */
 const FACTS_SHOWN = 200;
@@ -381,6 +383,11 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       }
       writeExtractDocs(store, workspaceId, docs);
       writeExtractOffsets(store, workspaceId, nextOffsets);
+      // A portrait lane that has not run yet keeps the start it had before this run (see `readLaneState`).
+      if (lane === "ledger") for (const other of EXTRACT_LANES.filter(portraitLane)) {
+        const own = readExtractState(store, workspaceId, laneStateKey(sessionId, other));
+        if (own.ranAt === undefined && !own.failures && !own.pinned) writeExtractState(store, workspaceId, laneStateKey(sessionId, other), { upTo: state.upTo, failures: 0, pinned: true });
+      }
       writeExtractState(store, workspaceId, laneStateKey(sessionId, lane), { upTo, failures: 0, ranAt: new Date().toISOString() });
       if (finishing && profileTask) markFinishing(store, workspaceId, sessionId, finishing.runs + 1);
     });

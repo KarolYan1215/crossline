@@ -38,7 +38,9 @@ export function markFinishing(store: CrosslineStore, workspaceId: string, sessio
 /** Minutes to wait after the first, second and third failure in a row (and every later one). */
 export const EXTRACT_BACKOFF_MINUTES = [1, 5, 30] as const;
 
-export type ExtractState = { upTo: number; failures: number; retryAt?: string; lastError?: { code: string; message: string; at: string }; ranAt?: string };
+/** `pinned`: a portrait lane's starting point, written before it first runs (apps/worker/src/onboarding-extract.ts `readLaneState`). */
+export type ExtractState = { upTo: number; failures: number; retryAt?: string; lastError?: { code: string; message: string; at: string }; ranAt?: string;
+  pinned?: boolean };
 /**
  * What the extraction still owes a conversation. `frontReplies` counts the waiting replies that answer a round of the front stages (or
  * the opening): only those can carry a start-standard fact, so only they hold 「开始使用」 (2026-10-19 walkthrough: on the sponsor model a

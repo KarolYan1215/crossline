@@ -346,6 +346,21 @@ test("a portrait lane that never ran starts at the single run's watermark: an in
   expect(extractor.nextSession(["line-research"], "ledger")).toBe("line-research");
 });
 
+test("the ledger lane moving on pins where a portrait lane that has not run starts, so a batch of replies waits for it", async () => {
+  const now = new Date().toISOString();
+  const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
+  store.saveOnboardingSession({ id: "s", ownerId, workspaceId, state: "active", coverage: { stage: "situation", flow: "v1", rules: "points" }, createdAt: now, updatedAt: now });
+  const { rpc } = fakeRuntime([round], [ONBOARDING_SKILL, ONBOARDING_EXTRACT_SKILL], { routes: [{ match: EXTRACT, answers: [deadline([1]), deadline([1]), deadline([1])] }] });
+  const extractor = createOnboardingExtractor(store, workspaceId, "C:\repo", () => rpc);
+  for (const text of ["一", "二", "三"]) {
+    store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text }, createdAt: now });
+    expect((await extractor.runOnce(["s"], "ledger")).state).toBe("done");
+  }
+  expect(readLaneState(store, workspaceId, "s", "ledger").upTo).toBe(3);
+  expect(readLaneState(store, workspaceId, "s", "sections")).toMatchObject({ upTo: 0, pinned: true });
+  expect(extractor.nextSession([], "sections")).toBe("s");
+});
+
 test("under the points rules the sections' lane writes points with their quotes, and a stage's view only once the stage is over", async () => {
   // One reply, read by every lane at once: the portrait's batching is tested on its own.
   process.env.CROSSLINE_PORTRAIT_BATCH = "1";
