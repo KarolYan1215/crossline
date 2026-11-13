@@ -5,7 +5,7 @@ import {
   AVAILABILITY_PROPOSED_SETTING, ONBOARDING_KEEP_EARLY_MAX, type ProfileSection, PROFILE_CONFIRMED, droppedOnboardingItems, keepOnboardingExtraction, LIMITED_LISTS, listsAtLimit, prunedOnboardingItems, lineAttributes, numberedText, onboardingExtractSchema,
   portraitFingerprint, sectionClosed, validateOnboardingExtraction, type SectionRecord,
   type EvidenceSentence, type KnownSources, type OnboardingExtractContext, type OnboardingExtraction, type OnboardingStage, type StoredLineProfile,
-  ONBOARDING_INSIGHTS, readInsightRatings, EXTRACT_LANE_KEYS, EXTRACT_KEYS, type ExtractLaneName, pointLines, pointsRules
+  ONBOARDING_INSIGHTS, readInsightRatings, EXTRACT_LANE_KEYS, EXTRACT_KEYS, type ExtractLaneName, pointLines, pointsRules, cardCandidates
 } from "@crossline/core";
 import { runCodexSkill, withUsagePurpose, type CodexRpcBoundary, type SkillTools } from "@crossline/codex";
 import {
@@ -48,6 +48,8 @@ const REPLIES_PER_RUN = 6;
 const REPLIES_PER_PORTRAIT_RUN = 12;
 /** What an extraction run may think on the developer's model (`thinkingBudget`, docs/token-economy.md §4, 2026-11-13). */
 export const EXTRACT_THINKING_BUDGET = 2048;
+/** The portrait's lanes read a batch and reason over the whole portrait: at 2048 three of their seven runs needed a repair (7th replay). */
+export const PORTRAIT_THINKING_BUDGET = 4096;
 /**
  * Replies the portrait's lanes wait for while an interview is under way (`CROSSLINE_PORTRAIT_BATCH` overrides it), and how long the oldest
  * may wait before they read it anyway.
@@ -127,6 +129,9 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       const pending = store.listOnboardingMessages(workspaceId, id).filter((message) => message.role === "user" && message.seq > state(id).upTo);
       if (!pending.length) return false;
       if (!portraitLane(lane) || sessions.find((session) => session.id === id)?.state !== "active") return true;
+      // The inferences are what the next cards are chosen from: they wait for a batch only while the log has two or more to offer
+      // (the seventh replay: batched from the start, the lane ran three times and no card came from the log).
+      if (lane === "insights" && cardCandidates(readProfileModel(store, workspaceId).hypotheses ?? []).length < 2) return true;
       return pending.length >= (Number(process.env.CROSSLINE_PORTRAIT_BATCH) || PORTRAIT_BATCH) || Date.now() - Date.parse(pending[0]!.createdAt) >= PORTRAIT_WAIT_MS;
     };
     const due = (id: string) => { const retryAt = state(id).retryAt; return !retryAt || Date.parse(retryAt) <= Date.now(); };
@@ -323,7 +328,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       // planning, ahead of discretionary work.
       ...(portraitLane(lane) ? { priority: "planning" as const } : lane === "ledger" && session?.state === "active" ? { priority: "interactive" as const } : {}),
       // On the developer's model each lane thinks at most this much (docs/token-economy.md §4): most of its output was reasoning.
-      thinkingBudget: EXTRACT_THINKING_BUDGET,
+      thinkingBudget: portraitLane(lane) ? PORTRAIT_THINKING_BUDGET : EXTRACT_THINKING_BUDGET,
       // The prompt cache (docs/token-economy.md §2.5): the lines, projects and portrait first, the facts on record (which grow) after
       // them, and this run's replies, files, task and date last.
       stableKeys: ["version", "lane", "timeZone", "lines", "domainGuides", "lineProfiles", "projects", "focusLine", "profile", "facts"],

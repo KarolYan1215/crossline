@@ -407,7 +407,7 @@ test("a split run of an account moved to the points rules writes points only and
   expect(store.getSetting(workspaceId, POINTS_SPLIT_SETTING)).toBeUndefined();
 });
 
-test("while an interview is under way the portrait's lanes wait for three replies, or for the oldest to have waited ten minutes; the ledger never waits", () => {
+test("while an interview is under way the portrait's lanes wait for three replies, or for the oldest to have waited ten minutes; the ledger never waits, and the inferences only while the log has cards to offer", () => {
   const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
   const now = new Date().toISOString();
   store.saveOnboardingSession({ id: "s", ownerId, workspaceId, state: "active", coverage: { stage: "situation", flow: "v1" }, createdAt: now, updatedAt: now });
@@ -415,6 +415,11 @@ test("while an interview is under way the portrait's lanes wait for three replie
   for (const text of ["一", "二"]) store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text }, createdAt: now });
   expect(extractor.nextSession([], "ledger")).toBe("s");
   expect(extractor.nextSession(["s"], "sections")).toBeUndefined();
+  // The inferences wait too only once the log has two hypotheses to offer the next cards.
+  expect(extractor.nextSession([], "insights")).toBe("s");
+  const two = [{ kind: "quote", text: "一", ref: "reply-1" }, { kind: "quote", text: "二", ref: "reply-3" }];
+  store.setSetting(workspaceId, "profile.model", JSON.stringify({ hypotheses: ["h1", "h2"].map((id) => ({ id, dimension: "D2", statement: "推断", basis: two,
+    falsifier: "", alternative: "", status: "open" })) }));
   expect(extractor.nextSession([], "insights")).toBeUndefined();
   store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text: "三" }, createdAt: now });
   expect(extractor.nextSession(["s"], "sections")).toBe("s");

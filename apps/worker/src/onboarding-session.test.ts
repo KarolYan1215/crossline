@@ -634,6 +634,27 @@ test("observations come as often as there is evidence, never the same one twice"
   expect(await kept("看重的是把事做完。")).toBe(false);
 });
 
+test("a card's hypothesis is marked asked when it is shown, rated or not; one picked from the log keeps its id, a new one never takes an id on record", async () => {
+  const refs = [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-3", quote: "一个人做研究" }];
+  const fromLog = { text: "你说投入的两次都是和人一起赶东西。", refs, falsifier: "如果独自时也常投入", hypothesisId: "h1" };
+  const fresh = { text: "你说底座主线是一个人做的研究。", refs, falsifier: "如果独自做研究时也常投入" };
+  const { rpc } = fakeRuntime([turn({ stage: "energy", insight: { text: "", refs: [] } }), turn({ stage: "energy", insight: fromLog }),
+    turn({ stage: "energy", insight: fresh })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { checklist: false, extract: "off" });
+  await run({ sessionId: "s", text: "最投入的是和同学一起赶比赛的时候。" });
+  store.setSetting(workspaceId, "profile.model", JSON.stringify({ hypotheses: [{ id: "h1", dimension: "D2", statement: "和人一起时投入",
+    basis: [], falsifier: "", alternative: "", status: "open" }, { id: "c5", dimension: "D2", statement: "旧卡", basis: [], falsifier: "", alternative: "", status: "open" }] }));
+  await run({ sessionId: "s", text: "底座是我一个人做研究。" });
+  const shown = store.listOnboardingMessages(workspaceId, "s").at(-1)!;
+  const log = () => (JSON.parse(store.getSetting(workspaceId, "profile.model")!) as { hypotheses: Array<{ id: string; cardKey?: string }> }).hypotheses;
+  expect(log().find((item) => item.id === "h1")?.cardKey).toBe(`s#${shown.seq}`);
+  await run({ sessionId: "s", text: "还有别的吗" });
+  const card = (store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { insight?: { hypothesisId?: string } }).insight;
+  expect(card?.hypothesisId).toBe("c5-2");
+  expect(log().find((item) => item.id === "c5-2")?.cardKey).toBe(`s#${store.listOnboardingMessages(workspaceId, "s").at(-1)!.seq}`);
+  expect(log().find((item) => item.id === "c5")?.cardKey).toBeUndefined();
+});
+
 test("the dialogue is told which lines still have no goal candidates, so it asks what the person wants to become only there", async () => {
   store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ media: { description: "小红书科普",
     attributes: [{ text: "有趣", kind: "ability", sourceRef: "reply-0" }, { text: "值得信赖", kind: "state", sourceRef: "reply-0" }] } }));

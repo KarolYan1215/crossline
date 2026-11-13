@@ -178,12 +178,29 @@ export function hypothesisLogLines(hypotheses: Hypothesis[], limit = 16): string
 }
 
 /**
+ * The extraction's new hypotheses numbered `h<n>` after the highest on record, whatever it called them, with the careers' references
+ * moved along. In the seventh replay (2026-11-13) the extraction saw a log of cards only (`c<seq>`) and went on numbering `c33`, `c35`…,
+ * the ids the next cards would take.
+ */
+export function numberNewHypotheses<C extends { hypothesisIds?: string[] }>(onRecord: Hypothesis[], hypotheses: Hypothesis[], careers: C[] = []):
+  { hypotheses: Hypothesis[]; careers: C[] } {
+  const known = new Set(onRecord.map((item) => item.id));
+  let next = Math.max(0, ...onRecord.map((item) => /^h(\d+)$/.exec(item.id)).map((match) => (match ? Number(match[1]) : 0))) + 1;
+  const renamed = new Map<string, string>();
+  for (const item of hypotheses) if (!known.has(item.id) && !renamed.has(item.id)) renamed.set(item.id, `h${next++}`);
+  const as = (id: string) => renamed.get(id) ?? id;
+  return { hypotheses: hypotheses.map((item) => ({ ...item, id: as(item.id) })),
+    careers: careers.map((career) => (career.hypothesisIds ? { ...career, hypothesisIds: career.hypothesisIds.map(as) } : career)) };
+}
+
+/**
  * What the next observation card asks about (2026-11-13, the owner: cards come from the log, not made up afresh each round): at most
  * `limit` hypotheses still open, never put on a card, resting on two replies or more (a card cites two), with the replies they rest on.
  * The dimension the cards have asked least comes first, then the hypothesis with more replies behind it, then the older one. In the
  * sixth replay every one of twelve cards was a new inference, and none of the 25 the extraction kept was ever asked.
  */
 export function cardCandidates(hypotheses: Hypothesis[], limit = 3): string[] {
+  // `cardKey` is set when a card is shown, answered or not (onboarding-session.ts), so a card left unanswered is not offered again.
   const asked = new Map<string, number>();
   for (const item of hypotheses) if (item.cardKey) asked.set(item.dimension, (asked.get(item.dimension) ?? 0) + 1);
   const replies = (item: Hypothesis) => [...new Map(item.basis.filter((basis) => /^reply-\d+$/.test(basis.ref)).map((basis) => [basis.ref, basis.text])).entries()];

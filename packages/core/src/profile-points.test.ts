@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { applyPointChanges, cardCandidates, hypothesisFromCard, hypothesisLogLines, pointSectionFor, rateHypothesis, unrateHypothesis, type PointChange, type ProfilePoint } from "./profile-points";
+import { applyPointChanges, cardCandidates, numberNewHypotheses, hypothesisFromCard, hypothesisLogLines, pointSectionFor, rateHypothesis, unrateHypothesis, type PointChange, type ProfilePoint } from "./profile-points";
 import type { Hypothesis } from "./profile-hypotheses";
 
 const at = "2026-11-12T00:00:00.000Z";
@@ -77,4 +77,11 @@ test("the next card is chosen from the log: open hypotheses never carded that re
   // h1 was asked, h4 rests on one reply, h5 is refuted and h6 settled; D5 has had no card, D2 one.
   expect(lines).toEqual(["h3 [D5] 被看见时更投入（依据 reply-2「有人看的时候我做得更快」、reply-4「交给导师前一晚写到三点」）",
     "h2 [D2] 被看见时更投入（依据 reply-2「有人看的时候我做得更快」、reply-4「交给导师前一晚写到三点」）"]);
+});
+
+test("the extraction's new hypotheses are numbered after the log's h ids, never as a card's, and the careers follow", () => {
+  const out = numberNewHypotheses([hypothesis({ id: "h2" }), hypothesis({ id: "c5" })],
+    [hypothesis({ id: "c5", status: "supported" }), hypothesis({ id: "c33" }), hypothesis({ id: "h9" })], [{ hypothesisIds: ["c33", "c5"] }]);
+  expect(out.hypotheses.map((item) => item.id)).toEqual(["c5", "h3", "h4"]);
+  expect(out.careers).toEqual([{ hypothesisIds: ["h3", "c5"] }]);
 });

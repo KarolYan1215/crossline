@@ -610,7 +610,9 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       const onRecord = named ? profile.hypotheses.find((item) => item.id === named) : undefined;
       if (onRecord) return onRecord.cardKey || asked.has(onRecord.id) || onRecord.status === "refuted" ? undefined
         : { ...newCard, hypothesisId: onRecord.id, dimension: onRecord.dimension };
-      const id = `c${userMessage.seq}`;
+      // `c<seq>`, or with a suffix if an id like it is already on record.
+      let id = `c${userMessage.seq}`;
+      for (let n = 2; profile.hypotheses.some((item) => item.id === id); n += 1) id = `c${userMessage.seq}-${n}`;
       const made = hypothesisFromCard(newCard, id, result.output.insight?.dimension);
       store.setSetting(workspaceId, "profile.model", JSON.stringify({ ...profile, hypotheses: [...profile.hypotheses.filter((item) => item.id !== id), made] }));
       return { ...newCard, hypothesisId: id, dimension: made.dimension };
@@ -619,6 +621,13 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const { insight: _raw, progress: _rawProgress, ...rest } = output;
     const stored = { ...rest, ...(insight ? { insight } : {}), ...(progress ? { progress } : {}) };
     const roundSeq = store.appendOnboardingMessage({ sessionId, workspaceId, role: "assistant", content: stored, createdAt: new Date().toISOString() });
+    // The hypothesis a card shows is asked from now on, answered or not: `cardKey` keeps it out of the next cards' candidates.
+    if (insight?.hypothesisId) {
+      const profile = readProfile();
+      const key = `${sessionId}#${roundSeq}`;
+      store.setSetting(workspaceId, "profile.model", JSON.stringify({ ...profile,
+        hypotheses: profile.hypotheses.map((item) => (item.id === insight.hypothesisId && !item.cardKey ? { ...item, cardKey: key } : item)) }));
+    }
     recordRound(store, workspaceId, sessionId, roundSeq, output.questions, new Date().toISOString());
     // Saved over the session as it is now, so a stage the extraction never writes is not lost to the copy read at the start.
     const current = store.getOnboardingSession(workspaceId, sessionId) ?? session;

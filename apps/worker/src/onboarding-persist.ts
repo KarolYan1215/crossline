@@ -4,7 +4,7 @@ import {
   type ProfileSection, type SectionRecord, GOAL_EDITS_SETTING, SECTION_EMPTY_RUNS_MAX, sectionClosed, citationWarnings, duplicateAttributes, mergeDateExtractions,
   resolveAvailability, sanitizeDateExtraction, withContentIds, withoutDecidedDates, withoutOffHours,
   type DateDrop, type DateExtraction, type OnboardingExtraction, type PendingGoalEdit, type ProfileModel, type StoredLineProfile,
-  PROFILE_INSTRUMENTS_SETTING, mergeInstrumentAnswers, mergeProfileInsights, readInstrumentAnswers, applyPointChanges, readPoints
+  PROFILE_INSTRUMENTS_SETTING, mergeInstrumentAnswers, mergeProfileInsights, readInstrumentAnswers, applyPointChanges, readPoints, numberNewHypotheses
 } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
@@ -96,8 +96,10 @@ export function persistExtraction(store: CrosslineStore, workspaceId: string, ex
   const { hypotheses, careers, dimensions, dropCareers } = extraction;
   if (!sessionId.startsWith("line-") && (hypotheses?.length || careers?.length || dimensions?.length || dropCareers?.length)) {
     const profile = readProfileModel(store, workspaceId);
+    // New hypotheses take the log's own numbering (`h<n>`), never a card's (`c<seq>`).
+    const numbered = numberNewHypotheses(profile.hypotheses ?? [], hypotheses ?? [], careers ?? []);
     store.setSetting(workspaceId, "profile.model", JSON.stringify({ ...profile,
-      ...mergeProfileInsights(profile, { ...(hypotheses ? { hypotheses } : {}), ...(careers ? { careers } : {}), ...(dimensions ? { dimensions } : {}),
+      ...mergeProfileInsights(profile, { ...(hypotheses ? { hypotheses: numbered.hypotheses } : {}), ...(careers ? { careers: numbered.careers } : {}), ...(dimensions ? { dimensions } : {}),
         ...(dropCareers ? { dropCareers } : {}) }, now) }));
   }
   // Card items the person answered in words: scored as `mapped` only for items still waiting to be read (a tap is never replaced).
