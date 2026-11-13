@@ -66,6 +66,27 @@ export function checkInsight(insight: TurnInsight | undefined, replies: Record<s
   return { text, refs: refs.slice(0, 4).map((ref) => ({ replyId: ref.replyId, quote: ref.quote.trim() })), ...(external.length ? { external } : {}), falsifier };
 }
 
+/** The help lines the onboarding Skill's 安全 section gives: a round whose reply carries one is answering a disclosure of self-harm. */
+const SAFETY_LINES = ["12356", "82951332"];
+export const handlesDisclosure = (text: string): boolean => SAFETY_LINES.some((line) => text.includes(line));
+
+/**
+ * The replies a disclosure of self-harm sits in: the one a round answered with the help lines, and the person's answer to that round's
+ * check. The Skill says such a disclosure is never portrait material, and the model still built three observation cards on it and
+ * offered 「情绪上又来一次大三上那样」 as an option (replay 8), and put a card beside the safety check itself (replay 9, 2026-11-14).
+ * An observation quoting one of these replies is dropped, and the round that handles a disclosure shows none.
+ */
+export function disclosureReplies(messages: ReadonlyArray<{ role: string; seq: number; content: unknown }>): Set<string> {
+  const ids = new Set<string>();
+  messages.forEach((message, index) => {
+    if (message.role !== "assistant" || !handlesDisclosure(String((message.content as { reply?: unknown }).reply ?? ""))) return;
+    for (let at = index - 1; at >= 0; at -= 1) if (messages[at]!.role === "user") { ids.add(`reply-${messages[at]!.seq}`); break; }
+    const answer = messages.slice(index + 1).find((item) => item.role === "user");
+    if (answer) ids.add(`reply-${answer.seq}`);
+  });
+  return ids;
+}
+
 /** The progress record as stored; anything malformed reads as none (an older round, or a model that left it out). */
 export function readTurnProgress(raw: unknown): TurnProgress | undefined {
   const value = raw as Partial<TurnProgress> | undefined;

@@ -5,7 +5,7 @@ import {
   validateOnboardingDialogue, locateQuote,
   gapCoveredBy, screenQuestions, screenAssumption, type QuestionScreenInput,
   type DimensionId, type ProfileGap, type ProfileModel, type OnboardingStage, DEEP_STAGES, ONBOARDING_TONE_SETTING, ASSESS_RESULT_SETTING, TYPE_TABLE, readTone,
-  checkInsight, readTurnProgress, openStageQuestion, withPlainTerms,
+  checkInsight, disclosureReplies, handlesDisclosure, readTurnProgress, openStageQuestion, withPlainTerms,
   type KnownSources, type OnboardingDialogue, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, ONBOARDING_LAST_FAILURE, readPartialTurn, type OnboardingProgress, calendarWeek,
   tFor, type Locale, flowOf, INTERVIEW_FLOW_STAGES, PROFILE_MODULE_STAGES, cardsFor, readCardAnswers, mergeInstrumentAnswers, readInstrumentAnswers,
   settledItems, PROFILE_INSTRUMENTS_SETTING, type CardSet, type InterviewFlow, type ProfileCard, type ProfileStage,
@@ -598,7 +598,12 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const squeeze = (text: string) => text.replace(/\s/gu, "");
     const shownInsights = new Set(messages.filter((message) => message.role === "assistant")
       .map((message) => squeeze(String((message.content as { insight?: { text?: string } }).insight?.text ?? ""))).filter(Boolean));
-    const checkedInsight = checkInsight(result.output.insight, replies, output.stage);
+    // Never beside the safety check, never built on a disclosure (`disclosureReplies`).
+    const sensitive = disclosureReplies(messages);
+    const checkedInsight = handlesDisclosure(output.reply) ? undefined : (() => {
+      const checked = checkInsight(result.output.insight, replies, output.stage);
+      return checked?.refs.some((ref) => sensitive.has(ref.replyId)) ? undefined : checked;
+    })();
     const newCard = checkedInsight && !shownInsights.has(squeeze(checkedInsight.text)) ? checkedInsight : undefined;
     // Under the points rules every card is one hypothesis of the log (2026-11-12): one on record by its id, never one a card already asked
     // about; else a new one, added to the log here under the reply's number, so 准 / 不准 lands on the inference it rates.

@@ -655,6 +655,23 @@ test("a card's hypothesis is marked asked when it is shown, rated or not; one pi
   expect(log().find((item) => item.id === "c5")?.cardKey).toBeUndefined();
 });
 
+test("no observation card beside the safety check, and none built on the disclosure or the answer to the check", async () => {
+  const card = (refs: Array<{ replyId: string; quote: string }>) => ({ text: "你说投入的时候身边都有人。", refs, falsifier: "如果独自时也常投入" });
+  const { rpc } = fakeRuntime([turn({ stage: "narrative" }),
+    turn({ stage: "narrative", reply: "谢谢你愿意说出来。全国心理援助热线 12356。", insight: card([{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-3", quote: "没人可说" }]) }),
+    turn({ stage: "narrative", insight: card([{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-5", quote: "现在没有了" }]) }),
+    turn({ stage: "energy", insight: card([{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-7", quote: "一个人做研究" }]) })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false, extract: "off" });
+  const shown = async (text: string) => {
+    await run({ sessionId: "s", text });
+    return (store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { insight?: unknown }).insight;
+  };
+  await shown("我最投入的是和同学一起赶比赛的时候。");
+  expect(await shown("大三有一段没人可说，有过不想活的念头。")).toBeUndefined();
+  expect(await shown("现在没有了。")).toBeUndefined();
+  expect(await shown("一个人做研究时最慢。")).toMatchObject({ text: "你说投入的时候身边都有人。" });
+});
+
 test("the dialogue is told which lines still have no goal candidates, so it asks what the person wants to become only there", async () => {
   store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ media: { description: "小红书科普",
     attributes: [{ text: "有趣", kind: "ability", sourceRef: "reply-0" }, { text: "值得信赖", kind: "state", sourceRef: "reply-0" }] } }));

@@ -6,6 +6,11 @@ import {
 import { datedItems, type CrosslineStore } from "@crossline/db";
 import { readProfileModel } from "./onboarding-persist";
 
+/**
+ * The person's ratings of the observations told back to the dialogue: the last four used to drop the earlier corrections out of sight in a
+ * long interview, and replay 8 showed one theme four times, three rated 部分对 with the same correction (2026-11-14).
+ */
+const OBSERVATIONS_SHOWN = 12;
 const SOURCE_LABEL: Record<string, string> = { saved: "本人设定", interview: "访谈提议", stated_hours: "按说过的小时数推算", default: "默认值" };
 
 /**
@@ -51,7 +56,7 @@ export function paceContext(store: CrosslineStore, workspaceId: string, sessionI
     recent: input.recent.slice(-5)
   });
   const ratings = Object.entries(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS)))
-    .filter(([key]) => key.startsWith(`${sessionId}#`)).sort((a, b) => a[1].at.localeCompare(b[1].at)).slice(-4)
+    .filter(([key]) => key.startsWith(`${sessionId}#`)).sort((a, b) => a[1].at.localeCompare(b[1].at)).slice(-OBSERVATIONS_SHOWN)
     .map(([, rating]) => `观察「${(rating.text ?? "").slice(0, 60)}」：本人说${rating.verdict === "fits" ? "准" : rating.verdict === "partial" ? `部分对，更正为「${(rating.correction ?? "").slice(0, 60)}」` : "不准"}`);
   const progress = progressLines(input.progress, input.flow, input.depth);
   // Lines with no long-term goal yet, and whether the picker beside the conversation already offers candidates for one: the dialogue asks
