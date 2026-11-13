@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { agentLanguageLine, runLocale, schemaForLocale, styleInstructions } from "./style";
 import { join } from "node:path";
+import { repairJsonBrackets } from "./json-repair";
 import { cleanAnswerStrings, designNoteText, instructionsText, tFor, type Locale } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
 import { routeForSkill, shiftEffort, tierForSkill, tierRoutes, type ModelRoute, type RouteTier, type SpendMode } from "./model-policy";
@@ -1104,8 +1105,17 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
 
   /** Models routinely wrap JSON in a ```json fence even when told to return JSON only: a transport habit, not invented content. */
   const parse = (answer: string): unknown => {
-    try { return cleanAnswerStrings(JSON.parse(answer.trim().replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```$/, ""))); }
-    catch { throw withDetail(new Error("SKILL_SCHEMA_INVALID"), "the answer was not valid JSON (cut off, or it repeated itself); return the complete JSON object once"); }
+    const body = answer.trim().replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```$/, "");
+    try { return cleanAnswerStrings(JSON.parse(body)); }
+    catch {
+      // One bracket wrong in a long answer is mended rather than regenerated (json-repair.ts); the content is still validated.
+      const mended = repairJsonBrackets(body, run.outputSchema);
+      if (mended !== undefined) {
+        console.log(JSON.stringify({ type: "skill.json_mended", skill: run.skillName, length: body.length }));
+        return cleanAnswerStrings(JSON.parse(mended));
+      }
+      throw withDetail(new Error("SKILL_SCHEMA_INVALID"), "the answer was not valid JSON (cut off, or it repeated itself); return the complete JSON object once");
+    }
   };
 
   /** A silent turn is interrupted and the same prompt sent again, a couple of times; every other failure ends the run as before. */
