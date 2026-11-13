@@ -14,7 +14,7 @@ beforeEach(() => {
   store = new CrosslineStore(":memory:");
   workspaceId = store.createPrincipalWithWorkspace("user-1", "个人 workspace").workspace.id;
 });
-afterEach(() => store.close());
+afterEach(() => { store.close(); delete process.env.CROSSLINE_PORTRAIT_BATCH; });
 
 const round = JSON.stringify({ reply: "收到。", questions: [{ id: "q1", text: "还有别的项目吗？", kind: "free", options: [], allowOther: true, identityId: "", projectId: "", repeats: 0 }],
   coverage: [], nextAction: "ask", stage: "orientation" });
@@ -298,6 +298,8 @@ test("words the person wrote elsewhere are read as notes: facts with their sente
 });
 
 test("in lanes the ledger, the portrait's sections and its inferences are written by three runs side by side, each with its own fields and watermark", async () => {
+  // One reply, read by every lane at once: the portrait's batching is tested on its own.
+  process.env.CROSSLINE_PORTRAIT_BATCH = "1";
   const now = "2026-11-12T00:00:00.000Z";
   const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
   store.saveOnboardingSession({ id: "s", ownerId, workspaceId, state: "active", coverage: { stage: "situation", flow: "v1" }, createdAt: now, updatedAt: now });
@@ -345,6 +347,8 @@ test("a portrait lane that never ran starts at the single run's watermark: an in
 });
 
 test("under the points rules the sections' lane writes points with their quotes, and a stage's view only once the stage is over", async () => {
+  // One reply, read by every lane at once: the portrait's batching is tested on its own.
+  process.env.CROSSLINE_PORTRAIT_BATCH = "1";
   const now = "2026-11-12T00:00:00.000Z";
   const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
   store.saveOnboardingSession({ id: "s", ownerId, workspaceId, state: "active", coverage: { stage: "situation", flow: "v1", rules: "points" }, createdAt: now, updatedAt: now });
@@ -401,4 +405,21 @@ test("a split run of an account moved to the points rules writes points only and
   expect(profile.problem).toBe("旧段落");
   expect(profile.points.map((point) => point.text)).toEqual(["论文 12 月中投稿，和产品抢同一段时间"]);
   expect(store.getSetting(workspaceId, POINTS_SPLIT_SETTING)).toBeUndefined();
+});
+
+test("while an interview is under way the portrait's lanes wait for three replies, or for the oldest to have waited ten minutes; the ledger never waits", () => {
+  const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
+  const now = new Date().toISOString();
+  store.saveOnboardingSession({ id: "s", ownerId, workspaceId, state: "active", coverage: { stage: "situation", flow: "v1" }, createdAt: now, updatedAt: now });
+  const extractor = createOnboardingExtractor(store, workspaceId, "C:\repo", () => undefined);
+  for (const text of ["一", "二"]) store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text }, createdAt: now });
+  expect(extractor.nextSession([], "ledger")).toBe("s");
+  expect(extractor.nextSession(["s"], "sections")).toBeUndefined();
+  expect(extractor.nextSession([], "insights")).toBeUndefined();
+  store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text: "三" }, createdAt: now });
+  expect(extractor.nextSession(["s"], "sections")).toBe("s");
+  // Two replies, the older eleven minutes old.
+  store.saveOnboardingSession({ id: "t", ownerId, workspaceId, state: "active", coverage: { stage: "situation", flow: "v1" }, createdAt: now, updatedAt: now });
+  store.appendOnboardingMessage({ sessionId: "t", workspaceId, role: "user", content: { text: "早" }, createdAt: new Date(Date.now() - 11 * 60_000).toISOString() });
+  expect(extractor.nextSession(["t"], "insights")).toBe("t");
 });

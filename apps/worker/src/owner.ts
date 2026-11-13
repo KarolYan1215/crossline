@@ -38,6 +38,17 @@ export function runtimesDir(env: NodeJS.ProcessEnv = process.env): string {
   catch { return path.join(env.CROSSLINE_DATA_DIR ?? path.resolve(process.cwd(), "../../data"), "runtimes"); }
 }
 
+/**
+ * The `tmp` of the Codex home an account's runtime runs in, where Codex links its own sandbox helper (`tmp/arg0-linux/…`): the owner's
+ * runtime is the machine's own Codex home, a guest's is under `runtimesDir`. A sandboxed assistant run reopens it (`AgentMode.sandbox`).
+ * Every run of the hosted owner's assistant failed from 2026-11-05 to 2026-11-13 because the guest path was given for the owner too, and
+ * its helper stayed behind the denied state folder (`bwrap: execvp …/codex-linux-sandbox: Permission denied`).
+ */
+export function runtimeTmpFor(workspaceId: string, owner: string | undefined, env: NodeJS.ProcessEnv = process.env): string {
+  const home = workspaceId === owner ? codexProcessEnvironment(env).CODEX_HOME : undefined;
+  return home ? path.join(home, "tmp") : path.join(runtimesDir(env), workspaceId.replace(/[^a-zA-Z0-9_-]/g, "_"), "codex-home", "tmp");
+}
+
 /** The person's monthly cap for a pay-per-use login (`model.budget.monthly`, default $10, decided 2026-10-10). */
 export const MONTHLY_BUDGET_SETTING = "model.budget.monthly";
 export function monthSpend(store: CrosslineStore, workspaceId: string, now = new Date()): { spent: number; cap: number } {

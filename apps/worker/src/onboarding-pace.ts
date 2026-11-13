@@ -1,7 +1,7 @@
 // i18n-exempt: the short ledger handed to the interview model each round (model-facing)
 import {
   AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, ONBOARDING_INSIGHTS, fixedScheduleLines, interviewAbstract, lineAttributes, progressLines, readInsightRatings, readTurnProgress,
-  resolveAvailability, type InterviewFlow, type OnboardingDepth, type StoredLineProfile, type TurnProgress, hypothesisLogLines, pointLines
+  resolveAvailability, type InterviewFlow, type OnboardingDepth, type StoredLineProfile, type TurnProgress, cardCandidates, hypothesisLogLines, pointLines
 } from "@crossline/core";
 import { datedItems, type CrosslineStore } from "@crossline/db";
 import { readProfileModel } from "./onboarding-persist";
@@ -21,7 +21,7 @@ export function paceContext(store: CrosslineStore, workspaceId: string, sessionI
   depth?: OnboardingDepth;
   /** The points rules: the hypothesis log and the points ledger go with every round. */
   rules?: boolean;
-}): { progress?: string[]; abstract: string[]; observations?: string[]; goalPicker?: string[]; fixedSchedule?: string[]; hypothesisLog?: string[]; points?: string[] } {
+}): { progress?: string[]; abstract: string[]; observations?: string[]; goalPicker?: string[]; fixedSchedule?: string[]; hypothesisLog?: string[]; cardFrom?: string[]; points?: string[] } {
   const profiles = (() => { try { return JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") as Record<string, StoredLineProfile>; } catch { return {}; } })();
   const facts = store.listProfileFacts(workspaceId);
   const deadlineOf = (projectId: string) => {
@@ -66,8 +66,9 @@ export function paceContext(store: CrosslineStore, workspaceId: string, sessionI
   // Under the points rules (2026-11-12): what cards may ask about, and what is settled.
   const log = input.rules ? hypothesisLogLines(profile.hypotheses ?? []) : [];
   const points = input.rules ? pointLines(profile.points ?? []).slice(-30) : [];
+  const cardFrom = input.rules ? cardCandidates(profile.hypotheses ?? []) : [];
   return { abstract, ...(progress.length ? { progress } : {}), ...(ratings.length ? { observations: ratings } : {}),
-    ...(log.length ? { hypothesisLog: log } : {}), ...(points.length ? { points } : {}),
+    ...(log.length ? { hypothesisLog: log } : {}), ...(cardFrom.length ? { cardFrom } : {}), ...(points.length ? { points } : {}),
     ...(goalPicker.length ? { goalPicker } : {}), ...(fixedSchedule.length ? { fixedSchedule } : {}) };
 }
 

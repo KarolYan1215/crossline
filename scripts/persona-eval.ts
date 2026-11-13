@@ -106,7 +106,9 @@ function cost(key: string) {
     reasoning: sum.reasoning + row.reasoningOutputTokens }), { input: 0, cached: 0, output: 0, reasoning: 0 });
   const bySkill: Record<string, { runs: number; repairs: number; seconds: number; output: number; reasoning: number }> = {};
   for (const row of usage) {
-    const entry = bySkill[row.skillName.replace(/^crossline:/, "")] ??= { runs: 0, repairs: 0, seconds: 0, output: 0, reasoning: 0 };
+    // The extraction's lanes apart (`interview:<lane>`), so the replay shows which one spends the output.
+    const name = row.skillName.replace(/^crossline:/, "") + (row.purpose?.startsWith("interview:") ? `:${row.purpose.slice("interview:".length)}` : "");
+    const entry = bySkill[name] ??= { runs: 0, repairs: 0, seconds: 0, output: 0, reasoning: 0 };
     entry.runs += 1; entry.repairs += row.repairs; entry.seconds += Math.round(row.durationMs / 1000);
     entry.output += row.outputTokens; entry.reasoning += row.reasoningOutputTokens;
   }

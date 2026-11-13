@@ -352,6 +352,8 @@ export type OnboardingTurnContext = {
    * person rated the others), and the points ledger (`pointLines`): what is settled, not to be asked again or contradicted.
    */
   hypothesisLog?: string[];
+  /** The hypotheses the next card asks about, with the replies they rest on (`cardCandidates`); empty when none is ready. */
+  cardFrom?: string[];
   points?: string[];
 };
 

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { applyPointChanges, hypothesisFromCard, hypothesisLogLines, pointSectionFor, rateHypothesis, unrateHypothesis, type PointChange, type ProfilePoint } from "./profile-points";
+import { applyPointChanges, cardCandidates, hypothesisFromCard, hypothesisLogLines, pointSectionFor, rateHypothesis, unrateHypothesis, type PointChange, type ProfilePoint } from "./profile-points";
 import type { Hypothesis } from "./profile-hypotheses";
 
 const at = "2026-11-12T00:00:00.000Z";
@@ -63,4 +63,18 @@ test("a card naming no hypothesis on record becomes one; the dialogue is told th
   expect(lines).toEqual(["h2 被看见时更投入（本人说不准，不再提）", "c4 [D2] 你在被看见时投入更多（待问）"]);
   expect(pointSectionFor("lines", "D4")).toBe("compass");
   expect(pointSectionFor("energy", "D4")).toBe("energy");
+});
+
+test("the next card is chosen from the log: open hypotheses never carded that rest on two replies, the least-asked dimension first", () => {
+  const two = [{ kind: "quote" as const, text: "有人看的时候我做得更快", ref: "reply-2" }, { kind: "behavior" as const, text: "交给导师前一晚写到三点", ref: "reply-4" }];
+  const lines = cardCandidates([
+    hypothesis({ id: "h1", dimension: "D2", cardKey: "s#2", rated: "partial", basis: two }),
+    hypothesis({ id: "h2", dimension: "D2", basis: two }),
+    hypothesis({ id: "h3", dimension: "D5", basis: two }),
+    hypothesis({ id: "h4", dimension: "D5", basis: [two[0]!, { ...two[0]!, kind: "behavior" }] }),
+    hypothesis({ id: "h5", dimension: "D1", basis: two, status: "refuted" }),
+    hypothesis({ id: "h6", dimension: "D7", basis: two, status: "supported" })]);
+  // h1 was asked, h4 rests on one reply, h5 is refuted and h6 settled; D5 has had no card, D2 one.
+  expect(lines).toEqual(["h3 [D5] 被看见时更投入（依据 reply-2「有人看的时候我做得更快」、reply-4「交给导师前一晚写到三点」）",
+    "h2 [D2] 被看见时更投入（依据 reply-2「有人看的时候我做得更快」、reply-4「交给导师前一晚写到三点」）"]);
 });

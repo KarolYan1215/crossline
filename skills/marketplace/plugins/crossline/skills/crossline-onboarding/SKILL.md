@@ -18,7 +18,7 @@ description: 从零访谈一位 Crossline 新用户，目的是一份有证据�
 
 ## 你收到什么
 
-第一轮：`{version, today, timeZone, identities[], lines[], projects[], facts[], sources[], sourcesWaiting?, focusLine, profile, stage, stageOrder?, checklist, questionLedger, abstract, progress?, observations?, hypothesisLog?, points?, goalPicker?, fixedSchedule?, workHistory?, calendar?, publicAssessment?, research?, history?, reply}`。同一线程的后续轮次只带变化的部分：`{reply, newSources?, sourcesWaiting?, checklist, questionLedger, abstract, progress?, observations?, hypothesisLog?, points?, goalPicker?, fixedSchedule?, lastRound?, unrecorded?, notRecorded?, calendar?, publicAssessment?, research?}`。旧会话里可能还带 `tone`、`depth`、`stageRounds`、`moveOn`：忽略它们，语气只有本 Skill 写的一种，访谈不分档、不限轮数。
+第一轮：`{version, today, timeZone, identities[], lines[], projects[], facts[], sources[], sourcesWaiting?, focusLine, profile, stage, stageOrder?, checklist, questionLedger, abstract, progress?, observations?, hypothesisLog?, cardFrom?, points?, goalPicker?, fixedSchedule?, workHistory?, calendar?, publicAssessment?, research?, history?, reply}`。同一线程的后续轮次只带变化的部分：`{reply, newSources?, sourcesWaiting?, checklist, questionLedger, abstract, progress?, observations?, hypothesisLog?, cardFrom?, points?, goalPicker?, fixedSchedule?, lastRound?, unrecorded?, notRecorded?, calendar?, publicAssessment?, research?}`。旧会话里可能还带 `tone`、`depth`、`stageRounds`、`moveOn`：忽略它们，语气只有本 Skill 写的一种，访谈不分档、不限轮数。
 
 - `reply` 是 `{id, text}`，本人写的原话。回答问题卡时每题一行：「【问题】选择：A；B。补充：文字」。
 - `sources[]` / `newSources[]` 是文件和全文。`sourcesWaiting` 是本轮没放下、下轮再来的文件数：还有文件在等时，不要断定文件里没有某样东西。
@@ -29,7 +29,8 @@ description: 从零访谈一位 Crossline 新用户，目的是一份有证据�
 - 第一轮的 `identities[]`、`projects[]`、`facts[]` 是账本里已有的全部，`profile` 是目前的画像草稿（只读不写，其中 `hypotheses` 是假设日志、`careers` 是职业候选、`dimensions` 是十个维度的现状），`stage` 是已到的阶段：重建的线程从这里接着走。
 - `goalPicker` 列出还没有长期目标的主线，以及选择器里是否已有候选定语（「创作者：还没有候选定语」）。见「长期目标」。
 - `progress` 是你上一轮自己写的进度记录。`observations` 是本人对你最近几条观察的评价：标「不准」的那条说错了，不要在它上面继续推；标「准」的是本人认可的，可以作为后续推断的基础；「部分对」后面是本人的更正，以更正为准。
-- `hypothesisLog`（新访谈才有）：假设日志里的推断，一行一条。标「待问」的可以拿来做观察卡（写它的 id）；标了「本人说准 / 不准 / 部分对」的已经问过，不要再出卡，也不要换说法再说。
+- `hypothesisLog`（新访谈才有）：假设日志里的推断，一行一条。标了「本人说准 / 不准 / 部分对」的已经问过，不要再出卡，也不要换说法再说。
+- `cardFrom`（新访谈才有）：下一张观察卡要问的候选假设，最多三条，每条带它依据的回答（`reply-N「原话」`）。有 `cardFrom` 时，观察卡只能从里面挑一条：写它的 id 和维度，`text` 用对话的说法写同一个推断，`refs` 用它列出的回答和原话。三条都和这一轮说的话接不上时，这一轮不出卡。没有 `cardFrom` 时才可以出一张新推出来的卡。
 - `points`（新访谈才有）：要点账本，已经确定的关于本人的事（本人原话、本人确认过的推断、本人的更正），一行一条。不要再问这些，也不要说和它们矛盾的话；本人自己改口时照常追问。
 - `checklist` 是系统记录的未完成项（本人看不到）：`label`、`detail`、`owner`，开始标准的项带 `start: true`。`recording: true` 表示本人已经在一条另一个运行还没写下的回复里答过：在线程里找到那条回复，不要换个说法再问，只问它漏掉的部分。
 - `startStandard` 是开始标准的状态：`met`（齐了没有）和 `missing`（还缺的项）。它是应用按账本算的，和你自己的判断不一样时以它为准。
@@ -171,7 +172,7 @@ description: 从零访谈一位 Crossline 新用户，目的是一份有证据�
 
 每一轮在有证据时给一条观察，显示在 `reply` 下方，带「准 / 不准」和证伪小字。它是这场访谈值得本人花时间的原因，所以要有信息量。
 
-- `hypothesisId` 和 `dimension`（新访谈有 `hypothesisLog` 时）：这张卡问的是假设日志里的哪一条。从 `hypothesisLog` 里标「待问」的挑一条时写它的 id 和维度（卡的 `text` 用对话的说法写同一个推断）；这一轮新推出来、日志里没有的，`hypothesisId` 写 `""`，`dimension` 写它属于的维度（D0–D9），应用会把它加进日志。每条假设只出一次卡。没有 `hypothesisLog` 时 `hypothesisId` 写 `""`。
+- `hypothesisId` 和 `dimension`（新访谈有 `hypothesisLog` 时）：这张卡问的是假设日志里的哪一条。从 `cardFrom` 里挑一条时写它的 id 和维度（卡的 `text` 用对话的说法写同一个推断）；没有 `cardFrom`、这一轮新推出来的，`hypothesisId` 写 `""`，`dimension` 写它属于的维度（D0–D9），应用会把它加进日志。每条假设只出一次卡。没有 `hypothesisLog` 时 `hypothesisId` 写 `""`。
 - `text`：推断本身，可以下判断，一到三句。写清结论和它依据的事实；不给建议（不说应该、可以试试、建议），不用比喻，不用点破、反转。
 - **观察是连接，不是挑刺。** 把本人在不同回答里说过的两件以上的事连起来，说出它们之间本人没说出口的关系：同一条规则在两个场景里出现，说的动机和做过的事指向不同，两段经历共用一个条件。不拿本人没有的东西下结论：「你还举不出一件」「一件也没有」「停在收集信息这一步」「简历一份未投」这类缺口不是观察，是问题，放进 `questions` 去问（职业方向的短板写进要求矩阵）。2026-11-12 回放里判「不准」的卡，多数是读一条回答缺什么。
 - `refs`：本人原话，**至少来自两条不同的回答**：`replyId`（`reply-N`，按每条回复给你的编号）和一段逐字片段（不超过 20 个字，原样照抄）。应用会逐字核对每一段，有一段对不上、或只引了一条回答，整张卡就丢掉。

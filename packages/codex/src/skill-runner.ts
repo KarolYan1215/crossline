@@ -149,6 +149,12 @@ export type SkillRunOptions<T> = {
   onQueued?: (ahead: number) => void;
   /** Overrides the gate's priority, which otherwise follows the Skill (`priorityForSkill`). */
   priority?: ModelPriority;
+  /**
+   * The most this run may think, in tokens, where the route can be told (the developer's model: `<model>@think:<tokens>`, which the
+   * gateway turns into the provider's thinking budget). Other routes run as they are. Most of an extraction's output was its reasoning
+   * (76% in the sixth replay, 2026-11-13); capped at 2048 one measured run wrote 3.5k tokens in 39 s instead of 5.8k in 62 s.
+   */
+  thinkingBudget?: number;
   /** The account the gate counts this run against; otherwise the workspace the run is attributed to (`enterUsageWorkspace`). */
   tenant?: string;
   signal?: AbortSignal;
@@ -420,7 +426,7 @@ const MAX_STALL_RETRIES = 2;
  * it back off, and reporting what the run used.
  */
 async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; mainModel?: boolean; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools;
-  onQueued?: (ahead: number) => void; priority?: ModelPriority; signal?: AbortSignal; agent?: AgentMode; tenant?: string; threadId?: string },
+  onQueued?: (ahead: number) => void; priority?: ModelPriority; signal?: AbortSignal; agent?: AgentMode; tenant?: string; threadId?: string; thinkingBudget?: number },
   body: (context: RunContext) => Promise<SkillRunResult<T>>): Promise<SkillRunResult<T>> {
   const queuedAt = Date.now();
   const timing: RunTiming = { laneMs: 0, gateMs: 0, tenant: options.tenant ?? tenantOf(currentUsageWorkspace()) ?? "-" };
@@ -506,7 +512,14 @@ async function releaseSkill(client: CodexRpcBoundary, path: string): Promise<voi
   if (entry.restore) await setNativeSkill(client, path, false);
 }
 
-async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; mainModel?: boolean; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools },
+/** The developer's model's thread provider (`threadProvider` names it `crossline-<id>`), the one route that understands `@think:`. */
+const SPONSOR_THREAD_PROVIDER = "crossline-sponsor";
+/** The provider with its model named to think at most `budget` tokens, when it is the developer's model and no setting is named yet. */
+export function thinkingCapped(provider: ThreadProvider, budget: number | undefined): ThreadProvider {
+  return budget && provider.id === SPONSOR_THREAD_PROVIDER && !provider.model.includes("@think:") ? { ...provider, model: `${provider.model}@think:${budget}` } : provider;
+}
+
+async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; mainModel?: boolean; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools; thinkingBudget?: number },
   body: (context: RunContext) => Promise<SkillRunResult<T>>, timing: RunTiming): Promise<SkillRunResult<T>> {
   const startedAt = Date.now();
   const spendMode = await currentSpendMode();
@@ -515,7 +528,7 @@ async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: stri
   const decision = options.provider ? { via: "provider" as const, provider: options.provider }
     : decideRoute(options.skillName, routing, options.mainModel ? { mainModel: true } : {});
   if (decision.via === "blocked") return { ok: false, blocker: { code: decision.code, message: decision.message }, audit: {} };
-  const provider = decision.via === "provider" ? decision.provider : undefined;
+  const provider = decision.via === "provider" ? thinkingCapped(decision.provider, options.thinkingBudget) : undefined;
   // A stronger look is a cost the person did not ask for: in economy mode the Skill keeps its own route.
   const wanted = provider ? { model: provider.model }
     : options.tier && spendMode === "normal" && process.env.CROSSLINE_MODEL_ROUTING?.trim().toLowerCase() !== "off"

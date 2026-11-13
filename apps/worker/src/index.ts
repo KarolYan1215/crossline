@@ -101,7 +101,7 @@ import { createDictationService } from "./dictation";
 import { probeSandboxShell } from "./sandbox-probe";
 import { automationPass, reconcileAutomationRuns, createAutomationService, designPending, onNewMail, suggestFromRepeats, type AutomationDeps } from "./automations";
 import { createWorkflowThreadService } from "./workflow-thread";
-import { monthSpend, ownerOf, runtimeOwner, runtimesDir } from "./owner";
+import { monthSpend, ownerOf, runtimeOwner, runtimeTmpFor, runtimesDir } from "./owner";
 import { createNodeHub, type NodeHub } from "./node/hub";
 import { skillLibraryDir } from "./skill-library";
 import { identityLines } from "./lines";
@@ -1419,7 +1419,7 @@ const agentService = createAgentService({
   sandbox: (workspaceId) => ({
     readable: [path.dirname(process.env.CROSSLINE_CODEX_PATH ?? "/opt/codex/codex")],
     deny: [dataDir, process.env.CROSSLINE_STATE_DIR ?? path.join(dataDir, "..", "state")],
-    runtimeTmp: path.join(runtimesDir(), workspaceId.replace(/[^a-zA-Z0-9_-]/g, "_"), "codex-home", "tmp") }),
+    runtimeTmp: runtimeTmpFor(workspaceId, runtimeOwner(analysisStore)) }),
   confine: { dataDir, stateDir: process.env.CROSSLINE_STATE_DIR ?? path.join(dataDir, "..", "state") },
   clientFor: accountClient,
   mailFor: (workspaceId) => mailService.lookup(workspaceId),

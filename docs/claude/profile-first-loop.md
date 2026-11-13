@@ -98,3 +98,10 @@ Costs and open points:
   - `--split` sets the rules and `profile.points.split`, so the sections lane splits the old paragraphs into cited points once and keeps the paragraphs. The split run is asked for no section (`profileTask` undefined), and `--split` closes every section that holds a paragraph. The first run on the owner's finished interview had finalized every open section and rewritten the paragraphs; they were put back from the backup.
   - `--export` writes the interview out.
   - `--reset` is 「清空数据重新开始」 (`RESET_KEEPS` now lives in `@crossline/db`).
+
+**After the sixth replay (2026-11-13).** Changes:
+- **Cards come from the log.** `cardCandidates` sends the dialogue up to three open, never-carded hypotheses as `cardFrom`. Each rests on two replies or more and comes with its quotes. The least-asked dimension comes first. A new inference may be carded only when `cardFrom` is empty.
+- **Thinking cap.** On the developer's model the extraction thinks at most 2048 tokens (`thinkingBudget`, `@think:2048`).
+- **Portrait lanes batch.** While an interview is active, the portrait's lanes wait for three replies (`PORTRAIT_BATCH`) or for ten minutes (`PORTRAIT_WAIT_MS`). `docs/token-economy.md` §4 has the measurements.
+- **Lane accounting.** Extraction usage is accounted per lane (`interview:<lane>`).
+- **Owner's sandbox fix.** Every hosted-owner assistant task failed from 2026-11-05 with `codex-linux-sandbox: Permission denied`: the sandbox reopened a guest's runtime `tmp`, not the owner's Codex home. `runtimeTmpFor` gives the owner its own.

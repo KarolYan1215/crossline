@@ -7,7 +7,7 @@ import {
   type EvidenceSentence, type KnownSources, type OnboardingExtractContext, type OnboardingExtraction, type OnboardingStage, type StoredLineProfile,
   ONBOARDING_INSIGHTS, readInsightRatings, EXTRACT_LANE_KEYS, EXTRACT_KEYS, type ExtractLaneName, pointLines, pointsRules
 } from "@crossline/core";
-import { runCodexSkill, type CodexRpcBoundary, type SkillTools } from "@crossline/codex";
+import { runCodexSkill, withUsagePurpose, type CodexRpcBoundary, type SkillTools } from "@crossline/codex";
 import {
   EXTRACT_BACKOFF_MINUTES, EXTRACT_REREAD_SETTING, FINISH_RUNS_MAX, NOTES_SESSION, markFinishing, readFinishing, firstSentenceOf, pendingExtractDocs, readExtractDocs, readExtractOffsets, readExtractState, writeExtractDocs, writeExtractOffsets, writeExtractState,
   type CrosslineStore, type ExtractState, type StoredOnboardingMessage, type StoredSentence, type StoredSourceDocument
@@ -46,6 +46,14 @@ const DOCUMENTS_PER_RUN = 12;
 /** Replies one run reads at most; more wait for the next run, which follows at once. The portrait's lanes read more at a time. */
 const REPLIES_PER_RUN = 6;
 const REPLIES_PER_PORTRAIT_RUN = 12;
+/** What an extraction run may think on the developer's model (`thinkingBudget`, docs/token-economy.md §4, 2026-11-13). */
+export const EXTRACT_THINKING_BUDGET = 2048;
+/**
+ * Replies the portrait's lanes wait for while an interview is under way (`CROSSLINE_PORTRAIT_BATCH` overrides it), and how long the oldest
+ * may wait before they read it anyway.
+ */
+export const PORTRAIT_BATCH = 3;
+export const PORTRAIT_WAIT_MS = 10 * 60_000;
 
 /**
  * Which part of the extraction a run writes (2026-11-12): `all` in one run (the shape the tests and the scripts' single runs use), or
@@ -111,8 +119,16 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     const sessions = store.listOnboardingSessions(workspaceId).filter((session) => !portraitLane(lane) || (!session.id.startsWith("line-") && session.id !== NOTES_SESSION));
     const ours = new Set(sessions.map((session) => session.id));
     const state = (id: string) => readLaneState(store, workspaceId, id, lane);
-    const waiting = (id: string) => store.listOnboardingMessages(workspaceId, id)
-      .some((message) => message.role === "user" && message.seq > state(id).upTo);
+    // While an interview is under way the portrait's lanes read replies in batches (docs/token-economy.md §4, 2026-11-13): each run
+    // rereads the whole portrait and reasons afresh, so a run per reply spent most of the extraction's output on one sentence at a time.
+    // The ledger lane still reads every reply at once (the start standard and the next round wait on it); a finished interview, and a
+    // reply left waiting `PORTRAIT_WAIT_MS`, are read whatever their number.
+    const waiting = (id: string) => {
+      const pending = store.listOnboardingMessages(workspaceId, id).filter((message) => message.role === "user" && message.seq > state(id).upTo);
+      if (!pending.length) return false;
+      if (!portraitLane(lane) || sessions.find((session) => session.id === id)?.state !== "active") return true;
+      return pending.length >= (Number(process.env.CROSSLINE_PORTRAIT_BATCH) || PORTRAIT_BATCH) || Date.now() - Date.parse(pending[0]!.createdAt) >= PORTRAIT_WAIT_MS;
+    };
     const due = (id: string) => { const retryAt = state(id).retryAt; return !retryAt || Date.parse(retryAt) <= Date.now(); };
     // An interview the dialogue ended whose synthesis is not written yet still owes a run, even with nothing new to read. The sections'
     // lane writes it; the ledger and the inferences owe nothing past the last reply.
@@ -153,7 +169,8 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     // The notes and a line's own interview have no portrait lanes beside them: the ledger lane reads them whole, as a single run would
     // (one watermark), so a note is still told apart by its missing `lane` and `profile`.
     const whole = lane === "ledger" && (sessionId === NOTES_SESSION || sessionId.startsWith("line-"));
-    try { return await runInner(sessionId, whole ? "all" : lane); }
+    // Accounted per lane (`interview:<lane>`), so a replay can tell which lane spends the output.
+    try { return await withUsagePurpose(`interview:${whole ? "all" : lane}`, () => runInner(sessionId, whole ? "all" : lane)); }
     catch (error) { return failed(sessionId, "EXTRACT_FAILED", error instanceof Error ? error.message : String(error), lane); }
   }
 
@@ -305,6 +322,8 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       // as a turn, outside the account's two background slots, which the portrait's two lanes may both hold for minutes. They queue as
       // planning, ahead of discretionary work.
       ...(portraitLane(lane) ? { priority: "planning" as const } : lane === "ledger" && session?.state === "active" ? { priority: "interactive" as const } : {}),
+      // On the developer's model each lane thinks at most this much (docs/token-economy.md §4): most of its output was reasoning.
+      thinkingBudget: EXTRACT_THINKING_BUDGET,
       // The prompt cache (docs/token-economy.md §2.5): the lines, projects and portrait first, the facts on record (which grow) after
       // them, and this run's replies, files, task and date last.
       stableKeys: ["version", "lane", "timeZone", "lines", "domainGuides", "lineProfiles", "projects", "focusLine", "profile", "facts"],

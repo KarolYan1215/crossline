@@ -1,6 +1,7 @@
+import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { MONTHLY_BUDGET_SETTING, monthSpend, runtimeOwner } from "./owner";
+import { MONTHLY_BUDGET_SETTING, monthSpend, runtimeOwner, runtimeTmpFor } from "./owner";
 
 let store: CrosslineStore;
 beforeEach(() => { store = new CrosslineStore(":memory:"); });
@@ -29,4 +30,10 @@ test("a pay-per-use month is this month's tokens at the rate, against $10 unless
   expect(monthSpend(store, ws, now)).toEqual({ spent: 3, cap: 10 });
   store.setSetting(ws, MONTHLY_BUDGET_SETTING, "25");
   expect(monthSpend(store, ws, now).cap).toBe(25);
+});
+
+test("a sandboxed assistant reopens the tmp of the Codex home its runtime runs in: the machine's own for the owner, its own for a guest", () => {
+  const env = { CROSSLINE_STATE_DIR: "/state" };
+  expect(runtimeTmpFor("ws-owner", "ws-owner", env)).toBe(path.join("/state/codex-home", "tmp"));
+  expect(runtimeTmpFor("ws-guest", "ws-owner", env)).toBe(path.join("/state", "runtimes", "ws-guest", "codex-home", "tmp"));
 });

@@ -177,6 +177,23 @@ export function hypothesisLogLines(hypotheses: Hypothesis[], limit = 16): string
   return [...rated, ...open];
 }
 
+/**
+ * What the next observation card asks about (2026-11-13, the owner: cards come from the log, not made up afresh each round): at most
+ * `limit` hypotheses still open, never put on a card, resting on two replies or more (a card cites two), with the replies they rest on.
+ * The dimension the cards have asked least comes first, then the hypothesis with more replies behind it, then the older one. In the
+ * sixth replay every one of twelve cards was a new inference, and none of the 25 the extraction kept was ever asked.
+ */
+export function cardCandidates(hypotheses: Hypothesis[], limit = 3): string[] {
+  const asked = new Map<string, number>();
+  for (const item of hypotheses) if (item.cardKey) asked.set(item.dimension, (asked.get(item.dimension) ?? 0) + 1);
+  const replies = (item: Hypothesis) => [...new Map(item.basis.filter((basis) => /^reply-\d+$/.test(basis.ref)).map((basis) => [basis.ref, basis.text])).entries()];
+  return hypotheses.map((item, index) => ({ item, index, cited: replies(item) }))
+    .filter(({ item, cited }) => !item.cardKey && (item.status === "open" || item.status === "undecided") && cited.length >= 2)
+    .sort((a, b) => (asked.get(a.item.dimension) ?? 0) - (asked.get(b.item.dimension) ?? 0) || b.cited.length - a.cited.length || a.index - b.index)
+    .slice(0, limit)
+    .map(({ item, cited }) => `${item.id} [${item.dimension}] ${item.statement.slice(0, 120)}（依据 ${cited.slice(0, 3).map(([ref, text]) => `${ref}「${text.slice(0, 40)}」`).join("、")}）`);
+}
+
 /** The ledger as the extraction and the dialogue are shown it: one line per point still standing. */
 export function pointLines(points: ProfilePoint[]): string[] {
   const label: Record<PointSource, string> = { stated: "原话", confirmed: "本人确认", corrected: "本人更正" };
