@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { researchCopied, safetyReplyOnly, saidNothingMore, withoutCardEcho, withoutRecordingTalk, withoutToldStory } from "./onboarding-reply";
+import { inventedDates, researchCopied, safetyReplyOnly, saidNothingMore, withoutCardEcho, withoutRecordingTalk, withoutToldStory } from "./onboarding-reply";
 
 const HELP = "如果这个念头再出现，全国心理援助热线 12356；北京心理危机研究与干预中心 010-82951332；身处危险时打 120 或 110，或去最近的医院急诊。";
 
@@ -43,4 +43,14 @@ test("nothing more to say counts only as the answer to the closing question", ()
   expect(saidNothingMore(closing, "【还有什么想聊的吗？】选择：没有了\n【画像报告会为本人生成一个卡通形象……】选择：不描述，用中性形象")).toBe(true);
   expect(saidNothingMore(closing, "【还有什么想聊的吗？】选择：没有了\n其实还想问问实习的事")).toBe(false);
   expect(saidNothingMore([{ id: "q1", text: "一天里哪段状态最好？" }], "没有了")).toBe(false);
+});
+
+test("a date the reply sets something for must come from the person, the research, the files or a weekday just said", () => {
+  const known = ["【约人问岗位，定在哪天？】选择：11 月 16 日周一，先发消息约时间"];
+  // 2026-11-17 is a Tuesday; nobody gave it.
+  expect(inventedDates("试做定在 11 月 17 日周二：约两位聊一次。", known, "【未来两周先做哪一件？】选择：约两位聊一次", "2026-11-14")).toEqual(["11 月 17 日"]);
+  expect(inventedDates("发消息定在 11 月 16 日。", known, "", "2026-11-14")).toEqual([]);
+  expect(inventedDates("第一份投递定在 11 月 18 日周三。", known, "周三就投，拖着更没底。", "2026-11-14")).toEqual([]);
+  expect(inventedDates("投递就在今天 11 月 14 日。", [], "", "2026-11-14")).toEqual([]);
+  expect(inventedDates("上次 11 月 17 日那场考试考得不错。", [], "", "2026-11-14")).toEqual([]);
 });

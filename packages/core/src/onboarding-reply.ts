@@ -113,3 +113,37 @@ export function saidNothingMore(lastQuestions: Array<Pick<TurnQuestion, "id" | "
   if (!answers.some((answer) => answer)) return parts.length > 0 && parts.every((line) => NOTHING_MORE.test(line) && line.length <= 20);
   return answers.every(Boolean) && answers.some((answer) => CLOSING_ASK.test(answer![1]!) && NOTHING_MORE.test(answer![2]!));
 }
+
+/** A date the reply says something is set for: 「定在 11 月 17 日」. */
+const SET_FOR = /(?:定在|定于|安排在|放在|约在|就在|改到|挪到)\s*(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]/gu;
+/** Dates as anyone writes them: 「11 月 24 日」, 「11/24」, 「2026-11-24」. */
+const DATE_WRITTEN = /(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]|(?<![\d/])(\d{1,2})\/(\d{1,2})(?![\d/])|\d{4}-(\d{2})-(\d{2})/gu;
+const WEEKDAY_CHAR = "日一二三四五六"; // i18n-ignore: matched against the reply, never shown
+
+/**
+ * Dates the reply says something is set for that nobody gave: not in the person's replies, the research, the files or the facts on
+ * record, not today, and not the day a weekday in the latest reply falls on (「周三就投」 the reply may write as its date). Replay 11
+ * (2026-11-14) wrote 「试做定在 11 月 17 日周二」 when she had chosen the trial and said no day; a date is the person's to choose.
+ */
+export function inventedDates(reply: string, known: string[], latestReply: string, today: string): string[] {
+  const day = (month: number, date: number) => `${month}-${date}`;
+  const given = new Set<string>();
+  for (const text of known) for (const match of text.matchAll(DATE_WRITTEN)) {
+    const [month, date] = match[1] ? [match[1], match[2]] : match[3] ? [match[3], match[4]] : [match[5], match[6]];
+    given.add(day(Number(month), Number(date)));
+  }
+  const [year, todayMonth, todayDate] = today.split("-").map(Number) as [number, number, number];
+  given.add(day(todayMonth, todayDate));
+  const said = new Set([...latestReply.matchAll(/(?:周|星期|礼拜)([一二三四五六日天])/gu)].map((match) => match[1] === "天" ? "日" : match[1]!));
+  const invented: string[] = [];
+  for (const match of reply.matchAll(SET_FOR)) {
+    const month = Number(match[1]);
+    const date = Number(match[2]);
+    if (given.has(day(month, date))) continue;
+    // The year the date falls in: this one, or the next when the month is well behind today's.
+    const when = new Date(Date.UTC(month + 6 < todayMonth ? year + 1 : year, month - 1, date));
+    if (said.has(WEEKDAY_CHAR[when.getUTCDay()]!)) continue;
+    invented.push(`${month} 月 ${date} 日`); // i18n-ignore: quoted back to the model in the repair note
+  }
+  return [...new Set(invented)];
+}

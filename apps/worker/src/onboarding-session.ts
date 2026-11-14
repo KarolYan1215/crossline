@@ -6,7 +6,7 @@ import {
   gapCoveredBy, screenQuestions, screenAssumption, type QuestionScreenInput,
   type DimensionId, type ProfileGap, type ProfileModel, type OnboardingStage, DEEP_STAGES, ONBOARDING_TONE_SETTING, ASSESS_RESULT_SETTING, TYPE_TABLE, readTone,
   checkInsight, disclosureReplies, handlesDisclosure, readTurnProgress, safetyReplyOnly, withoutToldStory, researchCopied, RESEARCH_FIGURES_MAX,
-  withoutCardEcho, withoutRecordingTalk, saidNothingMore, CLOSING_ASK, openStageQuestion, withPlainTerms,
+  withoutCardEcho, withoutRecordingTalk, saidNothingMore, CLOSING_ASK, inventedDates, openStageQuestion, withPlainTerms,
   type KnownSources, type OnboardingDialogue, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, ONBOARDING_LAST_FAILURE, readPartialTurn, type OnboardingProgress, calendarWeek,
   tFor, type Locale, flowOf, INTERVIEW_FLOW_STAGES, PROFILE_MODULE_STAGES, cardsFor, readCardAnswers, mergeInstrumentAnswers, readInstrumentAnswers,
   settledItems, PROFILE_INSTRUMENTS_SETTING, type CardSet, type InterviewFlow, type ProfileCard, type ProfileStage,
@@ -379,11 +379,18 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // What the finished research threads found: a reply that lists their figures is sent back once (`researchCopied`); after the repairs
     // run out it is kept as it is (`softAccept`), a round is not lost for it.
     const findings = () => researchNow().flatMap((item) => [item.conclusion ?? "", item.found ?? ""]).filter(Boolean);
+    // Where a date in the reply may come from: what the person said, the research, the files, the facts on record (`inventedDates`).
+    const givenTexts = () => [...messages.filter((message) => message.role === "user").map((message) => String((message.content as { text?: string }).text ?? "")),
+      ...findings(), ...[...docs.values()].map((doc) => doc.extractedText), ...store.listProfileFacts(workspaceId).map((fact) => fact.value ?? "")];
+    const setDates = (reply: string) => inventedDates(reply, givenTexts(), replyText, today);
     const validateOutput = (output: unknown) => {
       const valid = validateOnboardingDialogue(output, known);
       const copied = researchCopied(valid.reply, findings());
       if (copied.length > RESEARCH_FIGURES_MAX) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
         detail: `reply 逐条列了调研线程的细节（${copied.join("、")}）。它们在右栏的调研线程里；reply 只留改变下一步的那一条结论和它对本人意味着什么，一两句，不列日期、时间和门槛。` }); // i18n-ignore: model-facing repair note
+      const invented = setDates(valid.reply);
+      if (invented.length) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
+        detail: `reply 说事情定在 ${invented.join("、")}，可本人没说过这个日期。日期由本人定：reply 里不写它，要定就在 questions 里给几个日期让本人选。` }); // i18n-ignore: model-facing repair note
       return valid;
     };
     const softAccept = (_rejection: Error, output: unknown) => keepOnboardingDialogue(output, known);
@@ -391,7 +398,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const keepEarly = (_rejection: Error, output: unknown) => {
       const kept = keepOnboardingDialogue(output, known);
       return kept && droppedOnboardingItems(output, kept) <= ONBOARDING_KEEP_EARLY_MAX
-        && researchCopied(kept.reply, findings()).length <= RESEARCH_FIGURES_MAX ? kept : undefined;
+        && researchCopied(kept.reply, findings()).length <= RESEARCH_FIGURES_MAX && !setDates(kept.reply).length ? kept : undefined;
     };
 
     // The public quick test's result, only when the person pressed 「使用该结果」 (apps/web/lib/assess-link.ts): corroboration for the

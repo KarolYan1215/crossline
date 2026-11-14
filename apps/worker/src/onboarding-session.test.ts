@@ -718,6 +718,23 @@ test("once the person said there is nothing more, the next round does not ask th
   expect(store.getOnboardingSession(workspaceId, "s")?.state).toBe("active");
 });
 
+test("a reply that sets a date nobody gave is sent back once; the rewrite leaves the day to the person", async () => {
+  const { rpc, prompts } = fakeRuntime([turn({ reply: "试做定在 11 月 17 日周二：约两位从业者聊一次。" }), turn({ reply: "试做是约两位从业者聊一次，哪天由你定。" })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { checklist: false, extract: "off" });
+  await run({ sessionId: "s", text: "【未来两周先做哪一件？】选择：约两位从业者聊一次" });
+  expect(dialogue(prompts).some((prompt) => prompt.includes("可本人没说过这个日期"))).toBe(true);
+  expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string }).reply).toBe("试做是约两位从业者聊一次，哪天由你定。");
+});
+
+test("a line with fewer than three goal candidates is told it has not enough, and the round does not ask for a goal yet", async () => {
+  store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ media: { description: "小红书科普", attributes: [{ text: "有趣", kind: "ability", sourceRef: "reply-0" }] } }));
+  const { rpc, prompts } = fakeRuntime([turn()]);
+  await createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" })({ sessionId: "s", text: "开始吧" });
+  expect(dialogue(prompts)[0]).toMatch(/：长期目标的候选词还不够（1 个）/);
+  const asked = (store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { questions: Array<{ id: string }> }).questions;
+  expect(asked.some((question) => question.id.startsWith("gap-goal-"))).toBe(false);
+});
+
 test("a reply listing a finished research thread's figures is sent back once; the rewrite keeps one conclusion", async () => {
   store.setSetting(workspaceId, "onboarding.research:s", JSON.stringify([{ id: "r1", question: "寒假实习何时截止？", why: "", dimension: "D0", status: "done",
     conclusion: "事务所寒假实习网申多在 7 月底到 10 月，安永 10 月 16 日截止；银行分行多在 12 月底到 1 月初截止。", messages: [] }]));
@@ -732,19 +749,19 @@ test("a reply listing a finished research thread's figures is sent back once; th
 
 test("the dialogue is told which lines still have no goal candidates, so it asks what the person wants to become only there", async () => {
   store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ media: { description: "小红书科普",
-    attributes: [{ text: "有趣", kind: "ability", sourceRef: "reply-0" }, { text: "值得信赖", kind: "state", sourceRef: "reply-0" }] } }));
+    attributes: [{ text: "有趣", kind: "ability", sourceRef: "reply-0" }, { text: "值得信赖", kind: "state", sourceRef: "reply-0" }, { text: "高产", kind: "state", sourceRef: "reply-0" }] } }));
   const { rpc, prompts } = fakeRuntime([turn()]);
   await createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" })({ sessionId: "s", text: "开始吧" });
   const first = dialogue(prompts)[0]!;
   expect(first).toContain("goalPicker");
-  expect(first).toMatch(/：已给出 2 个长期目标的候选词/);
+  expect(first).toMatch(/：已给出 3 个长期目标的候选词/);
   expect(first).toMatch(/：还没有长期目标的候选词/);
 });
 
 test("a line's goal is chosen inside the conversation: its candidates come as a question, and the taps adopt the goal", async () => {
   store.setSetting(workspaceId, "lines.v1", JSON.stringify([{ id: "media", label: "创作者", color: "media", goal: "", createdAt: "2026-10-30T00:00:00.000Z" }]));
   store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ media: { description: "小红书科普",
-    attributes: [{ text: "有趣", kind: "ability", sourceRef: "reply-0" }, { text: "值得信赖", kind: "state", sourceRef: "reply-0" }] } }));
+    attributes: [{ text: "有趣", kind: "ability", sourceRef: "reply-0" }, { text: "值得信赖", kind: "state", sourceRef: "reply-0" }, { text: "高产", kind: "state", sourceRef: "reply-0" }] } }));
   const round = turn({ stage: "lines", questions: [{ id: "q1", text: "每周大概花几小时做内容？", kind: "single", allowOther: true, identityId: "media",
     projectId: "", options: [{ id: "a", label: "5 小时以内", detail: "" }, { id: "b", label: "5 小时以上", detail: "" }] }] });
   const { rpc } = fakeRuntime([round, round]);
@@ -752,7 +769,7 @@ test("a line's goal is chosen inside the conversation: its candidates come as a 
   await run({ sessionId: "s", text: "开始吧" });
   const asked = (store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { questions: Array<{ id: string; text: string; options: Array<{ label: string }> }> })
     .questions.find((question) => question.id === "gap-goal-media");
-  expect(asked?.options.map((option) => option.label)).toEqual(["有趣", "值得信赖"]);
+  expect(asked?.options.map((option) => option.label)).toEqual(["有趣", "值得信赖", "高产"]);
   await run({ sessionId: "s", text: `【${asked!.text}】选择：有趣；值得信赖` });
   const lines = JSON.parse(store.getSetting(workspaceId, "lines.v1")!) as Array<{ id: string; goalParts?: string[] }>;
   expect(lines.find((line) => line.id === "media")?.goalParts).toEqual(["有趣", "值得信赖"]);

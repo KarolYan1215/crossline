@@ -68,6 +68,9 @@ const COURSE_KINDS = new Set(["quiz", "homework_out", "homework_due"]);
  * not enough — a real interview recorded a syllabus's dates and never its percentages, so the check that asks for a target grade
  * never fired on the account it was written for.
  */
+/** Candidate words a line needs before the round asks the person to pick a goal from them; the extraction writes three to twelve. */
+export const GOAL_CANDIDATES_MIN = 3;
+
 export function isCourse(projectId: string, facts: Array<{ projectId: string; slot: string }>,
   dates: Array<{ project: string; kind: string }> = [], undated: Array<{ project: string; kind: string }> = []): boolean {
   return facts.some((fact) => fact.projectId === projectId && fact.slot === "grading")
@@ -116,7 +119,9 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
   for (const picker of input.goalPickers ?? []) {
     const label = lineLabel.get(picker.lineId);
     const candidates = [...new Set(picker.candidates.map((text) => text.trim()).filter(Boolean))].slice(0, 8);
-    if (!label || !candidates.length) continue;
+    // Fewer than three is not a choice (replay 11: the one candidate 「经济学方向」, a field, not a word for the person): the dialogue asks
+    // what the person wants to become first, and the left column's picker shows what there is meanwhile.
+    if (!label || candidates.length < GOAL_CANDIDATES_MIN) continue;
     gaps.push({
       code: "LINE_GOAL", identityId: picker.lineId, projectId: "", blocking: true,
       // i18n-ignore: for the model

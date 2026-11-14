@@ -77,6 +77,8 @@ test("the next card is chosen from the log: open hypotheses never carded that re
   // h1 was asked, h4 rests on one reply, h5 is refuted and h6 settled; D5 has had no card, D2 one.
   expect(lines).toEqual(["h3 [D5] 被看见时更投入（依据 reply-2「有人看的时候我做得更快」、reply-4「交给导师前一晚写到三点」）",
     "h2 [D2] 被看见时更投入（依据 reply-2「有人看的时候我做得更快」、reply-4「交给导师前一晚写到三点」）"]);
+  // The competing explanation goes with it, so the card can leave the why open.
+  expect(cardCandidates([hypothesis({ id: "h7", dimension: "D2", basis: two, alternative: "截止临近才快" })])[0]).toMatch(/；另一种解释：截止临近才快$/);
 });
 
 test("the extraction's new hypotheses are numbered after the log's h ids, never as a card's, and the careers follow", () => {

@@ -208,7 +208,10 @@ export function cardCandidates(hypotheses: Hypothesis[], limit = 3): string[] {
     .filter(({ item, cited }) => !item.cardKey && (item.status === "open" || item.status === "undecided") && cited.length >= 2)
     .sort((a, b) => (asked.get(a.item.dimension) ?? 0) - (asked.get(b.item.dimension) ?? 0) || b.cited.length - a.cited.length || a.index - b.index)
     .slice(0, limit)
-    .map(({ item, cited }) => `${item.id} [${item.dimension}] ${item.statement.slice(0, 120)}（依据 ${cited.slice(0, 3).map(([ref, text]) => `${ref}「${text.slice(0, 40)}」`).join("、")}）`);
+    // The competing explanation goes with it: a card states the pattern and leaves the why open unless the replies settle it (replays 10
+    // and 11, 2026-11-14: all seven cards rated 「部分对」 had the pattern right and the cause wrong).
+    .map(({ item, cited }) => `${item.id} [${item.dimension}] ${item.statement.slice(0, 120)}（依据 ${cited.slice(0, 3).map(([ref, text]) => `${ref}「${text.slice(0, 40)}」`).join("、")}）`
+      + (item.alternative.trim() ? `；另一种解释：${item.alternative.trim().slice(0, 80)}` : ""));
 }
 
 /** The ledger as the extraction and the dialogue are shown it: one line per point still standing. */

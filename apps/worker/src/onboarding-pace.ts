@@ -1,7 +1,7 @@
 // i18n-exempt: the short ledger handed to the interview model each round (model-facing)
 import {
   AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, ONBOARDING_INSIGHTS, fixedScheduleLines, interviewAbstract, lineAttributes, progressLines, readInsightRatings, readTurnProgress,
-  resolveAvailability, type InterviewFlow, type OnboardingDepth, type StoredLineProfile, type TurnProgress, cardCandidates, hypothesisLogLines, pointLines
+  resolveAvailability, type InterviewFlow, type OnboardingDepth, type StoredLineProfile, type TurnProgress, cardCandidates, hypothesisLogLines, pointLines, GOAL_CANDIDATES_MIN
 } from "@crossline/core";
 import { datedItems, type CrosslineStore } from "@crossline/db";
 import { readProfileModel } from "./onboarding-persist";
@@ -64,7 +64,8 @@ export function paceContext(store: CrosslineStore, workspaceId: string, sessionI
   const goalPicker = input.lines.filter((line) => !line.goals.length).map((line) => {
     const count = lineAttributes(profiles[line.id], line.label).length;
     // Worded so that echoing it to the person does no harm: 「定语」 was repeated to people word for word (2026-10-31).
-    return count ? `${line.label}：已给出 ${count} 个长期目标的候选词，由本人点选` : `${line.label}：还没有长期目标的候选词`;
+    return count >= GOAL_CANDIDATES_MIN ? `${line.label}：已给出 ${count} 个长期目标的候选词，由本人点选`
+      : count ? `${line.label}：长期目标的候选词还不够（${count} 个），本人还选不了` : `${line.label}：还没有长期目标的候选词`;
   });
   // Each weekly arrangement with its own weekday and time, every round: the abstract has only their number (W-183).
   const fixedSchedule = fixedScheduleLines(weekly);
