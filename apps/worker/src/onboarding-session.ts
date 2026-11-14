@@ -21,7 +21,7 @@ import { sourceIds } from "./source-ids";
 import { localeOf } from "./locale";
 import { adoptLineGoal, identityLines } from "./lines";
 import { checklistAnswered, checklistAskable, ledgerForModel, linesAnsweredUnread, recordReplyAnswers, recordRound, resolveRepeats, syncGapQuestions } from "./question-ledger";
-import { cardsWait, createOnboardingExtractor, extractionReached, requestAllLanes, requestExtraction, type ExtractLane } from "./onboarding-extract";
+import { cardsWait, correctionUnread, createOnboardingExtractor, extractionReached, requestAllLanes, requestExtraction, type ExtractLane } from "./onboarding-extract";
 import { DATES_UNRECORDED_EVENT, ONBOARDING_UNRECORDED_EVENT, personTimeZone, readProfileModel } from "./onboarding-persist";
 import { paceContext, storedProgress } from "./onboarding-pace";
 import { CARDS_OFFERED, cardCandidateIds, hypothesisFromCard, hypothesisReplies, INSIGHTS_PER_ROUND, POINTS_RULES, pointsRules, type Hypothesis, type TurnInsight } from "@crossline/core";
@@ -352,10 +352,13 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const heardAt = new Date().toISOString();
     const recorded = recordedSince(coverage.heardAt);
     // The short ledger the round starts from: the last round's progress record, an abstract of the ledger, and the latest ratings.
-    // A correction the inferences' lane has not read yet holds the cards back (`cardsWait`); with no extraction there is nothing to wait for.
-    const waitCards = !focusLine && extractMode !== "off" && pointsRules(session.coverage) && cardsWait(store, workspaceId, sessionId, lanes);
+    // A correction the inferences' lane has not read yet holds the cards back for one round (`cardsWait`), then the cards go with the
+    // corrections beside them; with no extraction there is nothing to wait for.
+    const reading = !focusLine && extractMode !== "off" && pointsRules(session.coverage);
+    const waitCards = reading && cardsWait(store, workspaceId, sessionId, lanes);
+    const correctionPending = reading && correctionUnread(store, workspaceId, sessionId, lanes);
     const pace = () => paceContext(store, workspaceId, sessionId, { today, recent: recorded.lines, progress: storedProgress(session!.coverage), flow, depth: depthNow(),
-      rules: !focusLine && pointsRules(session!.coverage), cardsWait: waitCards,
+      rules: !focusLine && pointsRules(session!.coverage), cardsWait: waitCards, correctionUnread: correctionPending,
       lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, goals: line.goals ?? [] })) });
     // What the app did to the last round and which replies the ledger lags behind: sent with every turn, only when there is something.
     const lastRound = coverage.lastRound;

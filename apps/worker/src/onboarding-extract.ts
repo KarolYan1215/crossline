@@ -64,13 +64,19 @@ export function correctedSince(store: CrosslineStore, workspaceId: string, sessi
     .some(([key, rating]) => key.startsWith(`${sessionId}#`) && rating.verdict !== "fits" && (!since || rating.at > since));
 }
 
+/** Whether the person corrected a card the inferences' lane has not read yet: the log may still rest on what was corrected. */
+export const correctionUnread = (store: CrosslineStore, workspaceId: string, sessionId: string, lanes = true): boolean =>
+  correctedSince(store, workspaceId, sessionId, readLaneState(store, workspaceId, sessionId, lanes ? "insights" : "all").readAt);
+
 /**
  * Whether this round's observation cards wait (2026-11-14, replay 12): the person corrected a card, and the inferences' lane has not
- * read that correction yet, so the log the cards are drawn from may still rest on what was corrected. Replay 12 put one premise she had
- * corrected three times on two more cards. The cards ready once the lane has read it come together in one round.
+ * read that correction yet. Replay 12 put one premise she had corrected three times on two more cards. The wait is one round at most
+ * (replay 14): the lane took nine minutes a run, and one correction held the cards for ten rounds. After that round the cards come
+ * with the corrections beside them (`paceContext`'s `cardsCheck`).
  */
 export function cardsWait(store: CrosslineStore, workspaceId: string, sessionId: string, lanes = true): boolean {
-  return correctedSince(store, workspaceId, sessionId, readLaneState(store, workspaceId, sessionId, lanes ? "insights" : "all").readAt);
+  const lastRound = store.listOnboardingMessages(workspaceId, sessionId).filter((message) => message.role === "assistant").at(-1)?.createdAt;
+  return correctionUnread(store, workspaceId, sessionId, lanes) && (!lastRound || correctedSince(store, workspaceId, sessionId, lastRound));
 }
 export const PORTRAIT_WAIT_MS = 10 * 60_000;
 

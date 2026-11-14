@@ -3,7 +3,7 @@ import { CrosslineStore, rateInsight, writeExtractState } from "@crossline/db";
 import { cardWordsHead, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
   DEPTH_PACE, type OnboardingProgress, type ProfileCard } from "@crossline/core";
 import { cardsForRound, closingQuestion, createOnboardingSessionRunner as createRunner, finishInterview, INSTRUCTIONS, ONBOARDING_SKILL, paceDeepRound, shownOrOpen, stageOrderFor, stagePace, withChecklist, withFreshOpenQuestion, withoutEndHint } from "./onboarding-session";
-import { cardsWait, correctedSince, INSTRUCTIONS as EXTRACT_INSTRUCTIONS } from "./onboarding-extract";
+import { cardsWait, correctedSince, correctionUnread, INSTRUCTIONS as EXTRACT_INSTRUCTIONS } from "./onboarding-extract";
 import { ONBOARDING_EXTRACT_SKILL } from "./onboarding-extract";
 import { fakeRuntime as runtimeWithRoutes } from "./testing/fake-runtime";
 
@@ -694,6 +694,10 @@ test("cards ready together come in one round: each is kept, keyed and rated on i
   expect(rateInsight(store, workspaceId, { sessionId: "s", seq: shown.seq, index: 2, verdict: "fits" })).toEqual({ ok: false, code: "INSIGHT_NOT_FOUND" });
   expect(cardsWait(store, workspaceId, "s")).toBe(true);
   expect(correctedSince(store, workspaceId, "s", "2999-01-01T00:00:00Z")).toBe(false);
+  // One round at most (replay 14: a nine-minute lane held the cards for ten rounds); the cards then go with the correction beside them.
+  store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "assistant", content: { reply: "held" }, createdAt: "2999-01-01T00:00:00Z" });
+  expect(cardsWait(store, workspaceId, "s")).toBe(false);
+  expect(correctionUnread(store, workspaceId, "s")).toBe(true);
 });
 
 test("an uncertain hypothesis the log offers on one reply may be carded citing that one; any other card still needs two", async () => {

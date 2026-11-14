@@ -10,6 +10,8 @@ const DAY_MS = 86_400_000;
 const iso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const utc = (year: number, month: number, day: number) => Date.UTC(year, month - 1, day);
 const lastDay = (year: number, month: number) => new Date(Date.UTC(year, month, 0)).getUTCDate();
+/** The Spring Festival's day: 「年前」 ends the day before. */
+const SPRING_FESTIVAL: Record<number, string> = { 2026: "2026-02-17", 2027: "2027-02-06", 2028: "2028-01-26", 2029: "2029-02-13", 2030: "2030-02-03" };
 const CN: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 }; // i18n-ignore: numerals read from the reply
 
 /** 「十一」「两」「3」 as a number; undefined when it is not one. */
@@ -76,6 +78,11 @@ export function roughWindow(text: string, today: string): RoughWindow | undefine
   if (/年初/u.test(q)) return months(1, 2, "month"); // i18n-ignore
   if (nextYear && /年(底|末)/u.test(q)) return months(12, 12, "month"); // i18n-ignore
   if (/年底|年末|今年(以)?内/u.test(q)) return window(now, utc(year, 12, 31), "month"); // i18n-ignore
+  // 「年前」 is before the Spring Festival (replay 14: 「年前投出去」), not 「一年前」.
+  if (/(?<![一两二三四五六七八九十\d多几半去])年前|(过年|春节)(之|以)?前/u.test(q)) { // i18n-ignore
+    const y = month >= 3 ? year + 1 : year;
+    return window(now, Date.parse(`${SPRING_FESTIVAL[y] ?? `${y}-02-10`}T00:00:00Z`) - DAY_MS, "term");
+  }
   if (nextYear && !/寒假|暑假|学期|期末/u.test(q)) return window(utc(year + 1, 1, 1), utc(year + 1, 12, 31), "year"); // i18n-ignore
   // The term and the holidays, as Chinese universities keep them: the autumn term ends in mid-January, the spring term in early July.
   if (/寒假/u.test(q)) { const y = month >= 3 ? year + 1 : year; return window(utc(y, 1, 15), utc(y, 2, 25), "term"); } // i18n-ignore
@@ -97,8 +104,12 @@ export function roughWindow(text: string, today: string): RoughWindow | undefine
   return undefined;
 }
 
-/** Whether a day (YYYY-MM-DD) lies in the window rough words name. */
-export const inRoughWindow = (day: string, text: string, today: string): boolean => {
-  const found = roughWindow(text, today);
-  return Boolean(found && day >= found.from && day <= found.to);
-};
+/**
+ * Whether a day (YYYY-MM-DD) lies in the window rough words name. Each clause names its own (replay 14: in 「这周改简历，下周开始投，年前
+ * 投出去」 only 「下周」 was read, and the day for 「这周改简历」 was refused).
+ */
+export const inRoughWindow = (day: string, text: string, today: string): boolean =>
+  [text, ...text.split(/[，,。；;、]/u)].some((part) => {
+    const found = roughWindow(part, today);
+    return Boolean(found && day >= found.from && day <= found.to);
+  });

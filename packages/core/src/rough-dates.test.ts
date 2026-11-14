@@ -43,6 +43,12 @@ test("a day inside the window is supported by the words, one outside is not", ()
   expect(inRoughWindow("2026-11-30", "11 月底前", today)).toBe(true);
   expect(inRoughWindow("2026-12-01", "11 月底前", today)).toBe(false);
   expect(inRoughWindow("2026-11-20", "下周", today)).toBe(true);
+  // Every clause names its own window (replay 14).
+  const plan = "这周改简历，下周开始投，年前投出去";
+  for (const day of ["2026-11-15", "2026-11-22", "2027-02-05"]) expect(inRoughWindow(day, plan, today)).toBe(true);
+  expect(inRoughWindow("2027-02-06", plan, today)).toBe(false);
+  expect(roughWindow("春节前", today)).toEqual({ from: "2026-11-14", to: "2027-02-05", precision: "term" });
+  expect(roughWindow("一年前投过", today)).toBeUndefined();
 });
 
 test("day questions and answers that leave the day open are told apart", () => {
