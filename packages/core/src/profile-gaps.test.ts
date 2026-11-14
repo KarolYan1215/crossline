@@ -225,6 +225,9 @@ test("a question that asks for several things takes several answers; one with ex
   expect(questionKind({ kind: "single", text: "ECE 548 的目标成绩？" })).toBe("single");
   expect(questionKind({ kind: "single", text: "「ECE 548」有截止日期吗？" })).toBe("single");
   expect(questionKind({ kind: "free", text: "还有哪些？" })).toBe("free");
+  // The dialogue's own day questions are answered in words or off the calendar; the app's deadline question keeps its chips.
+  expect(questionKind({ id: "cv-when", kind: "single", text: "投简历这件事，大概哪个时间范围内要投出去？" })).toBe("free");
+  expect(questionKind({ id: "gap-deadline-cv", kind: "single", text: "「投简历」有截止日期吗？" })).toBe("single");
   // Every question the app builds itself has options that exclude each other.
   const all = profileGaps({ ...base, projects: [...base.projects, { id: "x", identityId: "startup", name: "X" }],
     undated: [{ project: "ece555", kind: "exam", title: "期末" }], unfiled: [{ id: "d", fileName: "a.pdf" }], portrait: { written: true, confirmed: false } });

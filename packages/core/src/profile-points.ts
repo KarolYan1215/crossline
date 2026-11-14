@@ -199,29 +199,41 @@ export const CARDS_OFFERED = 4;
 /** The ids `cardCandidates` offers, in its order: a card naming one of them is drawn from the log. */
 export const cardCandidateIds = (hypotheses: Hypothesis[], limit = 3): string[] => candidateRows(hypotheses, limit).map(({ item }) => item.id);
 
+/** The person's replies a hypothesis rests on, each once, with the text it quotes from it. */
+export const hypothesisReplies = (item: Hypothesis): Array<[string, string]> =>
+  [...new Map(item.basis.filter((basis) => /^reply-\d+$/.test(basis.ref)).map((basis) => [basis.ref, basis.text])).entries()];
+
 /**
  * What the next observation card asks about (2026-11-13, the owner: cards come from the log, not made up afresh each round): at most
- * `limit` hypotheses still open, never put on a card, resting on two replies or more (a card cites two), with the replies they rest on.
- * The dimension the cards have asked least comes first, then the hypothesis with more replies behind it, then the older one. In the
- * sixth replay every one of twelve cards was a new inference, and none of the 25 the extraction kept was ever asked.
+ * `limit` hypotheses never put on a card and not refuted, with the replies they rest on. The dimension the cards have asked least comes
+ * first, then the hypothesis with more replies behind it, then the older one. In the sixth replay every one of twelve cards was a new
+ * inference, and none of the 25 the extraction kept was ever asked.
+ *
+ * `supported` counts as not yet asked (replay 13, 2026-11-14): the extraction marked 15 of 27 hypotheses supported on its own, only open
+ * ones were offered, three were left, and nine rounds running had no card. The extraction finding a pattern well backed is exactly when
+ * the person should see it. When fewer than `limit` rest on two replies (a card connects two), the extraction's uncertain ones fill the
+ * rest: resting on one reply, with a competing explanation on record. Such a card puts both explanations to the person (the owner: 「没卡的时候
+ * 分析层整理层发现问题或者不确定的地方也可以出卡提问」) and may cite that one reply (`checkInsight`'s `minReplies`).
  */
 export function cardCandidates(hypotheses: Hypothesis[], limit = 3): string[] {
   return candidateRows(hypotheses, limit)
     // The competing explanation goes with it: a card states the pattern and leaves the why open unless the replies settle it (replays 10
     // and 11, 2026-11-14: all seven cards rated 「部分对」 had the pattern right and the cause wrong).
     .map(({ item, cited }) => `${item.id} [${item.dimension}] ${item.statement.slice(0, 120)}（依据 ${cited.slice(0, 3).map(([ref, text]) => `${ref}「${text.slice(0, 40)}」`).join("、")}）`
-      + (item.alternative.trim() ? `；另一种解释：${item.alternative.trim().slice(0, 80)}` : ""));
+      + (cited.length < 2 ? `；待核实，只有一条回复：卡上把两种解释都摆出来，问本人哪个更接近——${item.statement.slice(0, 60)} / ${item.alternative.trim().slice(0, 60)}`
+        : item.alternative.trim() ? `；另一种解释：${item.alternative.trim().slice(0, 80)}` : ""));
 }
 
 function candidateRows(hypotheses: Hypothesis[], limit: number) {
   // `cardKey` is set when a card is shown, answered or not (onboarding-session.ts), so a card left unanswered is not offered again.
   const asked = new Map<string, number>();
   for (const item of hypotheses) if (item.cardKey) asked.set(item.dimension, (asked.get(item.dimension) ?? 0) + 1);
-  const replies = (item: Hypothesis) => [...new Map(item.basis.filter((basis) => /^reply-\d+$/.test(basis.ref)).map((basis) => [basis.ref, basis.text])).entries()];
-  return hypotheses.map((item, index) => ({ item, index, cited: replies(item) }))
-    .filter(({ item, cited }) => !item.cardKey && (item.status === "open" || item.status === "undecided") && cited.length >= 2)
-    .sort((a, b) => (asked.get(a.item.dimension) ?? 0) - (asked.get(b.item.dimension) ?? 0) || b.cited.length - a.cited.length || a.index - b.index)
-    .slice(0, limit);
+  type Row = { item: Hypothesis; index: number; cited: Array<[string, string]> };
+  const order = (a: Row, b: Row) => (asked.get(a.item.dimension) ?? 0) - (asked.get(b.item.dimension) ?? 0) || b.cited.length - a.cited.length || a.index - b.index;
+  const rows: Row[] = hypotheses.map((item, index) => ({ item, index, cited: hypothesisReplies(item) })).filter(({ item }) => !item.cardKey && item.status !== "refuted");
+  const backed = rows.filter((row) => row.cited.length >= 2).sort(order);
+  const unsure = rows.filter((row) => row.cited.length === 1 && row.item.alternative.trim()).sort(order);
+  return [...backed, ...unsure].slice(0, limit);
 }
 
 /** The ledger as the extraction and the dialogue are shown it: one line per point still standing. */

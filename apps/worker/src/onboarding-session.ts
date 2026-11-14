@@ -24,7 +24,7 @@ import { checklistAnswered, checklistAskable, ledgerForModel, linesAnsweredUnrea
 import { cardsWait, createOnboardingExtractor, extractionReached, requestAllLanes, requestExtraction, type ExtractLane } from "./onboarding-extract";
 import { DATES_UNRECORDED_EVENT, ONBOARDING_UNRECORDED_EVENT, personTimeZone, readProfileModel } from "./onboarding-persist";
 import { paceContext, storedProgress } from "./onboarding-pace";
-import { CARDS_OFFERED, cardCandidateIds, hypothesisFromCard, INSIGHTS_PER_ROUND, POINTS_RULES, pointsRules, type Hypothesis, type TurnInsight } from "@crossline/core";
+import { CARDS_OFFERED, cardCandidateIds, hypothesisFromCard, hypothesisReplies, INSIGHTS_PER_ROUND, POINTS_RULES, pointsRules, type Hypothesis, type TurnInsight } from "@crossline/core";
 import { readResearch, researchForDialogue, researchRunnerFor } from "./onboarding-research";
 import { DOMAIN_PACKS, domainGuides } from "@crossline/identity-packs";
 
@@ -392,7 +392,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         detail: `reply 逐条列了调研线程的细节（${copied.join("、")}）。它们在右栏的调研线程里；reply 只留改变下一步的那一条结论和它对本人意味着什么，一两句，不列日期、时间和门槛。` }); // i18n-ignore: model-facing repair note
       const invented = setDates(valid.reply);
       if (invented.length) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
-        detail: `reply 说事情定在 ${invented.join("、")}，可本人没说过这个日期。日期由本人定：reply 里不写它，要定就在 questions 里给几个日期让本人选。` }); // i18n-ignore: model-facing repair note
+        detail: `reply 说事情定在 ${invented.join("、")}，可本人没说过这个日期。日期由本人定：reply 里不写它，要定就在 questions 里用不带选项的 free 问本人想放在什么时候。` }); // i18n-ignore: model-facing repair note
       return valid;
     };
     const softAccept = (_rejection: Error, output: unknown) => keepOnboardingDialogue(output, known);
@@ -658,12 +658,14 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       const askedIds = new Set(earlierCards.map((card) => card.hypothesisId ?? "").filter(Boolean));
       const made: Hypothesis[] = [];
       for (const written of (result.output.insights ?? []).slice(0, INSIGHTS_PER_ROUND)) {
-        const checked = checkInsight(written, replies, output.stage);
+        const named = rules ? written.hypothesisId?.trim() ?? "" : "";
+        const onRecord = named ? profile.hypotheses.find((item) => item.id === named) : undefined;
+        // An uncertain hypothesis the log offered on one reply puts both explanations to the person and may cite that one (`cardCandidates`).
+        const minReplies = onRecord && offered.includes(onRecord.id) && hypothesisReplies(onRecord).length < 2 ? 1 : 2;
+        const checked = checkInsight(written, replies, output.stage, minReplies);
         if (!checked || checked.refs.some((ref) => sensitive.has(ref.replyId)) || shownInsights.has(squeeze(checked.text))
           || observed.some((card) => squeeze(card.text) === squeeze(checked.text))) continue;
         if (!rules) { observed.push(checked); continue; }
-        const named = written.hypothesisId?.trim() ?? "";
-        const onRecord = named ? profile.hypotheses.find((item) => item.id === named) : undefined;
         if (onRecord) {
           if (onRecord.cardKey || askedIds.has(onRecord.id) || onRecord.status === "refuted" || observed.some((card) => card.hypothesisId === onRecord.id)) continue;
           observed.push({ ...checked, hypothesisId: onRecord.id, dimension: onRecord.dimension });

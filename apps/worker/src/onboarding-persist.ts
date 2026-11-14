@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, INTERVIEW_SETTINGS, mergeInterviewSettings, readInterviewSettings, DEEP_SECTIONS, EMPTY_PROFILE_MODEL, PROFILE_SECTIONS, PROFILE_SECTIONS_SETTING, mergeProfileSections,
-  type ProfileSection, type SectionRecord, GOAL_EDITS_SETTING, SECTION_EMPTY_RUNS_MAX, sectionClosed, citationWarnings, duplicateAttributes, mergeDateExtractions,
+  type ProfileSection, type SectionRecord, GOAL_EDITS_SETTING, SECTION_EMPTY_RUNS_MAX, sectionClosed, citationWarnings, duplicateAttributes, ATTRIBUTE_CANDIDATES_MAX, mergeDateExtractions,
   resolveAvailability, sanitizeDateExtraction, withContentIds, withoutDecidedDates, withoutOffHours,
   type DateDrop, type DateExtraction, type OnboardingExtraction, type PendingGoalEdit, type ProfileModel, type StoredLineProfile,
   PROFILE_INSTRUMENTS_SETTING, mergeInstrumentAnswers, mergeProfileInsights, readInstrumentAnswers, applyPointChanges, readPoints, numberNewHypotheses
@@ -110,17 +110,21 @@ export function persistExtraction(store: CrosslineStore, workspaceId: string, ex
     if (mapped.length) store.setSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING, JSON.stringify(mergeInstrumentAnswers(kept, mapped)));
   }
   // Each line's personal description and attribute candidates, kept by line so a later run or a line's own interview refines one line
-  // only. An empty candidate list keeps those on record; new ones replace them, except the attributes split from the adopted goal.
+  // only. New candidates come first and the ones on record follow, minus those a new one restates, up to the most a line holds: replay 13
+  // (2026-11-14) ended with one candidate, 「务实」, because a later run's one-word list replaced the whole list the person had picked from.
+  // The attributes split from the adopted goal always stay.
   if (extraction.lineProfiles?.length) {
     let current: Record<string, StoredLineProfile> = {};
     try { current = JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") as Record<string, StoredLineProfile>; } catch { /* rebuilt below */ }
     for (const line of extraction.lineProfiles) {
       const previous = current[line.lineId] ?? {};
       const fresh = line.attributeCandidates ?? [];
-      const fromGoal = (previous.attributes ?? []).filter((item) => item.sourceRef === "goal"
-        && !duplicateAttributes([...fresh.map((other) => other.text), item.text]).some((pair) => pair.includes(item.text)));
+      const restated = (item: { text: string }) => duplicateAttributes([...fresh.map((other) => other.text), item.text]).some((pair) => pair.includes(item.text));
+      const onRecord = (previous.attributes ?? []).filter((item) => !restated(item));
+      const fromGoal = onRecord.filter((item) => item.sourceRef === "goal");
+      const others = onRecord.filter((item) => item.sourceRef !== "goal").slice(0, Math.max(0, ATTRIBUTE_CANDIDATES_MAX - fresh.length - fromGoal.length));
       current[line.lineId] = fresh.length
-        ? { description: line.description || previous.description || "", attributes: [...fresh, ...fromGoal] }
+        ? { description: line.description || previous.description || "", attributes: [...fresh, ...others, ...fromGoal] }
         : { ...previous, description: line.description || previous.description || "" };
     }
     store.setSetting(workspaceId, "lines.profiles", JSON.stringify(current));

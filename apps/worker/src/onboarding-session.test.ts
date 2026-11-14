@@ -384,9 +384,10 @@ test("a line card's turn is that line's own interview: attributes refresh by lin
   expect(await run({ sessionId: "line-research", text: "把目标改成器件物理方向能独立立项的研究者" })).toEqual({ state: "ready", sessionId: "line-research" });
   expect(prompts()[0]).toContain("\"focusLine\":{\"id\":\"research\"");
   const profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles")!) as Record<string, { description: string; attributes?: Array<{ text: string; sourceRef: string }>; goalCandidates?: string[] }>;
-  // The new candidates replace the old ones, but what was split from the adopted goal stays; the other line is untouched.
+  // The new candidates come first and the old ones stay after them (replay 13: a one-word list wiped the rest), with what was split from
+  // the adopted goal last; the other line is untouched.
   expect(profiles.research!.description).toBe("以器件物理为底的神经形态计算研究");
-  expect(profiles.research!.attributes!.map((item) => item.text)).toEqual([...attributes.map((item) => item.text), "类脑芯片方向能带队"]);
+  expect(profiles.research!.attributes!.map((item) => item.text)).toEqual([...attributes.map((item) => item.text), "旧候选", "类脑芯片方向能带队"]);
   expect(profiles.media).toEqual({ description: "自媒体描述", goalCandidates: ["成为有影响力的科普创作者"] });
   // Not applied: recorded for the card to show, in the person's order.
   expect(JSON.parse(store.getSetting(workspaceId, "lines.goalEdits")!)).toMatchObject({ research: { parts: ["器件物理", "能独立立项"], sourceRef: "reply-1" } });
@@ -693,6 +694,24 @@ test("cards ready together come in one round: each is kept, keyed and rated on i
   expect(rateInsight(store, workspaceId, { sessionId: "s", seq: shown.seq, index: 2, verdict: "fits" })).toEqual({ ok: false, code: "INSIGHT_NOT_FOUND" });
   expect(cardsWait(store, workspaceId, "s")).toBe(true);
   expect(correctedSince(store, workspaceId, "s", "2999-01-01T00:00:00Z")).toBe(false);
+});
+
+test("an uncertain hypothesis the log offers on one reply may be carded citing that one; any other card still needs two", async () => {
+  // Replay 13 (2026-11-14): with only open hypotheses on two replies offered, nine rounds had no card. The extraction's uncertain ones fill in.
+  const one = [{ replyId: "reply-3", quote: "一个人做研究" }];
+  const { rpc } = fakeRuntime([turn({ stage: "energy", insight: { text: "", refs: [] } }),
+    turn({ stage: "energy", insights: [{ text: "你说「一个人做研究」，我猜是你更喜欢自己定节奏；也可能只是那学期课多。", refs: one, falsifier: "如果课少时也常约人一起做", hypothesisId: "h7", dimension: "D3" },
+      { text: "你说一个人做研究时最慢。", refs: one, falsifier: "如果独自时也很快", hypothesisId: "h8", dimension: "D1" }] })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false, extract: "off" });
+  await run({ sessionId: "s", text: "最投入的是和同学一起赶比赛的时候。" });
+  const basis = [{ kind: "quote", text: "一个人做研究", ref: "reply-3" }];
+  store.setSetting(workspaceId, "profile.model", JSON.stringify({ hypotheses: [
+    { id: "h7", dimension: "D3", statement: "更喜欢自己定节奏", basis, falsifier: "", alternative: "只是那学期课多", status: "supported" },
+    { id: "h8", dimension: "D1", statement: "独处时慢", basis, falsifier: "", alternative: "", status: "open" }] }));
+  await run({ sessionId: "s", text: "底座是我一个人做研究。" });
+  const content = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { insight?: { text: string; hypothesisId?: string }; moreInsights?: unknown[] };
+  expect(content.insight).toMatchObject({ hypothesisId: "h7" });
+  expect(content.moreInsights ?? []).toEqual([]);
 });
 
 test("no observation card beside the safety check, and none built on the disclosure or the answer to the check", async () => {

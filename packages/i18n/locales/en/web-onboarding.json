@@ -5,6 +5,8 @@
   "{{question}} — 其他": "{{question}} — other",
   "回答…": "Answer…",
   "其他（可不填）…": "Something else (optional)…",
+  "说个大概就行：下周、12 月中、明年一季度、还没定，或者在下面挑一天": "Roughly is fine: next week, mid-December, Q1 next year, not decided yet, or pick a day below",
+  "{{question}} — 挑一天": "{{question}} — pick a day",
   "录音转写": "Recording transcription",
   "转写录音需要先下载一个语音识别模型": "Transcribing recordings needs a speech recognition model first",
   "同意并下载（约 {{mb}} MB）": "Agree and download (about {{mb}} MB)",

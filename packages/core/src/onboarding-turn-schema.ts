@@ -1,4 +1,5 @@
 import { RELATION_KINDS } from "./flywheel-schema";
+import { DATE_ASK } from "./question-ledger";
 import { DATE_EXTRACTION_SCHEMA, type DateExtraction } from "./date-schema";
 import { SCHWARTZ_VALUES } from "./portrait";
 import type { ProfileCard } from "./profile-instruments";
@@ -855,7 +856,13 @@ export function cleanProfileInsights(value: Partial<Pick<OnboardingTurn, "hypoth
  */
 // English as well as Chinese: "which ones", "select all that apply", a goal (but not a target score or grade, which is one number).
 const MANY = /哪些|哪几|多选|可多选|都有什么|目标(?!分|成绩|绩点|线|是多少)|\bwhich (ones|of these|of the following|of them)\b|\bwhat are (all|the)\b|\bselect all\b|\bchoose all\b|\b(all|any) that apply\b|\bpick (any|several|all)\b|\bgoals?\b(?!\s+(score|scores|grade|grades|gpa|mark|marks|number))/iu;
-export function questionKind(question: Pick<TurnQuestion, "kind" | "text">): TurnQuestion["kind"] {
+/**
+ * The dialogue's own day questions are answered in words, not picked (2026-11-14, the owner): 「下周」「12 月中」「明年一季度」 or a day off
+ * the calendar beside the box, which `roughWindow` and the date readers turn into days behind the scenes. A list of ranges forced one
+ * granularity on every thing. The app's own questions (`gap-`) keep their chips (「没有截止」, the inferred date), and have the box too.
+ */
+export function questionKind(question: Pick<TurnQuestion, "kind" | "text"> & { id?: string }): TurnQuestion["kind"] {
+  if (question.kind !== "free" && question.id !== undefined && !question.id.startsWith("gap-") && DATE_ASK.test(question.text)) return "free";
   return question.kind === "single" && MANY.test(question.text) ? "multi" : question.kind;
 }
 

@@ -65,7 +65,7 @@ test("a card naming no hypothesis on record becomes one; the dialogue is told th
   expect(pointSectionFor("energy", "D4")).toBe("energy");
 });
 
-test("the next card is chosen from the log: open hypotheses never carded that rest on two replies, the least-asked dimension first", () => {
+test("the next card is chosen from the log: hypotheses never carded that rest on two replies, the least-asked dimension first", () => {
   const two = [{ kind: "quote" as const, text: "有人看的时候我做得更快", ref: "reply-2" }, { kind: "behavior" as const, text: "交给导师前一晚写到三点", ref: "reply-4" }];
   const lines = cardCandidates([
     hypothesis({ id: "h1", dimension: "D2", cardKey: "s#2", rated: "partial", basis: two }),
@@ -74,9 +74,16 @@ test("the next card is chosen from the log: open hypotheses never carded that re
     hypothesis({ id: "h4", dimension: "D5", basis: [two[0]!, { ...two[0]!, kind: "behavior" }] }),
     hypothesis({ id: "h5", dimension: "D1", basis: two, status: "refuted" }),
     hypothesis({ id: "h6", dimension: "D7", basis: two, status: "supported" })]);
-  // h1 was asked, h4 rests on one reply, h5 is refuted and h6 settled; D5 has had no card, D2 one.
+  // h1 was asked, h4 rests on one reply with no competing explanation, h5 is refuted; h6 the extraction marked supported, which the
+  // person has not seen (replay 13). D5 and D7 have had no card, D2 one.
   expect(lines).toEqual(["h3 [D5] 被看见时更投入（依据 reply-2「有人看的时候我做得更快」、reply-4「交给导师前一晚写到三点」）",
+    "h6 [D7] 被看见时更投入（依据 reply-2「有人看的时候我做得更快」、reply-4「交给导师前一晚写到三点」）",
     "h2 [D2] 被看见时更投入（依据 reply-2「有人看的时候我做得更快」、reply-4「交给导师前一晚写到三点」）"]);
+  // Fewer than the limit on two replies: an uncertain one on one reply with a competing explanation fills in, and the card asks which.
+  const unsure = cardCandidates([hypothesis({ id: "h2", dimension: "D2", basis: two }), hypothesis({ id: "h8", dimension: "D5", alternative: "只是那周事多" }),
+    hypothesis({ id: "h9", dimension: "D5" })]);
+  expect(unsure).toHaveLength(2);
+  expect(unsure[1]).toMatch(/^h8 .*待核实，只有一条回复.*被看见时更投入 \/ 只是那周事多$/);
   // The dialogue may only card these ids (cards ready together come in one round, 2026-11-14).
   expect(cardCandidateIds([hypothesis({ id: "h2", dimension: "D2", basis: two }), hypothesis({ id: "h3", dimension: "D5", basis: two }),
     hypothesis({ id: "h4", dimension: "D5", basis: two, cardKey: "s#4.1" })], 4)).toEqual(["h2", "h3"]);

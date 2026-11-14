@@ -53,14 +53,15 @@ export function portraitConfirmedByInsights(ratings: InsightRatings): boolean {
  * interview may give one (a line's own interview, `details`, does not). Anything else is dropped, never repaired: a round is not held up for it.
  * The quotes come from at least two different replies (the owner, 2026-11-12): an observation connects things the person said. Of the
  * replay's cards judged 「不准」, most read one answer for what it lacked (「你还举不出一件」).
+ * `minReplies` is 1 only for a card on an uncertain hypothesis the log offered resting on one reply (`cardCandidates`).
  */
-export function checkInsight(insight: TurnInsight | undefined, replies: Record<string, string>, stage: string | undefined): TurnInsight | undefined {
+export function checkInsight(insight: TurnInsight | undefined, replies: Record<string, string>, stage: string | undefined, minReplies = 2): TurnInsight | undefined {
   const text = insight?.text?.trim() ?? "";
   const falsifier = insight?.falsifier?.trim() ?? "";
   if (!text || !falsifier || stage === "details" || !(ONBOARDING_STAGES as readonly string[]).includes(stage ?? "")) return undefined;
   const refs = (insight?.refs ?? []).filter((ref) => typeof ref?.replyId === "string" && typeof ref.quote === "string" && ref.quote.trim()
     && ref.replyId in replies && Boolean(locateQuote(replies[ref.replyId]!, ref.quote)));
-  if (!refs.length || refs.length < (insight?.refs ?? []).length || new Set(refs.map((ref) => ref.replyId)).size < 2) return undefined;
+  if (!refs.length || refs.length < (insight?.refs ?? []).length || new Set(refs.map((ref) => ref.replyId)).size < minReplies) return undefined;
   const external = (insight?.external ?? []).filter((item) => typeof item?.text === "string" && item.text.trim() && isWebUrl(item.url))
     .slice(0, 3).map((item) => ({ text: item.text.trim(), url: item.url.trim() }));
   return { text, refs: refs.slice(0, 4).map((ref) => ({ replyId: ref.replyId, quote: ref.quote.trim() })), ...(external.length ? { external } : {}), falsifier };

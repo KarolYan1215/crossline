@@ -32,9 +32,10 @@ export function unsureAnswer(answer: string): boolean {
 /* i18n-ignore-start: patterns read from questions and answers, never shown */
 /**
  * A question asking when something will be done (2026-11-14): 「哪天」「几号」「排在哪天」「打算什么时候投」「截止」. Not a question about when
- * something happened (「最近一次……是什么时候」). The app's own deadline questions ask it too.
+ * something happened (「最近一次……是什么时候」), and not one about free hours (「哪些时段」「什么时间段有空」). The app's own deadline
+ * questions ask it too. Replay 13 asked 「大概哪个时间范围内要投出去？」, which the first patterns missed.
  */
-export const DATE_ASK = /哪天|哪一天|几号|何时|哪个日期|排在|定在|截止|(打算|准备|计划|想|要).{0,10}什么时候|什么时候.{0,6}(办|投|交|做|开始|完成|出来|定)|when.{0,30}(will|plan|going to)|what day|which day/iu;
+export const DATE_ASK = /哪天|哪一天|几号|何时|哪个日期|排在|定在|截止|(打算|准备|计划|想|要).{0,10}什么时候|什么时候.{0,6}(办|投|交|做|开始|完成|出来|定)|when.{0,30}(will|plan|going to)|(哪个|什么)时间(范围|点|之?前)|(多久|多长时间)(之|以)?内|哪一?周(?![一二三四五六日天几])|哪个月|几月|what day|which day|what date|by when/iu;
 /**
  * An answer saying the day (or the thing) is not settled yet: 「还没定」「这学期内，具体再定」「看情况」「先选好方向，日期才定得下来」.
  * Replay 12 asked six days, four answered so, and the next rounds asked the next thing's day: a day that cannot be set is an answer,

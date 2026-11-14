@@ -100,7 +100,7 @@ Costs and open points:
   - `--reset` is 「清空数据重新开始」 (`RESET_KEEPS` now lives in `@crossline/db`).
 
 **After the sixth replay (2026-11-13).** Changes:
-- **Cards come from the log.** `cardCandidates` sends the dialogue up to three open, never-carded hypotheses as `cardFrom`. Each rests on two replies or more and comes with its quotes. The least-asked dimension comes first. A new inference may be carded only when `cardFrom` is empty.
+- **Cards come from the log.** `cardCandidates` sends the dialogue up to four never-carded, unrefuted hypotheses as `cardFrom` (`supported` ones included since replay 13, 2026-11-14). Each rests on two replies or more and comes with its quotes; when fewer than four do, uncertain ones on one reply with a competing explanation fill in, marked 「待核实」, and their card may cite that one reply. The least-asked dimension comes first. A new inference may be carded only when `cardFrom` is empty.
 - **Thinking cap.** On the developer's model the extraction thinks at most 2048 tokens (`thinkingBudget`, `@think:2048`).
 - **Portrait lanes batch.** While an interview is active, the portrait's lanes wait for three replies (`PORTRAIT_BATCH`) or for ten minutes (`PORTRAIT_WAIT_MS`). `docs/token-economy.md` §4 has the measurements.
 - **Lane accounting.** Extraction usage is accounted per lane (`interview:<lane>`).

@@ -1,6 +1,7 @@
 "use client";
 
-import { useT } from "../locale-context";
+import { DATE_ASK } from "@crossline/core";
+import { useLocale, useT } from "../locale-context";
 import { VoiceField } from "../ui/voice/voice-input";
 import type { Answer, Identity, Project, Question } from "./onboarding-types";
 
@@ -16,6 +17,14 @@ export function QuestionCard({ question, answer, onChange, identities, projects,
   hideText?: boolean; hideOther?: boolean;
 }) {
   const t = useT();
+  const locale = useLocale();
+  // A day question takes words (「下周」「12 月中」「明年一季度」「还没定」) or a day off the calendar, which writes the day into the box.
+  const dated = DATE_ASK.test(question.text);
+  const pickDay = (value: string) => {
+    if (!value) return;
+    const day = new Date(`${value}T12:00:00`);
+    onChange({ ...answer, other: day.toLocaleDateString(locale === "en" ? "en-US" : "zh-CN", { year: "numeric", month: "long", day: "numeric" }) });
+  };
   const about = [identities.find((identity) => identity.id === question.identityId)?.label,
     projects.find((project) => project.id === question.projectId)?.name].filter(Boolean).join(" · ");
   const toggle = (id: string) => {
@@ -32,6 +41,9 @@ export function QuestionCard({ question, answer, onChange, identities, projects,
       </button>)}
     </div>}
     {!hideOther && (question.allowOther || question.kind === "free") && <VoiceField kind="interview"><input className="ob-other" value={answer.other} aria-label={t("{{question}} — 其他", { question: question.text })}
-      placeholder={question.kind === "free" ? t("回答…") : t("其他（可不填）…")} onChange={(event) => onChange({ ...answer, other: event.target.value })} /></VoiceField>}
+      placeholder={dated ? t("说个大概就行：下周、12 月中、明年一季度、还没定，或者在下面挑一天") : question.kind === "free" ? t("回答…") : t("其他（可不填）…")}
+      onChange={(event) => onChange({ ...answer, other: event.target.value })} /></VoiceField>}
+    {!hideOther && dated && <input type="date" className="ob-day" aria-label={t("{{question}} — 挑一天", { question: question.text })}
+      onChange={(event) => pickDay(event.target.value)} />}
   </fieldset>;
 }
