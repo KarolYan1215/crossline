@@ -66,10 +66,13 @@ export function resolveOnboardingRefs(value: unknown, known: { replies: Record<s
     return cited;
   };
 
-  const slotUpdates = list(turn.slotUpdates).map((update) => {
+  const slotUpdates = list(turn.slotUpdates).flatMap((update) => {
     const cited = span(update.refs, `事实「${String(update.slot ?? "")}」`, update.status === "confirmed");
+    // A fact resting only on card tap lines restates what the app already keeps per item (`profile.instruments`); the website walkthrough
+    // of 2026-11-14 got two of them with the side flipped (「1/5 掌握资源和话语权」 written as 「倾向让更多人受益」), so it is dropped.
+    if (cited.ids.length && cited.ids.every((id) => TAP_LINE.test(index.get(id)?.text.trim() ?? ""))) return [];
     const { refs: _refs, ...rest } = update;
-    return { ...rest, sourceRef: cited.ids.length ? cited.sourceRef : "inference", sourceQuote: cited.quote, sentences: cited.ids };
+    return [{ ...rest, sourceRef: cited.ids.length ? cited.sourceRef : "inference", sourceQuote: cited.quote, sentences: cited.ids }];
   });
   const flywheelCandidates = list(turn.flywheelCandidates).map((candidate) => {
     const cited = span(candidate.refs, "飞轮候选", false);

@@ -110,4 +110,8 @@ test("a card's tap line is never the source of a long-term goal attribute (2026-
   expect(() => validateOnboardingAnswer(profile([card]), cardKnown)).toThrow("ONBOARDING_ATTRIBUTE_FROM_CARD");
   const kept = keepOnboardingAnswer(profile([card, { text: "看街道细节", kind: "ability", refs: [own] }]), cardKnown);
   expect(kept?.lineProfiles?.[0]?.attributeCandidates.map((item) => item.text)).toEqual(["看街道细节"]);
+  // Nor of a fact: the app keeps the tap itself, and a walkthrough got the side flipped (2026-11-14).
+  const facts = validateOnboardingAnswer(turn({ slotUpdates: [fact({ slot: "value", value: "话多", refs: [tap] }),
+    fact({ slot: "walk", value: "爱看街道", refs: [own, tap] })] }), cardKnown);
+  expect(facts.slotUpdates.map((update) => update.slot)).toEqual(["walk"]);
 });
