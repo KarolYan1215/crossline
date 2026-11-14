@@ -59,9 +59,9 @@ export const PORTRAIT_BATCH = 3;
 const OBSERVATIONS_READ = 16;
 
 /** Whether the person rated an observation 部分对 or 不准 in this conversation after `since` (all of them when it is unset). */
-export function correctedSince(store: CrosslineStore, workspaceId: string, sessionId: string, since: string | undefined): boolean {
+export function correctedSince(store: CrosslineStore, workspaceId: string, sessionId: string, since: string | undefined, inclusive = false): boolean {
   return Object.entries(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS)))
-    .some(([key, rating]) => key.startsWith(`${sessionId}#`) && rating.verdict !== "fits" && (!since || rating.at > since));
+    .some(([key, rating]) => key.startsWith(`${sessionId}#`) && rating.verdict !== "fits" && (!since || rating.at > since || (inclusive && rating.at === since)));
 }
 
 /** Whether the person corrected a card the inferences' lane has not read yet: the log may still rest on what was corrected. */
@@ -76,7 +76,8 @@ export const correctionUnread = (store: CrosslineStore, workspaceId: string, ses
  */
 export function cardsWait(store: CrosslineStore, workspaceId: string, sessionId: string, lanes = true): boolean {
   const lastRound = store.listOnboardingMessages(workspaceId, sessionId).filter((message) => message.role === "assistant").at(-1)?.createdAt;
-  return correctionUnread(store, workspaceId, sessionId, lanes) && (!lastRound || correctedSince(store, workspaceId, sessionId, lastRound));
+// A card is rated after its round is shown, so a rating stamped the same millisecond is on that round (CI ran the two in one).
+  return correctionUnread(store, workspaceId, sessionId, lanes) && (!lastRound || correctedSince(store, workspaceId, sessionId, lastRound, true));
 }
 export const PORTRAIT_WAIT_MS = 10 * 60_000;
 
