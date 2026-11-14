@@ -117,7 +117,7 @@ function cost(key: string) {
 }
 
 // ---- the player ----
-const PLAYER_SCHEMA = { type: "object", additionalProperties: false, required: ["answers", "freeText", "upload", "cardTaps", "cardWords", "insight", "correction"], properties: {
+const PLAYER_SCHEMA = { type: "object", additionalProperties: false, required: ["answers", "freeText", "upload", "cardTaps", "cardWords", "insights"], properties: {
   answers: { type: "array", maxItems: 16, items: { type: "object", additionalProperties: false, required: ["questionId", "picked", "other"], properties: {
     questionId: { type: "string", minLength: 1, maxLength: 120 }, picked: { type: "array", maxItems: 6, items: { type: "string", minLength: 1, maxLength: 200 } },
     other: { type: "string", minLength: 0, maxLength: 600 } } } },
@@ -126,9 +126,12 @@ const PLAYER_SCHEMA = { type: "object", additionalProperties: false, required: [
     itemId: { type: "string", minLength: 1, maxLength: 80 }, score: { type: "integer", minimum: 0, maximum: 5 } } } },
   cardWords: { type: "array", maxItems: 8, items: { type: "object", additionalProperties: false, required: ["cardId", "words"], properties: {
     cardId: { type: "string", minLength: 1, maxLength: 80 }, words: { type: "string", minLength: 0, maxLength: 400 } } } },
-  insight: { type: "string", enum: ["fits", "off", "partial", ""] }, correction: { type: "string", maxLength: 300 } } };
+  // One rating per observation card the round showed (2026-11-14: cards ready together come in one round), `index` its place in `insights`.
+  insights: { type: "array", maxItems: 3, items: { type: "object", additionalProperties: false, required: ["index", "verdict", "correction"], properties: {
+    index: { type: "integer", minimum: 0, maximum: 2 }, verdict: { type: "string", enum: ["fits", "off", "partial", ""] }, correction: { type: "string", maxLength: 300 } } } } } };
 type Played = { answers: Array<{ questionId: string; picked: string[]; other: string }>; freeText: string; upload: string[];
-  cardTaps: Array<{ itemId: string; score: number }>; cardWords: Array<{ cardId: string; words: string }>; insight: "fits" | "off" | "partial" | ""; correction?: string };
+  cardTaps: Array<{ itemId: string; score: number }>; cardWords: Array<{ cardId: string; words: string }>;
+  insights: Array<{ index: number; verdict: "fits" | "off" | "partial" | ""; correction: string }> };
 
 /** The cards' part of the reply, as the screen sends it (`cardReplyLines` in profile-cards.tsx, which the worker reads back without a model). */
 function cardLines(cards: readonly ProfileCard[], taps: Record<string, number>, words: Record<string, string>): string[] {
@@ -203,7 +206,9 @@ async function runPerson(name: string, opening: Opening) {
       state = outcome.state;
       if (outcome.state === "blocked") { transcript.push(`### 第 ${turns} 轮：中断 ${outcome.code} ${outcome.message}`); log({ turn: turns, blocked: outcome.code }); break; }
       const last = store.listOnboardingMessages(workspaceId, "eval").at(-1)!;
-      const turn = last.content as { reply: string; questions: Question[]; cards?: ProfileCard[]; insight?: { text?: string }; stage?: string; nextAction: string };
+      const turn = last.content as { reply: string; questions: Question[]; cards?: ProfileCard[]; insight?: { text?: string }; moreInsights?: Array<{ text?: string }>;
+        stage?: string; nextAction: string };
+      const shownCards = [turn.insight, ...(turn.moreInsights ?? [])].map((card) => card?.text ?? "").filter(Boolean);
       // What the screen shows of the round (the state route): questions another place owns or the ledger already answers are left out,
       // and the app's own questions not in the round join it.
       const shown = withStore(() => {
@@ -224,9 +229,9 @@ async function runPerson(name: string, opening: Opening) {
       transcript.push(`### 第 ${turns} 轮（${turn.stage ?? ""}）`, "", turn.reply, "",
         ...batch.map((question, index) => `${index + 1}. ${question.text}${question.options.length ? `\n   选项：${question.options.map((option) => option.label).join(" / ")}` : ""}`),
         ...(cards.length ? ["", `卡片：${cards.map((card) => `${card.title}（${card.items.length} 题）`).join("、")}`] : []),
-        ...(turn.insight?.text ? ["", `洞察：${turn.insight.text}`] : []), "");
+        ...shownCards.flatMap((card, index) => ["", `洞察${shownCards.length > 1 ? ` ${index + 1}` : ""}：${card}`]), "");
       rounds.push({ turn: turns, stage: turn.stage, questions: batch.length, held: shown.extra.length, cards: cards.reduce((sum, card) => sum + card.items.length, 0),
-        insight: Boolean(turn.insight?.text), next: turn.nextAction, modelSeconds: Math.round((Date.now() - turnStarted) / 1000),
+        insight: shownCards.length, next: turn.nextAction, modelSeconds: Math.round((Date.now() - turnStarted) / 1000),
         startOpen: items.filter((item) => item.start && !item.done).map((item) => item.id),
         open: items.filter((item) => !item.done && !item.deferred && item.owner === "interview").map((item) => item.id) });
       log({ turn: turns, stage: turn.stage, questions: batch.length, cards: cards.length, next: turn.nextAction, ready: Boolean(readyAt) });
@@ -235,7 +240,7 @@ async function runPerson(name: string, opening: Opening) {
       const research = researchRunnerFor(store, workspaceId, repoRoot, () => client);
       for (const thread of readResearch(store, workspaceId, "eval").filter((item) => item.status === "asking" && item.ask)) {
         const sideContext = { version: "crossline.eval-persona.v2", persona: life, reply: `（侧栏调研卡：${thread.question}）`, questions: [{ id: "side", text: thread.ask!, kind: "free", options: [] }],
-          files: [], cards: [], insight: "", earlier: earlier.slice(-3) };
+          files: [], cards: [], insights: [], earlier: earlier.slice(-3) };
         const side = await withUsageWorkspace(playerKey, () => runCodexSkill<Played>(client, sideContext, { skillName: "crossline:crossline-eval-persona", cwd: repoRoot,
           provider: threadProvider(routing(playerKey, playerModel), playerModel, "crossline-eval-persona"),
           developerInstructions: "Play the person as the Skill describes. Return raw JSON only.", outputSchema: PLAYER_SCHEMA, prepareInput: () => sideContext,
@@ -256,7 +261,7 @@ async function runPerson(name: string, opening: Opening) {
       const context = { version: "crossline.eval-persona.v2", persona: life, reply: turn.reply,
         questions: batch.map(({ id, text: body, kind, options }) => ({ id, text: body, kind, options: options.map((option) => ({ label: option.label })) })),
         files: [], cards: cards.map((card) => ({ id: card.id, title: card.title, items: card.items.map((item) => ({ id: item.id, text: item.text, anchors: item.anchors })) })),
-        insight: turn.insight?.text ?? "", earlier: earlier.slice(-3) };
+        insights: shownCards, earlier: earlier.slice(-3) };
       const play = () => withUsageWorkspace(playerKey, () => runCodexSkill<Played>(client, context, { skillName: "crossline:crossline-eval-persona", cwd: repoRoot,
         // A test-only Skill is never routed to a provider by the rules, so the player names its thread's provider itself.
         provider: threadProvider(routing(playerKey, playerModel), playerModel, "crossline-eval-persona"),
@@ -275,11 +280,13 @@ async function runPerson(name: string, opening: Opening) {
       const taps = Object.fromEntries((answer.cardTaps ?? []).filter((tap) => itemIds.has(tap.itemId) && tap.score >= 1 && tap.score <= 5).map((tap) => [tap.itemId, tap.score]));
       const words = Object.fromEntries((answer.cardWords ?? []).filter((said) => cards.some((card) => card.id === said.cardId) && said.words.trim()).map((said) => [said.cardId, said.words]));
       // Rated as the card's route rates (`rateInsight`): under the points rules 准 puts the hypothesis in the ledger, 部分对 the correction.
-      if (answer.insight && turn.insight?.text) rateInsight(store, workspaceId, { sessionId: "eval", seq: last.seq,
-        verdict: answer.insight === "partial" && !answer.correction?.trim() ? "off" : answer.insight, ...(answer.correction ? { correction: answer.correction } : {}) });
+      // Each card answered in a row, as the screen shows them one under another.
+      const rated = (answer.insights ?? []).filter((item, at, all) => item.verdict && item.index < shownCards.length && all.findIndex((other) => other.index === item.index) === at);
+      for (const item of rated) rateInsight(store, workspaceId, { sessionId: "eval", seq: last.seq, index: item.index,
+        verdict: item.verdict === "partial" && !item.correction.trim() ? "off" : item.verdict as "fits" | "off" | "partial", ...(item.correction.trim() ? { correction: item.correction } : {}) });
       text = [composeAnswers(batch, answers, answer.freeText), ...cardLines(cards, taps, words)].filter((part) => part.trim()).join("\n") || "不确定。";
       earlier.push({ interviewer: turn.reply.slice(0, 600), me: text.slice(0, 600) });
-      transcript.push("**回答**", "", text, ...(answer.insight ? ["", `（洞察：${answer.insight === "fits" ? "准" : answer.insight === "partial" ? `部分对：${answer.correction ?? ""}` : "不准"}）`] : []), "");
+      transcript.push("**回答**", "", text, ...rated.map((item) => `（洞察${shownCards.length > 1 ? ` ${item.index + 1}` : ""}：${item.verdict === "fits" ? "准" : item.verdict === "partial" ? `部分对：${item.correction}` : "不准"}）`), "");
     }
     // The interview said it is done (or ran out of rounds): the extraction's finishing runs write the synthesis, as the worker's tick asks
     // for them in the app; then the portrait writer, as the worker runs it once the interview is complete.

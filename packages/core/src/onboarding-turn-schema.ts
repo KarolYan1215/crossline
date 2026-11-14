@@ -197,8 +197,16 @@ export type OnboardingTurn = {
   /** How the person said the system should work (`INTERVIEW_SETTING_KEYS`), each resting on one of their replies (`interview-settings.ts`). */
   settings?: Array<{ key: string; target: string; value: string; sourceRef: string; sourceQuote: string }>;
   profile?: ProfileModel;
-  /** The dialogue's observation of the round (deep stages only; dropped in code when its quotes do not check out). */
+  /**
+   * The dialogue's observations of the round, as it writes them (2026-11-14, the owner: when several cards are ready in one round they
+   * are answered one after another, not spread one a round): at most `INSIGHTS_PER_ROUND`, each dropped in code when its quotes do not
+   * check out. Stored as `insight` (the first) and `moreInsights` (the rest), which is what the page and the ratings read.
+   */
+  insights?: TurnInsight[];
+  /** The round's first observation as stored (and every round stored before 2026-11-14). */
   insight?: TurnInsight;
+  /** The round's other observations as stored, rated under `<session>#<seq>.<n>` (n = 1, 2). */
+  moreInsights?: TurnInsight[];
   /** The dialogue's own record of where the interview stands, handed back next round. */
   progress?: TurnProgress;
   /** Questions the dialogue hands to research threads this round (contract C); the worker opens one thread per question. */
@@ -230,6 +238,8 @@ export type ItemScore = { itemId: string; score: number; confidence: number; sen
  * what would show it wrong (`falsifier`, shown under the card as 「如果……，这条就不准」). `checkInsight` keeps the card only when it
  * has a falsifier and every span is in its reply.
  */
+/** Observation cards one round may carry: the ones ready together are answered one after another (2026-11-14). */
+export const INSIGHTS_PER_ROUND = 3;
 export type TurnInsight = {
   /**
    * The hypothesis it asks about (2026-11-12): one on record by id, or, written "" by the dialogue, a new one the app adds to the log
@@ -582,10 +592,11 @@ function turnFields(ids?: TurnIds) {
     // The round's observation (contract A, 2026-11-12): an inference that may judge, resting on the person's verbatim words, with outside
     // data when there is any and what would show it wrong. `text` empty for none. Checked in code (`checkInsight`): a falsifier, and each
     // quote in the reply it names.
-    insight: object({ hypothesisId: { type: "string", maxLength: 12 }, dimension: DIMENSION_FIELD, text: { type: "string", maxLength: 400 },
+    insights: { type: "array", maxItems: INSIGHTS_PER_ROUND, items: object({ hypothesisId: { type: "string", maxLength: 12 }, dimension: DIMENSION_FIELD,
+      text: { type: "string", maxLength: 400 },
       refs: { type: "array", maxItems: 4, items: object({ replyId: { type: "string", maxLength: 20 }, quote: { type: "string", maxLength: 80 } }) },
       external: { type: "array", maxItems: 3, items: object({ text: text(300), url: URL_FIELD }) },
-      falsifier: { type: "string", maxLength: 200 } }),
+      falsifier: { type: "string", maxLength: 200 } }) },
     // Questions for research threads (contract C): what needs the web to answer, why it matters, the dimension it bears on.
     research: { type: "array", maxItems: 3, items: object({ question: text(300), why: text(300), dimension: DIMENSION_FIELD }) },
     // The hypothesis log, career directions and dimension notes (contract B): only what is new or changed this run, merged by id.
@@ -625,7 +636,7 @@ function turnFields(ids?: TurnIds) {
  * and the next questions. The **extraction** — facts with their sentence numbers, projects, dates, line attributes, hours, the
  * portrait — is written by its own run in the background, so its repairs never hold the conversation up.
  */
-export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage", "insight", "progress", "research"] as const;
+export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage", "insights", "progress", "research"] as const;
 export const EXTRACT_KEYS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles", "goalEdits", "availability", "settings", "profileSections", "itemScores",
   "hypotheses", "careers", "dimensions", "dropCareers", "pointChanges"] as const;
 export const onboardingDialogueSchema = (ids?: TurnIds) => object(pick(turnFields(ids), DIALOGUE_KEYS));
@@ -669,7 +680,7 @@ export function listsAtLimit(output: unknown, schema: unknown = ONBOARDING_EXTRA
   });
 }
 /** What the person waits for, and what is stored as the round. */
-export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage" | "insight" | "progress" | "research">;
+export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage" | "insights" | "progress" | "research">;
 /** What the background run writes to the ledger. */
 export type OnboardingExtraction = Pick<OnboardingTurn, "slotUpdates" | "projectsDetected" | "flywheelCandidates" | "lineProfiles" | "goalEdits"
   | "availability" | "settings" | "hypotheses" | "careers" | "dimensions" | "dropCareers" | "pointChanges"> & { fileDates?: DateExtraction; profileSections?: ProfileSections; itemScores?: ItemScore[] };

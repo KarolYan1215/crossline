@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
+import { ONBOARDING_INSIGHTS } from "@crossline/core";
 import { CrosslineStore, extractBacklog, readExtractState, writeExtractState } from "@crossline/db";
 import { createOnboardingSessionRunner as createRunner, ONBOARDING_SKILL } from "./onboarding-session";
 import { createOnboardingExtractor, evidenceTools, extractionSettled, ONBOARDING_EXTRACT_SKILL, readLaneState, requestExtraction, searchTerms } from "./onboarding-extract";
@@ -309,6 +310,11 @@ test("in lanes the ledger, the portrait's sections and its inferences are writte
     { match: '"lane":"sections"', answers: [sections] },
     { match: '"lane":"insights"', answers: [JSON.stringify({ hypotheses: [], careers: [], dimensions: [], dropCareers: [] })] },
     { match: EXTRACT, answers: [deadline([1])] }] });
+  // The person's ratings of this session's cards, in full and with the correction (another session's are not this one's).
+  store.setSetting(workspaceId, ONBOARDING_INSIGHTS, JSON.stringify({
+    "s#2.1": { verdict: "partial", text: "你最投入的两次都有人等着结果。", correction: "等结果的是我自己定的期限", at: "2026-11-12T00:00:01.000Z" },
+    "s#2": { verdict: "fits", text: "你先搭框架再动手。", at: "2026-11-12T00:00:00.500Z" },
+    "t#2": { verdict: "off", text: "别的会话的卡。", at: "2026-11-12T00:00:02.000Z" } }));
   const run = createRunner(store, workspaceId, "C:\\repo", () => rpc);
   expect((await run({ sessionId: "s", text: "论文 12 月中投稿，和产品在抢同一段时间。" })).state).toBe("asked");
   await extractionSettled(workspaceId);
@@ -321,6 +327,9 @@ test("in lanes the ledger, the portrait's sections and its inferences are writte
   expect(JSON.parse(ledger.slice(ledger.indexOf("{"), ledger.lastIndexOf("}") + 1))).toMatchObject({ lane: "ledger", profile: null, profileTask: null });
   expect(contextOf("sections").profileTask).toEqual({ finalize: [], synthesize: false });
   expect(contextOf("insights")).toMatchObject({ profileTask: null, profile: expect.any(Object) });
+  expect((contextOf("insights") as { observations?: string[] }).observations)
+    .toEqual(["准：你先搭框架再动手。", "部分对：你最投入的两次都有人等着结果。 → 本人更正：等结果的是我自己定的期限"]);
+  expect(readLaneState(store, workspaceId, "s", "insights").readAt).toEqual(expect.any(String));
   expect(store.listProfileFacts(workspaceId).map((fact) => fact.slot)).toEqual(["deadline"]);
   expect(JSON.parse(store.getSetting(workspaceId, "profile.model")!)).toMatchObject({ problem: "论文和产品抢同一段时间" });
   for (const lane of ["ledger", "sections", "insights"] as const) expect(readLaneState(store, workspaceId, "s", lane)).toMatchObject({ upTo: 1, failures: 0 });
@@ -390,8 +399,8 @@ test("under the points rules the sections' lane writes points with their quotes,
 test("under the points rules a card that names no hypothesis on record becomes one in the log, and its round says which", async () => {
   const card = JSON.stringify({ reply: "收到。", questions: [{ id: "q2", text: "还有别的吗？", kind: "free", options: [], allowOther: true, identityId: "", projectId: "", repeats: 0 }],
     coverage: [], nextAction: "ask", stage: "energy",
-    insight: { hypothesisId: "", dimension: "D2", text: "两次投入都和有人等结果有关", refs: [{ replyId: "reply-1", quote: "和同学赶比赛" }, { replyId: "reply-5", quote: "导师等着看图" }],
-      external: [], falsifier: "没人等时也一样投入" } });
+    insights: [{ hypothesisId: "", dimension: "D2", text: "两次投入都和有人等结果有关", refs: [{ replyId: "reply-1", quote: "和同学赶比赛" }, { replyId: "reply-5", quote: "导师等着看图" }],
+      external: [], falsifier: "没人等时也一样投入" }] });
   const { rpc } = runtime([round, round, card], [facts(), facts(), facts()]);
   const run = createRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });
   for (const text of ["和同学赶比赛那次最投入。", "还有一门课。", "组会前导师等着看图，那晚写到三点。"]) await run({ sessionId: "s", text });

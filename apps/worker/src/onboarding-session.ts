@@ -15,16 +15,16 @@ import {
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillProgress } from "@crossline/codex";
 import {
   EXTRACT_REREAD_SETTING, extractBacklog, readExtractState, firstSentenceOf, markFinishing, interviewChecklistFor, interviewGapsFor, interviewLocale, lockInterviewLocale, queueExtractDocs, questionScreenFor, readExtractDocs, unfiledFilesIn,
-  type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument
+  insightKey, type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument
 } from "@crossline/db";
 import { sourceIds } from "./source-ids";
 import { localeOf } from "./locale";
 import { adoptLineGoal, identityLines } from "./lines";
 import { checklistAnswered, checklistAskable, ledgerForModel, linesAnsweredUnread, recordReplyAnswers, recordRound, resolveRepeats, syncGapQuestions } from "./question-ledger";
-import { createOnboardingExtractor, extractionReached, requestAllLanes, requestExtraction, type ExtractLane } from "./onboarding-extract";
+import { cardsWait, createOnboardingExtractor, extractionReached, requestAllLanes, requestExtraction, type ExtractLane } from "./onboarding-extract";
 import { DATES_UNRECORDED_EVENT, ONBOARDING_UNRECORDED_EVENT, personTimeZone, readProfileModel } from "./onboarding-persist";
 import { paceContext, storedProgress } from "./onboarding-pace";
-import { hypothesisFromCard, POINTS_RULES, pointsRules } from "@crossline/core";
+import { CARDS_OFFERED, cardCandidateIds, hypothesisFromCard, INSIGHTS_PER_ROUND, POINTS_RULES, pointsRules, type Hypothesis, type TurnInsight } from "@crossline/core";
 import { readResearch, researchForDialogue, researchRunnerFor } from "./onboarding-research";
 import { DOMAIN_PACKS, domainGuides } from "@crossline/identity-packs";
 
@@ -352,8 +352,10 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const heardAt = new Date().toISOString();
     const recorded = recordedSince(coverage.heardAt);
     // The short ledger the round starts from: the last round's progress record, an abstract of the ledger, and the latest ratings.
+    // A correction the inferences' lane has not read yet holds the cards back (`cardsWait`); with no extraction there is nothing to wait for.
+    const waitCards = !focusLine && extractMode !== "off" && pointsRules(session.coverage) && cardsWait(store, workspaceId, sessionId, lanes);
     const pace = () => paceContext(store, workspaceId, sessionId, { today, recent: recorded.lines, progress: storedProgress(session!.coverage), flow, depth: depthNow(),
-      rules: !focusLine && pointsRules(session!.coverage),
+      rules: !focusLine && pointsRules(session!.coverage), cardsWait: waitCards,
       lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, goals: line.goals ?? [] })) });
     // What the app did to the last round and which replies the ledger lags behind: sent with every turn, only when there is something.
     const lastRound = coverage.lastRound;
@@ -624,7 +626,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const edits: RoundEdits = {
       removed: [
         ...screen.screened.map((item) => ({ text: item.question.text, why: `not shown: ${SCREEN_WHY[item.reason] ?? item.reason}` })),
-        ...repeated.dropped.map((item) => ({ text: item.text, why: `not shown: already answered (#${item.repeats})` })),
+        ...repeated.dropped.map((item) => ({ text: item.text, why: item.why === "undecided" ? "not shown: the person said this day is not set yet; keep it open or as a rough window, never ask it again"
+          : item.why === "one_date" ? "not shown: one day question a round" : `not shown: already answered (#${item.repeats})` })),
         ...repeated.questions.filter((question) => !shown.has(question.id))
           .map((question) => ({ text: question.text, why: `not shown: over this round's limit of ${tier.roundQuestions}; may be asked next round` }))
       ],
@@ -634,45 +637,62 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       idempotencyKey: `onboarding:round-edited:${sessionId}:${replyId}:${heardAt}`, type: "onboarding.round_edited", entityId: sessionId,
       payload: { replyId, ...edits } });
     // Observations may come as often as there is evidence (the owner, 2026-11-12), never the same one twice: the Skill asks for a new
-    // inference each time, and an observation whose words were already shown is dropped here.
+    // inference each time, and an observation whose words were already shown is dropped here. Cards ready together come in one round and
+    // are answered one after another (the owner, 2026-11-14: 「同一轮有很多卡准备好了，连续回答，而不是分批插入各轮」).
     const squeeze = (text: string) => text.replace(/\s/gu, "");
-    const shownInsights = new Set(messages.filter((message) => message.role === "assistant")
-      .map((message) => squeeze(String((message.content as { insight?: { text?: string } }).insight?.text ?? ""))).filter(Boolean));
-    // Never beside the safety check, never built on a disclosure (`disclosureReplies`).
+    const earlierCards = messages.filter((message) => message.role === "assistant").flatMap((message) => {
+      const content = message.content as { insight?: TurnInsight; moreInsights?: TurnInsight[] };
+      return [content.insight, ...(content.moreInsights ?? [])].filter((card): card is TurnInsight => Boolean(card?.text));
+    });
+    const shownInsights = new Set(earlierCards.map((card) => squeeze(card.text)));
+    // Never beside the safety check, never built on a disclosure (`disclosureReplies`); none while a correction waits to be read (`cardsWait`).
     const sensitive = disclosureReplies(messages);
-    const checkedInsight = handlesDisclosure(output.reply) ? undefined : (() => {
-      const checked = checkInsight(result.output.insight, replies, output.stage);
-      return checked?.refs.some((ref) => sensitive.has(ref.replyId)) ? undefined : checked;
-    })();
-    const newCard = checkedInsight && !shownInsights.has(squeeze(checkedInsight.text)) ? checkedInsight : undefined;
-    // Under the points rules every card is one hypothesis of the log (2026-11-12): one on record by its id, never one a card already asked
-    // about; else a new one, added to the log here under the reply's number, so 准 / 不准 lands on the inference it rates.
-    const insight = newCard && !focusLine && pointsRules(session.coverage) ? (() => {
-      const asked = new Set(messages.filter((message) => message.role === "assistant")
-        .map((message) => String((message.content as { insight?: { hypothesisId?: string } }).insight?.hypothesisId ?? "")).filter(Boolean));
+    const rules = !focusLine && pointsRules(session.coverage);
+    const observed: TurnInsight[] = [];
+    if (!handlesDisclosure(output.reply) && !waitCards) {
       const profile = readProfile();
-      const named = result.output.insight?.hypothesisId?.trim() ?? "";
-      const onRecord = named ? profile.hypotheses.find((item) => item.id === named) : undefined;
-      if (onRecord) return onRecord.cardKey || asked.has(onRecord.id) || onRecord.status === "refuted" ? undefined
-        : { ...newCard, hypothesisId: onRecord.id, dimension: onRecord.dimension };
-      // `c<seq>`, or with a suffix if an id like it is already on record.
-      let id = `c${userMessage.seq}`;
-      for (let n = 2; profile.hypotheses.some((item) => item.id === id); n += 1) id = `c${userMessage.seq}-${n}`;
-      const made = hypothesisFromCard(newCard, id, result.output.insight?.dimension);
-      store.setSetting(workspaceId, "profile.model", JSON.stringify({ ...profile, hypotheses: [...profile.hypotheses.filter((item) => item.id !== id), made] }));
-      return { ...newCard, hypothesisId: id, dimension: made.dimension };
-    })() : newCard;
+      // Under the points rules every card is one hypothesis of the log (2026-11-12): one on record by its id, never one a card already
+      // asked about; a new one only when the log offers none (replay 12: a card the dialogue made up afresh beside four offered ones put
+      // back a premise the person had corrected), added to the log here under the reply's number, so 准 / 不准 lands on what it rates.
+      const offered = rules ? cardCandidateIds(profile.hypotheses ?? [], CARDS_OFFERED) : [];
+      const askedIds = new Set(earlierCards.map((card) => card.hypothesisId ?? "").filter(Boolean));
+      const made: Hypothesis[] = [];
+      for (const written of (result.output.insights ?? []).slice(0, INSIGHTS_PER_ROUND)) {
+        const checked = checkInsight(written, replies, output.stage);
+        if (!checked || checked.refs.some((ref) => sensitive.has(ref.replyId)) || shownInsights.has(squeeze(checked.text))
+          || observed.some((card) => squeeze(card.text) === squeeze(checked.text))) continue;
+        if (!rules) { observed.push(checked); continue; }
+        const named = written.hypothesisId?.trim() ?? "";
+        const onRecord = named ? profile.hypotheses.find((item) => item.id === named) : undefined;
+        if (onRecord) {
+          if (onRecord.cardKey || askedIds.has(onRecord.id) || onRecord.status === "refuted" || observed.some((card) => card.hypothesisId === onRecord.id)) continue;
+          observed.push({ ...checked, hypothesisId: onRecord.id, dimension: onRecord.dimension });
+          continue;
+        }
+        if (offered.length || made.length) continue;
+        // `c<seq>`, or with a suffix if an id like it is already on record.
+        let id = `c${userMessage.seq}`;
+        for (let n = 2; profile.hypotheses.some((item) => item.id === id); n += 1) id = `c${userMessage.seq}-${n}`;
+        const hypothesis = hypothesisFromCard(checked, id, written.dimension);
+        made.push(hypothesis);
+        observed.push({ ...checked, hypothesisId: id, dimension: hypothesis.dimension });
+      }
+      if (made.length) store.setSetting(workspaceId, "profile.model", JSON.stringify({ ...profile,
+        hypotheses: [...profile.hypotheses.filter((item) => !made.some((new_) => new_.id === item.id)), ...made] }));
+    }
     const progress = readTurnProgress(result.output.progress);
-    const { insight: _raw, progress: _rawProgress, ...rest } = output;
+    const { insights: _raw, progress: _rawProgress, ...rest } = output;
     // A card is rated where it stands: the reply does not say it a second time (`withoutCardEcho`).
-    const stored = { ...rest, ...(insight ? { reply: withoutCardEcho(rest.reply, insight.text), insight } : {}), ...(progress ? { progress } : {}) };
+    const replyKept = observed.reduce((reply, card) => withoutCardEcho(reply, card.text), rest.reply);
+    const stored = { ...rest, ...(observed.length ? { reply: replyKept, insight: observed[0]!, ...(observed.length > 1 ? { moreInsights: observed.slice(1) } : {}) } : {}),
+      ...(progress ? { progress } : {}) };
     const roundSeq = store.appendOnboardingMessage({ sessionId, workspaceId, role: "assistant", content: stored, createdAt: new Date().toISOString() });
-    // The hypothesis a card shows is asked from now on, answered or not: `cardKey` keeps it out of the next cards' candidates.
-    if (insight?.hypothesisId) {
+    // The hypothesis a card shows is asked from now on, answered or not: `cardKey` keeps it out of the next observed' candidates.
+    if (observed.some((card) => card.hypothesisId)) {
       const profile = readProfile();
-      const key = `${sessionId}#${roundSeq}`;
+      const keys = new Map(observed.map((card, index) => [card.hypothesisId ?? "", insightKey(sessionId, roundSeq, index)]));
       store.setSetting(workspaceId, "profile.model", JSON.stringify({ ...profile,
-        hypotheses: profile.hypotheses.map((item) => (item.id === insight.hypothesisId && !item.cardKey ? { ...item, cardKey: key } : item)) }));
+        hypotheses: profile.hypotheses.map((item) => (keys.has(item.id) && !item.cardKey ? { ...item, cardKey: keys.get(item.id)! } : item)) }));
     }
     recordRound(store, workspaceId, sessionId, roundSeq, output.questions, new Date().toISOString());
     // Saved over the session as it is now, so a stage the extraction never writes is not lost to the copy read at the start.

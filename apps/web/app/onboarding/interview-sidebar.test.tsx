@@ -45,9 +45,9 @@ test("the map places the ten dimensions, each hypothesis in its dimension's sect
 
 test("what the person rated 准 comes first: rated hypotheses, then rated observations no hypothesis already says", () => {
   const hypotheses = [hypothesis({ id: "h1" }), hypothesis({ id: "h2", statement: "怕失去选择", rated: "fits" })];
-  const entries = fitsEntries(hypotheses, [{ seq: 4, text: "怕失去选择" }, { seq: 6, text: "做事先搭框架" }, { seq: 8, text: "不准的这条" }],
-    { "4": "fits", "6": "fits", "8": "off" });
-  expect(entries.map((entry) => entry.text)).toEqual(["怕失去选择", "做事先搭框架"]);
+  const entries = fitsEntries(hypotheses, [{ seq: 4, text: "怕失去选择" }, { seq: 6, text: "做事先搭框架" }, { seq: 8, text: "不准的这条" }, { seq: "8.1", text: "同一轮的第二张" }],
+    { "4": "fits", "6": "fits", "8": "off", "8.1": "fits" });
+  expect(entries.map((entry) => entry.text)).toEqual(["怕失去选择", "做事先搭框架", "同一轮的第二张"]);
   expect(entries[0]).toMatchObject({ source: "hypothesis", hypothesisId: "h2" });
   expect(fitsFirst(hypotheses).map((item) => item.id)).toEqual(["h2", "h1"]);
 });

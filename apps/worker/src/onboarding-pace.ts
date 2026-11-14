@@ -1,7 +1,7 @@
 // i18n-exempt: the short ledger handed to the interview model each round (model-facing)
 import {
   AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, ONBOARDING_INSIGHTS, fixedScheduleLines, interviewAbstract, lineAttributes, progressLines, readInsightRatings, readTurnProgress,
-  resolveAvailability, type InterviewFlow, type OnboardingDepth, type StoredLineProfile, type TurnProgress, cardCandidates, hypothesisLogLines, pointLines, GOAL_CANDIDATES_MIN
+  resolveAvailability, type InterviewFlow, type OnboardingDepth, type StoredLineProfile, type TurnProgress, cardCandidates, hypothesisLogLines, pointLines, GOAL_CANDIDATES_MIN, CARDS_OFFERED
 } from "@crossline/core";
 import { datedItems, type CrosslineStore } from "@crossline/db";
 import { readProfileModel } from "./onboarding-persist";
@@ -26,7 +26,10 @@ export function paceContext(store: CrosslineStore, workspaceId: string, sessionI
   depth?: OnboardingDepth;
   /** The points rules: the hypothesis log and the points ledger go with every round. */
   rules?: boolean;
-}): { progress?: string[]; abstract: string[]; observations?: string[]; goalPicker?: string[]; fixedSchedule?: string[]; hypothesisLog?: string[]; cardFrom?: string[]; points?: string[] } {
+  /** The person corrected a card the inferences' lane has not read yet (`cardsWait`): no card this round. */
+  cardsWait?: boolean;
+}): { progress?: string[]; abstract: string[]; observations?: string[]; goalPicker?: string[]; fixedSchedule?: string[]; hypothesisLog?: string[]; cardFrom?: string[];
+  cardsWait?: string; points?: string[] } {
   const profiles = (() => { try { return JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") as Record<string, StoredLineProfile>; } catch { return {}; } })();
   const facts = store.listProfileFacts(workspaceId);
   const deadlineOf = (projectId: string) => {
@@ -57,7 +60,8 @@ export function paceContext(store: CrosslineStore, workspaceId: string, sessionI
   });
   const ratings = Object.entries(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS)))
     .filter(([key]) => key.startsWith(`${sessionId}#`)).sort((a, b) => a[1].at.localeCompare(b[1].at)).slice(-OBSERVATIONS_SHOWN)
-    .map(([, rating]) => `观察「${(rating.text ?? "").slice(0, 60)}」：本人说${rating.verdict === "fits" ? "准" : rating.verdict === "partial" ? `部分对，更正为「${(rating.correction ?? "").slice(0, 60)}」` : "不准"}`);
+    // Whole, not cut at 60 characters: a premise cut off is a premise the next card cannot see was corrected (replay 12).
+    .map(([, rating]) => `观察「${(rating.text ?? "").slice(0, 300)}」：本人说${rating.verdict === "fits" ? "准" : rating.verdict === "partial" ? `部分对，更正为「${(rating.correction ?? "").slice(0, 300)}」` : "不准"}`);
   const progress = progressLines(input.progress, input.flow, input.depth);
   // Lines with no long-term goal yet, and whether the picker beside the conversation already offers candidates for one: the dialogue asks
   // what the person wants to become on a line only while it offers none (W-8: asking beside the picker asked the same thing twice).
@@ -72,9 +76,10 @@ export function paceContext(store: CrosslineStore, workspaceId: string, sessionI
   // Under the points rules (2026-11-12): what cards may ask about, and what is settled.
   const log = input.rules ? hypothesisLogLines(profile.hypotheses ?? []) : [];
   const points = input.rules ? pointLines(profile.points ?? []).slice(-30) : [];
-  const cardFrom = input.rules ? cardCandidates(profile.hypotheses ?? []) : [];
+  const cardFrom = input.rules && !input.cardsWait ? cardCandidates(profile.hypotheses ?? [], CARDS_OFFERED) : [];
   return { abstract, ...(progress.length ? { progress } : {}), ...(ratings.length ? { observations: ratings } : {}),
     ...(log.length ? { hypothesisLog: log } : {}), ...(cardFrom.length ? { cardFrom } : {}), ...(points.length ? { points } : {}),
+    ...(input.rules && input.cardsWait ? { cardsWait: "本人刚更正过观察卡，假设日志还没按更正重看：这一轮不出观察卡，insights 写 []。" } : {}),
     ...(goalPicker.length ? { goalPicker } : {}), ...(fixedSchedule.length ? { fixedSchedule } : {}) };
 }
 

@@ -20,7 +20,7 @@ export function DivergenceView({ hypotheses, dimensions, insights, ratings, init
   hypotheses: Hypothesis[] | undefined;
   dimensions: import("./interview-contract").DimensionNote[] | undefined;
   /** The observation cards of the conversation, by round, for the 「准」 list. */
-  insights: Array<{ seq: number; text: string }>;
+  insights: Array<{ seq: number | string; text: string }>;
   ratings: Record<string, "fits" | "off" | "partial"> | undefined;
   /** Under the points rules, the points ledger: listed above the map in place of the 「准」 list (a confirmed inference is one of them). */
   points?: ProfilePoint[];

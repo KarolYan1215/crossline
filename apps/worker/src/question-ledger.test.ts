@@ -127,3 +127,25 @@ test("a checklist question answered with something that settles it counts as ans
   store.answerQuestion(ws, second, { text: "选择：馒头的日常照顾，没有截止", at });
   expect(checklistAnswered(store, ws, "s1")(text)).toBe(true);
 });
+
+test("a day the person has not set is not asked again; after two 「还没定」 the dialogue asks no days, and one thing gets one day question a round", () => {
+  store = new CrosslineStore(":memory:");
+  const at = "2026-11-14T05:00:00Z";
+  const ask = (text: string, projectId = "", id = "q") =>
+    ({ id, text, kind: "free" as const, options: [], allowOther: true, identityId: "student", projectId, repeats: 0 });
+  // Two days of one thing in one round: the first stays. Two projects' deadlines are two things.
+  const round = resolveRepeats(store, ws, "s1", [ask("简历打算哪天做出来？"), ask("打算什么时候开始约人聊？")]);
+  expect(round.questions.map((question) => question.text)).toEqual(["简历打算哪天做出来？"]);
+  expect(round.dropped).toEqual([expect.objectContaining({ why: "one_date" })]);
+  expect(resolveRepeats(store, ws, "s1", [ask("「A」截止定在哪天？", "a"), ask("「B」截止定在哪天？", "b")]).questions).toHaveLength(2);
+  // Answered 「还没定」: the same day reworded is dropped, another thing's day still goes out.
+  store.answerQuestion(ws, store.recordQuestion(ws, { kind: "interview", key: "iq:s1:2:q1", text: "简历打算哪天做出来？", identityId: "student", status: "open", at }),
+    { text: "还没定，要先想好投哪类", at });
+  expect(resolveRepeats(store, ws, "s1", [ask("简历哪天写好？")]).dropped).toEqual([expect.objectContaining({ why: "undecided" })]);
+  expect(resolveRepeats(store, ws, "s1", [ask("约人聊的事打算什么时候开始？")]).questions).toHaveLength(1);
+  // A second 「还没定」: no more days from the dialogue; the app's own deadline question and a question with no day still go out.
+  store.answerQuestion(ws, store.recordQuestion(ws, { kind: "interview", key: "iq:s1:4:q1", text: "约人聊的事打算什么时候开始？", identityId: "student", status: "open", at }),
+    { text: "看情况", at });
+  const after = resolveRepeats(store, ws, "s1", [ask("作品集哪天整理好？"), ask("你最想先弄清楚的是什么？", "", "q2"), ask("「C」截止定在哪天？", "c", "gap-deadline-c")]);
+  expect(after.questions.map((question) => question.id)).toEqual(["q2", "gap-deadline-c"]);
+});

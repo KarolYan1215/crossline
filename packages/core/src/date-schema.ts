@@ -1,4 +1,5 @@
 import { withCourse } from "./task-title";
+import { inRoughWindow } from "./rough-dates";
 
 /**
  * Dates a person's own documents state — class meetings, quiz and homework dates, exams, deadlines.
@@ -210,8 +211,10 @@ export const RELATIVE_DAY_WORDS = /今天|今晚|明天|明早|明晚|后天|下
 export const RELATIVE_NOTE = "relative:";
 
 /** The person's words support a date when they print it, or, in a reply, name it relative to the day the reply was written. */
+// A reply's rough words (「下周」「11 月底前」「这学期内」, 2026-11-14) support a day inside the window they name: the extraction writes
+// the window's last day, the app keeps it as the deadline, and the person is never asked for the exact day (`roughWindow`).
 const supportsDate = (date: string, quote: string, sourceRef: string, today: string) =>
-  quoteSupportsDate(date, quote) || (sourceRef.startsWith("reply-") && relativeDays(quote, today).has(date));
+  quoteSupportsDate(date, quote) || (sourceRef.startsWith("reply-") && (relativeDays(quote, today).has(date) || inRoughWindow(date, quote, today)));
 
 type Known = { sources: Record<string, string>; today: string };
 

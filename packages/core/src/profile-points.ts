@@ -193,6 +193,12 @@ export function numberNewHypotheses<C extends { hypothesisIds?: string[] }>(onRe
     careers: careers.map((career) => (career.hypothesisIds ? { ...career, hypothesisIds: career.hypothesisIds.map(as) } : career)) };
 }
 
+/** Hypotheses offered to the cards each round (2026-11-14): up to `INSIGHTS_PER_ROUND` may go on cards together, one more to choose from. */
+export const CARDS_OFFERED = 4;
+
+/** The ids `cardCandidates` offers, in its order: a card naming one of them is drawn from the log. */
+export const cardCandidateIds = (hypotheses: Hypothesis[], limit = 3): string[] => candidateRows(hypotheses, limit).map(({ item }) => item.id);
+
 /**
  * What the next observation card asks about (2026-11-13, the owner: cards come from the log, not made up afresh each round): at most
  * `limit` hypotheses still open, never put on a card, resting on two replies or more (a card cites two), with the replies they rest on.
@@ -200,6 +206,14 @@ export function numberNewHypotheses<C extends { hypothesisIds?: string[] }>(onRe
  * sixth replay every one of twelve cards was a new inference, and none of the 25 the extraction kept was ever asked.
  */
 export function cardCandidates(hypotheses: Hypothesis[], limit = 3): string[] {
+  return candidateRows(hypotheses, limit)
+    // The competing explanation goes with it: a card states the pattern and leaves the why open unless the replies settle it (replays 10
+    // and 11, 2026-11-14: all seven cards rated 「部分对」 had the pattern right and the cause wrong).
+    .map(({ item, cited }) => `${item.id} [${item.dimension}] ${item.statement.slice(0, 120)}（依据 ${cited.slice(0, 3).map(([ref, text]) => `${ref}「${text.slice(0, 40)}」`).join("、")}）`
+      + (item.alternative.trim() ? `；另一种解释：${item.alternative.trim().slice(0, 80)}` : ""));
+}
+
+function candidateRows(hypotheses: Hypothesis[], limit: number) {
   // `cardKey` is set when a card is shown, answered or not (onboarding-session.ts), so a card left unanswered is not offered again.
   const asked = new Map<string, number>();
   for (const item of hypotheses) if (item.cardKey) asked.set(item.dimension, (asked.get(item.dimension) ?? 0) + 1);
@@ -207,11 +221,7 @@ export function cardCandidates(hypotheses: Hypothesis[], limit = 3): string[] {
   return hypotheses.map((item, index) => ({ item, index, cited: replies(item) }))
     .filter(({ item, cited }) => !item.cardKey && (item.status === "open" || item.status === "undecided") && cited.length >= 2)
     .sort((a, b) => (asked.get(a.item.dimension) ?? 0) - (asked.get(b.item.dimension) ?? 0) || b.cited.length - a.cited.length || a.index - b.index)
-    .slice(0, limit)
-    // The competing explanation goes with it: a card states the pattern and leaves the why open unless the replies settle it (replays 10
-    // and 11, 2026-11-14: all seven cards rated 「部分对」 had the pattern right and the cause wrong).
-    .map(({ item, cited }) => `${item.id} [${item.dimension}] ${item.statement.slice(0, 120)}（依据 ${cited.slice(0, 3).map(([ref, text]) => `${ref}「${text.slice(0, 40)}」`).join("、")}）`
-      + (item.alternative.trim() ? `；另一种解释：${item.alternative.trim().slice(0, 80)}` : ""));
+    .slice(0, limit);
 }
 
 /** The ledger as the extraction and the dialogue are shown it: one line per point still standing. */

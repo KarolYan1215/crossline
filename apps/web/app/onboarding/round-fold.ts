@@ -17,7 +17,12 @@ export function roundSummary(reply: string, max = 40): string {
   return chars.length > max ? `${chars.slice(0, max - 1).join("")}…` : first;
 }
 
-export function foldThread(messages: Message[], rated: (seq: number) => boolean): ThreadItem[] {
+/** A round's observation cards, first to last (2026-11-14: cards ready together come in one round). */
+export const cardsOf = (turn: AssistantTurn | undefined) => [turn?.insight, ...(turn?.moreInsights ?? [])]
+  .filter((card): card is NonNullable<AssistantTurn["insight"]> => Boolean(card?.text));
+
+/** `rated(seq, index)`: whether the round's card `index` (0 the first) has a rating. */
+export function foldThread(messages: Message[], rated: (seq: number, index: number) => boolean): ThreadItem[] {
   const lastAssistant = messages.map((message) => message.role).lastIndexOf("assistant");
   if (lastAssistant <= 0) return messages.map((message) => ({ kind: "message", message }));
   const items: ThreadItem[] = [];
@@ -34,7 +39,7 @@ export function foldThread(messages: Message[], rated: (seq: number) => boolean)
     while (index < lastAssistant && messages[index]!.role === "user") group.push(messages[index++]!);
     round++;
     const content = turn.content as AssistantTurn;
-    const insightOpen = Boolean(content.insight?.text) && !rated(turn.seq);
+    const insightOpen = cardsOf(content).some((_card, card) => !rated(turn.seq, card));
     items.push({ kind: "fold", key: `round-${turn.seq}`, round, summary: roundSummary(content.reply ?? ""), messages: group,
       ...(insightOpen ? { unratedInsight: turn } : {}) });
   }

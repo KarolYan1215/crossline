@@ -27,6 +27,8 @@ export type AssistantTurn = {
    * (contract A), absent on rounds stored before.
    */
   insight?: TurnInsightView;
+  /** The round's other observations (2026-11-14: cards ready together come in one round), rated under `<seq>.<n>`. */
+  moreInsights?: TurnInsightView[];
   /** The profile module's cards the app put in this round (flow v2): answered by tapping one of five dots, or in words in the card's box. */
   cards?: import("@crossline/core").ProfileCard[];
 };

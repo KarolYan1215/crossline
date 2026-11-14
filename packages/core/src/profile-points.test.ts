@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { applyPointChanges, cardCandidates, numberNewHypotheses, hypothesisFromCard, hypothesisLogLines, pointSectionFor, rateHypothesis, unrateHypothesis, type PointChange, type ProfilePoint } from "./profile-points";
+import { applyPointChanges, cardCandidateIds, cardCandidates, numberNewHypotheses, hypothesisFromCard, hypothesisLogLines, pointSectionFor, rateHypothesis, unrateHypothesis, type PointChange, type ProfilePoint } from "./profile-points";
 import type { Hypothesis } from "./profile-hypotheses";
 
 const at = "2026-11-12T00:00:00.000Z";
@@ -77,6 +77,9 @@ test("the next card is chosen from the log: open hypotheses never carded that re
   // h1 was asked, h4 rests on one reply, h5 is refuted and h6 settled; D5 has had no card, D2 one.
   expect(lines).toEqual(["h3 [D5] 被看见时更投入（依据 reply-2「有人看的时候我做得更快」、reply-4「交给导师前一晚写到三点」）",
     "h2 [D2] 被看见时更投入（依据 reply-2「有人看的时候我做得更快」、reply-4「交给导师前一晚写到三点」）"]);
+  // The dialogue may only card these ids (cards ready together come in one round, 2026-11-14).
+  expect(cardCandidateIds([hypothesis({ id: "h2", dimension: "D2", basis: two }), hypothesis({ id: "h3", dimension: "D5", basis: two }),
+    hypothesis({ id: "h4", dimension: "D5", basis: two, cardKey: "s#4.1" })], 4)).toEqual(["h2", "h3"]);
   // The competing explanation goes with it, so the card can leave the why open.
   expect(cardCandidates([hypothesis({ id: "h7", dimension: "D2", basis: two, alternative: "截止临近才快" })])[0]).toMatch(/；另一种解释：截止临近才快$/);
 });

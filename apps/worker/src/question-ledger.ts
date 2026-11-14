@@ -1,4 +1,4 @@
-import { answersInReply, freeTextAnswers, ledgerLines, questionSimilarity, sameQuestion, unsureAnswer, type LedgerQuestion, type ProfileGap, type TurnQuestion } from "@crossline/core";
+import { answersInReply, DATE_ASK, freeTextAnswers, ledgerLines, questionSimilarity, sameQuestion, undecidedAnswer, unsureAnswer, type LedgerQuestion, type ProfileGap, type TurnQuestion } from "@crossline/core";
 import type { CrosslineStore, StoredSentence } from "@crossline/db";
 
 /**
@@ -18,6 +18,19 @@ export const SAME_LINE_SIMILARITY = 0.6;
 export const EARLIER_SHOWN = 80;
 /** However it is worded, one question is put to the person at most this many times; the rest is left to an assumption. */
 export const MAX_ASKINGS = 2;
+/**
+ * A day question this close to one answered 「还没定」, about the same line and project, asks that day again (「简历打算哪天做出来」, then
+ * 「简历哪天写好」: 0.31; another thing's day, 「作品集哪天整理好」, is 0.13).
+ */
+export const SAME_DAY_SIMILARITY = 0.3;
+/**
+ * Days the dialogue asks itself (2026-11-14, replay 12): one a round about each thing (a project, or a line when none is named; two
+ * projects' deadlines asked together are two things), and none once the person answered this many day questions with
+ * 「还没定」. Six days were asked in seven rounds, four answered 「还没定」, and each next round asked the next thing's day;
+ * the person had said the days wait on a choice not made yet. A day not set is kept as a rough window or left open; the app's own deadline
+ * questions (`gap-`) keep their rules.
+ */
+export const DATE_UNDECIDED_MAX = 2;
 
 const interviewQuestions = (store: CrosslineStore, workspaceId: string, sessionId: string) => store.listQuestions(workspaceId, { kind: "interview" })
   .filter((question) => question.key.startsWith("gap:") || question.key.startsWith(`iq:${sessionId}:`));
@@ -71,7 +84,7 @@ export function ledgerForModel(store: CrosslineStore, workspaceId: string, sessi
   return ledgerLines([...older, ...settled, ...ownWaiting, ...appWaiting].sort((a, b) => a.id - b.id));
 }
 
-export type RepeatOutcome = { questions: TurnQuestion[]; coveredGaps: Set<string>; dropped: Array<{ text: string; repeats: number; why: "answered" | "similar" }> };
+export type RepeatOutcome = { questions: TurnQuestion[]; coveredGaps: Set<string>; dropped: Array<{ text: string; repeats: number; why: "answered" | "similar" | "undecided" | "one_date" }> };
 
 /**
  * Reads the round's `repeats`: a question asking again what was answered goes (asked again is the duplicate the ledger exists to catch;
@@ -86,7 +99,12 @@ export function resolveRepeats(store: CrosslineStore, workspaceId: string, sessi
   const dropped: RepeatOutcome["dropped"] = [];
   // An answer that settled nothing (「不确定」) may be asked about once more, never twice: the start items take only the person's word.
   const askedAgain = (id: number) => ledger.some((item) => item.repeats === id);
-  const reopenable = (item: LedgerQuestion) => item.status === "answered" && unsureAnswer(item.answer) && !askedAgain(item.id);
+  // A day the person said is not set yet is not asked again (`DATE_UNDECIDED_MAX`): only a start item's question is reopened.
+  const reopenable = (item: LedgerQuestion) => item.status === "answered" && unsureAnswer(item.answer) && !askedAgain(item.id)
+    && !(DATE_ASK.test(item.text) && !item.key.startsWith("gap:"));
+  // The dialogue's own day questions the person answered 「还没定」: past `DATE_UNDECIDED_MAX` of them, it asks no more days.
+  const undecidedDays = ledger.filter((item) => !item.key.startsWith("gap:") && item.status === "answered" && DATE_ASK.test(item.text) && undecidedAnswer(item.answer));
+  const daysThisRound = new Set<string>();
   // Same line and same project: two projects' deadlines, or 「X 这条线眼下在做的一件事」 asked of each line, are worded alike and are
   // different questions (2026-11-01: three lines' current work was asked in one round, all three dropped, and the round showed none).
   const alike = (a: { text: string; identityId: string; projectId: string }, b: { text: string; identityId: string; projectId: string }) => {
@@ -100,6 +118,16 @@ export function resolveRepeats(store: CrosslineStore, workspaceId: string, sessi
   const askedBefore = ledger.filter((item) => item.status !== "dropped" && !item.key.startsWith("gap:"));
   const kept: TurnQuestion[] = [];
   for (const question of questions) {
+    // The app's own questions (`gap-`) keep their rules; the dialogue's day questions are limited here.
+    if (!question.id.startsWith("gap-") && DATE_ASK.test(question.text)) {
+      if (undecidedDays.length >= DATE_UNDECIDED_MAX) { dropped.push({ text: question.text, repeats: undecidedDays.at(-1)!.id, why: "undecided" }); continue; }
+      const sameThing = undecidedDays.find((item) => (!item.identityId || !question.identityId || item.identityId === question.identityId)
+        && (!item.projectId || !question.projectId || item.projectId === question.projectId) && questionSimilarity(item.text, question.text) >= SAME_DAY_SIMILARITY);
+      if (sameThing) { dropped.push({ text: question.text, repeats: sameThing.id, why: "undecided" }); continue; }
+      const about = `${question.identityId}|${question.projectId}`;
+      if (daysThisRound.has(about)) { dropped.push({ text: question.text, repeats: 0, why: "one_date" }); continue; }
+      daysThisRound.add(about);
+    }
     const named = question.repeats ? byId.get(question.repeats) : undefined;
     if (named && (named.status === "answered" || named.status === "assumed") && !reopenable(named)) { dropped.push({ text: question.text, repeats: named.id, why: "answered" }); continue; }
     if (named?.key.startsWith("gap:")) coveredGaps.add(named.key.slice(4));

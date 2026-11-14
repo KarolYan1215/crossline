@@ -29,6 +29,22 @@ export function unsureAnswer(answer: string): boolean {
   return !text || /^(还?不(确定|知道|清楚|好说|记得)|暂(时)?不确定|暂不清楚|尚未确定|还没(想好|定)|没想好|说不(好|上来|准|清楚?)|跳过|暂无|unsure|notsure|don'?tknow|skip)$/iu.test(text);
 }
 
+/* i18n-ignore-start: patterns read from questions and answers, never shown */
+/**
+ * A question asking when something will be done (2026-11-14): 「哪天」「几号」「排在哪天」「打算什么时候投」「截止」. Not a question about when
+ * something happened (「最近一次……是什么时候」). The app's own deadline questions ask it too.
+ */
+export const DATE_ASK = /哪天|哪一天|几号|何时|哪个日期|排在|定在|截止|(打算|准备|计划|想|要).{0,10}什么时候|什么时候.{0,6}(办|投|交|做|开始|完成|出来|定)|when.{0,30}(will|plan|going to)|what day|which day/iu;
+/**
+ * An answer saying the day (or the thing) is not settled yet: 「还没定」「这学期内，具体再定」「看情况」「先选好方向，日期才定得下来」.
+ * Replay 12 asked six days, four answered so, and the next rounds asked the next thing's day: a day that cannot be set is an answer,
+ * kept as a rough window or left open, and not asked again in other words (`resolveRepeats` in the worker).
+ */
+export function undecidedAnswer(answer: string): boolean {
+  return unsureAnswer(answer) || /还没定|没定下|还没想好|没想好|具体再定|再定|定不下|看情况|看安排|说不准|不确定|还说不好|才定得下/u.test(answer);
+}
+/* i18n-ignore-end */
+
 /** Letters and digits only, lower case: what a question says, not how it is punctuated. */
 const normalize = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 /** The same question in the same words, punctuation, spacing and case set aside. */

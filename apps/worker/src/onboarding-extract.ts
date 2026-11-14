@@ -55,6 +55,23 @@ export const PORTRAIT_THINKING_BUDGET = 4096;
  * may wait before they read it anyway.
  */
 export const PORTRAIT_BATCH = 3;
+/** The observation ratings a portrait run reads, oldest dropped first: every correction of a usual interview. */
+const OBSERVATIONS_READ = 16;
+
+/** Whether the person rated an observation 部分对 or 不准 in this conversation after `since` (all of them when it is unset). */
+export function correctedSince(store: CrosslineStore, workspaceId: string, sessionId: string, since: string | undefined): boolean {
+  return Object.entries(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS)))
+    .some(([key, rating]) => key.startsWith(`${sessionId}#`) && rating.verdict !== "fits" && (!since || rating.at > since));
+}
+
+/**
+ * Whether this round's observation cards wait (2026-11-14, replay 12): the person corrected a card, and the inferences' lane has not
+ * read that correction yet, so the log the cards are drawn from may still rest on what was corrected. Replay 12 put one premise she had
+ * corrected three times on two more cards. The cards ready once the lane has read it come together in one round.
+ */
+export function cardsWait(store: CrosslineStore, workspaceId: string, sessionId: string, lanes = true): boolean {
+  return correctedSince(store, workspaceId, sessionId, readLaneState(store, workspaceId, sessionId, lanes ? "insights" : "all").readAt);
+}
 export const PORTRAIT_WAIT_MS = 10 * 60_000;
 
 /**
@@ -134,6 +151,8 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       // The inferences are what the next cards are chosen from: they wait for a batch only while the log has two or more to offer
       // (the seventh replay: batched from the start, the lane ran three times and no card came from the log).
       if (lane === "insights" && cardCandidates(readProfileModel(store, workspaceId).hypotheses ?? []).length < 2) return true;
+      // A correction the log has not been checked against holds the cards back (`cardsWait`): the lane reads it at once.
+      if (lane === "insights" && correctedSince(store, workspaceId, id, state(id).readAt)) return true;
       return pending.length >= (Number(process.env.CROSSLINE_PORTRAIT_BATCH) || PORTRAIT_BATCH) || Date.now() - Date.parse(pending[0]!.createdAt) >= PORTRAIT_WAIT_MS;
     };
     const due = (id: string) => { const retryAt = state(id).retryAt; return !retryAt || Date.parse(retryAt) <= Date.now(); };
@@ -183,6 +202,8 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
 
   /** The oldest waiting replies of one conversation (at most `REPLIES_PER_RUN`), and the files waiting, within the reading budget. */
   async function runInner(sessionId: string, lane: ExtractLane): Promise<ExtractOutcome> {
+    // Ratings given after this moment are not in this run's input (`cardsWait`).
+    const readAt = new Date().toISOString();
     const state = readLaneState(store, workspaceId, sessionId, lane);
     const client = getClient();
     const blocked = (code: string, message: string): ExtractOutcome => failed(sessionId, code, message, lane);
@@ -310,9 +331,13 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       replies, sources, ...(waitingDocs.length > taken.length ? { sourcesWaiting: waitingDocs.length - taken.length } : {}), reread,
       ...(cardItems.length ? { scaleItems: cardItems.map((item) => ({ id: item.id, text: item.text, anchors: item.anchors,
         card: CARD_TITLE[item.instrument] })) } : {}),
-      // The person's ratings of the interview's observations: one they called 不准 is wrong about them and does not go into the portrait.
-      ...(() => { const rated = Object.values(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS))).filter((rating) => rating.text)
-        .slice(-8).map((rating) => `${rating.verdict === "fits" ? "准" : "不准"}：${rating.text!.slice(0, 120)}`);
+      // The person's ratings of the interview's observations: one they called 不准 is wrong about them and does not go into the portrait;
+      // 部分对 comes with their correction, which every hypothesis resting on the same premise must follow. Until 2026-11-14 a 部分对 was
+      // shown here as 「不准」 without the correction, and replay 12 put a premise she corrected three times on two more cards.
+      ...(() => { const rated = Object.entries(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS)))
+        .filter(([key, rating]) => key.startsWith(`${sessionId}#`) && rating.text).sort((a, b) => a[1].at.localeCompare(b[1].at)).slice(-OBSERVATIONS_READ)
+        .map(([, rating]) => rating.verdict === "fits" ? `准：${rating.text!.slice(0, 300)}`
+          : rating.verdict === "partial" ? `部分对：${rating.text!.slice(0, 300)} → 本人更正：${(rating.correction ?? "").slice(0, 300)}` : `不准：${rating.text!.slice(0, 300)}`);
         return rated.length && readsPortrait ? { observations: rated } : {}; })(),
       ...(findings.length ? { research: findings } : {})
     };
@@ -388,7 +413,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
         const own = readExtractState(store, workspaceId, laneStateKey(sessionId, other));
         if (own.ranAt === undefined && !own.failures && !own.pinned) writeExtractState(store, workspaceId, laneStateKey(sessionId, other), { upTo: state.upTo, failures: 0, pinned: true });
       }
-      writeExtractState(store, workspaceId, laneStateKey(sessionId, lane), { upTo, failures: 0, ranAt: new Date().toISOString() });
+      writeExtractState(store, workspaceId, laneStateKey(sessionId, lane), { upTo, failures: 0, ranAt: new Date().toISOString(), readAt });
       if (finishing && profileTask) markFinishing(store, workspaceId, sessionId, finishing.runs + 1);
     });
     store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:extracted:${sessionId}:${upTo}:${new Date().toISOString()}`, type: "onboarding.extracted",

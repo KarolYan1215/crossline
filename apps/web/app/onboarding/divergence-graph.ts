@@ -70,7 +70,7 @@ export type FitsEntry = { key: string; text: string; source: "hypothesis" | "ins
  * What the person marked 准, kept on top (decision 23): rated hypotheses first, then the observation cards rated 准 whose text no hypothesis
  * already says.
  */
-export function fitsEntries(hypotheses: Hypothesis[] | undefined, insights: Array<{ seq: number; text: string }>,
+export function fitsEntries(hypotheses: Hypothesis[] | undefined, insights: Array<{ seq: number | string; text: string }>,
   ratings: Record<string, "fits" | "off" | "partial"> | undefined): FitsEntry[] {
   const entries: FitsEntry[] = (hypotheses ?? []).filter((item) => item.rated === "fits")
     .map((item) => ({ key: `h:${item.id}`, text: item.statement, source: "hypothesis", hypothesisId: item.id, dimension: item.dimension }));

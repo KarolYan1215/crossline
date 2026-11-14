@@ -28,8 +28,9 @@ export function falsifierCondition(falsifier: string | undefined): string {
  * Rating is a one-shot step (2026-11-10): with `vanish` the card leaves a receipt for about 1.5 s with 撤销 (which clears the rating and
  * brings the card back), then is gone; its round's fold keeps it, rated, where it can be changed (`vanish` off).
  */
-export function InsightCard({ sessionId, seq, insight, rating, onRated, vanish = false }: {
-  sessionId: string; seq: number; insight: TurnInsightView;
+export function InsightCard({ sessionId, seq, index = 0, insight, rating, onRated, vanish = false }: {
+  /** Which of the round's cards it is (0 the first; cards ready together come in one round, 2026-11-14). */
+  sessionId: string; seq: number; index?: number; insight: TurnInsightView;
   rating: "fits" | "off" | "partial" | undefined; onRated: () => void; vanish?: boolean;
 }) {
   const t = useT();
@@ -43,7 +44,7 @@ export function InsightCard({ sessionId, seq, insight, rating, onRated, vanish =
   const send = async (verdict: "fits" | "off" | "partial" | "clear") => {
     setBusy(true);
     const response = await fetch("/api/onboarding/insight", { method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sessionId, seq, verdict, ...(verdict === "partial" ? { correction: correction.trim() } : {}) }) }).catch(() => undefined);
+      body: JSON.stringify({ sessionId, seq, ...(index ? { index } : {}), verdict, ...(verdict === "partial" ? { correction: correction.trim() } : {}) }) }).catch(() => undefined);
     setBusy(false);
     return Boolean(response?.ok);
   };

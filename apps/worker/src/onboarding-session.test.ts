@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { CrosslineStore, writeExtractState } from "@crossline/db";
+import { CrosslineStore, rateInsight, writeExtractState } from "@crossline/db";
 import { cardWordsHead, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
   DEPTH_PACE, type OnboardingProgress, type ProfileCard } from "@crossline/core";
 import { cardsForRound, closingQuestion, createOnboardingSessionRunner as createRunner, finishInterview, INSTRUCTIONS, ONBOARDING_SKILL, paceDeepRound, shownOrOpen, stageOrderFor, stagePace, withChecklist, withFreshOpenQuestion, withoutEndHint } from "./onboarding-session";
-import { INSTRUCTIONS as EXTRACT_INSTRUCTIONS } from "./onboarding-extract";
+import { cardsWait, correctedSince, INSTRUCTIONS as EXTRACT_INSTRUCTIONS } from "./onboarding-extract";
 import { ONBOARDING_EXTRACT_SKILL } from "./onboarding-extract";
 import { fakeRuntime as runtimeWithRoutes } from "./testing/fake-runtime";
 
@@ -30,7 +30,9 @@ beforeEach(() => {
 });
 afterEach(() => { store.close(); vi.unstubAllEnvs(); });
 
-const turn = (over: object = {}) => JSON.stringify({
+// A test round's `insight` is the dialogue's one card (`insights`, 2026-11-14): an empty one is none.
+const turn = ({ insight, ...over }: { insight?: { text: string; [key: string]: unknown } } & Record<string, unknown> = {}) => JSON.stringify({
+  ...(insight ? { insights: insight.text ? [insight] : [] } : {}),
   reply: "收到，我先确认几件事。",
   questions: [{ id: "q1", text: "项目 A 的图表清单在哪？", kind: "single", allowOther: true, identityId: "research", projectId: "westlake",
     options: [{ id: "a", label: "师兄给的文档", detail: "" }, { id: "b", label: "只在聊天记录里", detail: "" }] }],
@@ -663,6 +665,34 @@ test("a card's hypothesis is marked asked when it is shown, rated or not; one pi
   expect(card?.hypothesisId).toBe("c5-2");
   expect(log().find((item) => item.id === "c5-2")?.cardKey).toBe(`s#${store.listOnboardingMessages(workspaceId, "s").at(-1)!.seq}`);
   expect(log().find((item) => item.id === "c5")?.cardKey).toBeUndefined();
+});
+
+test("cards ready together come in one round: each is kept, keyed and rated on its own, and a correction holds the next cards back", async () => {
+  const refs = [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-3", quote: "一个人做研究" }];
+  const card = (id: string, text: string) => ({ text, refs, falsifier: "如果独自时也常投入", hypothesisId: id, dimension: "D2" });
+  const { rpc } = fakeRuntime([turn({ stage: "energy", insight: { text: "", refs: [] } }),
+    turn({ stage: "energy", insights: [card("h1", "你说投入的两次都是和人一起赶东西。"), card("h2", "你说底座主线是一个人做的研究。"),
+      card("h3", "你说投入的两次都是和人一起赶东西。")] })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { checklist: false, extract: "off" });
+  await run({ sessionId: "s", text: "最投入的是和同学一起赶比赛的时候。" });
+  const hypothesis = (id: string) => ({ id, dimension: "D2", statement: id, basis: [], falsifier: "", alternative: "", status: "open" });
+  store.setSetting(workspaceId, "profile.model", JSON.stringify({ hypotheses: [hypothesis("h1"), hypothesis("h2"), hypothesis("h3")] }));
+  await run({ sessionId: "s", text: "底座是我一个人做研究。" });
+  const shown = store.listOnboardingMessages(workspaceId, "s").at(-1)!;
+  const content = shown.content as { insight?: { text: string }; moreInsights?: Array<{ text: string }> };
+  // The third says what the first said and is left out.
+  expect([content.insight?.text, ...(content.moreInsights ?? []).map((item) => item.text)])
+    .toEqual(["你说投入的两次都是和人一起赶东西。", "你说底座主线是一个人做的研究。"]);
+  const log = () => (JSON.parse(store.getSetting(workspaceId, "profile.model")!) as { hypotheses: Array<{ id: string; cardKey?: string; rated?: string }> }).hypotheses;
+  expect(log().map((item) => item.cardKey)).toEqual([`s#${shown.seq}`, `s#${shown.seq}.1`, undefined]);
+  // The second card is rated under its own key; a 部分对 newer than the inferences' last read holds the next cards back.
+  expect(cardsWait(store, workspaceId, "s")).toBe(false);
+  expect(rateInsight(store, workspaceId, { sessionId: "s", seq: shown.seq, index: 1, verdict: "partial", correction: "是一个人做，但常和导师讨论" }))
+    .toMatchObject({ ok: true, hypothesisId: "h2" });
+  expect(log().find((item) => item.id === "h2")?.rated).toBe("partial");
+  expect(rateInsight(store, workspaceId, { sessionId: "s", seq: shown.seq, index: 2, verdict: "fits" })).toEqual({ ok: false, code: "INSIGHT_NOT_FOUND" });
+  expect(cardsWait(store, workspaceId, "s")).toBe(true);
+  expect(correctedSince(store, workspaceId, "s", "2999-01-01T00:00:00Z")).toBe(false);
 });
 
 test("no observation card beside the safety check, and none built on the disclosure or the answer to the check", async () => {

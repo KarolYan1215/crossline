@@ -21,7 +21,7 @@ import { withLink } from "./rich-text";
 import { tFor } from "../../lib/i18n";
 import { useLocale } from "../locale-context";
 import { VoiceField } from "../ui/voice/voice-input";
-import { foldThread } from "./round-fold";
+import { cardsOf, foldThread } from "./round-fold";
 import { Receipt } from "./receipt";
 import { FinishButton } from "./finish-button";
 import { ResearchPanel } from "./research-panel";
@@ -310,20 +310,31 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const centre = deepStage ? roundQuestions : batchQuestions;
   const held = deepStage ? extra : [];
   const opening = !state.focusLine && messages.length === 0 && busy !== "turn" && !pendingText;
-  const insightCard = (message: Message, vanish: boolean) => {
+  /** A card's rating: `<seq>` for a round's first card, `<seq>.<n>` for the ones after it. */
+  const ratingOf = (seq: number, index: number) => state.insightRatings?.[index ? `${seq}.${index}` : String(seq)];
+  /**
+   * A round's observation cards, one after another (2026-11-14: cards ready together come in one round and are answered in a row):
+   * `which` picks the rated ones (in a fold), the unrated ones (outside it) or all (the open round).
+   */
+  const insightCards = (message: Message, vanish: boolean, which: "all" | "rated" | "unrated") => {
     const turn = asTurn(message);
-    return turn?.insight?.text && state.session ? <InsightCard key={`insight-${message.seq}`} sessionId={state.session.id} seq={message.seq} insight={turn.insight}
-      rating={state.insightRatings?.[String(message.seq)]} onRated={() => void load()} vanish={vanish} /> : null;
+    if (!turn || !state.session) return null;
+    const sessionId = state.session.id;
+    return cardsOf(turn).map((card, index) => {
+      const rating = ratingOf(message.seq, index);
+      if ((which === "rated" && !rating) || (which === "unrated" && rating)) return null;
+      return <InsightCard key={`insight-${message.seq}-${index}`} sessionId={sessionId} seq={message.seq} index={index} insight={card}
+        rating={rating} onRated={() => void load()} vanish={vanish} />;
+    });
   };
   /** One message of the thread; in a fold the observation shows rated (changeable), on the open round it goes once rated. */
   const renderMessage = (message: Message, folded: boolean) => {
     const turn = asTurn(message);
     if (!turn) return <div className="ob-turn ob-user" key={message.seq} data-user-text><p>{userText(message)}</p></div>;
     const latest = message.seq === messages.at(-1)?.seq;
-    const rated = Boolean(state.insightRatings?.[String(message.seq)]);
     return <div className="ob-turn ob-assistant" key={message.seq}>
       <p className="gen">{turn.reply}</p>
-      {(!folded || rated) && insightCard(message, !folded)}
+      {insightCards(message, !folded, folded ? "rated" : "all")}
       {latest && turn.nextAction === "ready_for_milestones" && state.readyToStart && <p className="ob-done">{t("信息已基本完整，可以在下方设计里程碑；画像报告随后生成。")}</p>}
     </div>;
   };
@@ -367,13 +378,13 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
           busy={busy !== ""} hasMaterials={filesRead} needsConnection={!state.focusLine && connected === false} onStart={(answer) => void start(answer)} />}
         {messages.length === 0 && state.focusLine && <div className="ob-turn ob-assistant"><p>{t("「{{line}}」的访谈：现状、长期目标、项目、截止日与已有文件。", { line: state.focusLine.label })}</p></div>}
         {/* Rounds before the latest fold to one line each; an observation still waiting for 准/不准 stays out until it is rated. */}
-        {foldThread(messages, (seq) => Boolean(state.insightRatings?.[String(seq)])).map((item) => item.kind === "message" ? renderMessage(item.message, false)
+        {foldThread(messages, (seq, index) => Boolean(ratingOf(seq, index))).map((item) => item.kind === "message" ? renderMessage(item.message, false)
           : <div key={item.key} className="ob-round">
             <details className="ob-round-fold">
               <summary><b>{item.round === 0 ? t("开场") : t("第 {{n}} 轮", { n: item.round })}</b>{item.summary && <span className="gen"> · {item.summary}</span>}</summary>
               {item.messages.map((message) => renderMessage(message, true))}
             </details>
-            {item.unratedInsight && insightCard(item.unratedInsight, true)}
+            {item.unratedInsight && insightCards(item.unratedInsight, true, "unrated")}
           </div>)}
         {busy === "turn" && pendingText && !(messages.at(-1)?.role === "user" && userText(messages.at(-1)!) === pendingText)
           && <div className="ob-turn ob-user" data-user-text><p>{pendingText}</p></div>}

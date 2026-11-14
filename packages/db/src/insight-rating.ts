@@ -2,6 +2,9 @@ import { EMPTY_PROFILE_MODEL, ONBOARDING_INSIGHTS, pointSectionFor, rateHypothes
   type DimensionId, type InsightRatings, type ProfileModel } from "@crossline/core";
 import type { CrosslineStore } from "./index";
 
+/** Where a card's rating is kept: `<session>#<seq>` for a round's first card, `<session>#<seq>.<n>` for the others. */
+export const insightKey = (sessionId: string, seq: number, index = 0) => `${sessionId}#${seq}${index ? `.${index}` : ""}`;
+
 type Card = { hypothesisId?: string; dimension?: DimensionId; text?: string; refs?: Array<{ replyId: string; quote: string }>; external?: Array<{ text: string; url: string }> };
 
 /**
@@ -11,14 +14,17 @@ type Card = { hypothesisId?: string; dimension?: DimensionId; text?: string; ref
  * what the one before did. Shared by the card's route and the persona replay, so a replay rates as the app does.
  */
 export function rateInsight(store: CrosslineStore, workspaceId: string, input: { sessionId: string; seq: number; verdict: "fits" | "off" | "partial" | "clear";
-  correction?: string; at?: string }): { ok: true; hypothesisId?: string } | { ok: false; code: "INSIGHT_NOT_FOUND" | "INSIGHT_CORRECTION_REQUIRED" } {
+  correction?: string; at?: string;
+  /** Which of the round's cards (2026-11-14: cards ready together come in one round): 0 the first (`insight`), n the n-th of `moreInsights`. */
+  index?: number }): { ok: true; hypothesisId?: string } | { ok: false; code: "INSIGHT_NOT_FOUND" | "INSIGHT_CORRECTION_REQUIRED" } {
   const correction = (input.correction ?? "").trim().slice(0, 300);
   if (input.verdict === "partial" && !correction) return { ok: false, code: "INSIGHT_CORRECTION_REQUIRED" };
   const round = store.listOnboardingMessages(workspaceId, input.sessionId).find((message) => message.seq === input.seq && message.role === "assistant");
-  const content = round?.content as { insight?: Card; stage?: string } | undefined;
-  const card = content?.insight;
+  const content = round?.content as { insight?: Card; moreInsights?: Card[]; stage?: string } | undefined;
+  const index = input.index ?? 0;
+  const card = index ? content?.moreInsights?.[index - 1] : content?.insight;
   if (!card?.text) return { ok: false, code: "INSIGHT_NOT_FOUND" };
-  const key = `${input.sessionId}#${input.seq}`;
+  const key = insightKey(input.sessionId, input.seq, index);
   const at = input.at ?? new Date().toISOString();
   store.atomically(() => {
     const ratings: InsightRatings = readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS));

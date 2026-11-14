@@ -40,7 +40,12 @@ export const EXTRACT_BACKOFF_MINUTES = [1, 5, 30] as const;
 
 /** `pinned`: a portrait lane's starting point, written before it first runs (apps/worker/src/onboarding-extract.ts `readLaneState`). */
 export type ExtractState = { upTo: number; failures: number; retryAt?: string; lastError?: { code: string; message: string; at: string }; ranAt?: string;
-  pinned?: boolean };
+  pinned?: boolean;
+  /**
+   * When the last finished run built its input (2026-11-14): the observation ratings it read are those given before this. The cards are
+   * drawn from the hypothesis log only once the inferences' lane has read the latest correction (`cardsWait`).
+   */
+  readAt?: string };
 /**
  * What the extraction still owes a conversation. `frontReplies` counts the waiting replies that answer a round of the front stages (or
  * the opening): only those can carry a start-standard fact, so only they hold 「开始使用」 (2026-10-19 walkthrough: on the sponsor model a

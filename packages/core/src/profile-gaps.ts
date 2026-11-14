@@ -128,7 +128,8 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
       detail: `「${label}」的长期目标还没有选定：本人从候选定语里选，或自己写。`,
       question: {
         id: `gap-goal-${picker.lineId}`, kind: "multi", allowOther: true, identityId: picker.lineId, projectId: "",
-        text: t("「{{label}}」的长期目标：下面是从你说过的话里整理出的词，勾选想成为的样子，也可以自己写。", { label }),
+        // Summarised by the extraction, not quoted (2026-11-14): the words describe the kind of person wanted on this line, not what was said.
+        text: t("「{{label}}」的长期目标：想成为怎样的{{label}}？下面几个词是按目前聊到的整理的，可以多选，也可以自己写。", { label }),
         options: candidates.map((text, index) => ({ id: `c${index + 1}`, label: text, detail: "" }))
       }
     });

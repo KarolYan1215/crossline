@@ -165,8 +165,10 @@ export function StageView({ state, stage, complete, onChanged }: {
 
 /** The observation cards of the conversation, by round, for the map's 「准」 list. */
 const insightsOf = (state: OnboardingState) => state.messages.flatMap((message) => {
-  const text = message.role === "assistant" ? (message.content as { insight?: { text?: string } } | null)?.insight?.text : undefined;
-  return text ? [{ seq: message.seq, text }] : [];
+  if (message.role !== "assistant") return [];
+  const content = message.content as { insight?: { text?: string }; moreInsights?: Array<{ text?: string }> } | null;
+  // A round's later cards are rated under `<seq>.<n>` (2026-11-14).
+  return [content?.insight, ...(content?.moreInsights ?? [])].flatMap((card, index) => card?.text ? [{ seq: index ? `${message.seq}.${index}` : message.seq, text: card.text }] : []);
 });
 
 /** The five kinds of start item (`interviewChecklist`, `start: true`), by the prefix of their ids. */
