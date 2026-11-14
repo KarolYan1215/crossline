@@ -88,6 +88,15 @@ test("本人用汉字说的钟点也算固定日程（「早八点到晚九点�
   expect(interviewChecklist(said).find((item) => item.id === "hard_schedule:research")?.done).toBe(true);
 });
 
+test("固定日程的槽位里没有哪天、几点，也没说定不下来，不算收集到（第十一次回放：开场卡的「有固定日程」被记成了日程）", () => {
+  const undated = { ...full, dates: full.dates.filter((entry) => !entry.recurring) };
+  const fact = (value: string) => ({ identityId: "research", projectId: "", slot: "fixed_schedule", status: "confirmed" as const, sourceRef: "reply-1", value });
+  const done = (value: string) => interviewChecklist({ ...undated, facts: [...undated.facts, fact(value)] }).find((item) => item.id === "hard_schedule:research")?.done;
+  expect(done("有固定日程")).toBe(false);
+  expect(done("工作日白天上课")).toBe(true);
+  expect(done("课表记不清，之后补")).toBe(true);
+});
+
 test("记在本人名下的课表算唯一那条硬线的固定日程；两条硬线时不替任何一条作数", () => {
   const undated = { ...full, dates: full.dates.filter((entry) => !entry.recurring) };
   const classes = { identityId: "person", projectId: "", slot: "fixed_schedule_class", status: "confirmed" as const, sourceRef: "reply-13", value: "周一到周五按课表上课，早八点到晚九点之间，周二没课" };

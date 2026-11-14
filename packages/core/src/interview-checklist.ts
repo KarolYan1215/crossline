@@ -118,8 +118,17 @@ const WEEKDAY = /周[一二三四五六日天末]|星期|礼拜|工作日|每天
 // 「早八点到晚九点」 in Chinese numerals is a time too (2026-11-12 replay: a student's class hours said so stayed 「not collected」, and the
 // interview asked for her fixed schedule again sixteen rounds after she gave it).
 const CLOCK = /\d{1,2}\s*[:：点]|[零一二两三四五六七八九十]{1,3}\s*点|[上下]午|早上|晚上|凌晨|\b\d{1,2}\s?(am|pm)\b/i;
-const statesSchedule = (fact: { slot: string; value?: string }) =>
-  SCHEDULE_SLOT.test(fact.slot) ? Boolean(fact.value?.trim()) : WEEKDAY.test(fact.value ?? "") && CLOCK.test(fact.value ?? "");
+/** A schedule the person could only give as a range or said they cannot pin down: recorded as the range, it settles the item (the Skill). */
+const VAGUE_SCHEDULE = /不固定|没有固定|没固定|记不清|说不准|随机|看情况|看课表|no fixed|not sure|varies/i;
+/**
+ * A schedule slot holds a schedule only when its value says when: a day, a time, or that it cannot be pinned down. Replay 11 (2026-11-14)
+ * read the opening card's 「有固定日程的主线：学生」 into `fixed_schedule` with no day or time in it, and the start standard stood at
+ * round 8 while her timetable was asked only in round 12.
+ */
+const statesSchedule = (fact: { slot: string; value?: string }) => {
+  const value = fact.value ?? "";
+  return SCHEDULE_SLOT.test(fact.slot) ? WEEKDAY.test(value) || CLOCK.test(value) || VAGUE_SCHEDULE.test(value) : WEEKDAY.test(value) && CLOCK.test(value);
+};
 /** What a line is about, said by the person: enough to stand for its description while the extraction has not written one. */
 const DESCRIBES_LINE = /^(description|what)$/;
 /** A part of a course (its project, an exam): graded and timed through the course itself, not on its own. */

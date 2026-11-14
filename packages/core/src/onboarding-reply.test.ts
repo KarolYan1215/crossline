@@ -40,6 +40,7 @@ test("nothing more to say counts only as the answer to the closing question", ()
   expect(saidNothingMore(closing, "【还有什么想聊的吗？】选择：没有了")).toBe(true);
   expect(saidNothingMore([{ id: "closing-open", text: "还有没有别的想聊的？没有的话，可以按「结束并出报告」。" }], "没有了")).toBe(true);
   expect(saidNothingMore(closing, "【还有什么想聊的吗？】补充：还想说说实习的事")).toBe(false);
-  expect(saidNothingMore(closing, "【还有什么想聊的吗？】选择：没有了\n【一天里哪段状态最好？】选择：下午")).toBe(false);
+  expect(saidNothingMore(closing, "【还有什么想聊的吗？】选择：没有了\n【画像报告会为本人生成一个卡通形象……】选择：不描述，用中性形象")).toBe(true);
+  expect(saidNothingMore(closing, "【还有什么想聊的吗？】选择：没有了\n其实还想问问实习的事")).toBe(false);
   expect(saidNothingMore([{ id: "q1", text: "一天里哪段状态最好？" }], "没有了")).toBe(false);
 });

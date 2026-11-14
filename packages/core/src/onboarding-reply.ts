@@ -106,10 +106,10 @@ const NOTHING_MORE = /没有了|没了|没有别的|就这些|不用了|暂时�
 export function saidNothingMore(lastQuestions: Array<Pick<TurnQuestion, "id" | "text">>, replyText: string): boolean {
   const asked = lastQuestions.filter((question) => question.id === "closing-open" || CLOSING_ASK.test(question.text));
   if (!asked.length) return false;
-  // The page writes an answer as 「【question】选择：…」; anything else in the reply means the person had something to say.
+  // The page writes an answer as 「【question】选择：…」. The closing question answered with nothing more, and no words outside an answer, is the
+  // person saying so; answers to the round's other questions (replay 11: the cartoon figure's look, asked beside it) do not change that.
   const parts = replyText.split(/\n+/u).map((line) => line.trim()).filter(Boolean);
-  return parts.length > 0 && parts.every((line) => {
-    const answer = /^【([^】]*)】(.*)$/u.exec(line);
-    return answer ? CLOSING_ASK.test(answer[1]!) && NOTHING_MORE.test(answer[2]!) : NOTHING_MORE.test(line) && line.length <= 20;
-  });
+  const answers = parts.map((line) => /^【([^】]*)】(.*)$/u.exec(line));
+  if (!answers.some((answer) => answer)) return parts.length > 0 && parts.every((line) => NOTHING_MORE.test(line) && line.length <= 20);
+  return answers.every(Boolean) && answers.some((answer) => CLOSING_ASK.test(answer![1]!) && NOTHING_MORE.test(answer![2]!));
 }
