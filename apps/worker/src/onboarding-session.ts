@@ -5,7 +5,8 @@ import {
   validateOnboardingDialogue, locateQuote,
   gapCoveredBy, screenQuestions, screenAssumption, type QuestionScreenInput,
   type DimensionId, type ProfileGap, type ProfileModel, type OnboardingStage, DEEP_STAGES, ONBOARDING_TONE_SETTING, ASSESS_RESULT_SETTING, TYPE_TABLE, readTone,
-  checkInsight, disclosureReplies, handlesDisclosure, readTurnProgress, openStageQuestion, withPlainTerms,
+  checkInsight, disclosureReplies, handlesDisclosure, readTurnProgress, safetyReplyOnly, withoutToldStory, researchCopied, RESEARCH_FIGURES_MAX,
+  withoutCardEcho, withoutRecordingTalk, saidNothingMore, CLOSING_ASK, openStageQuestion, withPlainTerms,
   type KnownSources, type OnboardingDialogue, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, ONBOARDING_LAST_FAILURE, readPartialTurn, type OnboardingProgress, calendarWeek,
   tFor, type Locale, flowOf, INTERVIEW_FLOW_STAGES, PROFILE_MODULE_STAGES, cardsFor, readCardAnswers, mergeInstrumentAnswers, readInstrumentAnswers,
   settledItems, PROFILE_INSTRUMENTS_SETTING, type CardSet, type InterviewFlow, type ProfileCard, type ProfileStage,
@@ -42,6 +43,8 @@ const FINISH_WAIT_MS = 90_000;
 const CHECKLIST_WAIT_MS = 300_000;
 /** How long a round with a blocking app question waits for the extraction of the reply it may answer. */
 const BLOCKING_WAIT_MS = 30_000;
+/** How long a fact round waits, before the dialogue runs, for the extraction of a reply that may settle a start item. */
+const START_WAIT_MS = 60_000;
 /** Facts the extraction recorded since the last turn, at most this many lines in `recorded`. */
 const RECORDED_SHOWN = 40;
 /** Questions of the ledger shown to the model each round; repeats of older ones are still caught in code (`resolveRepeats`). */
@@ -364,15 +367,31 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const researchNow = () => researchForDialogue(readResearch(store, workspaceId, sessionId));
     // Whether the lower bound stands, said outright every round (2026-11-12 replay 4: the model told the person 「你可以开始使用应用了」
     // seven rounds before it did, reading the open items of `checklist` as settled). Only a line's own interview goes without.
-    const startStandard = () => focusLine ? {} : { startStandard: { met: !startOpen(),
-      missing: checklistNow().filter((item) => item.start && !item.done).map((item) => item.label) } };
+    // An item the person answered that the extraction has not written down yet is not missing: it is listed as answered, so the dialogue
+    // neither asks it again nor tells the person it is 「还在记录」 (replay 10, `withoutRecordingTalk`).
+    const startStandard = () => {
+      if (focusLine) return {};
+      const answered = new Set(openChecklist(Infinity, (item) => !item.start, sessionId).filter((item) => item.recording).map((item) => item.label));
+      const missing = checklistNow().filter((item) => item.start && !item.done).map((item) => item.label);
+      return { startStandard: { met: !startOpen(), missing: missing.filter((label) => !answered.has(label)), ...(answered.size ? { answered: [...answered] } : {}) } };
+    };
     const outputSchema = onboardingDialogueSchema(ids);
-    const validateOutput = (output: unknown) => validateOnboardingDialogue(output, known);
+    // What the finished research threads found: a reply that lists their figures is sent back once (`researchCopied`); after the repairs
+    // run out it is kept as it is (`softAccept`), a round is not lost for it.
+    const findings = () => researchNow().flatMap((item) => [item.conclusion ?? "", item.found ?? ""]).filter(Boolean);
+    const validateOutput = (output: unknown) => {
+      const valid = validateOnboardingDialogue(output, known);
+      const copied = researchCopied(valid.reply, findings());
+      if (copied.length > RESEARCH_FIGURES_MAX) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
+        detail: `reply 逐条列了调研线程的细节（${copied.join("、")}）。它们在右栏的调研线程里；reply 只留改变下一步的那一条结论和它对本人意味着什么，一两句，不列日期、时间和门槛。` }); // i18n-ignore: model-facing repair note
+      return valid;
+    };
     const softAccept = (_rejection: Error, output: unknown) => keepOnboardingDialogue(output, known);
-    // A turn that only needs one or two questions dropped is kept now instead of rewritten in full by a repair.
+    // A turn that only needs one or two questions dropped is kept now instead of rewritten in full by a repair; one that lists the research is not.
     const keepEarly = (_rejection: Error, output: unknown) => {
       const kept = keepOnboardingDialogue(output, known);
-      return kept && droppedOnboardingItems(output, kept) <= ONBOARDING_KEEP_EARLY_MAX ? kept : undefined;
+      return kept && droppedOnboardingItems(output, kept) <= ONBOARDING_KEEP_EARLY_MAX
+        && researchCopied(kept.reply, findings()).length <= RESEARCH_FIGURES_MAX ? kept : undefined;
     };
 
     // The public quick test's result, only when the person pressed 「使用该结果」 (apps/web/lib/assess-link.ts): corroboration for the
@@ -442,6 +461,10 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // A model reading the files says nothing for a minute or more; the heartbeat tells the page the turn is still alive.
     const heartbeat = setInterval(() => { if (latest) write({ ...latest, updatedAt: new Date().toISOString() }); }, 15_000);
 
+    // A fact round while the start standard is open waits a little for the extraction of this reply before the dialogue reads the checklist:
+    // replay 10 gave her free hours in round 14 and the start stood only in round 17, the rounds between reading 「还在记录」.
+    const stageNow = (session.coverage as { stage?: OnboardingStage }).stage;
+    if (!focusLine && extractMode === "background" && (stageNow === "orientation" || stageNow === "lines") && startOpen()) await caughtUp(START_WAIT_MS);
     let result;
     try {
       if (!session.codexThreadId) {
@@ -574,7 +597,17 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const roundOut = withFreshOpenQuestion(shownOrOpen(assembled, questionScreenFor(store, workspaceId), locale),
       checklistAskable(store, workspaceId, sessionId), locale, startStands ? closingQuestion(locale) : undefined);
     // Before the start standard stands the button would refuse: the reply does not point at it.
-    const output = withPlainTerms(startStands || focusLine ? roundOut : { ...roundOut, reply: withoutEndHint(roundOut.reply) });
+    const plain = withPlainTerms(startStands || focusLine ? roundOut : { ...roundOut, reply: withoutEndHint(roundOut.reply) });
+    // What the reply and the questions keep, as the person reads them (onboarding-reply.ts, replay 10): the safety round's reply ends at its
+    // help lines; nothing is 「还在记录」; a best story already told is excluded from the question asking for one; and once the person said
+    // there is nothing more, the closing question is not asked again (the box stays open for anything they think of).
+    const closed = plain.nextAction === "ask" && saidNothingMore(asked, replyText);
+    const askedBefore = messages.filter((message) => message.role === "assistant")
+      .flatMap((message) => ((message.content as { questions?: TurnQuestion[] }).questions ?? []).map((question) => question.text));
+    const output = { ...plain,
+      reply: withoutRecordingTalk(handlesDisclosure(plain.reply) ? safetyReplyOnly(plain.reply) : plain.reply),
+      questions: closed ? plain.questions.filter((question) => question.id !== "closing-open" && !question.id.startsWith("open-") && !CLOSING_ASK.test(question.text))
+        : withoutToldStory(plain.questions, askedBefore) };
     // The observation is kept only when its quotes are in the replies it names; the progress record goes back to the model next round.
     const replies = Object.fromEntries(messages.filter((message) => message.role === "user")
       .map((message) => [`reply-${message.seq}`, String((message.content as { text?: string }).text ?? "")]));
@@ -624,7 +657,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     })() : newCard;
     const progress = readTurnProgress(result.output.progress);
     const { insight: _raw, progress: _rawProgress, ...rest } = output;
-    const stored = { ...rest, ...(insight ? { insight } : {}), ...(progress ? { progress } : {}) };
+    // A card is rated where it stands: the reply does not say it a second time (`withoutCardEcho`).
+    const stored = { ...rest, ...(insight ? { reply: withoutCardEcho(rest.reply, insight.text), insight } : {}), ...(progress ? { progress } : {}) };
     const roundSeq = store.appendOnboardingMessage({ sessionId, workspaceId, role: "assistant", content: stored, createdAt: new Date().toISOString() });
     // The hypothesis a card shows is asked from now on, answered or not: `cardKey` keeps it out of the next cards' candidates.
     if (insight?.hypothesisId) {
@@ -866,16 +900,25 @@ export function closingQuestion(locale?: Locale): TurnQuestion {
 }
 
 /**
+ * How long the person waits after 「结束并出报告」 for the extraction before the portrait is written from what is on record. The writer reads
+ * every reply word for word, so what a late extraction adds is the last replies' points, not the person's story. Replay 10 (2026-11-14)
+ * waited 65 minutes: the provider wrote the last two runs at three tokens a second, steadily enough that no stall watchdog fired.
+ */
+export const FINISH_BUDGET_MS = 8 * 60_000;
+
+/**
  * The person's 「结束并出报告」 (the owner, 2026-11-12): the interview is marked complete, the extraction finishes every section from what was
- * said, and `settled` resolves once it has, so the caller writes the portrait from the finished record. The start standard (the lower
- * bound) is checked by the web route before it calls this; the interview can be taken up again afterwards, and a new report written.
+ * said, and `settled` resolves once it has — or once `FINISH_BUDGET_MS` has passed, with `"late"` — so the caller writes the portrait. The
+ * extraction carries on after a late settle; `complete` resolves when it is done. The start standard (the lower bound) is checked by the
+ * web route before it calls this; the interview can be taken up again afterwards, and a new report written.
  */
 export function finishInterview(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined, sessionId: string,
   /** `extract: false` leaves the extraction alone (tests of the ending itself); `lanes: false` finishes with single runs. */
-  options: { extract?: boolean; lanes?: boolean } = {}):
-  { outcome: { state: "finished"; sessionId: string } | { state: "blocked"; code: string; message: string }; settled: Promise<void> } {
+  options: { extract?: boolean; lanes?: boolean; budgetMs?: number } = {}):
+  { outcome: { state: "finished"; sessionId: string } | { state: "blocked"; code: string; message: string }; settled: Promise<"done" | "late">; complete: Promise<void> } {
   const session = store.getOnboardingSession(workspaceId, sessionId);
-  if (!session) return { outcome: { state: "blocked", code: "ONBOARDING_SESSION_UNKNOWN", message: tFor(localeOf(store, workspaceId))("找不到这次访谈。") }, settled: Promise.resolve() };
+  if (!session) return { outcome: { state: "blocked", code: "ONBOARDING_SESSION_UNKNOWN", message: tFor(localeOf(store, workspaceId))("找不到这次访谈。") },
+    settled: Promise.resolve("done"), complete: Promise.resolve() };
   const now = new Date().toISOString();
   markFinishing(store, workspaceId, sessionId);
   store.saveOnboardingSession({ ...session, state: "complete", updatedAt: now });
@@ -887,8 +930,8 @@ export function finishInterview(store: CrosslineStore, workspaceId: string, cwd:
   const ask = lanes ? () => requestAllLanes(workspaceId, (preferred, which) => extractor.runOnce(preferred, which), sessionId)
     : () => requestExtraction(workspaceId, (preferred) => extractor.runOnce(preferred), sessionId);
   const lastReply = store.listOnboardingMessages(workspaceId, sessionId).filter((message) => message.role === "user").at(-1)?.seq;
-  if (options.extract === false) return { outcome: { state: "finished", sessionId }, settled: Promise.resolve() };
-  const settled = (async () => {
+  if (options.extract === false) return { outcome: { state: "finished", sessionId }, settled: Promise.resolve("done"), complete: Promise.resolve() };
+  const complete = (async () => {
     // Every reply recorded first (the ledger, then the inferences and the sections, within one 20-minute budget), then the finishing run
     // that writes the synthesis (as a round that ended the interview used to): the sections' lane, with lanes.
     const until = Date.now() + 20 * 60_000;
@@ -900,5 +943,12 @@ export function finishInterview(store: CrosslineStore, workspaceId: string, cwd:
     }
     await (lanes ? lane("sections")() : ask()).catch(() => undefined);
   })();
-  return { outcome: { state: "finished", sessionId }, settled };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const budget = new Promise<"late">((resolve) => { timer = setTimeout(() => resolve("late"), options.budgetMs ?? FINISH_BUDGET_MS); });
+  const settled = Promise.race([complete.then(() => "done" as const), budget]).then((how) => {
+    clearTimeout(timer);
+    if (how === "late") console.log(JSON.stringify({ type: "onboarding.finish_late", workspaceId, sessionId, budgetMinutes: Math.round((options.budgetMs ?? FINISH_BUDGET_MS) / 60_000) }));
+    return how;
+  });
+  return { outcome: { state: "finished", sessionId }, settled, complete };
 }

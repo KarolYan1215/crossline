@@ -554,6 +554,7 @@ export { dropEnumSlips } from "./json-schema-check";
 export * from "./local-stamp";
 export * from "./onboarding-progress";
 export * from "./onboarding-pace";
+export * from "./onboarding-reply";
 export * from "./onboarding-depth";
 export * from "./calendar-subscriptions";
 export * from "./source-folders";

@@ -171,6 +171,16 @@ test("the main interview never ends itself: a model that is done asks whether th
   expect(store.listEvents(workspaceId, { type: "onboarding.finish_requested" })).toHaveLength(1);
 });
 
+test("after 「结束并出报告」 the portrait waits for the extraction only so long: a provider that never answers settles it as late", async () => {
+  const now = new Date().toISOString();
+  store.saveOnboardingSession({ id: "s", ownerId: "user-1", workspaceId, state: "active", coverage: {}, createdAt: now, updatedAt: now });
+  store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text: "都说完了" }, createdAt: now });
+  const silent = { request: () => new Promise(() => {}), onNotification: () => () => {} } as never;
+  const { settled } = finishInterview(store, workspaceId, "C:\\repo", () => silent, "s", { lanes: false, budgetMs: 50 });
+  expect(await settled).toBe("late");
+  expect(store.getOnboardingSession(workspaceId, "s")?.state).toBe("complete");
+});
+
 test("before the start standard stands, a model that is done is not shown 「可以按结束」: the round asks what is still owed", async () => {
   const { rpc, prompts } = fakeRuntime([turn({ questions: [], nextAction: "ready_for_milestones" })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });
@@ -670,6 +680,54 @@ test("no observation card beside the safety check, and none built on the disclos
   expect(await shown("大三有一段没人可说，有过不想活的念头。")).toBeUndefined();
   expect(await shown("现在没有了。")).toBeUndefined();
   expect(await shown("一个人做研究时最慢。")).toMatchObject({ text: "你说投入的时候身边都有人。" });
+});
+
+test("as the person reads a round: the safety reply ends at its help lines, a card is not said twice, a told story is excluded", async () => {
+  const help = "全国心理援助热线 12356；身处危险时打 120 或 110，或去最近的医院急诊。";
+  const card = { text: "你最投入的两次都是有人一起、每天有反馈的事，一个人做的研究推得最慢。", falsifier: "如果独自时也常投入",
+    refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-7", quote: "一个人做研究" }] };
+  const { rpc } = fakeRuntime([turn({ stage: "narrative", questions: [{ id: "q1", text: "讲一件到目前为止最有成就感的事？", kind: "free", allowOther: true, identityId: "", projectId: "", options: [] }] }),
+    turn({ stage: "narrative", reply: `谢谢你愿意说出来。${help}回到前面：你敬佩的人和那段时间正好相对。` }), turn({ stage: "energy" }),
+    turn({ stage: "energy", reply: "记下了。你最投入的两次都是有人一起、每天有反馈的事，一个人的研究推得最慢。周末先排整块时间。", insight: card,
+      questions: [{ id: "q1", text: "近一年最骄傲的一件事是什么？", kind: "free", allowOther: true, identityId: "", projectId: "", options: [] }] })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false, extract: "off" });
+  const last = async (text: string) => {
+    await run({ sessionId: "s", text });
+    return store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string; insight?: { text: string }; questions: Array<{ text: string }> };
+  };
+  await last("我最有成就感的是和同学一起赶比赛的时候。");
+  expect((await last("有过一段情绪很低的时候，现在没有了。")).reply).toBe(`谢谢你愿意说出来。${help}`);
+  await last("现在没有了，继续吧。");
+  const round = await last("一个人做研究时最慢。");
+  expect(round.insight?.text).toBe(card.text);
+  expect(round.reply).toBe("记下了。周末先排整块时间。");
+  expect(round.questions[0]!.text).toBe("除了前面讲过的那件，近一年最骄傲的一件事是什么？");
+});
+
+test("once the person said there is nothing more, the next round does not ask the closing question again", async () => {
+  const { rpc } = fakeRuntime([turn({ questions: [], nextAction: "ready_for_milestones" }),
+    turn({ reply: "好，按页面上的「结束并出报告」就会出报告。", questions: [{ id: "q9", text: "还有什么想聊的吗？", kind: "free", allowOther: true, identityId: "", projectId: "", options: [] }] })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false, extract: "off" });
+  await run({ sessionId: "s", text: "都说完了" });
+  const closing = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { questions: Array<{ id: string; text: string }> };
+  expect(closing.questions.map((question) => question.id)).toEqual(["closing-open"]);
+  expect(await run({ sessionId: "s", text: `【${closing.questions[0]!.text}】选择：没有了` })).toEqual({ state: "asked", sessionId: "s" });
+  const after = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string; nextAction: string; questions: unknown[] };
+  expect(after).toMatchObject({ nextAction: "ask", questions: [] });
+  expect(after.reply).toContain("结束并出报告");
+  expect(store.getOnboardingSession(workspaceId, "s")?.state).toBe("active");
+});
+
+test("a reply listing a finished research thread's figures is sent back once; the rewrite keeps one conclusion", async () => {
+  store.setSetting(workspaceId, "onboarding.research:s", JSON.stringify([{ id: "r1", question: "寒假实习何时截止？", why: "", dimension: "D0", status: "done",
+    conclusion: "事务所寒假实习网申多在 7 月底到 10 月，安永 10 月 16 日截止；银行分行多在 12 月底到 1 月初截止。", messages: [] }]));
+  const { rpc, prompts } = fakeRuntime([
+    turn({ reply: "查到了：事务所网申在 7 月到 10 月，安永 10 月 16 日已截止；银行分行 12 月底截止。" }),
+    turn({ reply: "事务所的寒假批次已经过了，银行分行还在窗口内，先投它。" })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false, extract: "off" });
+  await run({ sessionId: "s", text: "想找寒假实习。" });
+  expect(dialogue(prompts).some((prompt) => prompt.includes("reply 逐条列了调研线程的细节"))).toBe(true);
+  expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string }).reply).toBe("事务所的寒假批次已经过了，银行分行还在窗口内，先投它。");
 });
 
 test("the dialogue is told which lines still have no goal candidates, so it asks what the person wants to become only there", async () => {
