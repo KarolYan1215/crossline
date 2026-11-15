@@ -234,6 +234,10 @@ async function runPerson(name: string, opening: Opening) {
         startOpen: items.filter((item) => item.start && !item.done).map((item) => item.id),
         open: items.filter((item) => !item.done && !item.deferred && item.owner === "interview").map((item) => item.id) });
       log({ turn: turns, stage: turn.stage, questions: batch.length, cards: cards.length, next: turn.nextAction, ready: Boolean(readyAt) });
+      // Written after every round, not only at the end: a run the process dies in (2026-11-15, at round 10) still leaves its rounds.
+      writeFileSync(path.join(dir, "transcript.md"), transcript.join("\n"), "utf8");
+      writeFileSync(path.join(dir, "progress.json"), JSON.stringify({ turns, readyAtRound: readyAt ?? null, rounds,
+        metrics: interviewMetrics(store, workspaceId, "eval"), cost: { interview: cost(interviewKey), player: cost(playerKey) } }, null, 2), "utf8");
       if (outcome.state === "ready") break;
       // The research threads' questions to the person, answered by the player in the side card (never in the main conversation).
       const research = researchRunnerFor(store, workspaceId, repoRoot, () => client);
@@ -345,6 +349,15 @@ async function runPerson(name: string, opening: Opening) {
     return { name, state, turns, readyAtRound: readyAt ?? null, complete: result.complete, portrait: Boolean(result.portrait), metrics: result.metrics, cost: result.cost };
   }
 }
+
+// undici's HTTP parser asserts from a socket's `end` event when a provider closes TLS mid-response (2026-11-15, Node 22.23): thrown
+// outside any request's promise, it ended the whole walkthrough. That one is logged and the run goes on — the request it belonged to
+// fails or times out and the runner's own retry takes it; anything else still ends the process.
+process.on("uncaughtException", (error: Error & { code?: string }) => {
+  const undici = error.code === "ERR_ASSERTION" && /undici/u.test(error.stack ?? "");
+  console.error(JSON.stringify({ type: "uncaught", undici, message: error.message, stack: (error.stack ?? "").split("\n").slice(0, 4).join(" | ") }));
+  if (!undici) process.exit(1);
+});
 
 console.info(JSON.stringify({ step: "start", people: names, model, playerModel, out }));
 // One person's failure must not take the others' results with it.
