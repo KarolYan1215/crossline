@@ -19,12 +19,13 @@ import { localeOf } from "./locale";
 import { adoptLineGoal, identityLines } from "./lines";
 import { checklistAnswered, interviewLedger, ledgerForModel, linesAnsweredUnread, recordReplyAnswers, recordRound, syncGapQuestions } from "./question-ledger";
 import { mergeTools } from "./ledger-index";
+import { standingLines } from "./onboarding-standing";
 import { interviewReadTools, READ_TOOLS_INSTRUCTIONS } from "./onboarding-read-tools";
 import { CARD_TOOLS_INSTRUCTIONS, cardTools, checkInsights, checkOpenItems, checkQuestions, checkResearch, emptyDraft, withDraft } from "./onboarding-cards";
 import { correctionUnread, createOnboardingExtractor, extractionReached, requestAllLanes, requestExtraction, type ExtractLane } from "./onboarding-extract";
 import { DATES_UNRECORDED_EVENT, ONBOARDING_UNRECORDED_EVENT, personTimeZone, readProfileModel } from "./onboarding-persist";
 import { paceContext, storedProgress } from "./onboarding-pace";
-import { hypothesisFromCard, POINTS_RULES, pointsRules, withProfileFramework, type Hypothesis, type TurnInsight } from "@crossline/core";
+import { hypothesisFromCard, ONBOARDING_INSIGHTS, POINTS_RULES, pointsRules, readInsightRatings, withProfileFramework, type Hypothesis, type TurnInsight } from "@crossline/core";
 import { readResearch, researchForDialogue, researchRunnerFor } from "./onboarding-research";
 import { DOMAIN_PACKS, domainGuides } from "@crossline/identity-packs";
 
@@ -69,7 +70,9 @@ type Announced = { announcedSources?: string[]; calendarSent?: string; heardAt?:
    * Whether the dialogue's thread was started with the card tools (P2b-3b): a route that calls functions gets them, one that does not
    * writes its items in the answer's fields. Tools are declared at `thread/start`, so the follow-up turns answer them only on such a thread.
    */
-  cardTools?: "tools" | "fallback" };
+  cardTools?: "tools" | "fallback";
+  /** The round the start standard first stood in (the progress header's 「从第几轮起已齐」). */
+  startMetRound?: number };
 
 /**
  * What of the dialogue's last round the person did not see, and what the app put beside it (2026-10-31). Since the 2026-11-14 audit the
@@ -367,6 +370,27 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       const missing = checklistNow().filter((item) => item.start && !item.done).map((item) => item.label);
       return { startStandard: { met: !startOpen(), missing: missing.filter((label) => !answered.has(label)), ...(answered.size ? { answered: [...answered] } : {}) } };
     };
+    // The progress header (onboarding-standing.ts), first in every round's input: the rounds so far, the parts walked, since when the start
+    // standard stands, what `ready_for_milestones` still lacks and the latest cards. Only the main interview has one.
+    const assistantRounds = messages.filter((message) => message.role === "assistant");
+    const startMetRound = focusLine || startOpen() ? null : coverage.startMetRound ?? assistantRounds.length + 1;
+    const standing = () => {
+      if (focusLine) return {};
+      const ratings = readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS));
+      const profile = readProfile();
+      return { standing: standingLines({
+        rounds: assistantRounds.map((message) => {
+          const content = message.content as { stage?: string; questions?: unknown[]; insight?: { text?: string }; moreInsights?: Array<{ text?: string }> };
+          const cards = [content.insight, ...(content.moreInsights ?? [])].filter((card) => Boolean(card?.text)).length;
+          const verdicts = Array.from({ length: cards }, (_, index) => ratings[insightKey(sessionId, message.seq, index)]?.verdict)
+            .filter((verdict): verdict is "fits" | "partial" | "off" => verdict === "fits" || verdict === "partial" || verdict === "off");
+          return { stage: content.stage ?? "", questions: content.questions?.length ?? 0, cards, verdicts };
+        }),
+        stage: stageNow, stageOrder: stageOrderFor(flow), startMetRound,
+        startMissing: checklistNow().filter((item) => item.start && !item.done).map((item) => item.label),
+        profile: { dimensions: profile.dimensions, hypotheses: profile.hypotheses, careers: profile.careers }
+      }) };
+    };
     // The app's own questions still waiting, put to the person only when the dialogue names them (`openItems`). Whether the portrait fits
     // is asked on the portrait page; which project a file belongs to is the app's bookkeeping, put beside the round (`filing` below).
     const askable = () => currentGaps().filter((gap) => gap.code !== "PORTRAIT_UNCONFIRMED" && gap.code !== "FILE_UNFILED" && !(focusLine && gap.code === "LINE_GOAL"));
@@ -476,6 +500,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     /** A first turn: everything the ledger knows goes in, because the thread starts empty. */
     const startThread = async (documents: typeof fresh, history?: OnboardingTurnContext["history"]) => {
       const context: OnboardingTurnContext = {
+        ...standing(),
         version: "crossline.onboarding.turn.v1",
         identities: identities(),
         projects: store.listProjects(workspaceId).map(({ id, identityId, name, summary }) => ({ id, identityId, name, summary })),
@@ -536,7 +561,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         // Later turns carry only what is new: the reply, any file that arrived since the last turn, and what the extraction recorded.
         const newSources = clipDocuments(fresh);
         // The completion list goes with every turn, so the model knows what it still owes without being told twice in prose.
-        const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(8, undefined, sessionId), ...startStandard(), ...openItems(),
+        const message = JSON.stringify({ ...standing(), reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(8, undefined, sessionId), ...startStandard(), ...openItems(),
           ...(focusLine ? {} : { stageOrder: stageOrderFor(flow) }),
           questionLedger: ledgerForModel(store, workspaceId, sessionId, LEDGER_SHOWN), ...pace(), ...roundNotes(),
           ...(calendarChanged ? { calendar: week } : {}),
@@ -641,7 +666,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       state: output.nextAction === "ready_for_milestones" ? "complete" : "active",
       coverage: { ...current.coverage, coverage: output.coverage, ...(output.stage ? { stage: output.stage } : {}), ...(progress ? { progress } : {}),
         announcedSources: [...announcedNow, ...sent.map(([id]) => id)], heardAt, ...(week.length ? { calendarSent: weekSent } : {}), lastRound: edits,
-        ...(cardMode ? { cardTools: cardMode } : {}) },
+        ...(cardMode ? { cardTools: cardMode } : {}), ...(startMetRound !== null ? { startMetRound } : {}) },
       updatedAt: new Date().toISOString()
     });
     return { state: output.nextAction === "ready_for_milestones" ? "ready" : "asked", sessionId };

@@ -222,5 +222,18 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     text: { file: INTERVIEW_SKILL, anchor: "并把这道题的 `followUp` 设为 `true`" } },
   { id: "IR-114", layer: "L2", verdict: "model", status: "active", rule: "app 只退回问题清单，不替模型改字、不悄悄删",
     text: { file: INTERVIEW_SKILL, anchor: "**应用核对后把问题退回给你。**" } },
+  // The progress header (2026-11-15, after replay 15): the app counts, the model decides.
+  { id: "IR-115", layer: "L0", verdict: "keep", status: "active", rule: "每轮输入最前面放进度头：轮数、阶段、开始标准从第几轮齐、ready 还差什么、最近三轮的题数和卡",
+    code: { file: `${WORKER}/onboarding-standing.ts`, symbol: "standingLines", test: `${WORKER}/onboarding-standing.test.ts` } },
+  { id: "IR-116", layer: "L2", verdict: "model", status: "active", rule: "进度头只是事实，不替模型判断",
+    text: { file: INTERVIEW_SKILL, anchor: "**进度头只是事实。**" } },
+  { id: "IR-117", layer: "L2", verdict: "model", status: "active", rule: "同一阶段多轮每轮只剩一题，就换阶段或说可以结束，不往下钻",
+    text: { file: INTERVIEW_SKILL, anchor: "**同一阶段连着很多轮、每轮只剩一道题，这一阶段就问完了。**" } },
+  { id: "IR-118", layer: "L2", verdict: "model", status: "active", rule: "开始标准一齐，回复里说一次本人可以结束；ready 还差的问完再说一次",
+    text: { file: INTERVIEW_SKILL, anchor: "**开始标准一齐，就说一次本人可以结束。**" } },
+  { id: "IR-119", layer: "L2", verdict: "model", status: "active", rule: "最近三轮的卡多被评部分对，这一轮先问再出卡",
+    text: { file: INTERVIEW_SKILL, anchor: "**最近三轮的卡多被评「部分对」，这一轮先问再出卡。**" } },
+  { id: "IR-120", layer: "L2", verdict: "model", status: "active", rule: "不把本人刚定的安排换说法写成卡",
+    text: { file: INTERVIEW_SKILL, anchor: "**不把本人刚定的安排写成卡。**" } },
 ];
 /* i18n-ignore-end */

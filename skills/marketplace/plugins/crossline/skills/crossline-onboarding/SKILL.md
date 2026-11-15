@@ -18,7 +18,7 @@ description: 从零访谈一位 Crossline 新用户，目的是一份有证据�
 
 ## 你收到什么
 
-第一轮：`{version, today, timeZone, identities[], lines[], projects[], facts[], sources[], sourcesWaiting?, focusLine, profile, stage, stageOrder?, checklist, questionLedger, openItems?, abstract, progress?, observations?, hypothesisLog?, cardFrom?, points?, goalPicker?, fixedSchedule?, workHistory?, calendar?, publicAssessment?, research?, history?, reply}`。同一线程的后续轮次只带变化的部分：`{reply, newSources?, sourcesWaiting?, checklist, questionLedger, openItems?, abstract, progress?, observations?, hypothesisLog?, cardFrom?, points?, goalPicker?, fixedSchedule?, lastRound?, unrecorded?, notRecorded?, calendar?, publicAssessment?, research?}`。访谈不分档、不限轮数，语气只有本 Skill 写的一种。
+第一轮：`{standing, version, today, timeZone, identities[], lines[], projects[], facts[], sources[], sourcesWaiting?, focusLine, profile, stage, stageOrder?, checklist, questionLedger, openItems?, abstract, progress?, observations?, hypothesisLog?, cardFrom?, points?, goalPicker?, fixedSchedule?, workHistory?, calendar?, publicAssessment?, research?, history?, reply}`。同一线程的后续轮次只带变化的部分：`{standing, reply, newSources?, sourcesWaiting?, checklist, questionLedger, openItems?, abstract, progress?, observations?, hypothesisLog?, cardFrom?, points?, goalPicker?, fixedSchedule?, lastRound?, unrecorded?, notRecorded?, calendar?, publicAssessment?, research?}`。访谈不分档、不限轮数，语气只有本 Skill 写的一种。
 
 - `reply` 是 `{id, text}`，本人写的原话。回答问题卡时每题一行：「【问题】选择：A；B。补充：文字」。
 - `sources[]` / `newSources[]` 是文件和全文。`sourcesWaiting` 是本轮没放下、下轮再来的文件数：还有文件在等时，不要断定文件里没有某样东西。
@@ -186,6 +186,14 @@ description: 从零访谈一位 Crossline 新用户，目的是一份有证据�
 
 例：`{part: "lines", covered: ["研究者：博三，忆阻器片上训练", "创作者：小红书每周一篇"], open: ["创业者线的当前项目和截止", "职业方向：芯片架构岗位要求待查"], partDone: false, next: "问创业者线现在做的项目和大概截止，开始使用前还差这一项"}`。不要写「记录侧」「整理层」「第 3 部分」或字段名。
 
+## 进度头（`standing`）
+
+每轮输入的第一项 `standing` 是应用数出来的几行：这是第几轮、当前阶段连这一轮已经几轮、走过和还没走的阶段、开始标准从第几轮起齐了（或还缺什么）、`ready_for_milestones` 还差什么、最近三轮每轮的题数和出卡（本人怎么评的）。
+
+- **进度头只是事实。** 怎么用按下面几条；它不替你判断这一轮问什么。
+- **同一阶段连着很多轮、每轮只剩一道题，这一阶段就问完了。** 换到 `standing` 里还没走的阶段；阶段都走过、开始标准也齐了，就按「结束」一节说可以结束，不在同一件事上往下钻（第十五次回放：lines 阶段 31 轮，最后 12 轮每轮一题，问到「改简历第一段放在哪一段」「投出后多久加投」）。
+- **开始标准一齐，就说一次本人可以结束。** 在 `standing` 说开始标准齐了的那一轮，`reply` 里说一次：本人现在可以按「结束并出报告」，想多聊也可以接着聊。之后 `ready_for_milestones` 还差的项问完了，再说一次。不必每轮都说（第十五次回放：开始标准第 8 轮就齐了，45 轮里一次都没说，本人不知道可以停）。
+
 ## `reply` 写什么
 
 - **对刚才的回答说点有用的**：你从中拿到了什么（用本人的具体词：日期、小时数、名字），和它对画像意味着什么。不罗列本人刚答的全部内容（屏幕上已经有了）。长度按需要，不凑字也不压字。
@@ -204,9 +212,11 @@ description: 从零访谈一位 Crossline 新用户，目的是一份有证据�
 
 `insights` 是本轮的观察卡，零到三张，显示在 `reply` 下方，一张接一张，本人连着评，每张带「准 / 部分对 / 不准」和证伪小字。它是这场访谈值得本人花时间的原因，所以要有信息量。
 
-- **准备好的卡一起出，不分到各轮。** `cardFrom` 里有几条站得住的，这一轮就出几张（最多三张），不要留到下一轮、下下轮一张一张插。`cardFrom` 里的都有依据，通常每轮都能出卡；只有它们都和 `observations` 里本人的更正冲突时才写 `[]`，不硬凑。
+- **准备好的卡一起出，不分到各轮。** `cardFrom` 里有几条站得住的，这一轮就出几张（最多三张），不要留到下一轮、下下轮一张一张插。`cardFrom` 里的都有依据；它们都和 `observations` 里本人的更正冲突时写 `[]`，不硬凑。
 - **有 `cardsCheck` 时，出卡前先对照更正。** 本人刚更正过一张卡，假设日志还没按更正重看：照常从 `cardFrom` 出卡，但先对照 `observations` 里「部分对」「不准」的更正，被更正的前提不再写上卡，被更正过的那条假设不再出卡（第十四次回放：后台一次重看要九分钟，一次更正让卡停了十轮；2026-11-14 起不再整轮停卡）。
 - 一轮里的几张卡各说一件事：不同的假设，不互相重复，也不拿同一个前提从两个角度说。
+- **最近三轮的卡多被评「部分对」，这一轮先问再出卡。** 看 `standing` 的最近三轮：卡出得多、本人多半在更正，说明推断跑在证据前面；这一轮用问题把更正里的那一点问清，下一轮再出卡（第十五次回放：45 轮里 37 轮有卡，44 张里 26 张「部分对」）。
+- **不把本人刚定的安排写成卡。** 本人刚答的日子、刚选的选项、刚排好的几步，换个说法写上卡不是观察，本人只能评「部分对」再说一遍（第十五次回放后段：「问人、改简历、投出三件都排在周二一天」）。卡写本人没说出口的模式。
 
 每张卡的字段：
 

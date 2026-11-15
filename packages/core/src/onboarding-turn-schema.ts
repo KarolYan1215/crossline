@@ -269,6 +269,8 @@ export type TurnProgress = { part: OnboardingStage; covered: string[]; open: str
  * the person's words and the files as they are; numbered sentences go only to the extraction (`OnboardingExtractContext`).
  */
 export type OnboardingTurnContext = {
+  /** The progress header, put first (apps/worker/src/onboarding-standing.ts): where the round stands in the whole interview. */
+  standing?: string[];
   version: "crossline.onboarding.turn.v1";
   /** `YYYY-MM-DD` in the person's zone, so a date written without a year lands in the right one. */
   today?: string; timeZone?: string;

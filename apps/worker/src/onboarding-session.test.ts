@@ -197,6 +197,19 @@ test("before the start standard stands, the model is told what is still owed, an
   expect(dialogue(prompts)[0]).toContain('"startStandard":{"met":false,"missing":[');
 });
 
+test("every round's input opens with the progress header, counted from the rounds already in the ledger", async () => {
+  const { rpc, prompts } = fakeRuntime([turn({ stage: "narrative" }), turn({ stage: "narrative" })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  await run({ sessionId: "s", text: "我在读研二" });
+  await run({ sessionId: "s", text: "导师管得松" });
+  const [first, second] = dialogue(prompts);
+  // First in the object, before the context it summarises (docs/onboarding-agent-session.md 「状态头怎么收」).
+  expect(first).toContain('{"standing":["这是第 1 轮；');
+  expect(second).toContain('{"standing":["这是第 2 轮；当前阶段 narrative 连这一轮已经 2 轮。"');
+  expect(second).toContain("开始标准：还没齐，缺 ");
+  expect(store.getOnboardingSession(workspaceId, "s")?.coverage).not.toHaveProperty("startMetRound");
+});
+
 test("before the start standard stands the reply does not point at the end button", () => {
   const reply = "课表这一段已经按你说的记下。要用的几样都在了，这周先开口找导师的顺序不变。按页面上的「结束并出报告」就会出报告。";
   expect(withoutEndHint(reply)).toBe("课表这一段已经按你说的记下。要用的几样都在了，这周先开口找导师的顺序不变。");
