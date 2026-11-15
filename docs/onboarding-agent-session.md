@@ -597,6 +597,14 @@
 
 Skill 同步改了 `questionLedger`、`lastRound`、`openItems`、`followUp` 和「核对后退回」的说法（IR-112 到 IR-114），删了「应用会拿掉收尾问题」「应用会删掉「还在记录」」这些已经不成立的句子。这一步仍走 JSON 字段；同样的核对作为工具调用（D1）是 P2b-3b。
 
+**P2b-3b 完成（2026-11-14）：问题、观察卡、调研改成工具交。** 函数调用可用的路线（本人自己的 Codex 总是；第三方提供方要有 `functionCalls` 的一致性记录）在 `thread/start` 声明四个工具（`cardTools`，`apps/worker/src/onboarding-cards.ts`）：`ask_question`、`ask_app_question`（openItems 的一项）、`show_observation`、`open_research`。每次调用跑和 P2b-3a 同一套核对（加上整份回答会被拒的问题结构），不合格作为工具错误当场还给模型，合格的收进这一轮的草稿；最后的 JSON 里这几项写 []，写了也照样合并在草稿后面再核对一遍（`withDraft`）。不调函数的路线照旧走 JSON 字段和整轮退回（`optionalTools` 的降级路径）。工具只能在开线程时声明，所以会话记下这条线程是哪种（`coverage.cardTools`），后续轮次只在 `tools` 线程上应答；线程丢失重建时草稿清空、按新路线重新判断。登记为 IR-053。
+
+和 §4 的设计相比，这一步有意没做的：
+
+- 卡仍在一轮结束时写进账本，不是工具调用时立即写：这一轮的回答如果整轮失败，已收下的题不该先出现在页面上。
+- 最后一条消息没有缩成 `{reply, progress}`：降级路线还要这些字段，同一个输出 schema 两条路线共用。
+- `ask_date`、`show_goal_picker`、`show_scale_card` 没有单独的工具：日期题用题目自己的 `date` 字段（P2b-1），长期目标的候选是 openItems 里的 `gap-goal-*`，量表卡仍按阶段由应用放（`cardsForRound`），它们不是模型的判断。
+
 **往后加机制的规矩**：新发现的问题，先改 Skill 或工具说明。只有涉及 §3.7 六类的，才加代码，而且是拒收后让模型改，不静默改写。
 
 ---

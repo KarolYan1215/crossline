@@ -2,6 +2,7 @@ import {
   CARDS_OFFERED, INSIGHTS_PER_ROUND, cardCandidateIds, checkInsight, hypothesisReplies, isWebUrl, locateQuote, questionSimilarity,
   type DimensionId, type Hypothesis, type LedgerQuestion, type ProfileGap, type ResearchRequest, type ResearchThread, type TurnInsight, type TurnQuestion
 } from "@crossline/core";
+import type { SkillTools } from "@crossline/codex";
 import { RESEARCH_OPEN_MAX } from "./onboarding-research";
 
 /**
@@ -198,3 +199,92 @@ export function checkResearch(asked: ResearchRequest[], threads: ResearchThread[
   return { accepted, problems };
 }
 /* i18n-ignore-end */
+
+/**
+ * The round's items handed in through the card tools (P2b-3b, docs/onboarding-agent-session.md D1): each kept the moment its check passes,
+ * so the model fixes a failing one in the same turn, with the tool's answer, instead of after the whole round came back.
+ */
+export type RoundDraft = { questions: TurnQuestion[]; openItems: string[]; insights: TurnInsight[]; research: ResearchRequest[] };
+export const emptyDraft = (): RoundDraft => ({ questions: [], openItems: [], insights: [], research: [] });
+
+/* i18n-ignore-start: tool answers and problems for the model */
+/** What `checkTurn` would refuse the whole answer for, said of one question as it is handed in. */
+export function questionShape(question: TurnQuestion, ids: { lines: readonly string[]; projects: readonly string[] }): string[] {
+  const problems: string[] = [];
+  const name = `问题「${question.id}」`;
+  if (!question.id || !question.text?.trim()) problems.push("问题要有 id 和题干。");
+  if (question.identityId && !ids.lines.includes(question.identityId)) problems.push(`${name}的主线「${question.identityId}」不存在。`);
+  if (question.projectId && !ids.projects.includes(question.projectId)) problems.push(`${name}引用了不存在的项目「${question.projectId}」。`);
+  const options = Array.isArray(question.options) ? question.options : [];
+  if (new Set(options.map((option) => option.id)).size !== options.length) problems.push(`${name}的选项 id 有重复。`);
+  if (question.kind !== "free" && options.length < 2) problems.push(`${name}是选择题，至少要给 2 个候选。`);
+  return problems;
+}
+
+export const CARD_TOOL_NAMES = ["ask_question", "ask_app_question", "show_observation", "open_research"] as const;
+
+/** How the dialogue is told to use the card tools, appended to its instructions on a route that calls functions. */
+export const CARD_TOOLS_INSTRUCTIONS = "这一轮的问题、应用的待问题、观察卡和调研问题用工具交：`ask_question`（你自己的一道问题，字段同 `questions` 的一项）、"
+  + "`ask_app_question`（`openItems` 里的一项，给它的 `id`）、`show_observation`（一张观察卡，字段同 `insights` 的一项）、`open_research`（一个调研问题）。"
+  + "每次调用当场核对：回「收下」就已经放进这一轮；回的是问题，就按说的改好再调用，或者不要这一项。"
+  + "最后的 JSON 里 `questions`、`openItems`、`insights`、`research` 写 []：工具交过的不要再写一遍。`reply` 照常接住本人的话，`nextAction` 为 ask 时这一轮至少要交一道题。";
+
+/**
+ * The card tools, over one round's draft. `check` runs the round's checks on the draft with the new item (`deskCheck` in the session):
+ * the items already kept passed them, so whatever it reports is the new item's. A failing call is answered as a tool error and changes
+ * nothing; the final answer's fields are merged after the draft (`withDraft`), so a model that writes them there instead is checked the same.
+ */
+export function cardTools(input: {
+  schemas: { question: Record<string, unknown>; insight: Record<string, unknown>; research: Record<string, unknown> };
+  ids: () => { lines: readonly string[]; projects: readonly string[] };
+  check: (draft: RoundDraft) => string[];
+  draft: () => RoundDraft;
+}): SkillTools {
+  const specs: SkillTools["specs"] = [
+    { name: "ask_question", description: "交这一轮你自己的一道问题（字段同输出的 questions 的一项）。当场核对，回「收下」或要改的问题。", inputSchema: input.schemas.question },
+    { name: "ask_app_question", description: "问 openItems 里应用自己的一道待问题，按应用的写法和选项发给本人。给它的 id。", inputSchema: {
+      type: "object", properties: { id: { type: "string", maxLength: 80 } }, required: ["id"], additionalProperties: false } },
+    { name: "show_observation", description: "交一张观察卡（字段同输出的 insights 的一项）。当场核对引文和假设日志，回「收下」或要改的问题。", inputSchema: input.schemas.insight },
+    { name: "open_research", description: "提一个要上网调研的问题（字段同输出的 research 的一项）。当场核对，回「收下」或要改的问题。", inputSchema: input.schemas.research }
+  ];
+  const call = (name: string, args: unknown): string => {
+    const value = (args && typeof args === "object" ? args : {}) as Record<string, unknown>;
+    const draft = input.draft();
+    const next: RoundDraft = { questions: [...draft.questions], openItems: [...draft.openItems], insights: [...draft.insights], research: [...draft.research] };
+    let shape: string[] = [];
+    let label = "";
+    if (name === "ask_question") {
+      const question = { allowOther: true, identityId: "", projectId: "", options: [], repeats: 0, ...value } as unknown as TurnQuestion;
+      shape = questionShape(question, input.ids());
+      next.questions.push(question);
+      label = `问题「${question.id}」`;
+    } else if (name === "ask_app_question") {
+      const id = String(value.id ?? "");
+      next.openItems.push(id);
+      label = `待问题「${id}」`;
+    } else if (name === "show_observation") {
+      next.insights.push({ hypothesisId: "", external: [], refs: [], ...value } as unknown as TurnInsight);
+      label = "观察卡";
+    } else if (name === "open_research") {
+      next.research.push(value as ResearchRequest);
+      label = `调研「${short(String(value.question ?? ""))}」`;
+    } else throw new Error(`没有名为 ${name} 的工具`);
+    const problems = shape.length ? shape : input.check(next);
+    if (problems.length) throw new Error(`没收下，${label}要改：\n- ${problems.join("\n- ")}`);
+    Object.assign(draft, next);
+    const count = draft.questions.length + draft.openItems.length;
+    return `收下：${label}。这一轮已有 ${count} 道题${draft.insights.length ? `、${draft.insights.length} 张观察卡` : ""}。`;
+  };
+  return { specs, call };
+}
+/* i18n-ignore-end */
+
+/** The final answer with the draft's items in front of its own (the merge `cardTools` relies on). */
+export function withDraft(output: unknown, draft: RoundDraft): unknown {
+  if (!output || typeof output !== "object" || Array.isArray(output)) return output;
+  const value = output as Record<string, unknown>;
+  const list = (key: string) => (Array.isArray(value[key]) ? value[key] as unknown[] : []);
+  if (!draft.questions.length && !draft.openItems.length && !draft.insights.length && !draft.research.length) return output;
+  return { ...value, questions: [...draft.questions, ...list("questions")], openItems: [...draft.openItems, ...list("openItems")],
+    insights: [...draft.insights, ...list("insights")], research: [...draft.research, ...list("research")] };
+}

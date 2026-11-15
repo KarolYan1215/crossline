@@ -18,7 +18,7 @@ import { sourceIds } from "./source-ids";
 import { localeOf } from "./locale";
 import { adoptLineGoal, identityLines } from "./lines";
 import { checklistAnswered, interviewLedger, ledgerForModel, linesAnsweredUnread, recordReplyAnswers, recordRound, syncGapQuestions } from "./question-ledger";
-import { checkInsights, checkOpenItems, checkQuestions, checkResearch } from "./onboarding-cards";
+import { CARD_TOOLS_INSTRUCTIONS, cardTools, checkInsights, checkOpenItems, checkQuestions, checkResearch, emptyDraft, withDraft } from "./onboarding-cards";
 import { correctionUnread, createOnboardingExtractor, extractionReached, requestAllLanes, requestExtraction, type ExtractLane } from "./onboarding-extract";
 import { DATES_UNRECORDED_EVENT, ONBOARDING_UNRECORDED_EVENT, personTimeZone, readProfileModel } from "./onboarding-persist";
 import { paceContext, storedProgress } from "./onboarding-pace";
@@ -62,7 +62,12 @@ export type OnboardingTurnOutcome =
   | { state: "blocked"; sessionId: string; code: string; message: string; detail?: string };
 
 /** What the dialogue's thread has been shown: the files, the calendar week, and when it last heard what the extraction recorded. */
-type Announced = { announcedSources?: string[]; calendarSent?: string; heardAt?: string; lastRound?: RoundEdits };
+type Announced = { announcedSources?: string[]; calendarSent?: string; heardAt?: string; lastRound?: RoundEdits;
+  /**
+   * Whether the dialogue's thread was started with the card tools (P2b-3b): a route that calls functions gets them, one that does not
+   * writes its items in the answer's fields. Tools are declared at `thread/start`, so the follow-up turns answer them only on such a thread.
+   */
+  cardTools?: "tools" | "fallback" };
 
 /**
  * What of the dialogue's last round the person did not see, and what the app put beside it (2026-10-31). Since the 2026-11-14 audit the
@@ -367,7 +372,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       const items = askable().map((gap) => ({ id: gap.question.id, text: gap.question.text, ...(gap.blocking ? { start: true } : {}) }));
       return items.length ? { openItems: items } : {};
     };
-    // What a round's items are checked against (`onboarding-cards.ts`), the same checks whether they came as fields or, later, as tools.
+    // What a round's items are checked against (`onboarding-cards.ts`), the same checks whether they came as fields or as tools.
     const replies = Object.fromEntries(messages.filter((message) => message.role === "user")
       .map((message) => [`reply-${message.seq}`, String((message.content as { text?: string }).text ?? "")]));
     const earlierCards = messages.filter((message) => message.role === "assistant").flatMap((message) => {
@@ -389,6 +394,16 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     };
     /* i18n-ignore-end */
     const outputSchema = onboardingDialogueSchema(ids);
+    // The card tools (P2b-3b): each item is checked as it is handed in, against the round's draft so far; the final answer's own fields
+    // are merged after the draft and go through the same checks. A thread rebuilt after the runtime lost it starts a fresh draft.
+    let draft = emptyDraft();
+    let cardMode = coverage.cardTools;
+    const itemSchema = (key: "questions" | "insights" | "research") =>
+      ((outputSchema as { properties: Record<string, { items: Record<string, unknown> }> }).properties[key]!).items;
+    const stageNow = (session.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : INTERVIEW_FLOW_STAGES[flow][0]!);
+    const tools = cardTools({ schemas: { question: itemSchema("questions"), insight: itemSchema("insights"), research: itemSchema("research") },
+      ids: () => ids, draft: () => draft,
+      check: (next) => deskCheck({ reply: "", coverage: [], nextAction: "ask", stage: stageNow, safety: false, ...next } as unknown as OnboardingDialogue).problems });
     // What the finished research threads found: a reply that lists their figures is sent back once (`researchCopied`); after the repairs
     // run out it is kept as it is (`softAccept`), a round is not lost for it.
     const findings = () => researchNow().flatMap((item) => [item.conclusion ?? "", item.found ?? ""]).filter(Boolean);
@@ -397,7 +412,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       ...findings(), ...[...docs.values()].map((doc) => doc.extractedText), ...store.listProfileFacts(workspaceId).map((fact) => fact.value ?? "")];
     const setDates = (reply: string) => inventedDates(reply, givenTexts(), replyText, today);
     const validateOutput = (output: unknown) => {
-      const valid = validateOnboardingDialogue(output, known);
+      const valid = validateOnboardingDialogue(withDraft(output, draft), known);
       const copied = researchCopied(valid.reply, findings());
       if (copied.length > RESEARCH_FIGURES_MAX) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
         detail: `reply 逐条列了调研线程的细节（${copied.join("、")}）。它们在右栏的调研线程里；reply 只留改变下一步的那一条结论和它对本人意味着什么，一两句，不列日期、时间和门槛。` }); // i18n-ignore: model-facing repair note
@@ -426,7 +441,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // kept on the reply (interview-rules IR-006), because a made-up date read as the person's own plan is worse than a shorter reply.
     const withoutInventedDates = (reply: string) => (reply.match(/[^。！？!?\n]+[。！？!?]?|\n+/gu) ?? []).filter((sentence) => !setDates(sentence).length).join("").trim();
     const softAccept = (_rejection: Error, output: unknown) => {
-      const kept = keepOnboardingDialogue(output, known);
+      const kept = keepOnboardingDialogue(withDraft(output, draft), known);
       // Past the repairs a sentence pointing at a button that would refuse is left out too (interview-rules IR-035).
       return kept && { ...kept, reply: withoutInventedDates(!focusLine && startOpen() ? withoutEndHint(kept.reply) : kept.reply) };
     };
@@ -434,8 +449,9 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const keepEarly = (rejection: Error, output: unknown) => {
       // The safety question and the items' own problems are the model's to answer, never settled by keeping the answer as it is.
       if ((rejection as Error & { safety?: boolean; cards?: boolean }).safety || (rejection as Error & { cards?: boolean }).cards) return undefined;
-      const kept = keepOnboardingDialogue(output, known);
-      return kept && droppedOnboardingItems(output, kept) <= ONBOARDING_KEEP_EARLY_MAX
+      const merged = withDraft(output, draft);
+      const kept = keepOnboardingDialogue(merged, known);
+      return kept && droppedOnboardingItems(merged, kept) <= ONBOARDING_KEEP_EARLY_MAX
         && researchCopied(kept.reply, findings()).length <= RESEARCH_FIGURES_MAX && !setDates(kept.reply).length
         && !(!focusLine && startOpen() && endHinted(kept.reply)) ? kept : undefined;
     };
@@ -476,6 +492,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       return runCodexSkill<OnboardingDialogue>(client, context, {
         skillName: ONBOARDING_SKILL, cwd, developerInstructions: withProfileFramework(INSTRUCTIONS), outputSchema, keepThread: true, locale, secondPerson: SECOND_PERSON, allowWebSearch: true,
         prepareInput: () => context, validateOutput, softAccept, keepEarly,
+        optionalTools: { tools, instructions: CARD_TOOLS_INSTRUCTIONS, withoutTools: (input) => input, onMode: (mode) => { cardMode = mode; } },
         onAudit: (audit) => { if (audit.threadId) threadId = audit.threadId; }, onProgress, onQueued,
         timeoutMs: 60 * 60_000
       });
@@ -521,12 +538,14 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
           ...(publicAssessment ? { publicAssessment } : {}), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}), research: researchNow() });
         result = await continueSkillTurn<OnboardingDialogue>(client, session.codexThreadId, message, {
           skillName: ONBOARDING_SKILL, cwd, locale, outputSchema, validateOutput, softAccept, keepEarly, allowWebSearch: true,
+          ...(cardMode === "tools" ? { tools } : {}),
           onAudit: () => {}, onProgress, onQueued, timeoutMs: 60 * 60_000
         });
         // The runtime forgets a conversation when it restarts. The interview does not: the profile, the files and
         // every message are in the ledger, so a new thread is told what was said and carries on from there.
         if (!result.ok && result.blocker.code === "SKILL_THREAD_LOST") {
           threadId = undefined;
+          draft = emptyDraft();
           announcedNow = new Set();
           sent = [...docs].filter(([, doc]) => doc.extractionStatus === "done");
           result = await startThread(sent, conversationSoFar(messages.slice(0, -1)));
@@ -614,7 +633,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       ...current, ...(threadId ? { codexThreadId: threadId } : {}),
       state: output.nextAction === "ready_for_milestones" ? "complete" : "active",
       coverage: { ...current.coverage, coverage: output.coverage, ...(output.stage ? { stage: output.stage } : {}), ...(progress ? { progress } : {}),
-        announcedSources: [...announcedNow, ...sent.map(([id]) => id)], heardAt, ...(week.length ? { calendarSent: weekSent } : {}), lastRound: edits },
+        announcedSources: [...announcedNow, ...sent.map(([id]) => id)], heardAt, ...(week.length ? { calendarSent: weekSent } : {}), lastRound: edits,
+        ...(cardMode ? { cardTools: cardMode } : {}) },
       updatedAt: new Date().toISOString()
     });
     return { state: output.nextAction === "ready_for_milestones" ? "ready" : "asked", sessionId };

@@ -179,6 +179,9 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     code: { file: `${WORKER}/onboarding-cards.ts`, symbol: "checkInsights", test: `${WORKER}/onboarding-cards.test.ts` } },
   { id: "IR-050", layer: "L0", verdict: "return", status: "active", rule: "调研已有线程或同时开着的太多时退回模型",
     code: { file: `${WORKER}/onboarding-cards.ts`, symbol: "checkResearch", test: `${WORKER}/onboarding-cards.test.ts` } },
+  // P2b-3b: the same checks, run as each item is handed in through a tool; a failing call is the tool's error, in the same turn.
+  { id: "IR-053", layer: "L0", verdict: "return", status: "active", rule: "出卡工具当场核对每一项，不合格作为工具的回答退回，不收下",
+    code: { file: `${WORKER}/onboarding-cards.ts`, symbol: "cardTools", test: `${WORKER}/onboarding-cards.test.ts` } },
   { id: "IR-045", layer: "L0", verdict: "delete", status: "retired", rule: "事实合并（core 版）",
     code: { file: `${CORE}/profile-gaps.ts`, symbol: "mergeFacts" },
     reason: "没有生产调用者；「推断不覆盖已确认」由数据库的 upsert 规则保证" },

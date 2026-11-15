@@ -908,3 +908,36 @@ test("the cards' start item counts the short set whatever tier an account once c
   expect(cardsItem()).toMatchObject({ done: true });
 });
 
+
+// P2b-3b (docs/onboarding-agent-session.md D1): on a route that calls functions the dialogue hands its questions in through the card
+// tools; each is checked as it comes, and a failing one is answered as a tool error in the same turn, before the round is written.
+test("the card tools: a question handed in is checked on the spot, a failing one comes back as the tool's answer, and the kept ones make the round", async () => {
+  const answers: Array<Record<string, unknown>> = [];
+  const bad = { id: "q-when", text: "哪段时间最空？", kind: "single", allowOther: true, identityId: "research", projectId: "",
+    options: [{ id: "a", label: "周末", detail: "" }, { id: "a", label: "晚上", detail: "" }] };
+  const good = { ...bad, options: [{ id: "a", label: "周末", detail: "" }, { id: "b", label: "晚上", detail: "" }] };
+  const dialogueThreads = () => runtime.threadStarts().flatMap((params, index) =>
+    (params.dynamicTools as Array<{ name: string }> | undefined)?.some((tool) => tool.name === "ask_question") ? [`thread-${index + 1}`] : []);
+  const runtime = runtimeWithRoutes([turn({ questions: [] }), turn({ questions: [] })], [ONBOARDING_SKILL, ONBOARDING_EXTRACT_SKILL], {
+    routes: [{ match: EXTRACT, answers: [turn()] }],
+    script: async ({ threadId, ask }) => {
+      if (!dialogueThreads().includes(threadId)) return;
+      for (const question of [bad, good]) answers.push(await ask("item/tool/call", { callId: `c${answers.length}`, tool: "ask_question", arguments: question }));
+    } });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => runtime.rpc);
+  await run({ sessionId: "s1", text: "西湖那篇 10/31 前要投出，数据下周到。" });
+  // The tools are declared at the thread's start, and the session remembers it, so the follow-up turns answer them too.
+  expect(dialogueThreads()).toHaveLength(1);
+  expect(store.getOnboardingSession(workspaceId, "s1")!.coverage).toMatchObject({ cardTools: "tools" });
+  const text = (answer: Record<string, unknown>) => ((answer.contentItems as Array<{ text: string }>)[0]!.text);
+  expect(answers[0]).toMatchObject({ success: false });
+  expect(text(answers[0]!)).toContain("选项 id 有重复");
+  expect(answers[1]).toMatchObject({ success: true });
+  expect(text(answers[1]!)).toContain("收下");
+  // The final answer's `questions` was []: the round is what the tool kept.
+  const round = store.listOnboardingMessages(workspaceId, "s1").at(-1)!.content as { questions: Array<{ id: string }> };
+  expect(round.questions.map((question) => question.id)).toEqual(["q-when"]);
+  // The next turn: the same question again is checked against the ledger, which now holds it unanswered — asked once, so it goes out.
+  await run({ sessionId: "s1", text: "周末吧" });
+  expect(answers[3]).toMatchObject({ success: true });
+});

@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { profileGaps, type Hypothesis, type ResearchThread, type TurnInsight, type TurnQuestion } from "@crossline/core";
-import { checkInsights, checkOpenItems, checkQuestions, checkResearch, ROUND_QUESTIONS } from "./onboarding-cards";
+import { cardTools, checkInsights, checkOpenItems, checkQuestions, checkResearch, emptyDraft, ROUND_QUESTIONS, withDraft, type RoundDraft } from "./onboarding-cards";
 import { interviewLedger } from "./question-ledger";
 
 // 2026-11-14 audit (docs/onboarding-validation-audit.md §3.3–3.5): every check answers with a problem the model can act on; none rewrites
@@ -114,4 +114,25 @@ test("research comes back when its thread exists or too many are open", () => {
   const busy = ["一", "二", "三", "四"].map((name) => thread(name, "running"));
   expect(checkResearch([asked], busy).problems).toEqual([expect.stringContaining("同时开着的调研已有 4 条")]);
   expect(checkResearch([asked], []).accepted).toEqual([asked]);
+});
+
+test("the card tools keep an item only once its checks pass, and the final answer's own fields come after the draft", () => {
+  let draft = emptyDraft();
+  const seen: RoundDraft[] = [];
+  const tools = cardTools({ schemas: { question: {}, insight: {}, research: {} }, ids: () => ({ lines: ["research"], projects: [] }), draft: () => draft,
+    check: (next) => { seen.push(next); return next.questions.length + next.openItems.length > 2 ? ["一轮最多两题（测试）"] : []; } });
+  expect(tools.specs.map((spec) => spec.name)).toEqual(["ask_question", "ask_app_question", "show_observation", "open_research"]);
+  // A shape the whole answer would be refused for comes back before the round's checks run.
+  expect(() => tools.call("ask_question", { id: "q1", text: "哪段时间最空？", kind: "single", options: [{ id: "a", label: "周末", detail: "" }] })).toThrow("至少要给 2 个候选");
+  expect(() => tools.call("ask_question", { id: "q1", text: "哪段时间最空？", kind: "free", identityId: "money" })).toThrow("主线「money」不存在");
+  expect(seen).toEqual([]);
+  expect(tools.call("ask_question", { id: "q1", text: "哪段时间最空？", kind: "free" })).toContain("收下");
+  expect(tools.call("ask_app_question", { id: "gap-meetings-ece548" })).toContain("这一轮已有 2 道题");
+  expect(() => tools.call("ask_question", { id: "q3", text: "第三题？", kind: "free" })).toThrow("一轮最多两题");
+  expect(draft.questions.map((question) => question.id)).toEqual(["q1"]);
+  expect(draft.openItems).toEqual(["gap-meetings-ece548"]);
+  expect(withDraft({ reply: "好", questions: [ask("别的？", { id: "q9" })] }, draft)).toMatchObject({
+    questions: [expect.objectContaining({ id: "q1" }), expect.objectContaining({ id: "q9" })], openItems: ["gap-meetings-ece548"], insights: [], research: [] });
+  draft = emptyDraft();
+  expect(withDraft({ reply: "好", questions: [] }, draft)).toEqual({ reply: "好", questions: [] });
 });
