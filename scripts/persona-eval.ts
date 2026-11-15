@@ -26,7 +26,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { configureModelGate, runCodexSkill, setProviderResolver, setUsageSink, startCodexAppServer, startCodexSupervisor, startModelGateway,
-  threadProvider, withUsageWorkspace, type ProviderRouting, type SkillUsage } from "../packages/codex/src/index";
+  installUndiciAssertionGuard, threadProvider, withUsageWorkspace, type ProviderRouting, type SkillUsage } from "../packages/codex/src/index";
 import {
   ONBOARDING_INSIGHTS, PROFILE_CLAIMS_SETTING, PROFILE_INSTRUMENTS_SETTING, THIRD_PARTY_CAPABILITIES, cardWordsHead,
   composeGoal, instrumentClaims, interviewCompleteness, instrumentReadings, interviewComplete, parseSponsorModels, readInsightRatings, readInstrumentAnswers, readyToStart,
@@ -352,12 +352,8 @@ async function runPerson(name: string, opening: Opening) {
 
 // undici's HTTP parser asserts from a socket's `end` event when a provider closes TLS mid-response (2026-11-15, Node 22.23): thrown
 // outside any request's promise, it ended the whole walkthrough. That one is logged and the run goes on — the request it belonged to
-// fails or times out and the runner's own retry takes it; anything else still ends the process.
-process.on("uncaughtException", (error: Error & { code?: string }) => {
-  const undici = error.code === "ERR_ASSERTION" && /undici/u.test(error.stack ?? "");
-  console.error(JSON.stringify({ type: "uncaught", undici, message: error.message, stack: (error.stack ?? "").split("\n").slice(0, 4).join(" | ") }));
-  if (!undici) process.exit(1);
-});
+// fails or times out and the runner's own retry takes it; anything else still ends the process (packages/codex/src/undici-guard.ts).
+installUndiciAssertionGuard();
 
 console.info(JSON.stringify({ step: "start", people: names, model, playerModel, out }));
 // One person's failure must not take the others' results with it.

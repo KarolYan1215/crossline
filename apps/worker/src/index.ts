@@ -4,7 +4,7 @@ import { get } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { accountConcurrency, breakdownOfResponsesUsage, codexProcessEnvironment, flushMeteredUsage, recordMeteredUsage, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, modelGateStatus, setDesignNoteProvider, setInstructionsProvider, setEffortPreferenceProvider, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
+import { accountConcurrency, breakdownOfResponsesUsage, codexProcessEnvironment, flushMeteredUsage, recordMeteredUsage, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, installUndiciAssertionGuard, modelGateStatus, setDesignNoteProvider, setInstructionsProvider, setEffortPreferenceProvider, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
 import { containerMemory, containerPeak, createCollectMemory, heldMemory } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
@@ -1079,6 +1079,9 @@ if (!claimWorkerLock()) {
   console.info(JSON.stringify({ type: "worker.already_running", lockPath }));
   process.exit(0);
 }
+// A provider closing a stream mid-response can make undici assert from a socket event, outside every request's promise; that one
+// assertion is logged and the worker stays up instead of taking every account's model runs with it (packages/codex/src/undici-guard.ts).
+installUndiciAssertionGuard();
 const analysisStore = new CrosslineStore(path.join(dataDir, "crossline.db"));
 // Keys and links that are credentials (a model provider's key, a calendar's private link): DPAPI files, never the ledger.
 const secrets = createDpapiSecretStore(dataDir);

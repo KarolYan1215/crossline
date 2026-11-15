@@ -27,6 +27,7 @@ export * from "./runtime-registry";
 export * from "./prices";
 export * from "./providers";
 export * from "./model-gateway";
+export * from "./undici-guard";
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === "object" && value !== null ? value as Record<string, unknown> : undefined;
