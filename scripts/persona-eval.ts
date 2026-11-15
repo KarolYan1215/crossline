@@ -35,6 +35,7 @@ import {
 import { CrosslineStore, interviewChecklistFor, rateInsight } from "../packages/db/src/index";
 import { composeAnswers, type Question } from "../apps/web/app/onboarding/onboarding-types";
 import { openingReply } from "../apps/web/app/onboarding/opening-card";
+import { interviewMetrics } from "../apps/worker/src/interview-metrics";
 import { identityLines } from "../apps/worker/src/lines";
 import { createOnboardingExtractor, extractionSettled, requestExtraction } from "../apps/worker/src/onboarding-extract";
 import { readSectionRecords } from "../apps/worker/src/onboarding-persist";
@@ -321,6 +322,8 @@ async function runPerson(name: string, opening: Opening) {
     const result = {
       name, opening, model, playerModel, state, turns, minutes: Math.round((Date.now() - started) / 60_000), readyAtRound: readyAt ?? null,
       complete: interviewComplete(checklist), goalsAdopted, rounds,
+      // P5 (docs/onboarding-agent-session.md §5): what the refactor is judged by against earlier replays.
+      metrics: interviewMetrics(store, workspaceId, "eval"),
       lines, lineProfiles: json("lines.profiles", {}), profile: json("profile.model", {}), sections: readSectionRecords(store, workspaceId),
       portrait: json<{ report?: unknown }>("portrait.report", {}).report ?? null,
       claims: { cards: instrumentClaims(answers, new Date().toISOString()), written: json<{ claims?: unknown[] }>(PROFILE_CLAIMS_SETTING, {}).claims ?? [] },
@@ -337,7 +340,7 @@ async function runPerson(name: string, opening: Opening) {
     writeFileSync(path.join(dir, "result.json"), JSON.stringify(result, null, 2), "utf8");
     writeFileSync(path.join(dir, "transcript.md"), transcript.join("\n"), "utf8");
     store.close();
-    return { name, state, turns, readyAtRound: readyAt ?? null, complete: result.complete, portrait: Boolean(result.portrait), cost: result.cost };
+    return { name, state, turns, readyAtRound: readyAt ?? null, complete: result.complete, portrait: Boolean(result.portrait), metrics: result.metrics, cost: result.cost };
   }
 }
 
