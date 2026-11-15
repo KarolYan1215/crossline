@@ -68,17 +68,6 @@ export function correctedSince(store: CrosslineStore, workspaceId: string, sessi
 export const correctionUnread = (store: CrosslineStore, workspaceId: string, sessionId: string, lanes = true): boolean =>
   correctedSince(store, workspaceId, sessionId, readLaneState(store, workspaceId, sessionId, lanes ? "insights" : "all").readAt);
 
-/**
- * Whether this round's observation cards wait (2026-11-14, replay 12): the person corrected a card, and the inferences' lane has not
- * read that correction yet. Replay 12 put one premise she had corrected three times on two more cards. The wait is one round at most
- * (replay 14): the lane took nine minutes a run, and one correction held the cards for ten rounds. After that round the cards come
- * with the corrections beside them (`paceContext`'s `cardsCheck`).
- */
-export function cardsWait(store: CrosslineStore, workspaceId: string, sessionId: string, lanes = true): boolean {
-  const lastRound = store.listOnboardingMessages(workspaceId, sessionId).filter((message) => message.role === "assistant").at(-1)?.createdAt;
-// A card is rated after its round is shown, so a rating stamped the same millisecond is on that round (CI ran the two in one).
-  return correctionUnread(store, workspaceId, sessionId, lanes) && (!lastRound || correctedSince(store, workspaceId, sessionId, lastRound, true));
-}
 export const PORTRAIT_WAIT_MS = 10 * 60_000;
 
 /**
@@ -158,7 +147,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       // The inferences are what the next cards are chosen from: they wait for a batch only while the log has two or more to offer
       // (the seventh replay: batched from the start, the lane ran three times and no card came from the log).
       if (lane === "insights" && cardCandidates(readProfileModel(store, workspaceId).hypotheses ?? []).length < 2) return true;
-      // A correction the log has not been checked against holds the cards back (`cardsWait`): the lane reads it at once.
+      // A correction the log has not been checked against goes beside the next round's cards (`cardsCheck`): the lane reads it at once.
       if (lane === "insights" && correctedSince(store, workspaceId, id, state(id).readAt)) return true;
       return pending.length >= (Number(process.env.CROSSLINE_PORTRAIT_BATCH) || PORTRAIT_BATCH) || Date.now() - Date.parse(pending[0]!.createdAt) >= PORTRAIT_WAIT_MS;
     };
@@ -209,7 +198,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
 
   /** The oldest waiting replies of one conversation (at most `REPLIES_PER_RUN`), and the files waiting, within the reading budget. */
   async function runInner(sessionId: string, lane: ExtractLane): Promise<ExtractOutcome> {
-    // Ratings given after this moment are not in this run's input (`cardsWait`).
+    // Ratings given after this moment are not in this run's input (`correctionUnread`).
     const readAt = new Date().toISOString();
     const state = readLaneState(store, workspaceId, sessionId, lane);
     const client = getClient();

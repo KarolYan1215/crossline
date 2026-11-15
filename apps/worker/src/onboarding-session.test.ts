@@ -3,7 +3,7 @@ import { CrosslineStore, rateInsight, writeExtractState } from "@crossline/db";
 import { cardWordsHead, PROFILE_FRAMEWORK, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
   type OnboardingProgress, type ProfileCard } from "@crossline/core";
 import { cardsForRound, closingQuestion, createOnboardingSessionRunner as createRunner, finishInterview, INSTRUCTIONS, ONBOARDING_SKILL, paceDeepRound, shownOrOpen, stageOrderFor, withFreshOpenQuestion, withoutEndHint } from "./onboarding-session";
-import { cardsWait, correctedSince, correctionUnread, INSTRUCTIONS as EXTRACT_INSTRUCTIONS } from "./onboarding-extract";
+import { correctedSince, correctionUnread, INSTRUCTIONS as EXTRACT_INSTRUCTIONS } from "./onboarding-extract";
 import { ONBOARDING_EXTRACT_SKILL } from "./onboarding-extract";
 import { fakeRuntime as runtimeWithRoutes } from "./testing/fake-runtime";
 
@@ -689,17 +689,17 @@ test("cards ready together come in one round: each is kept, keyed and rated on i
     .toEqual(["你说投入的两次都是和人一起赶东西。", "你说底座主线是一个人做的研究。"]);
   const log = () => (JSON.parse(store.getSetting(workspaceId, "profile.model")!) as { hypotheses: Array<{ id: string; cardKey?: string; rated?: string }> }).hypotheses;
   expect(log().map((item) => item.cardKey)).toEqual([`s#${shown.seq}`, `s#${shown.seq}.1`, undefined]);
-  // The second card is rated under its own key; a 部分对 newer than the inferences' last read holds the next cards back.
-  expect(cardsWait(store, workspaceId, "s")).toBe(false);
+  // The second card is rated under its own key; a 部分对 newer than the inferences' last read goes beside the next cards (`cardsCheck`).
+  expect(correctionUnread(store, workspaceId, "s")).toBe(false);
   expect(rateInsight(store, workspaceId, { sessionId: "s", seq: shown.seq, index: 1, verdict: "partial", correction: "是一个人做，但常和导师讨论" }))
     .toMatchObject({ ok: true, hypothesisId: "h2" });
   expect(log().find((item) => item.id === "h2")?.rated).toBe("partial");
   expect(rateInsight(store, workspaceId, { sessionId: "s", seq: shown.seq, index: 2, verdict: "fits" })).toEqual({ ok: false, code: "INSIGHT_NOT_FOUND" });
-  expect(cardsWait(store, workspaceId, "s")).toBe(true);
+  expect(correctionUnread(store, workspaceId, "s")).toBe(true);
   expect(correctedSince(store, workspaceId, "s", "2999-01-01T00:00:00Z")).toBe(false);
-  // One round at most (replay 14: a nine-minute lane held the cards for ten rounds); the cards then go with the correction beside them.
-  store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "assistant", content: { reply: "held" }, createdAt: "2999-01-01T00:00:00Z" });
-  expect(cardsWait(store, workspaceId, "s")).toBe(false);
+  // Never held back any more (replay 14: a nine-minute lane held the cards for ten rounds; 2026-11-14 audit): the correction stays
+  // beside the cards until the lane has read it, a later round included.
+  store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "assistant", content: { reply: "next" }, createdAt: "2999-01-01T00:00:00Z" });
   expect(correctionUnread(store, workspaceId, "s")).toBe(true);
 });
 

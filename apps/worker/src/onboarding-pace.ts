@@ -24,12 +24,10 @@ export function paceContext(store: CrosslineStore, workspaceId: string, sessionI
   flow?: InterviewFlow;
   /** The points rules: the hypothesis log and the points ledger go with every round. */
   rules?: boolean;
-  /** The person corrected a card the inferences' lane has not read yet (`cardsWait`): no card this round. */
-  cardsWait?: boolean;
-  /** Such a correction is still unread after the round it held (`correctionUnread`): the cards go, checked against it. */
+  /** The person corrected a card the inferences' lane has not read yet (`correctionUnread`): the cards go, checked against it. */
   correctionUnread?: boolean;
 }): { progress?: string[]; abstract: string[]; observations?: string[]; goalPicker?: string[]; fixedSchedule?: string[]; hypothesisLog?: string[]; cardFrom?: string[];
-  cardsWait?: string; cardsCheck?: string; points?: string[] } {
+  cardsCheck?: string; points?: string[] } {
   const profiles = (() => { try { return JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") as Record<string, StoredLineProfile>; } catch { return {}; } })();
   const facts = store.listProfileFacts(workspaceId);
   const deadlineOf = (projectId: string) => {
@@ -76,10 +74,9 @@ export function paceContext(store: CrosslineStore, workspaceId: string, sessionI
   // Under the points rules (2026-11-12): what cards may ask about, and what is settled.
   const log = input.rules ? hypothesisLogLines(profile.hypotheses ?? []) : [];
   const points = input.rules ? pointLines(profile.points ?? []).slice(-30) : [];
-  const cardFrom = input.rules && !input.cardsWait ? cardCandidates(profile.hypotheses ?? [], CARDS_OFFERED) : [];
+  const cardFrom = input.rules ? cardCandidates(profile.hypotheses ?? [], CARDS_OFFERED) : [];
   return { abstract, ...(progress.length ? { progress } : {}), ...(ratings.length ? { observations: ratings } : {}),
     ...(log.length ? { hypothesisLog: log } : {}), ...(cardFrom.length ? { cardFrom } : {}), ...(points.length ? { points } : {}),
-    ...(input.rules && input.cardsWait ? { cardsWait: "本人刚更正过观察卡，假设日志还没按更正重看：这一轮不出观察卡，insights 写 []。" } : {}),
     ...(cardFrom.length && input.correctionUnread ? { cardsCheck: "假设日志还没按本人最近的更正重看：出卡前对照 observations 里「部分对」「不准」的更正，被更正的前提不再写上卡。" } : {}),
     ...(goalPicker.length ? { goalPicker } : {}), ...(fixedSchedule.length ? { fixedSchedule } : {}) };
 }

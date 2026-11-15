@@ -42,8 +42,8 @@ export const EXTRACT_BACKOFF_MINUTES = [1, 5, 30] as const;
 export type ExtractState = { upTo: number; failures: number; retryAt?: string; lastError?: { code: string; message: string; at: string }; ranAt?: string;
   pinned?: boolean;
   /**
-   * When the last finished run built its input (2026-11-14): the observation ratings it read are those given before this. The cards are
-   * drawn from the hypothesis log only once the inferences' lane has read the latest correction (`cardsWait`).
+   * When the last finished run built its input (2026-11-14): the observation ratings it read are those given before this. A correction given
+   * after it is unread, and goes beside the next cards (`correctionUnread`, `cardsCheck`).
    */
   readAt?: string };
 /**

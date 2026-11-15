@@ -13,14 +13,14 @@ import {
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillProgress } from "@crossline/codex";
 import {
-  EXTRACT_REREAD_SETTING, extractBacklog, readExtractState, firstSentenceOf, markFinishing, interviewChecklistFor, interviewGapsFor, interviewLocale, lockInterviewLocale, queueExtractDocs, questionScreenFor, readExtractDocs, unfiledFilesIn,
+  EXTRACT_REREAD_SETTING, readExtractState, firstSentenceOf, markFinishing, interviewChecklistFor, interviewGapsFor, interviewLocale, lockInterviewLocale, queueExtractDocs, questionScreenFor, readExtractDocs, unfiledFilesIn,
   insightKey, type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument
 } from "@crossline/db";
 import { sourceIds } from "./source-ids";
 import { localeOf } from "./locale";
 import { adoptLineGoal, identityLines } from "./lines";
 import { checklistAnswered, checklistAskable, ledgerForModel, linesAnsweredUnread, recordReplyAnswers, recordRound, resolveRepeats, syncGapQuestions } from "./question-ledger";
-import { cardsWait, correctionUnread, createOnboardingExtractor, extractionReached, requestAllLanes, requestExtraction, type ExtractLane } from "./onboarding-extract";
+import { correctionUnread, createOnboardingExtractor, extractionReached, requestAllLanes, requestExtraction, type ExtractLane } from "./onboarding-extract";
 import { DATES_UNRECORDED_EVENT, ONBOARDING_UNRECORDED_EVENT, personTimeZone, readProfileModel } from "./onboarding-persist";
 import { paceContext, storedProgress } from "./onboarding-pace";
 import { CARDS_OFFERED, cardCandidateIds, hypothesisFromCard, hypothesisReplies, INSIGHTS_PER_ROUND, POINTS_RULES, pointsRules, withProfileFramework, type Hypothesis, type TurnInsight } from "@crossline/core";
@@ -38,12 +38,9 @@ const SOURCE_TEXT_TOTAL = 60_000;
 const SOURCES_PER_TURN = 12;
 /** How long the round that ends a line's own interview waits for the extraction (the main interview is ended by the person, `finishInterview`). */
 const FINISH_WAIT_MS = 90_000;
-/** How long a round left with nothing to ask waits for the extraction before it reads the app's own questions (one run is about four minutes). */
-const CHECKLIST_WAIT_MS = 300_000;
-/** How long a round with a blocking app question waits for the extraction of the reply it may answer. */
-const BLOCKING_WAIT_MS = 30_000;
-/** How long a fact round waits, before the dialogue runs, for the extraction of a reply that may settle a start item. */
-const START_WAIT_MS = 60_000;
+// No round waits for the extraction any more (2026-11-14 audit): the three waits (60 s before a fact round, 30 s under a blocking app
+// question, 300 s for a round left empty) stacked, and an extraction on a sponsor's model takes 4–15 minutes, so they mostly ran out
+// for nothing. The dialogue is told instead which answers are not on record yet (`startStandard.answered`, `unrecorded`).
 /** Facts the extraction recorded since the last turn, at most this many lines in `recorded`. */
 const RECORDED_SHOWN = 40;
 /** Questions of the ledger shown to the model each round; repeats of older ones are still caught in code (`resolveRepeats`). */
@@ -347,13 +344,12 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const heardAt = new Date().toISOString();
     const recorded = recordedSince(coverage.heardAt);
     // The short ledger the round starts from: the last round's progress record, an abstract of the ledger, and the latest ratings.
-    // A correction the inferences' lane has not read yet holds the cards back for one round (`cardsWait`), then the cards go with the
-    // corrections beside them; with no extraction there is nothing to wait for.
+    // A correction the inferences' lane has not read yet goes beside the cards (`cardsCheck`): they are checked against it, never held
+    // back (2026-11-14 audit: holding them stopped every card for a round, once for ten). With no extraction nothing is unread.
     const reading = !focusLine && extractMode !== "off" && pointsRules(session.coverage);
-    const waitCards = reading && cardsWait(store, workspaceId, sessionId, lanes);
     const correctionPending = reading && correctionUnread(store, workspaceId, sessionId, lanes);
     const pace = () => paceContext(store, workspaceId, sessionId, { today, recent: recorded.lines, progress: storedProgress(session!.coverage), flow,
-      rules: !focusLine && pointsRules(session!.coverage), cardsWait: waitCards, correctionUnread: correctionPending,
+      rules: !focusLine && pointsRules(session!.coverage), correctionUnread: correctionPending,
       lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, goals: line.goals ?? [] })) });
     // What the app did to the last round and which replies the ledger lags behind: sent with every turn, only when there is something.
     const lastRound = coverage.lastRound;
@@ -489,10 +485,6 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // A model reading the files says nothing for a minute or more; the heartbeat tells the page the turn is still alive.
     const heartbeat = setInterval(() => { if (latest) write({ ...latest, updatedAt: new Date().toISOString() }); }, 15_000);
 
-    // A fact round while the start standard is open waits a little for the extraction of this reply before the dialogue reads the checklist:
-    // replay 10 gave her free hours in round 14 and the start stood only in round 17, the rounds between reading 「还在记录」.
-    const stageNow = (session.coverage as { stage?: OnboardingStage }).stage;
-    if (!focusLine && extractMode === "background" && (stageNow === "orientation" || stageNow === "lines") && startOpen()) await caughtUp(START_WAIT_MS);
     let result;
     try {
       if (!session.codexThreadId) {
@@ -543,10 +535,6 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const ending = result.output.nextAction === "ready_for_milestones";
     if (extractMode === "await") await caughtUp();
     else if (ending) await caughtUp(FINISH_WAIT_MS);
-    // An app question that blocks is asked every round until answered: when this reply may have answered it in prose, the round waits a
-    // little for the extraction, so it is not asked again right under the answer.
-    // A chosen goal is read from the taps themselves, so its question waits for nothing.
-    else if (currentGaps().some((gap) => gap.blocking && gap.code !== "LINE_GOAL")) await caughtUp(BLOCKING_WAIT_MS);
     // Questions that are not the person's to answer (a room, class times already on record, whether a calendar event repeats) are taken
     // out before the round is stored; what something rests on is written as an assumption the person can correct.
     const screen = screenQuestions(result.output.questions, questionScreenFor(store, workspaceId));
@@ -574,8 +562,6 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // Every question the model wrote was taken out (already answered, screened) and none of its cards are left: what the round asks now is
     // the app's own, read off the checklist. That checklist waits for the extraction once more, or it asks what this reply just said (the
     // 2026-11-01 rerun asked the illustrator line's current project right under the answer naming it).
-    if (!paced.output.questions.length && !cards.length && paced.output.nextAction === "ask" && extractMode === "background" && !focusLine
-      && extractBacklog(store, workspaceId, sessionId).replies > 0) { await caughtUp(CHECKLIST_WAIT_MS); gapsNow = gapsFresh(); }
     const touched = { lines: recorded.identities, projects: recorded.projects, portrait: Boolean(readProfile().portrait) };
     const startStands = !focusLine && !startOpen();
     const checked = paced.deep ? paced.output
@@ -624,11 +610,11 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       return [content.insight, ...(content.moreInsights ?? [])].filter((card): card is TurnInsight => Boolean(card?.text));
     });
     const shownInsights = new Set(earlierCards.map((card) => squeeze(card.text)));
-    // Never beside the safety check, never built on a disclosure (`disclosureReplies`); none while a correction waits to be read (`cardsWait`).
+    // Never beside the safety check, never built on a disclosure (`disclosureReplies`).
     const sensitive = disclosureReplies(messages);
     const rules = !focusLine && pointsRules(session.coverage);
     const observed: TurnInsight[] = [];
-    if (!safetyRound(output) && !waitCards) {
+    if (!safetyRound(output)) {
       const profile = readProfile();
       // Under the points rules every card is one hypothesis of the log (2026-11-12): one on record by its id, never one a card already
       // asked about; a new one only when the log offers none (replay 12: a card the dialogue made up afresh beside four offered ones put
