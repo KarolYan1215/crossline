@@ -670,7 +670,9 @@ test("favourites by topic: the list read for its titles, sorted into topics, the
     // A run that broke holds the site: the tick starts nothing, however late, until the person presses 「立即运行」.
     holdAfterFailure(store, ws, "Target crashed");
     // A month on, by night: the list is due again, so only the hold stops it (a wall-clock date made this pass only between 02 and 08 UTC).
-    const soon = new Date("2026-11-22T03:00:00Z");
+    // Relative to the wall clock the collection was stamped with (a fixed 2026-11-22 stopped being 「a month on」 on 2026-11-14).
+    const soon = new Date(Date.now() + 31 * 86_400_000);
+    soon.setUTCHours(3, 0, 0, 0);
     expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, soon)).toMatchObject({ state: "blocked", code: "SITE_PAUSED" });
     expect(resumeByPerson(store, ws, readGrownSkills(store, ws)[0]!)).toEqual(["xiaohongshu.com"]);
     expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, soon, { manual: true })).not.toMatchObject({ code: "SITE_PAUSED" });
