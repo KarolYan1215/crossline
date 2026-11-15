@@ -528,6 +528,7 @@ export * from "./sentences";
 export * from "./onboarding-refs";
 export * from "./question-ledger";
 export * from "./interview-checklist";
+export * from "./interview-rules";
 export * from "./fixed-events";
 export * from "./life";
 export * from "./event-merge";

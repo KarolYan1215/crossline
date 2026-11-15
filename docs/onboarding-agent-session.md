@@ -132,7 +132,7 @@
 | 34 | 评卡：`rateInsight`/`rateHypothesis`（`insight-rating.ts`，PP:114-155） | 留。W-267：「不准」要拆成两个意思，见 §3.3 |
 | 35 | 画像合并：<br>- 要点 `applyPointChanges`<br>- 假设与职业 `mergeProfileInsights`、`numberNewHypotheses`、`settledOnCard`、`cleanHypotheses`/`cleanCareers`<br>- `researchUrls` | 留，在子代理结果的合并步骤里执行 |
 | 36 | 来源与画像校验：`validateResearchTurn`/`researchFindings`、`validatePortrait`/`resolveWrittenClaims`/`typeSummaryProblem` | 留 |
-| 37 | 输入与事实的保护：<br>- 本人回复截到 16k 字（web 侧拒收 12k 以上）<br>- 一次最多 12 份文件<br>- 推断不覆盖已确认的 `mergeFacts`<br>- `portraitStillConfirmed` | 留 |
+| 37 | 输入与事实的保护：<br>- 本人回复截到 16k 字（web 侧拒收 12k 以上）<br>- 一次最多 12 份文件<br>- 推断不覆盖已确认（真正起作用的是数据库的 upsert 规则；core 的 `mergeFacts` 没有生产调用者，审查判为死代码）<br>- `portraitStillConfirmed` | 留 |
 | 38 | 只做计算的展示：`capacityConflict`、`skeletonDraft`、`weekSkeleton` | 留 |
 
 ### 1.5 上下文与线程
@@ -523,9 +523,9 @@
 
 - **登记表**：新增 `packages/core/src/interview-rules.ts`。把 §1 和提示词盘点里的 207 条去重，得到约 170 条，每条一个 id（`IR-001`…），写明归属层（L0–L4）和所在文件。退役的规则也留在表里，写上原因（例如「死代码」「已由工具 schema 表达」）。
 - **测试 `interview-rules.test.ts`**：
-  1. L1–L4 的每条规则，id 在全部 Skill、工具说明和 style 文本里**恰好出现一次**。规则正文旁边放一个 HTML 注释形式的 id 标记，模型看不到这个标记。
-  2. L0 的每条规则都有一个测试用 `it("IR-xxx …")` 指名覆盖。
-  3. 登记表里没有的 id 不许出现在文本里。
+  1. L1–L4 的每条规则在登记表里记一句**锚点原文**，它在所属文件里**恰好出现一次**。（原计划在正文旁放 HTML 注释形式的 id 标记，但 Skill 原文会整段进模型的上下文，注释模型也看得到，所以改用锚点。）
+  2. L0 的每条规则写明源文件、符号和覆盖它的测试文件；测试文件要点名这个符号或那条测试的名字。没有测试的，在 `untested` 里写明原因。
+  3. 退役的规则写明原因，接替它的规则必须在表里；退役的代码规则，符号不许还留在原文件里。
   4. 每次迁移只能把规则从一层挪到另一层，或者标记退役；**不能凭空消失**。
 - **回放证据**：
   - `apps/worker/src/testing/fixtures` 里录下的模型输出，要在新的 handler 上重放。
@@ -536,7 +536,7 @@
 
 ## 5. 分步迁移
 
-每一步都要通过 `pnpm typecheck` 和 `pnpm test`，并单独提交。
+每一步都要通过 `pnpm typecheck` 和 `pnpm test`，并单独提交。从 P2 起，每一步还要按 [onboarding-validation-audit.md](onboarding-validation-audit.md) 第 4 节的规矩验收：不静默、本人的话不改、不从文字猜意图。
 
 | 步 | 内容 | 风险 | 证明没丢 |
 |---|---|---|---|
@@ -563,6 +563,8 @@
 - `docs/onboarding-prompts.md` 移到 `docs/archive/`，并标成历史。
 
 证明没丢：`pnpm typecheck`、`pnpm test` 通过。新增或改写的测试覆盖：不发档位和语气字段、短候选不被补齐、调研最后一轮的 `lastRun`、四个运行附带框架。
+
+**P1 完成（2026-11-14）。** `packages/core/src/interview-rules.ts` 登记了 [onboarding-validation-audit.md](onboarding-validation-audit.md) 逐条核验过的 45 条代码规则和 6 条访谈 Skill 规则，每条带审查的判定（留 / 回 / 交模型 / 删）。没有把 207 条全部登记：只登记审查核验过、P2 要动的那些，其余规则在 P2–P4 改到它们时补登。登记时发现 5 条代码规则没有任何测试（三种等待、`holdGaps`、`adoptGoalsFromRound`），在表里标成 `untested`；它们都在 P2 删除之列。
 
 **往后加机制的规矩**：新发现的问题，先改 Skill 或工具说明。只有涉及 §3.7 六类的，才加代码，而且是拒收后让模型改，不静默改写。
 
