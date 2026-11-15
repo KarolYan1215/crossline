@@ -1,11 +1,11 @@
 import { transcriptDocumentIds } from "./recording-digest";
 import {
   AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary, ACTIVITY_HOURLY, atComputerLines, type ActivityHour,
-  PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, answeredGoalQuestions, type TurnQuestion, keepOnboardingDialogue, droppedOnboardingItems, ONBOARDING_KEEP_EARLY_MAX, onboardingDialogueSchema,
+  PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, type TurnQuestion, keepOnboardingDialogue, droppedOnboardingItems, ONBOARDING_KEEP_EARLY_MAX, onboardingDialogueSchema,
   validateOnboardingDialogue, locateQuote,
   gapCoveredBy, screenQuestions, screenAssumption, type QuestionScreenInput,
   type DimensionId, type ProfileGap, type ProfileModel, type OnboardingStage, DEEP_STAGES, ASSESS_RESULT_SETTING, TYPE_TABLE,
-  checkInsight, disclosureReplies, handlesDisclosure, readTurnProgress, safetyReplyOnly, withoutToldStory, researchCopied, RESEARCH_FIGURES_MAX,
+  checkInsight, disclosureReplies, mentionsSelfHarm, safetyRound, readTurnProgress, safetyReplyOnly, withoutToldStory, researchCopied, RESEARCH_FIGURES_MAX,
   withoutCardEcho, withoutRecordingTalk, saidNothingMore, CLOSING_ASK, inventedDates, openStageQuestion, withPlainTerms,
   type KnownSources, type OnboardingDialogue, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, ONBOARDING_LAST_FAILURE, readPartialTurn, type OnboardingProgress, calendarWeek,
   tFor, type Locale, flowOf, INTERVIEW_FLOW_STAGES, PROFILE_MODULE_STAGES, cardsFor, readCardAnswers, mergeInstrumentAnswers, readInstrumentAnswers,
@@ -289,10 +289,10 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
           status: "confirmed", sourceRef: replyId, sourceQuote: answer.quote, sourceSentences: sentencesFor(answer.quote), updatedAt: now });
       }
     }
-    // A long-term goal the person chose answering the interview's own question about a line is theirs as well: adopted now, so the app's goal
-    // picker does not ask them to tick the same words again (a line that has a goal is left as it is).
+    // A line's goal is written only from the app's own goal question (`LINE_GOAL` above) and the goal picker: the dialogue's own questions
+    // about a line's future are read by the extraction, not taken as the goal. Guessing them from the wording wrote 「你最不想成为什么样的
+    // 研究者？」 answered 「浮躁的」 as the line's goal (docs/onboarding-validation-audit.md §3.4).
     const asked = ([...messages].reverse().find((message) => message.role === "assistant")?.content as { questions?: TurnQuestion[] } | undefined)?.questions ?? [];
-    for (const chosen of answeredGoalQuestions(replyText, asked)) adoptLineGoal(store, workspaceId, ownerId, chosen.lineId, chosen.parts, locale);
     // The question ledger: the answers this reply gives, then the app's own questions as of now (answered ones stay answered).
     recordReplyAnswers(store, workspaceId, sessionId, replyText, replySentences, now);
     syncGapQuestions(store, workspaceId, currentGaps(), now);
@@ -391,11 +391,27 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       const invented = setDates(valid.reply);
       if (invented.length) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
         detail: `reply 说事情定在 ${invented.join("、")}，可本人没说过这个日期。日期由本人定：reply 里不写它，要定就在 questions 里用不带选项的 free 问本人想放在什么时候。` }); // i18n-ignore: model-facing repair note
+      // The person's reply names self-harm and the round is not the safety reply: sent back once, since the words may be about someone
+      // else or a research topic, which the model can tell and the pattern cannot (2026-11-14 audit). Its second answer stands.
+      if (mentionsSelfHarm(replyText) && !safetyRound(valid) && !safetyAsked) {
+        safetyAsked = true;
+        throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { safety: true,
+          detail: "本人这条回复里有提到自伤或不想活的字眼。如果是本人自己有过或现在有这样的念头，这一轮按「安全」一节回应，safety 设为 true；如果说的是别人的事或一个题目，保持原来的回答，safety 设为 false。" }); // i18n-ignore: model-facing repair note
+      }
       return valid;
     };
-    const softAccept = (_rejection: Error, output: unknown) => keepOnboardingDialogue(output, known);
+    let safetyAsked = false;
+    // A date nobody gave stays out of the reply even when the repairs ran out: the sentence that sets it is left out. The one silent edit
+    // kept on the reply (interview-rules IR-006), because a made-up date read as the person's own plan is worse than a shorter reply.
+    const withoutInventedDates = (reply: string) => (reply.match(/[^。！？!?\n]+[。！？!?]?|\n+/gu) ?? []).filter((sentence) => !setDates(sentence).length).join("").trim();
+    const softAccept = (_rejection: Error, output: unknown) => {
+      const kept = keepOnboardingDialogue(output, known);
+      return kept && { ...kept, reply: withoutInventedDates(kept.reply) };
+    };
     // A turn that only needs one or two questions dropped is kept now instead of rewritten in full by a repair; one that lists the research is not.
-    const keepEarly = (_rejection: Error, output: unknown) => {
+    const keepEarly = (rejection: Error, output: unknown) => {
+      // The safety question is the model's to answer, never settled by keeping the answer as it is.
+      if ((rejection as Error & { safety?: boolean }).safety) return undefined;
       const kept = keepOnboardingDialogue(output, known);
       return kept && droppedOnboardingItems(output, kept) <= ONBOARDING_KEEP_EARLY_MAX
         && researchCopied(kept.reply, findings()).length <= RESEARCH_FIGURES_MAX && !setDates(kept.reply).length ? kept : undefined;
@@ -547,7 +563,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       : [];
     // Rating cards no longer take the round's question slots (the owner, 2026-11-12: 「量表题也不会占额度了」). The short set has no
     // interest cards (想不想做), so none waits for a round of its own (onboarding-depth.ts).
-    const cards = paced.output.nextAction === "ask" ? cardsLeft : [];
+    // Nor beside the safety reply (2026-11-14 audit: a rating card could still show there).
+    const cards = paced.output.nextAction === "ask" && !safetyRound(paced.output) ? cardsLeft : [];
     // Every question the model wrote was taken out (already answered, screened) and none of its cards are left: what the round asks now is
     // the app's own, read off the checklist. That checklist waits for the extraction once more, or it asks what this reply just said (the
     // 2026-11-01 rerun asked the illustrator line's current project right under the answer naming it).
@@ -577,7 +594,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const askedBefore = messages.filter((message) => message.role === "assistant")
       .flatMap((message) => ((message.content as { questions?: TurnQuestion[] }).questions ?? []).map((question) => question.text));
     const output = { ...plain,
-      reply: withoutRecordingTalk(handlesDisclosure(plain.reply) ? safetyReplyOnly(plain.reply) : plain.reply),
+      reply: withoutRecordingTalk(safetyRound(plain) ? safetyReplyOnly(plain.reply) : plain.reply),
       questions: closed ? plain.questions.filter((question) => question.id !== "closing-open" && !question.id.startsWith("open-") && !CLOSING_ASK.test(question.text))
         : withoutToldStory(plain.questions, askedBefore) };
     // The observation is kept only when its quotes are in the replies it names; the progress record goes back to the model next round.
@@ -612,7 +629,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const sensitive = disclosureReplies(messages);
     const rules = !focusLine && pointsRules(session.coverage);
     const observed: TurnInsight[] = [];
-    if (!handlesDisclosure(output.reply) && !waitCards) {
+    if (!safetyRound(output) && !waitCards) {
       const profile = readProfile();
       // Under the points rules every card is one hypothesis of the log (2026-11-12): one on record by its id, never one a card already
       // asked about; a new one only when the log offers none (replay 12: a card the dialogue made up afresh beside four offered ones put

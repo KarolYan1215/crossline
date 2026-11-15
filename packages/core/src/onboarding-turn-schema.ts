@@ -195,6 +195,8 @@ export type OnboardingTurn = {
   moreInsights?: TurnInsight[];
   /** The dialogue's own record of where the interview stands, handed back next round. */
   progress?: TurnProgress;
+  /** The model marks the round that answers a disclosure of self-harm (the Skill's 安全); the app also reads the reply itself (`mentionsSelfHarm`). */
+  safety?: boolean;
   /** Questions the dialogue hands to research threads this round (contract C); the worker opens one thread per question. */
   research?: ResearchRequest[];
   /**
@@ -562,6 +564,8 @@ function turnFields(ids?: TurnIds) {
     },
     fileDates: DATE_EXTRACTION_SCHEMA,
     nextAction: { type: "string", enum: ["ask", "ready_for_milestones"] },
+    // True for the round that answers a disclosure of self-harm (the Skill's 安全): no cards beside it, its reply ends at the help lines.
+    safety: { type: "boolean" },
     stage: { type: "string", enum: [...ONBOARDING_STAGES] },
     // The round's observation (contract A, 2026-11-12): an inference that may judge, resting on the person's verbatim words, with outside
     // data when there is any and what would show it wrong. `text` empty for none. Checked in code (`checkInsight`): a falsifier, and each
@@ -610,7 +614,7 @@ function turnFields(ids?: TurnIds) {
  * and the next questions. The **extraction** — facts with their sentence numbers, projects, dates, line attributes, hours, the
  * portrait — is written by its own run in the background, so its repairs never hold the conversation up.
  */
-export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage", "insights", "progress", "research"] as const;
+export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage", "insights", "progress", "research", "safety"] as const;
 export const EXTRACT_KEYS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles", "goalEdits", "availability", "settings", "profileSections", "itemScores",
   "hypotheses", "careers", "dimensions", "dropCareers", "pointChanges"] as const;
 export const onboardingDialogueSchema = (ids?: TurnIds) => object(pick(turnFields(ids), DIALOGUE_KEYS));
@@ -654,7 +658,7 @@ export function listsAtLimit(output: unknown, schema: unknown = ONBOARDING_EXTRA
   });
 }
 /** What the person waits for, and what is stored as the round. */
-export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage" | "insights" | "progress" | "research">;
+export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage" | "insights" | "progress" | "research" | "safety">;
 /** What the background run writes to the ledger. */
 export type OnboardingExtraction = Pick<OnboardingTurn, "slotUpdates" | "projectsDetected" | "flywheelCandidates" | "lineProfiles" | "goalEdits"
   | "availability" | "settings" | "hypotheses" | "careers" | "dimensions" | "dropCareers" | "pointChanges"> & { fileDates?: DateExtraction; profileSections?: ProfileSections; itemScores?: ItemScore[] };

@@ -164,15 +164,13 @@ export function validatePortrait(value: unknown, lineIds: string[],
   if (!report?.cover || !report.problem || !report.compass || !report.energy || !report.lines || !report.gap || !Array.isArray(report.insights)) throw new Error("PORTRAIT_SCHEMA_INVALID");
   if (!report.cover.portrait.trim()) throw new Error("PORTRAIT_EMPTY");
   const known = new Set(lineIds);
-  const unknown = report.lines.items.find((item) => !known.has(item.lineId));
-  if (unknown) {
-    // i18n-ignore: a repair message to the model
-    throw refuse("PORTRAIT_LINE_UNKNOWN", `主线「${unknown.lineId}」不存在；可用：${lineIds.join("、")}`);
-  }
+  // An item about a line that is not on record is left out, not the whole report: two failed repairs used to fail the portrait (2026-11-14
+  // audit). The rest of the report stands on its own.
+  const onRecord = report.lines.items.filter((item) => known.has(item.lineId));
   const lenient = options.lenient ?? false;
   const values = inFixedOrder(report.compass.values, SCHWARTZ_VALUES.map((item) => item.name), (item) => item.name, "PORTRAIT_VALUES_INCOMPLETE", lenient);
   const pairs = inFixedOrder(report.gap.pairs, SAY_DO_DIMENSIONS.map((item) => item.label), (item) => item.dimension, "PORTRAIT_SAY_DO_INCOMPLETE", lenient);
-  const items = report.lines.items.map((item) => ({ ...item, feeds: item.feeds.filter((feed) => known.has(feed.toLineId) && feed.toLineId !== item.lineId) }));
+  const items = onRecord.map((item) => ({ ...item, feeds: item.feeds.filter((feed) => known.has(feed.toLineId) && feed.toLineId !== item.lineId) }));
   // Shares are read as parts of a whole: two sets that do not add up to about 100 are scaled to it, rather than refused over arithmetic.
   for (const key of ["share", "targetShare"] as const) {
     const total = items.reduce((sum, item) => sum + (item[key] ?? 0), 0);

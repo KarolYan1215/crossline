@@ -26,6 +26,8 @@ test("a composed goal reads as Chinese: fields share one 的, the noun's stem is
 test("cleaning keeps the phrase and drops what composing adds back", () => {
   expect(cleanAttribute("  成为 神经形态计算方向的。")).toBe("神经形态计算方向");
   expect(cleanAttribute("「能独立立项」")).toBe("能独立立项");
+  // Symbols that belong to a word stay (2026-11-14 audit: 「C++」 was cut to 「C」).
+  expect(["精通 C++", "会 C#。", "懂 R&D 的"].map(cleanAttribute)).toEqual(["精通 C++", "会 C#", "懂 R&D"]);
 });
 
 test("duplicates: after removing 的 and punctuation, one contains the other", () => {
@@ -134,6 +136,9 @@ test("chosen parts are checked before they become a goal", () => {
   expect(checkGoalParts([])).toMatchObject({ ok: false, code: "LINE_GOAL_PARTS_EMPTY" });
   expect(checkGoalParts("科普")).toMatchObject({ ok: false, code: "LINE_GOAL_PARTS_INVALID" });
   expect(checkGoalParts(["科普", "科普的"])).toMatchObject({ ok: false, code: "LINE_GOAL_PARTS_DUPLICATE" });
+  // The person's own choices are two choices even when one word contains the other (2026-11-14 audit).
+  expect(checkGoalParts(["自由", "财务自由"])).toEqual({ ok: true, parts: ["自由", "财务自由"] });
+  expect(checkGoalParts(["稳定", "情绪稳定"])).toEqual({ ok: true, parts: ["稳定", "情绪稳定"] });
   expect(checkGoalParts(Array.from({ length: 13 }, (_, index) => `定语${index}`))).toMatchObject({ ok: false, code: "LINE_GOAL_PARTS_TOO_MANY" });
 });
 

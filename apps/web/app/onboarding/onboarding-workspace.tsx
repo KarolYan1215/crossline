@@ -25,7 +25,7 @@ import { cardsOf, foldThread } from "./round-fold";
 import { Receipt } from "./receipt";
 import { FinishButton } from "./finish-button";
 import { ResearchPanel } from "./research-panel";
-import { asksLongTermGoal, composeAnswers, type Answer, type AssistantTurn, type DocumentRow, type Message, type OnboardingState } from "./onboarding-types";
+import { composeAnswers, type Answer, type AssistantTurn, type DocumentRow, type Message, type OnboardingState } from "./onboarding-types";
 
 const ACCEPT = ".pdf,.docx,.txt,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.m4a,.mp3,.wav,.aac,.ogg,.flac";
 
@@ -170,26 +170,9 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const waiting = messages.at(-1)?.role === "user";
   const open = lastTurn && !waiting ? lastTurn : undefined;
 
-  /**
-   * A round's question about a line's long-term goal (「研究者长期目标保留哪些品质？」), answered by picking, is the person choosing that
-   * goal: it is adopted as if from the left column's picker. Otherwise the interview said 「可以开始使用」 while the start standard still
-   * waited on three goals nobody had adopted (2026-10-15 walkthrough).
-   */
-  const adoptGoalsFromRound = async () => {
-    for (const question of batchQuestions) {
-      if (!asksLongTermGoal(question.text) || !question.identityId) continue;
-      const line = state?.lines.find((item) => item.id === question.identityId);
-      const parts = (answers[question.id]?.picked ?? []).map((id) => question.options.find((option) => option.id === id)?.label ?? "").filter(Boolean);
-      if (!line || line.goals.length || !parts.length) continue;
-      await fetch("/api/lines", { method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id: line.id, goalParts: parts.slice(0, 3) }) }).catch(() => undefined);
-    }
-  };
-
   /** `aside`: a turn the app sends for the person (files added, dates re-read); the cards' taps are kept for the round they belong to. */
   const runTurn = async (message: string, reread = false, aside = false) => {
     setBusy("turn"); setError("");
-    if (message) await adoptGoalsFromRound();
     if (message) { setPendingText(message); setText(""); setAnswers({}); if (!aside) setCardAnswers(NO_CARD_ANSWERS); }
     // A line's own interview lives in its own session; the full interview mints its id once.
     const id = line ? `line-${line}` : sessionId || crypto.randomUUID();

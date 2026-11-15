@@ -152,10 +152,3 @@ export function composeAnswers(questions: Question[], answers: Record<string, An
   return parts.join("\n");
 }
 
-/**
- * Whether a round's question (written by the model, in either language) asks about a line's long-term goal, so that picking options for it
- * adopts that goal (`adoptGoalsFromRound` in onboarding-workspace.tsx).
- */
-export function asksLongTermGoal(text: string): boolean {
-  return /长期目标|long[- ]term goal/i.test(text); // i18n-ignore: matched against model-written text
-}

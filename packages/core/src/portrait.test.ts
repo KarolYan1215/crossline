@@ -16,7 +16,8 @@ test("a portrait keeps only real lines and links, and sensitive spans that occur
   const checked = validatePortrait(report, ["research", "media"]);
   expect(checked.lines.items[0]!.feeds).toEqual([{ toLineId: "media", how: "选题" }]);
   expect(checked.sensitive).toEqual(["UW–Madison"]);
-  expect(() => validatePortrait({ ...report, lines: { allocation: "", items: [{ ...report.lines.items[0]!, lineId: "x" }] } }, ["research"])).toThrow("PORTRAIT_LINE_UNKNOWN");
+  // A line not on record is left out of the report, which still stands (2026-11-14 audit: it used to fail the whole portrait).
+  expect(validatePortrait({ ...report, lines: { allocation: "", items: [{ ...report.lines.items[0]!, lineId: "x" }] } }, ["research"]).lines.items).toEqual([]);
 });
 
 test("the shared version hides every sensitive span but keeps line ids", () => {
@@ -136,6 +137,11 @@ test("类型名互不共用字词；字母是英文词首字母；个人简介�
   expect(typeSummaryProblem("你习惯把几条线接在一起，代价是收尾常被打断，")).toBeNull();
   expect(typeSummaryProblem("习惯把几条线接在一起")).toContain("「你」");
   expect(typeSummaryProblem("你是军师")).toContain("军师");
+  expect(typeSummaryProblem("你属于典型的甲方型")).toContain("甲方");
+  expect(typeSummaryProblem("你是 ROBA")).toContain("ROBA");
+  // The names are plain words too: used as words, not as the person's label, they pass (2026-11-14 audit).
+  expect(typeSummaryProblem("你像大学生备考一样把每周排满，所以先把一条线做深。")).toBeNull();
+  expect(typeSummaryProblem("你常替甲方想好验收标准，再把活交给 AI。")).toBeNull();
   expect(typeSummaryProblem("你像 ENTP 一样")).toContain("外部人格类型");
 });
 

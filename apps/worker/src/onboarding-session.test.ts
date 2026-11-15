@@ -737,6 +737,28 @@ test("no observation card beside the safety check, and none built on the disclos
   expect(await shown("一个人做研究时最慢。")).toMatchObject({ text: "你说投入的时候身边都有人。" });
 });
 
+test("a reply naming self-harm is sent back once when the round is not the safety reply; the model's `safety` mark keeps cards away (2026-11-14 audit)", async () => {
+  // The floor reads the person's words (`mentionsSelfHarm`); the model decides whether they are the person's own (`safetyRound`).
+  const card = { text: "你说投入的时候身边都有人。", falsifier: "如果独自时也常投入",
+    refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-3", quote: "写综述" }] };
+  const { rpc, prompts } = fakeRuntime([turn({ stage: "narrative" }),
+    turn({ stage: "narrative", reply: "综述的题目很少见。" }), turn({ stage: "narrative", reply: "综述的题目很少见。", safety: false }),
+    turn({ stage: "narrative", reply: "谢谢你愿意说出来。现在还有这样的念头吗？", safety: true, insight: card })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { checklist: false, extract: "off" });
+  const last = async (text: string) => {
+    await run({ sessionId: "s", text });
+    return store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string; safety?: boolean; insight?: unknown };
+  };
+  await last("我最投入的是和同学一起赶比赛的时候。");
+  // A research topic: the model answers it as it was, and its second answer stands.
+  expect(await last("我在写综述，题目是大学生自杀预防。")).toMatchObject({ reply: "综述的题目很少见。" });
+  expect(dialogue(prompts).filter((prompt) => prompt.includes("自伤或不想活的字眼"))).toHaveLength(1);
+  // Marked by the model without the hotline numbers: still the safety round, so no card beside it.
+  const safe = await last("我写综述的时候，自己也有过不想活的念头。");
+  expect(safe.safety).toBe(true);
+  expect(safe.insight).toBeUndefined();
+});
+
 test("as the person reads a round: the safety reply ends at its help lines, a card is not said twice, a told story is excluded", async () => {
   const help = "全国心理援助热线 12356；身处危险时打 120 或 110，或去最近的医院急诊。";
   const card = { text: "你最投入的两次都是有人一起、每天有反馈的事，一个人做的研究推得最慢。", falsifier: "如果独自时也常投入",

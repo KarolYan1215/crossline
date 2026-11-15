@@ -1,7 +1,9 @@
 import type { TurnQuestion } from "./onboarding-turn-schema";
 import { APPEARANCE_FACT_SLOT as APPEARANCE_SLOT } from "./portrait-figure";
 import { courseCodeOf } from "./task-title";
-import { RELATIVE_NOTE } from "./date-schema";
+import { RELATIVE_DAY_WORDS, RELATIVE_NOTE } from "./date-schema";
+import { NO_DEADLINE } from "./interview-checklist";
+import { roughWindow } from "./rough-dates";
 import { tFor, type Locale } from "./i18n";
 
 /**
@@ -375,18 +377,6 @@ function sharesName(name: string, text: string): boolean {
   return false;
 }
 
-/** Facts as they will stand once a turn's updates are written: a confirmed fact is never replaced by a guess. */
-export function mergeFacts<T extends { identityId: string; projectId: string; slot: string; status: string }>(existing: T[], updates: T[]): T[] {
-  const key = (fact: T) => `${fact.identityId}\u0000${fact.projectId}\u0000${fact.slot}`;
-  const merged = new Map(existing.map((fact) => [key(fact), fact]));
-  for (const update of updates) {
-    const current = merged.get(key(update));
-    if (current && confirmed(current) && !confirmed(update)) continue;
-    merged.set(key(update), update);
-  }
-  return [...merged.values()];
-}
-
 /** A fact to write; or, with an empty `slot`, an action: filing a file (`file`), the person's 「符合」 for the portrait, or a chosen goal. */
 export type GapAnswer = { identityId: string; projectId: string; slot: string; value: string; quote: string;
   file?: { documentId: string; projectId: string }; confirmPortrait?: boolean;
@@ -427,24 +417,16 @@ const sameOption = (label: string, picked: string) => {
 };
 
 /**
- * The long-term goals the person chose answering the interview's own question about a line (「三五年后，你希望自己是个什么样的管钱的人？」):
- * the options they picked, and their own words when short enough to be a trait. B of the 2026-11-01 walkthrough picked 稳当、看得懂、看长期
- * there and was then asked to tick the same words again on the app's goal picker.
+ * Whether words typed into a date answer say a day: a written date, a weekday, a rough window (「12 月中」「下周」), or 「没有截止」. Anything
+ * else (「还不知道」「看导师安排」) is not written as a fact here: it stays in the reply for the extraction to read. Before, 「还不知道」
+ * typed under 「我来写日期」 was recorded as a confirmed deadline and closed the start item (2026-11-14 audit).
  */
-export function answeredGoalQuestions(replyText: string, questions: ReadonlyArray<Pick<TurnQuestion, "text" | "identityId" | "options">>): Array<{ lineId: string; parts: string[] }> {
-  const out: Array<{ lineId: string; parts: string[] }> = [];
-  for (const question of questions) {
-    if (!question.identityId || question.identityId === "person" || !LONG_TERM_GOAL.test(question.text)) continue;
-    const marker = [`【${question.text}】`, `[${question.text}]`].find((candidate) => replyText.includes(candidate));
-    if (!marker) continue;
-    const { picked, other } = readAnswerLine(replyText.slice(replyText.indexOf(marker) + marker.length).split("\n")[0] ?? "");
-    const parts = picked.filter((label) => (question.options ?? []).some((option) => sameOption(option.label, label)));
-    const own = other.length <= 12 && !/[，。,.；;！？!?]/u.test(other) ? other : "";
-    const all = [...new Set([...parts, ...(own ? [own] : [])])];
-    if (all.length) out.push({ lineId: question.identityId, parts: all.slice(0, 4) });
-  }
-  return out;
+function statesDay(text: string): boolean {
+  return NO_DEADLINE.test(text) || DAY_WRITTEN.test(text) || RELATIVE_DAY_WORDS.test(text) || Boolean(roughWindow(text, new Date().toISOString().slice(0, 10)));
 }
+const DAY_WRITTEN = /\d{4}-\d{1,2}-\d{1,2}|\d{1,2}\s*月\s*\d{1,2}|(?<![\d/])\d{1,2}\/\d{1,2}(?![\d/])|(周|星期|礼拜)[一二三四五六日天]|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}\b|\b(mon|tues?|wed(nes)?|thu(rs)?|fri|sat(ur)?|sun)(day)?\b/iu;
+/** Whether words typed for when something meets say a day or a time; 「不固定」 is an answer too. */
+const statesTime = (text: string) => statesDay(text) || /\d{1,2}\s*[:：点]|[上下]午|早上|晚上|不固定|没有固定|\b\d{1,2}\s?(am|pm)\b/iu.test(text);
 
 /**
  * What the person's answers to the code-built questions say, as facts. The message the screen sends is `【question】选择：label。补充：text`
@@ -475,26 +457,30 @@ export function answeredGapFacts(replyText: string, gaps: ProfileGap[]): GapAnsw
     };
     const base = { identityId: gap.identityId, projectId: gap.projectId };
     if (gap.code === "LINE_UNCONFIRMED") {
+      // What the person typed about the line is theirs to describe and the extraction's to read: 「说不好」 was written as the line's
+      // description (2026-11-14 audit). Only the picked 「先不规划」 is recorded here.
       const declined = gap.question.options.filter((option) => option.id !== "doing").map((option) => pickedFor(option.id)).find(Boolean);
-      if (other) out.push({ ...base, slot: "what", value: other, quote: other });
-      else if (declined) out.push({ ...base, slot: "skipped", value: declined, quote: declined });
+      if (declined && !other) out.push({ ...base, slot: "skipped", value: declined, quote: declined });
     } else if (gap.code === "LINE_GOAL") {
       const parts = [...gap.question.options.map((option) => pickedFor(option.id)).filter((label): label is string => Boolean(label)), ...(other ? [other] : [])];
       if (parts.length) out.push({ identityId: "", projectId: "", slot: "", value: parts.join("；"), quote: parts[0]!, goal: { lineId: gap.identityId, parts } });
     } else if (gap.code === "PROJECT_DEADLINE") {
       const none = pickedFor("none");
       const guess = picked.find((label) => label.startsWith(DEADLINE_GUESS_PREFIX) || label.startsWith(DEADLINE_GUESS_PREFIX_EN));
-      if (other) out.push({ ...base, slot: "deadline", value: other, quote: other });
+      if (other && statesDay(other)) out.push({ ...base, slot: "deadline", value: other, quote: other });
+      else if (other) continue;
       else if (guess) out.push({ ...base, slot: "deadline", value: guess.replace(DEADLINE_GUESS_PREFIX, "").replace(DEADLINE_GUESS_PREFIX_EN, ""), quote: guess });
       else if (none) out.push({ ...base, slot: "no_deadline", value: none, quote: none });
     } else if (gap.code === "DATE_UNDATED") {
       // 「知道具体日期」 without the date is not an answer.
+      if (other && !statesDay(other)) continue;
       const value = other || gap.question.options.filter((option) => option.id !== "known").map((option) => pickedFor(option.id)).find(Boolean);
       if (value) out.push({ ...base, slot: `undated_${stable(gap.question.id)}`, value: `${gap.detail}${value}`, quote: value });
     } else if (gap.code === "COURSE_MEETINGS") {
       // The times themselves go to the interview, which turns them into a weekly pattern the person confirms; this only records them.
       const none = pickedFor("none");
-      if (other) out.push({ ...base, slot: "meeting_times", value: other, quote: other });
+      if (other && statesTime(other)) out.push({ ...base, slot: "meeting_times", value: other, quote: other });
+      else if (other) continue;
       else if (none) out.push({ ...base, slot: "no_meetings", value: none, quote: none });
     } else if (gap.code === "FILE_UNFILED") {
       const option = gap.question.options.find((item) => picked.some((label) => sameOption(item.label, label)));

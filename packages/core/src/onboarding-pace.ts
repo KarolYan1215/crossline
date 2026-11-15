@@ -66,6 +66,18 @@ const SAFETY_LINES = ["12356", "82951332"];
 export const handlesDisclosure = (text: string): boolean => SAFETY_LINES.some((line) => text.includes(line));
 
 /**
+ * Words in the person's own reply that name self-harm: high precision on purpose, a floor under the model's own `safety` mark (2026-11-14
+ * audit: the round was recognised only by the hotline numbers in the model's reply, so a reply that left them out was not handled at all).
+ * Matching ones send the round back to the model when its reply is not the safety reply.
+ */
+const SELF_HARM = /自杀|轻生|自残|自伤|割腕|不想活|活不下去|结束(自己的)?生命|寻死|suicid|kill myself|end my life|self[- ]harm|hurt myself|want to die|don'?t want to live/iu; // i18n-ignore: matched against the reply
+export const mentionsSelfHarm = (text: string): boolean => SELF_HARM.test(text);
+
+/** A stored round that answered a disclosure: the model marked it, or its reply carries the help lines. */
+export const safetyRound = (content: { safety?: unknown; reply?: unknown } | undefined): boolean =>
+  content?.safety === true || handlesDisclosure(String(content?.reply ?? ""));
+
+/**
  * The replies a disclosure of self-harm sits in: the one a round answered with the help lines, and the person's answer to that round's
  * check. The Skill says such a disclosure is never portrait material, and the model still built three observation cards on it and
  * offered 「情绪上又来一次大三上那样」 as an option (replay 8), and put a card beside the safety check itself (replay 9, 2026-11-14).
@@ -74,7 +86,7 @@ export const handlesDisclosure = (text: string): boolean => SAFETY_LINES.some((l
 export function disclosureReplies(messages: ReadonlyArray<{ role: string; seq: number; content: unknown }>): Set<string> {
   const ids = new Set<string>();
   messages.forEach((message, index) => {
-    if (message.role !== "assistant" || !handlesDisclosure(String((message.content as { reply?: unknown }).reply ?? ""))) return;
+    if (message.role !== "assistant" || !safetyRound(message.content as { safety?: unknown; reply?: unknown })) return;
     for (let at = index - 1; at >= 0; at -= 1) if (messages[at]!.role === "user") { ids.add(`reply-${messages[at]!.seq}`); break; }
     const answer = messages.slice(index + 1).find((item) => item.role === "user");
     if (answer) ids.add(`reply-${answer.seq}`);

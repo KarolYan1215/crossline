@@ -46,14 +46,15 @@ test("the report is saved with its schema version, and the model is given what t
   expect(runtime.prompts()[0]).toContain("\"sufficient\":false");
 });
 
-test("an answer whose values stay incomplete after the repairs is kept; an unknown line is still refused", async () => {
+test("an answer whose values stay incomplete after the repairs is kept; an unknown line is left out, not the whole report", async () => {
   const nine = report({ compass: { ...report().compass, values: report().compass.values!.slice(0, 9) } });
   const runtime = fakeRuntime([JSON.stringify(nine), JSON.stringify(nine), JSON.stringify(nine)], PORTRAIT_WRITER);
   expect(await createPortraitWriter(store, workspaceId, "C:\\repo", () => runtime.rpc)()).toMatchObject({ state: "written" });
   expect(saved().report.compass.values).toHaveLength(9);
   const ghost = report({ lines: { allocation: "", items: [{ lineId: "ghost", description: "", goals: [], feeds: [] }] } });
-  const refused = fakeRuntime([JSON.stringify(ghost), JSON.stringify(ghost), JSON.stringify(ghost)], PORTRAIT_WRITER);
-  expect(await createPortraitWriter(store, workspaceId, "C:\\repo", () => refused.rpc)()).toMatchObject({ state: "blocked" });
+  const ghostly = fakeRuntime([JSON.stringify(ghost)], PORTRAIT_WRITER);
+  expect(await createPortraitWriter(store, workspaceId, "C:\\repo", () => ghostly.rpc)()).toMatchObject({ state: "written" });
+  expect(saved().report.lines.items).toEqual([]);
 });
 
 const NOW = new Date("2026-10-12T12:00:00.000Z");

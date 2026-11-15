@@ -36,11 +36,11 @@ test("adopting attributes writes the parts in order and the composed sentence as
   expect(identityLines(TEST_CTX).find((item) => item.id === "research")!.goalParts).toBeUndefined();
 });
 
-test("parts are checked: none, overlapping or not a list are refused with the reason", () => {
+test("parts are checked: none, the same words twice or not a list are refused with the reason", () => {
   setup();
   expect(updateLine(TEST_CTX, "research", { goalParts: [] })).toMatchObject({ ok: false, code: "LINE_GOAL_PARTS_EMPTY" });
-  expect(updateLine(TEST_CTX, "research", { goalParts: ["神经形态计算", "神经形态计算方向"] })).toMatchObject({ ok: false, code: "LINE_GOAL_PARTS_DUPLICATE",
-    message: "「神经形态计算」与「神经形态计算方向」重复" });
+  expect(updateLine(TEST_CTX, "research", { goalParts: ["神经形态计算", "神经形态计算的"] })).toMatchObject({ ok: false, code: "LINE_GOAL_PARTS_DUPLICATE",
+    message: "「神经形态计算」与「神经形态计算」重复" });
   expect(updateLine(TEST_CTX, "research", { goalParts: "科普" as unknown as string[] })).toMatchObject({ ok: false, code: "LINE_GOAL_PARTS_INVALID" });
   expect(identityLines(TEST_CTX).find((item) => item.id === "research")!.goals?.[0]).toBe("成为神经形态计算方向能独立立项的研究者");
 });

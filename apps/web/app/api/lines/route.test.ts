@@ -24,9 +24,10 @@ test("goalParts adopts a goal built from attributes: validated, composed into go
   const lines = await (await call("GET")).json() as { lines: Array<{ id: string; goals: string[]; goalParts: string[] }> };
   expect(lines.lines[0]).toMatchObject({ goals: ["成为科普的、有影响力的创作者"], goalParts: ["科普", "有影响力"] });
 
-  const overlapping = await call("POST", { id: "line-media", goalParts: ["科普", "科普视频"] });
-  expect(overlapping.status).toBe(400);
-  expect(await overlapping.json()).toMatchObject({ ok: false, code: "LINE_GOAL_PARTS_DUPLICATE", message: "「科普」与「科普视频」重复" });
+  // Only the same words twice are a duplicate: 「科普」 and 「科普视频」 are two choices of the person's (2026-11-14 audit).
+  const twice = await call("POST", { id: "line-media", goalParts: ["科普", "科普的"] });
+  expect(twice.status).toBe(400);
+  expect(await twice.json()).toMatchObject({ ok: false, code: "LINE_GOAL_PARTS_DUPLICATE", message: "「科普」与「科普」重复" });
   expect((await call("POST", { id: "line-media", goalParts: "科普" })).status).toBe(400);
   expect((await call("POST", { id: "line-media", goalParts: [] })).status).toBe(400);
 });

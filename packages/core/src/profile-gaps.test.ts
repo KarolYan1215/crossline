@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { answeredGapFacts, answeredGoalQuestions, gapCoveredBy, isCourse, mergeFacts, profileGaps, screenAssumption, screenedNote, screenQuestions, undatedKey, type ProfileGapInput } from "./profile-gaps";
+import { answeredGapFacts, gapCoveredBy, isCourse, profileGaps, screenAssumption, screenedNote, screenQuestions, undatedKey, type ProfileGapInput } from "./profile-gaps";
 import { questionKind } from "./onboarding-turn-schema";
 
 const identities = [{ id: "research", label: "科研" }, { id: "startup", label: "创业" }];
@@ -58,16 +58,11 @@ describe("answers to the app's own questions become facts without the model", ()
   test("「有，我来写」 alone is not a fact, but what they then write is; 「知道日期」 without the date is not an answer", () => {
     const doing = `【${text("LINE_UNCONFIRMED")}】选择：有，我来写下具体在做什么`;
     expect(answeredGapFacts(doing, gaps)).toEqual([]);
-    expect(answeredGapFacts(`${doing}。补充：Crossline 内测`, gaps)).toMatchObject([{ slot: "what", value: "Crossline 内测" }]);
+    // What they type about the line is the extraction's to read: 「说不好」 was once written as the line's description (2026-11-14 audit).
+    expect(answeredGapFacts(`${doing}。补充：Crossline 内测`, gaps)).toEqual([]);
     expect(answeredGapFacts(`【${text("DATE_UNDATED")}】选择：知道具体日期，我来写`, gaps)).toEqual([]);
     expect(answeredGapFacts(`【${text("DATE_UNDATED")}】选择：知道具体日期，我来写。补充：12/11`, gaps)).toMatchObject([{ value: expect.stringContaining("12/11") }]);
   });
-});
-
-test("merging never lets a guess replace a confirmed fact", () => {
-  const fact = (status: string, value: string) => ({ identityId: "a", projectId: "p", slot: "goal", status, value });
-  expect(mergeFacts([fact("confirmed", "我说的")], [fact("inferred", "它猜的")])[0]?.value).toBe("我说的");
-  expect(mergeFacts([fact("inferred", "旧猜测")], [fact("confirmed", "新确认")])[0]?.value).toBe("新确认");
 });
 
 test("a course is recognised by its grade breakdown, or by quizzes and homework dated in its files; a lone exam is not enough", () => {
@@ -121,6 +116,11 @@ test("一个非默认项目没有截止时，问「有截止日期吗」，答�
   expect(gap).toMatchObject({ projectId: "xhs", blocking: true });
   expect(answeredGapFacts(`【${gap.question.text}】选择：没有截止`, gaps)).toEqual([expect.objectContaining({ slot: "no_deadline", value: "没有截止" })]);
   expect(answeredGapFacts(`【${gap.question.text}】选择：我来写日期。补充：2026-12-15`, gaps)).toEqual([expect.objectContaining({ slot: "deadline", value: "2026-12-15" })]);
+  expect(answeredGapFacts(`【${gap.question.text}】选择：我来写日期。补充：12 月中`, gaps)).toEqual([expect.objectContaining({ slot: "deadline", value: "12 月中" })]);
+  // Words that say no day are not a deadline: 「还不知道」 closed the start item as a confirmed deadline (2026-11-14 audit). They stay in
+  // the reply for the extraction to read.
+  expect(answeredGapFacts(`【${gap.question.text}】选择：我来写日期。补充：还不知道`, gaps)).toEqual([]);
+  expect(answeredGapFacts(`【${gap.question.text}】选择：我来写日期。补充：看导师安排`, gaps)).toEqual([]);
 });
 
 // Found in the sponsor models' sample interviews (2026-10-18): every candidate asked a project's deadline in its own words, and the app's
@@ -276,17 +276,3 @@ test("a project whose deadline is asked gets no second question about the same d
   expect(profileGaps({ ...base, projects, undated, facts }).filter((gap) => gap.projectId === "apply").map((gap) => gap.code)).toEqual(["DATE_UNDATED"]);
 });
 
-test("a long-term goal picked on the interview's own question is the person's choice, a sentence of their own is not a trait", () => {
-  const question = { text: "三五年后，你希望自己是个什么样的管钱的人？可以用你自己的说法。", identityId: "line-fund",
-    options: [{ id: "a", label: "稳当", detail: "" }, { id: "b", label: "看长期", detail: "" }, { id: "c", label: "收益高", detail: "" }] };
-  const reply = `【${question.text}】选择：稳当；看长期。补充：不图快，钱是自己的，看几年的事。\n其他`;
-  expect(answeredGoalQuestions(reply, [question])).toEqual([{ lineId: "line-fund", parts: ["稳当", "看长期"] }]);
-  expect(answeredGoalQuestions(`【${question.text}】补充：心里有数`, [question])).toEqual([{ lineId: "line-fund", parts: ["心里有数"] }]);
-  expect(answeredGoalQuestions(reply, [{ ...question, text: "基金这条线眼下在做什么？" }])).toEqual([]);
-  expect(answeredGoalQuestions(reply, [{ ...question, identityId: "person" }])).toEqual([]);
-  // 2026-11-01 run 10: the goal asked with the line's object between 是 and 什么样, then asked again on the picker.
-  const cat = { ...question, identityId: "line-cat", text: "几年下来，你希望自己是馒头的什么样的铲屎官？别人会用哪些词形容你？",
-    options: [{ id: "a", label: "细心", detail: "" }, { id: "b", label: "有耐心", detail: "" }] };
-  expect(answeredGoalQuestions(`【${cat.text}】选择：细心；有耐心。补充：希望它别觉得我老不在家。`, [cat])).toEqual([{ lineId: "line-cat", parts: ["细心", "有耐心"] }]);
-  expect(answeredGoalQuestions(reply, [{ ...question, text: "铲屎官这条线对你来说主要是件什么事？" }])).toEqual([]);
-});

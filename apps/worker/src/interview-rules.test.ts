@@ -21,7 +21,7 @@ describe("the interview's rule register", () => {
   });
 
   it("says which code rules no test covers, and why", () => {
-    for (const rule of INTERVIEW_RULES.filter((item) => item.code && !item.code.test)) expect(rule.code!.untested?.trim(), rule.id).toBeTruthy();
+    for (const rule of INTERVIEW_RULES.filter((item) => item.status === "active" && item.code && !item.code.test)) expect(rule.code!.untested?.trim(), rule.id).toBeTruthy();
   });
 
   it("finds every active code rule in its file and in the test file that covers it", () => {
