@@ -1,7 +1,7 @@
 import type { AvailabilityWindow } from "./availability";
 import { joinList, monthDay, tFor, type Locale } from "./i18n";
 import { locateQuote } from "./sentences";
-import { INTERVIEW_FLOW_STAGES, ONBOARDING_STAGES, isWebUrl, type InterviewFlow, type OnboardingStage, type TurnInsight, type TurnProgress, type TurnQuestion } from "./onboarding-turn-schema";
+import { INTERVIEW_FLOW_STAGES, ONBOARDING_STAGES, isWebUrl, type InterviewFlow, type OnboardingStage, type TurnInsight, type TurnProgress } from "./onboarding-turn-schema";
 
 /**
  * What keeps the interview moving and gives something back at every part (2026-10-19, the owner's decisions after testers lost patience):
@@ -323,34 +323,5 @@ export function skeletonDraft(windows: AvailabilityWindow[], busy: BusySpan[], l
 export function lineWeights(lines: Array<{ id: string; rank: number | null }>, shares: Record<string, number> | null): Array<{ id: string; weight: number }> {
   if (shares && lines.some((line) => (shares[line.id] ?? 0) > 0)) return lines.map((line) => ({ id: line.id, weight: shares[line.id] ?? 0 }));
   return lines.map((line) => ({ id: line.id, weight: line.rank === 1 ? 2 : 1 }));
-}
-
-/** What a round that still asks but holds no question asks, by stage: open, in the interview's own voice. */
-export const OPEN_QUESTION: Record<OnboardingStage, string> = {
-  narrative: "说一件你这几年做过、现在想起来还挺得意的事？小事也行。",
-  orientation: "还有哪条主线、哪份材料没提到？",
-  lines: "哪条主线你最想先说清楚：现在在做什么、想做成什么样？",
-  situation: "说说你现在的处境：这几周最占你精力、最让你担心的是什么？",
-  compass: "做这些事，你最终想得到什么？",
-  energy: "一天里什么时候状态最好，什么事最耗你？",
-  details: "还有哪个项目的截止日、交付物或验收方式没说清楚？"
-};
-
-/**
- * The open question for a round that still asks and holds nothing to answer: the worker adds it when a round is stored, the interview page
- * when its own screen (files the app asks about, facts recorded since) left a stored round empty.
- *
- * `askable` says whether a question may still be put to the person (the question ledger's word: not once answered, not a third time).
- * The stage's own question comes first; one that may not be asked gives way to the next stage's, in `OPEN_QUESTION`'s order and round
- * again (W-184: 「做这些事，你最终想得到什么？」 was answered and asked again word for word the next round, because this question is the app's
- * own and the ledger's repeat check only reads the model's). When every one has been used, the stage's own stands.
- */
-export function openStageQuestion(stage: string | undefined, locale?: Locale, askable: (text: string) => boolean = () => true): TurnQuestion {
-  const at = (stage && stage in OPEN_QUESTION ? stage : "situation") as OnboardingStage;
-  const t = tFor(locale);
-  const stages = Object.keys(OPEN_QUESTION) as OnboardingStage[];
-  const from = stages.indexOf(at);
-  const pick = [...stages.slice(from), ...stages.slice(0, from)].find((name) => askable(t(OPEN_QUESTION[name]))) ?? at;
-  return { id: `open-${pick}`, text: t(OPEN_QUESTION[pick]), kind: "free", allowOther: true, identityId: "", projectId: "", options: [] };
 }
 

@@ -1,4 +1,4 @@
-import { answersInReply, DATE_ASK, freeTextAnswers, ledgerLines, questionSimilarity, sameQuestion, undecidedAnswer, unsureAnswer, type LedgerQuestion, type ProfileGap, type TurnQuestion } from "@crossline/core";
+import { answersInReply, freeTextAnswers, ledgerLines, unsureAnswer, type LedgerQuestion, type ProfileGap, type TurnQuestion } from "@crossline/core";
 import type { CrosslineStore, StoredSentence } from "@crossline/db";
 
 /**
@@ -7,33 +7,14 @@ import type { CrosslineStore, StoredSentence } from "@crossline/db";
  */
 const gapKey = (id: string) => `gap:${id}`;
 const roundKey = (sessionId: string, seq: number, id: string) => `iq:${sessionId}:${seq}:${id}`;
-/** A question the model writes this close to one already answered is that question again, whatever number it gave. */
-export const REPEAT_SIMILARITY = 0.85;
-/**
- * About the same line a question is a repeat at a lower similarity: the model rewords what it asks each round, and the 2026-10-31
- * walkthrough had one person's savings asked six times at about 0.5 bigram similarity, each worded a little differently.
- */
-export const SAME_LINE_SIMILARITY = 0.6;
 /** The dialogue's own answered questions shown by text alone beyond the latest ones (`ledgerForModel`). */
 export const EARLIER_SHOWN = 80;
-/** However it is worded, one question is put to the person at most this many times; the rest is left to an assumption. */
-export const MAX_ASKINGS = 2;
-/**
- * A day question this close to one answered 「还没定」, about the same line and project, asks that day again (「简历打算哪天做出来」, then
- * 「简历哪天写好」: 0.31; another thing's day, 「作品集哪天整理好」, is 0.13).
- */
-export const SAME_DAY_SIMILARITY = 0.3;
-/**
- * Days the dialogue asks itself (2026-11-14, replay 12): one a round about each thing (a project, or a line when none is named; two
- * projects' deadlines asked together are two things), and none once the person answered this many day questions with
- * 「还没定」. Six days were asked in seven rounds, four answered 「还没定」, and each next round asked the next thing's day;
- * the person had said the days wait on a choice not made yet. A day not set is kept as a rough window or left open; the app's own deadline
- * questions (`gap-`) keep their rules.
- */
-export const DATE_UNDECIDED_MAX = 2;
 
 const interviewQuestions = (store: CrosslineStore, workspaceId: string, sessionId: string) => store.listQuestions(workspaceId, { kind: "interview" })
   .filter((question) => question.key.startsWith("gap:") || question.key.startsWith(`iq:${sessionId}:`));
+/** The interview's ledger as a round's questions are checked against it (`checkQuestions`): every question but the dropped ones. */
+export const interviewLedger = (store: CrosslineStore, workspaceId: string, sessionId: string): LedgerQuestion[] =>
+  interviewQuestions(store, workspaceId, sessionId).filter((question) => question.status !== "dropped");
 
 /** The answers this reply gives to questions still open, read from the cards' own form, each with the sentences it was given in. */
 export function recordReplyAnswers(store: CrosslineStore, workspaceId: string, sessionId: string, reply: string, sentences: StoredSentence[], at: string): number {
@@ -84,81 +65,6 @@ export function ledgerForModel(store: CrosslineStore, workspaceId: string, sessi
   return ledgerLines([...older, ...settled, ...ownWaiting, ...appWaiting].sort((a, b) => a.id - b.id));
 }
 
-export type RepeatOutcome = { questions: TurnQuestion[]; coveredGaps: Set<string>; dropped: Array<{ text: string; repeats: number; why: "answered" | "similar" | "undecided" | "one_date" }> };
-
-/**
- * Reads the round's `repeats`: a question asking again what was answered goes (asked again is the duplicate the ledger exists to catch;
- * a question the model wrote this close to an answered one goes too, whatever number it gave), and one of the app's waiting questions
- * the model asked in its own words is marked so the app does not add it as well. A number that is not in the ledger is read as new.
- */
-export function resolveRepeats(store: CrosslineStore, workspaceId: string, sessionId: string, questions: TurnQuestion[]): RepeatOutcome {
-  const ledger = interviewQuestions(store, workspaceId, sessionId);
-  const byId = new Map(ledger.map((question) => [question.id, question]));
-  const answered = ledger.filter((question) => question.status === "answered" || question.status === "assumed");
-  const coveredGaps = new Set<string>();
-  const dropped: RepeatOutcome["dropped"] = [];
-  // An answer that settled nothing (「不确定」) may be asked about once more, never twice: the start items take only the person's word.
-  const askedAgain = (id: number) => ledger.some((item) => item.repeats === id);
-  // A day the person said is not set yet is not asked again (`DATE_UNDECIDED_MAX`): only a start item's question is reopened.
-  const reopenable = (item: LedgerQuestion) => item.status === "answered" && unsureAnswer(item.answer) && !askedAgain(item.id)
-    && !(DATE_ASK.test(item.text) && !item.key.startsWith("gap:"));
-  // The dialogue's own day questions the person answered 「还没定」: past `DATE_UNDECIDED_MAX` of them, it asks no more days.
-  const undecidedDays = ledger.filter((item) => !item.key.startsWith("gap:") && item.status === "answered" && DATE_ASK.test(item.text) && undecidedAnswer(item.answer));
-  const daysThisRound = new Set<string>();
-  // Same line and same project: two projects' deadlines, or 「X 这条线眼下在做的一件事」 asked of each line, are worded alike and are
-  // different questions (2026-11-01: three lines' current work was asked in one round, all three dropped, and the round showed none).
-  const alike = (a: { text: string; identityId: string; projectId: string }, b: { text: string; identityId: string; projectId: string }) => {
-    if (a.projectId && b.projectId && a.projectId !== b.projectId) return false;
-    if (a.identityId && b.identityId && a.identityId !== b.identityId) return false;
-    const similarity = questionSimilarity(a.text, b.text);
-    return similarity >= REPEAT_SIMILARITY
-      || (Boolean(a.identityId) && a.identityId === b.identityId && a.projectId === b.projectId && similarity >= SAME_LINE_SIMILARITY);
-  };
-  // What the model asked before, answered or not: the model's own questions only (the app's are keyed by gap and asked by its own rules).
-  const askedBefore = ledger.filter((item) => item.status !== "dropped" && !item.key.startsWith("gap:"));
-  const kept: TurnQuestion[] = [];
-  for (const question of questions) {
-    // The app's own questions (`gap-`) keep their rules; the dialogue's day questions are limited here.
-    if (!question.id.startsWith("gap-") && DATE_ASK.test(question.text)) {
-      if (undecidedDays.length >= DATE_UNDECIDED_MAX) { dropped.push({ text: question.text, repeats: undecidedDays.at(-1)!.id, why: "undecided" }); continue; }
-      const sameThing = undecidedDays.find((item) => (!item.identityId || !question.identityId || item.identityId === question.identityId)
-        && (!item.projectId || !question.projectId || item.projectId === question.projectId) && questionSimilarity(item.text, question.text) >= SAME_DAY_SIMILARITY);
-      if (sameThing) { dropped.push({ text: question.text, repeats: sameThing.id, why: "undecided" }); continue; }
-      const about = `${question.identityId}|${question.projectId}`;
-      if (daysThisRound.has(about)) { dropped.push({ text: question.text, repeats: 0, why: "one_date" }); continue; }
-      daysThisRound.add(about);
-    }
-    const named = question.repeats ? byId.get(question.repeats) : undefined;
-    if (named && (named.status === "answered" || named.status === "assumed") && !reopenable(named)) { dropped.push({ text: question.text, repeats: named.id, why: "answered" }); continue; }
-    if (named?.key.startsWith("gap:")) coveredGaps.add(named.key.slice(4));
-    const twin = !named && answered.find((item) => alike(item, question) && !reopenable(item));
-    if (twin) { dropped.push({ text: question.text, repeats: twin.id, why: "similar" }); continue; }
-    // The same thing asked twice already (answered in prose the cards could not read, or skipped) is not asked a third time.
-    // One hop further: each rewording is close to the last one, not always to the first.
-    const near = askedBefore.filter((item) => item.id === named?.id || alike(item, question));
-    const earlier = askedBefore.filter((item) => near.includes(item) || near.some((other) => alike(other, item)));
-    if (earlier.length >= MAX_ASKINGS) { dropped.push({ text: question.text, repeats: earlier.at(-1)!.id, why: "similar" }); continue; }
-    // Two questions of one round that ask the same thing: the first stays.
-    if (kept.some((other) => alike(other, question))) continue;
-    kept.push({ ...question, repeats: question.repeats && byId.has(question.repeats) ? question.repeats : 0 });
-  }
-  return { questions: kept.map(withDistinctOptions), coveredGaps, dropped };
-}
-
-/**
- * Whether the app may put one of its own checklist questions (an item's `ask`) to the person again: not once an asking of it was answered
- * with something that settles it, and not more than `MAX_ASKINGS` times in all. The 2026-10-31 rerun asked 「「X」这条线眼下在做什么？」
- * nine times: the person answered at once, the extraction had not written the description down yet, and the item stayed open.
- * The stage's open question (`openStageQuestion`) is judged the same way (W-184).
- */
-export function checklistAskable(store: CrosslineStore, workspaceId: string, sessionId: string): (text: string) => boolean {
-  const asked = interviewQuestions(store, workspaceId, sessionId).filter((question) => question.status !== "dropped");
-  return (text) => {
-    const same = asked.filter((question) => sameQuestion(question.text, text) || question.text.startsWith(text));
-    return same.length < MAX_ASKINGS && !same.some((question) => (question.status === "answered" && !unsureAnswer(question.answer)) || question.status === "assumed");
-  };
-}
-
 /**
  * Whether one of the app's checklist questions has an answer on record that settles it: the item is then only waiting for the extraction
  * to write it down, and the dialogue is told so (2026-11-01 run 10: 「铲屎官这条线眼下在做的一件事」 answered at round 11 was asked again
@@ -182,18 +88,6 @@ export function linesAnsweredUnread(store: CrosslineStore, workspaceId: string, 
     .filter((question) => question.status === "answered" && question.identityId && question.identityId !== "person"
       && (question.answeredAt ?? "") >= since)
     .map((question) => question.identityId));
-}
-
-/** A question's options with repeats left out (2026-10-31: one card offered the same choice twice). */
-export function withDistinctOptions(question: TurnQuestion): TurnQuestion {
-  const seen = new Set<string>();
-  const options = question.options.filter((option) => {
-    const key = (option.label ?? "").replace(/[\s，,。.、；;：:（）()「」]/g, "").toLowerCase();
-    if (!key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-  return options.length === question.options.length ? question : { ...question, options };
 }
 
 /** Every question of a stored round, now shown and open; returns the ledger numbers in the round's order. */

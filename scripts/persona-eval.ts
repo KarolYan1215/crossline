@@ -30,9 +30,9 @@ import { configureModelGate, runCodexSkill, setProviderResolver, setUsageSink, s
 import {
   ONBOARDING_INSIGHTS, PROFILE_CLAIMS_SETTING, PROFILE_INSTRUMENTS_SETTING, THIRD_PARTY_CAPABILITIES, cardWordsHead,
   composeGoal, instrumentClaims, interviewCompleteness, instrumentReadings, interviewComplete, parseSponsorModels, readInsightRatings, readInstrumentAnswers, readyToStart,
-  scaleAnswerLine, screenQuestions, sponsorSpend, type AccessContext, type ProfileCard, type StoredLineProfile
+  scaleAnswerLine, sponsorSpend, type AccessContext, type ProfileCard, type StoredLineProfile
 } from "../packages/core/src/index";
-import { CrosslineStore, interviewChecklistFor, questionScreenFor, rateInsight } from "../packages/db/src/index";
+import { CrosslineStore, interviewChecklistFor, rateInsight } from "../packages/db/src/index";
 import { composeAnswers, type Question } from "../apps/web/app/onboarding/onboarding-types";
 import { openingReply } from "../apps/web/app/onboarding/opening-card";
 import { identityLines } from "../apps/worker/src/lines";
@@ -208,13 +208,10 @@ async function runPerson(name: string, opening: Opening) {
       const turn = last.content as { reply: string; questions: Question[]; cards?: ProfileCard[]; insight?: { text?: string }; moreInsights?: Array<{ text?: string }>;
         stage?: string; nextAction: string };
       const shownCards = [turn.insight, ...(turn.moreInsights ?? [])].map((card) => card?.text ?? "").filter(Boolean);
-      // What the screen shows of the round (the state route): questions another place owns or the ledger already answers are left out,
-      // and the app's own questions not in the round join it.
+      // What the screen shows of the round (the state route): the round as the model wrote it, and the app's own questions not in it.
       const shown = withStore(() => {
         lib.adoptPendingDates(ctx);
-        const moved = lib.questionsOwnedElsewhere(ctx, turn.questions);
-        for (const item of screenQuestions(turn.questions, questionScreenFor(store, workspaceId)).screened) moved.add(item.question.id);
-        const round = turn.questions.filter((question) => !moved.has(question.id));
+        const round = turn.questions;
         const inRound = new Set(turn.questions.map((question) => question.id));
         const status = lib.interviewStatus(ctx);
         return { round, extra: (status.questions as Question[]).filter((question) => !inRound.has(question.id)) };

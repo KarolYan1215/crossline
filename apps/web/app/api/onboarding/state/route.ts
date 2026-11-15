@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { PROFILE_SECTIONS_SETTING, sectionClosed, type SectionRecord } from "@crossline/core";
-import { INTERVIEW_FLOW_STAGES, flowOf, ONBOARDING_INSIGHTS, progressView, readInsightRatings, readTurnProgress, FIRST_DRAFTS_SETTING, ONBOARDING_LAST_FAILURE, readOnboardingFailure, firstDraftsState, interviewCompleteness, openStageQuestion, questionKind, sameQuestion, screenQuestions, unsureAnswer, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
-import { INTERVIEW_LOCALE_SETTING, extractBacklog, interviewLocale, questionScreenFor } from "@crossline/db";
+import { INTERVIEW_FLOW_STAGES, flowOf, ONBOARDING_INSIGHTS, progressView, readInsightRatings, readTurnProgress, FIRST_DRAFTS_SETTING, ONBOARDING_LAST_FAILURE, readOnboardingFailure, firstDraftsState, interviewCompleteness, questionKind, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
+import { INTERVIEW_LOCALE_SETTING, extractBacklog, interviewLocale } from "@crossline/db";
 import { isLocale } from "@crossline/i18n";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { getStore, planToday } from "../../../../lib/crossline";
@@ -9,7 +9,7 @@ import { folderDocumentIds, projectTimeline, weekCapacity, weekSkeleton } from "
 import { adoptPendingDates, loadAdoptedDates, loadPendingDateBatch } from "../../../../lib/imported-dates";
 import { loadDiligence } from "../../../../lib/diligence";
 import { identityLines, needsLineSetup } from "../../../../lib/lines";
-import { interviewStatus, pendingAnswerIds, questionsOwnedElsewhere } from "../../../../lib/interview-status";
+import { interviewStatus, pendingAnswerIds } from "../../../../lib/interview-status";
 import { startConfirmed, startSummary } from "../../../../lib/start-confirm";
 import { portraitConfirmation } from "../../../../lib/portrait";
 import { readResearchThreads } from "../../../../lib/interview-research";
@@ -32,30 +32,17 @@ export async function GET(request: Request) {
   const session = focus ? store.getOnboardingSession(workspaceId, `line-${focus.id}`) : store.getLatestOnboardingSession(workspaceId);
   const json = <T,>(key: string, fallback: T): T => { try { return JSON.parse(store.getSetting(workspaceId, key) ?? "null") ?? fallback; } catch { return fallback; } };
   const raw = session ? store.listOnboardingMessages(workspaceId, session.id) : [];
-  // A model question that names a file the app itself asks about (or has settled) is left out: the app's question is the one kept.
+  // The open round's questions are shown as the model wrote them (2026-11-14 audit, docs/onboarding-validation-audit.md §3.2): nothing is
+  // screened out here, and an empty round gets no question of the app's making (the worker sends a round asking nothing back to the model).
   const lastIndex = raw.length - 1;
   const lastQuestions = raw[lastIndex]?.role === "assistant" ? ((raw[lastIndex]!.content as { questions?: TurnQuestion[] }).questions ?? []) : [];
-  const moved = questionsOwnedElsewhere(access.ctx, lastQuestions);
-  // A round stored before the screen existed is screened here as on 待决事项 (`lib/interview-status.ts`): a room, class times on record, a
-  // calendar's recurrence are not the person's to answer. A question asking for several things is shown as multiple choice.
-  for (const item of screenQuestions(lastQuestions, questionScreenFor(store, workspaceId)).screened) moved.add(item.question.id);
   const identities = identityLines(access.ctx).map((pack) => ({ id: pack.id, label: pack.label }));
   // The start standard (main interview only): what is still missing, and the app's own questions not in the open round — so an account
   // whose interview already ended can answer 「没有截止」 here without waiting for a new round.
   const status = focus ? null : interviewStatus(access.ctx);
   const inRound = new Set(lastQuestions.map((question) => question.id));
-  const kept = lastQuestions.filter((question) => !moved.has(question.id)).map((question) => ({ ...question, kind: questionKind(question) }));
-  // A round that still asks never shows an empty box: when this screen took out everything it held (the files the app asks about, facts
-  // recorded since it was stored) and nothing of the app's own waits beside it, it asks the stage's open question (2026-10-31 walkthrough).
-  const lastContent = (raw[lastIndex]?.content ?? {}) as { nextAction?: string; stage?: string; cards?: unknown[] };
+  const shown = lastQuestions.map((question) => ({ ...question, kind: questionKind(question) }));
   const extra = status ? status.questions.filter((question) => !inRound.has(question.id)) : [];
-  const empty = raw[lastIndex]?.role === "assistant" && lastContent.nextAction === "ask" && lastQuestions.length > 0 && !kept.length
-    && !(lastContent.cards ?? []).length && !extra.length;
-  // Not one the person already answered, as the worker judges it (W-184): the next stage's open question then.
-  const settled = empty && session ? store.listQuestions(workspaceId, { kind: "interview", keyPrefix: `iq:${session.id}:`, statuses: ["answered", "assumed"] })
-    .filter((question) => question.status === "assumed" || !unsureAnswer(question.answer)) : [];
-  const shown = empty ? [openStageQuestion(lastContent.stage, interviewLocale(store, workspaceId),
-    (text) => !settled.some((question) => sameQuestion(question.text, text)))] : kept;
   const messages = lastQuestions.length ? raw.map((message, index) => index === lastIndex
     ? { ...message, content: { ...(message.content as object), questions: shown } } : message) : raw;
   // What the background extraction still owes this conversation (2026-10-19): while it reads the last replies the facts behind the start

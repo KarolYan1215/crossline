@@ -12,7 +12,7 @@ import { advanceWorkOrder, validateCommandEnvelope, validateSuccessCriteria } fr
 import { ASSUMPTION_PREFIX, interviewChecklist } from "./interview-checklist";
 import { openAccessVerdict } from "./manualbook-schema";
 import { portraitLabels, typeFromScores } from "./portrait-type";
-import { answerLine, answeredGapFacts, gapCoveredBy, profileGaps, readAnswerLine, readableFromMaterial, screenQuestions, undatedKey } from "./profile-gaps";
+import { answerLine, answeredGapFacts, profileGaps, readAnswerLine, readableFromMaterial, undatedKey } from "./profile-gaps";
 import { licenseVerdict } from "./public-skills";
 import { plainEstimateWords } from "./text-hygiene";
 import { scheduleLabel, stepLeavesMachine } from "./workflows";
@@ -129,16 +129,7 @@ describe("heuristics read English as well as Chinese", () => {
     expect(readAnswerLine("选择：甲；乙。补充：周五")).toEqual({ picked: ["甲", "乙"], other: "周五" });
   });
 
-  test("a model question that already asks what a gap asks, and questions screened out", () => {
-    const gaps = profileGaps({ identities: [{ id: "research", label: "Research" }], projects: [{ id: "ece548", identityId: "research", name: "ECE 548" }],
-      facts: [{ identityId: "research", projectId: "ece548", slot: "grading", value: "x", status: "confirmed" }], dated: ["ece548"], locale: "en" });
-    const meetings = gaps.find((gap) => gap.code === "COURSE_MEETINGS")!;
-    expect(gapCoveredBy(meetings, [{ identityId: "research", projectId: "ece548", text: "When does the ECE 548 lecture meet each week?" }])).toBe(true);
-    expect(gapCoveredBy(meetings, [{ identityId: "research", projectId: "ece548", text: "ECE 548 每周几点上课？" }])).toBe(true);
-    const screen = (text: string) => screenQuestions([{ id: "q", text, projectId: "" }], { projects: [], meetings: [] }).screened[0]?.reason;
-    expect(screen("Which room is the ECE 548 lecture in?")).toBe("location");
-    expect(screen("ECE 548 在哪个教室？")).toBe("location");
-    expect(screen("Are these calendar events ongoing or one-off?")).toBe("calendar_inferable");
+  test("questions the task's own material answers, and undated items", () => {
     expect(readableFromMaterial("How do I submit homework 3?")).toBe(true);
     expect(readableFromMaterial("作业提交方式？")).toBe(true);
     expect(readableFromMaterial("Which topic matters most to you?")).toBe(false);

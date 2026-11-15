@@ -1,6 +1,5 @@
 import { expect, test } from "vitest";
 import { inRoughWindow, roughWindow } from "./rough-dates";
-import { DATE_ASK, undecidedAnswer } from "./question-ledger";
 
 // 2026-11-14 is a Saturday.
 const today = "2026-11-14";
@@ -49,13 +48,4 @@ test("a day inside the window is supported by the words, one outside is not", ()
   expect(inRoughWindow("2027-02-06", plan, today)).toBe(false);
   expect(roughWindow("春节前", today)).toEqual({ from: "2026-11-14", to: "2027-02-05", precision: "term" });
   expect(roughWindow("一年前投过", today)).toBeUndefined();
-});
-
-test("day questions and answers that leave the day open are told apart", () => {
-  for (const text of ["简历打算哪天做出来？", "约人聊的事打算什么时候开始？", "截止定在几号？", "投简历这件事，大概哪个时间范围内要投出去？", "打算哪个月开始？"]) expect(DATE_ASK.test(text)).toBe(true);
-  for (const text of ["你最想先弄清楚的是什么？", "那段时间你在做什么？", "固定安排之外，每周大概哪些时段可以用来做自己的事？", "每周什么时间段有空？", "一段专注最长多久？", "每周哪几天有课？",
-    "赶截止复习时，什么让你仍然会做？", "截止临近时，你一般是哪种样子？", "你会把什么排在第一位？"]) expect(DATE_ASK.test(text)).toBe(false);
-  for (const text of ["「寒假深度实习」有截止日期吗？", "截止是哪天？", "什么时候截止？", "打算排在哪天？"]) expect(DATE_ASK.test(text)).toBe(true);
-  for (const text of ["还没定", "看情况吧", "要先想好投哪类，再定"]) expect(undecidedAnswer(text)).toBe(true);
-  expect(undecidedAnswer("下周三")).toBe(false);
 });

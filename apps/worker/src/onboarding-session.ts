@@ -3,27 +3,26 @@ import {
   AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary, ACTIVITY_HOURLY, atComputerLines, type ActivityHour,
   PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, type TurnQuestion, keepOnboardingDialogue, droppedOnboardingItems, ONBOARDING_KEEP_EARLY_MAX, onboardingDialogueSchema,
   validateOnboardingDialogue, locateQuote,
-  gapCoveredBy, screenQuestions, screenAssumption, type QuestionScreenInput,
-  type DimensionId, type ProfileGap, type ProfileModel, type OnboardingStage, DEEP_STAGES, ASSESS_RESULT_SETTING, TYPE_TABLE,
-  checkInsight, disclosureReplies, mentionsSelfHarm, safetyRound, readTurnProgress, safetyReplyOnly, researchCopied, RESEARCH_FIGURES_MAX,
-  inventedDates, openStageQuestion,
-  type KnownSources, type OnboardingDialogue, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, ONBOARDING_LAST_FAILURE, readPartialTurn, type OnboardingProgress, calendarWeek,
-  tFor, type Locale, flowOf, INTERVIEW_FLOW_STAGES, PROFILE_MODULE_STAGES, cardsFor, readCardAnswers, mergeInstrumentAnswers, readInstrumentAnswers,
+  type ProfileGap, type ProfileModel, type OnboardingStage, ASSESS_RESULT_SETTING, TYPE_TABLE,
+  disclosureReplies, mentionsSelfHarm, safetyRound, readTurnProgress, safetyReplyOnly, researchCopied, RESEARCH_FIGURES_MAX,
+  inventedDates, type KnownSources, type OnboardingDialogue, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, ONBOARDING_LAST_FAILURE, readPartialTurn, type OnboardingProgress, calendarWeek,
+  tFor, flowOf, INTERVIEW_FLOW_STAGES, PROFILE_MODULE_STAGES, cardsFor, readCardAnswers, mergeInstrumentAnswers, readInstrumentAnswers,
   settledItems, PROFILE_INSTRUMENTS_SETTING, type CardSet, type InterviewFlow, type ProfileCard, type ProfileStage, INTERVIEW_PACE
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillProgress } from "@crossline/codex";
 import {
-  EXTRACT_REREAD_SETTING, readExtractState, firstSentenceOf, markFinishing, interviewChecklistFor, interviewGapsFor, interviewLocale, lockInterviewLocale, queueExtractDocs, questionScreenFor, readExtractDocs, unfiledFilesIn,
+  EXTRACT_REREAD_SETTING, readExtractState, firstSentenceOf, markFinishing, interviewChecklistFor, interviewGapsFor, interviewLocale, lockInterviewLocale, queueExtractDocs, readExtractDocs, unfiledFilesIn,
   insightKey, type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument
 } from "@crossline/db";
 import { sourceIds } from "./source-ids";
 import { localeOf } from "./locale";
 import { adoptLineGoal, identityLines } from "./lines";
-import { checklistAnswered, checklistAskable, ledgerForModel, linesAnsweredUnread, recordReplyAnswers, recordRound, resolveRepeats, syncGapQuestions } from "./question-ledger";
+import { checklistAnswered, interviewLedger, ledgerForModel, linesAnsweredUnread, recordReplyAnswers, recordRound, syncGapQuestions } from "./question-ledger";
+import { checkInsights, checkOpenItems, checkQuestions, checkResearch } from "./onboarding-cards";
 import { correctionUnread, createOnboardingExtractor, extractionReached, requestAllLanes, requestExtraction, type ExtractLane } from "./onboarding-extract";
 import { DATES_UNRECORDED_EVENT, ONBOARDING_UNRECORDED_EVENT, personTimeZone, readProfileModel } from "./onboarding-persist";
 import { paceContext, storedProgress } from "./onboarding-pace";
-import { CARDS_OFFERED, cardCandidateIds, hypothesisFromCard, hypothesisReplies, INSIGHTS_PER_ROUND, POINTS_RULES, pointsRules, withProfileFramework, type Hypothesis, type TurnInsight } from "@crossline/core";
+import { hypothesisFromCard, POINTS_RULES, pointsRules, withProfileFramework, type Hypothesis, type TurnInsight } from "@crossline/core";
 import { readResearch, researchForDialogue, researchRunnerFor } from "./onboarding-research";
 import { DOMAIN_PACKS, domainGuides } from "@crossline/identity-packs";
 
@@ -43,7 +42,7 @@ const FINISH_WAIT_MS = 90_000;
 // for nothing. The dialogue is told instead which answers are not on record yet (`startStandard.answered`, `unrecorded`).
 /** Facts the extraction recorded since the last turn, at most this many lines in `recorded`. */
 const RECORDED_SHOWN = 40;
-/** Questions of the ledger shown to the model each round; repeats of older ones are still caught in code (`resolveRepeats`). */
+/** Questions of the ledger shown to the model each round; a question like an older one is sent back to it with the answer (`checkQuestions`). */
 const LEDGER_SHOWN = 15;
 
 // The scenario in brief, and nothing more: every rule and example is in the Skill. A second copy of the rules here drifted from it twice
@@ -66,18 +65,11 @@ export type OnboardingTurnOutcome =
 type Announced = { announcedSources?: string[]; calendarSent?: string; heardAt?: string; lastRound?: RoundEdits };
 
 /**
- * How the app changed the dialogue's last round before the person saw it (2026-10-31). The thread holds the questions the model wrote;
- * the person answered the ones the screen showed. Without this the model read a removed question as one the person skipped, and said
- * 「按假设处理」 about something never asked, or asked it again.
+ * What of the dialogue's last round the person did not see, and what the app put beside it (2026-10-31). Since the 2026-11-14 audit the
+ * app removes nothing on its own: an item is left out only when it still failed its check after the repairs ran out (`removed`, with
+ * the problem the model was told), and the only thing added is the app's bookkeeping question for a file that came with the reply.
  */
 export type RoundEdits = { removed: Array<{ text: string; why: string }>; added: string[] };
-
-/** Why a question was not shown, in the words the model is told (model-facing). */
-const SCREEN_WHY: Record<string, string> = {
-  duplicate: "the app asks this deadline itself", goal_picker: "the person picks this line's long-term goal beside the conversation",
-  calendar_inferable: "the calendar already says it", location: "a place does not change the plan",
-  known_schedule: "these class times are already on record"
-};
 
 /** Earlier replies the extraction has not recorded yet, newest last, at most this many named. */
 const UNRECORDED_SHOWN = 8;
@@ -92,8 +84,6 @@ const UNRECORDED_WHY: Record<string, string> = {
 
 export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId: string, cwd: string,
   getClient: () => CodexRpcBoundary | undefined, options: {
-    /** A main-interview round whose model has nothing more to ask asks the open start items (on in the app; tests of other behaviour turn it off). */
-    checklist?: boolean;
     /**
      * The extraction (onboarding-extract.ts) starts with every turn. `background` (the app): the person gets the round without waiting for
      * it, except a round that would end the interview, which waits so the checklist is read after it. `await`: the round waits for it
@@ -127,9 +117,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
   const checklistNow = () => interviewChecklistFor(store, workspaceId, identityLines(store, workspaceId)
     .map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] })), { unfiledFiles: unfiled().length, today: todayIso() });
   // Start items first, then what the interview itself still owes; a project's details are deferred (asked when its task is planned).
-  // An item's own question goes to the person only while `checklistAskable` allows it: once answered, the item waits for the extraction.
+  // An item's suggested question (`ask`) is offered to the dialogue until the person answered it; then the item waits for the extraction.
   const openChecklist = (limit = 8, skip: (item: { id: string; group: string; start?: boolean }) => boolean = () => false, sessionId?: string) => {
-    const askable = sessionId ? checklistAskable(store, workspaceId, sessionId) : () => true;
     const answered = sessionId ? checklistAnswered(store, workspaceId, sessionId) : () => false;
     // A line answered about in a reply the extraction has not read yet: its items' questions wait (`linesAnsweredUnread`).
     const upTo = sessionId ? readExtractState(store, workspaceId, sessionId).upTo : 0;
@@ -139,7 +128,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     return checklistNow()
       .filter((item) => !item.done && !item.deferred && !skip(item)).sort((a, b) => Number(Boolean(b.start)) - Number(Boolean(a.start)))
       .slice(0, limit).map(({ id, label, detail, owner, start, ask }) => ({ label, detail, owner, ...(start ? { start } : {}),
-        ...(ask && askable(ask) && !waits(id) ? { ask } : {}),
+        ...(ask && !waits(id) && !answered(ask) ? { ask } : {}),
         // Answered, or spoken to, in a reply the extraction has not written down yet: the dialogue must not ask it again in its own words.
         ...(waits(id) || (ask && answered(ask)) ? { recording: true } : {}) }));
   };
@@ -371,6 +360,34 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       const missing = checklistNow().filter((item) => item.start && !item.done).map((item) => item.label);
       return { startStandard: { met: !startOpen(), missing: missing.filter((label) => !answered.has(label)), ...(answered.size ? { answered: [...answered] } : {}) } };
     };
+    // The app's own questions still waiting, put to the person only when the dialogue names them (`openItems`). Whether the portrait fits
+    // is asked on the portrait page; which project a file belongs to is the app's bookkeeping, put beside the round (`filing` below).
+    const askable = () => currentGaps().filter((gap) => gap.code !== "PORTRAIT_UNCONFIRMED" && gap.code !== "FILE_UNFILED" && !(focusLine && gap.code === "LINE_GOAL"));
+    const openItems = () => {
+      const items = askable().map((gap) => ({ id: gap.question.id, text: gap.question.text, ...(gap.blocking ? { start: true } : {}) }));
+      return items.length ? { openItems: items } : {};
+    };
+    // What a round's items are checked against (`onboarding-cards.ts`), the same checks whether they came as fields or, later, as tools.
+    const replies = Object.fromEntries(messages.filter((message) => message.role === "user")
+      .map((message) => [`reply-${message.seq}`, String((message.content as { text?: string }).text ?? "")]));
+    const earlierCards = messages.filter((message) => message.role === "assistant").flatMap((message) => {
+      const content = message.content as { insight?: TurnInsight; moreInsights?: TurnInsight[] };
+      return [content.insight, ...(content.moreInsights ?? [])].filter((card): card is TurnInsight => Boolean(card?.text));
+    });
+    const sensitive = disclosureReplies(messages);
+    const rules = !focusLine && pointsRules(session.coverage);
+    /* i18n-ignore-start: problems sent back to the model */
+    const deskCheck = (output: OnboardingDialogue) => {
+      const asked = checkQuestions(output.questions, { ledger: interviewLedger(store, workspaceId, sessionId), openItems: askable() });
+      const items = checkOpenItems(output.openItems ?? [], askable(), asked.accepted);
+      const cards = safetyRound(output) ? { accepted: [], problems: (output.insights ?? []).length ? ["安全这一轮不出观察卡，insights 写 []。"] : [] }
+        : checkInsights(output.insights ?? [], { replies, sensitive, focusLine: Boolean(focusLine), stage: output.stage ?? "", rules,
+          hypotheses: readProfile().hypotheses ?? [], earlier: earlierCards });
+      const research = focusLine ? { accepted: [], problems: [] } : checkResearch(output.research ?? [], readResearch(store, workspaceId, sessionId));
+      return { questions: [...asked.accepted, ...items.accepted], cards: cards.accepted, research: research.accepted,
+        problems: [...asked.problems, ...items.problems, ...cards.problems, ...research.problems] };
+    };
+    /* i18n-ignore-end */
     const outputSchema = onboardingDialogueSchema(ids);
     // What the finished research threads found: a reply that lists their figures is sent back once (`researchCopied`); after the repairs
     // run out it is kept as it is (`softAccept`), a round is not lost for it.
@@ -391,6 +408,10 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       // model (2026-11-14 audit: it used to be cut silently).
       if (!focusLine && startOpen() && endHinted(valid.reply)) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
         detail: "开始标准还没齐（见 startStandard.missing）：reply 不提「结束并出报告」，也不说已经可以开始使用；接着问缺的那几项。" }); // i18n-ignore: model-facing repair note
+      // Each question, waiting item, card and research question through its check: what fails comes back with why, the rest stands.
+      const desk = deskCheck(valid);
+      if (desk.problems.length) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { cards: true,
+        detail: `这一轮有几项要改，其余照旧：\n- ${desk.problems.join("\n- ")}` }); // i18n-ignore: model-facing repair note
       // The person's reply names self-harm and the round is not the safety reply: sent back once, since the words may be about someone
       // else or a research topic, which the model can tell and the pattern cannot (2026-11-14 audit). Its second answer stands.
       if (mentionsSelfHarm(replyText) && !safetyRound(valid) && !safetyAsked) {
@@ -411,8 +432,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     };
     // A turn that only needs one or two questions dropped is kept now instead of rewritten in full by a repair; one that lists the research is not.
     const keepEarly = (rejection: Error, output: unknown) => {
-      // The safety question is the model's to answer, never settled by keeping the answer as it is.
-      if ((rejection as Error & { safety?: boolean }).safety) return undefined;
+      // The safety question and the items' own problems are the model's to answer, never settled by keeping the answer as it is.
+      if ((rejection as Error & { safety?: boolean; cards?: boolean }).safety || (rejection as Error & { cards?: boolean }).cards) return undefined;
       const kept = keepOnboardingDialogue(output, known);
       return kept && droppedOnboardingItems(output, kept) <= ONBOARDING_KEEP_EARLY_MAX
         && researchCopied(kept.reply, findings()).length <= RESEARCH_FIGURES_MAX && !setDates(kept.reply).length
@@ -442,7 +463,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         today, timeZone, sources: clipDocuments(documents), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}), ...(history ? { history } : {}), reply: { id: replyId, text: replyText },
         focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : INTERVIEW_FLOW_STAGES[flow][0]!)),
         ...(focusLine ? {} : { stageOrder: stageOrderFor(flow) }),
-        checklist: openChecklist(8, undefined, sessionId), ...startStandard(),
+        checklist: openChecklist(8, undefined, sessionId), ...startStandard(), ...openItems(),
         questionLedger: ledgerForModel(store, workspaceId, sessionId, LEDGER_SHOWN), ...pace(), ...roundNotes(),
         ...(workHistory().length ? { workHistory: workHistory() } : {}), ...(week.length ? { calendar: week } : {}),
         ...(publicAssessment ? { publicAssessment } : {}), research: researchNow(),
@@ -493,7 +514,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         // Later turns carry only what is new: the reply, any file that arrived since the last turn, and what the extraction recorded.
         const newSources = clipDocuments(fresh);
         // The completion list goes with every turn, so the model knows what it still owes without being told twice in prose.
-        const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(8, undefined, sessionId), ...startStandard(),
+        const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(8, undefined, sessionId), ...startStandard(), ...openItems(),
           ...(focusLine ? {} : { stageOrder: stageOrderFor(flow) }),
           questionLedger: ledgerForModel(store, workspaceId, sessionId, LEDGER_SHOWN), ...pace(), ...roundNotes(),
           ...(calendarChanged ? { calendar: week } : {}),
@@ -514,18 +535,14 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     } finally { clearInterval(heartbeat); store.deleteSetting(workspaceId, progressKey); }
     if (!result.ok) return blocked(result.blocker.code, result.blocker.message, result.blocker.detail);
     // The main interview never ends itself (the owner, 2026-11-12): only the person's 「结束并出报告」 ends it, once the start standard stands
-    // (`finishInterview`). A model that has nothing more to ask says so and asks whether there is anything else to talk about.
+    // (`finishInterview`). A model that is done says so in its reply; the app adds no question of its own to the round (2026-11-14 audit:
+    // the start items and a closing question it used to add did not follow from the reply above them). The box stays open.
     const modelDone = !focusLine && result.output.nextAction === "ready_for_milestones";
-    // Before the start standard stands the person cannot end it yet: a model that is done asks what the start still owes, never 「可以按
-    // 结束」 (2026-11-12 replay: shown two rounds before the button would take it). None with words of its own: the round's open question.
-    const startAsks = () => openChecklist(Infinity, (item) => !item.start, sessionId).filter((item) => item.owner === "interview" && item.ask).slice(0, 2)
-      .map((item, index): TurnQuestion => ({ id: `checklist-open-${index + 1}`, text: item.ask!, kind: "free", allowOther: true,
-        identityId: "", projectId: "", options: [] }));
-    if (modelDone) result = { ...result, output: { ...result.output, nextAction: "ask" as const,
-      questions: result.output.questions.length ? result.output.questions : options.checklist !== false && startOpen() ? startAsks() : [closingQuestion(locale)] } };
+    if (modelDone) result = { ...result, output: { ...result.output, nextAction: "ask" as const } };
+    // The round's items as they stand after the repairs: what still fails its check is left out and told to the model next round (`lastRound`).
+    const desk = deskCheck(result.output);
     // Questions the dialogue wants looked into on the web go to research threads of their own, in the background.
-    const raised = (result.output as { research?: Array<{ question: string; why: string; dimension: DimensionId }> }).research ?? [];
-    if (research && raised.length) research.start(sessionId, raised);
+    if (research && desk.research.length) research.start(sessionId, desk.research);
 
     // The checklist and the app's questions are read after the extraction when the round would end a line's own interview (so a fact this
     // reply gave is on record), or always when asked to wait; otherwise from what the ledger held, and what this reply settled joins next round.
@@ -535,120 +552,51 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const ending = result.output.nextAction === "ready_for_milestones";
     if (extractMode === "await") await caughtUp();
     else if (ending) await caughtUp(FINISH_WAIT_MS);
-    // Questions that are not the person's to answer (a room, class times already on record, whether a calendar event repeats) are taken
-    // out before the round is stored; what something rests on is written as an assumption the person can correct.
-    const screen = screenQuestions(result.output.questions, questionScreenFor(store, workspaceId));
-    for (const item of screen.screened) {
-      const assumption = screenAssumption(item);
-      if (assumption) store.upsertProfileFact({ workspaceId, ...assumption, status: "inferred", sourceRef: "inference", sourceQuote: "", updatedAt: new Date().toISOString() });
-    }
-    // What the ledger says this round repeats: an answered question asked again goes; an app question the model asked itself is not added.
-    const repeated = resolveRepeats(store, workspaceId, sessionId, screen.keep);
-    if (repeated.dropped.length) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:questions-repeated:${sessionId}:${replyId}:${heardAt}`,
-      type: "onboarding.questions_repeated", entityId: sessionId, payload: { replyId, dropped: repeated.dropped } });
-    // A line's own interview leaves its goal to the line card's picker (`goalEdits` wait there for the person).
-    const gapsFresh = () => currentGaps().filter((gap) => !repeated.coveredGaps.has(gap.question.id) && !(focusLine && gap.code === "LINE_GOAL"));
-    let gapsNow = gapsFresh();
-    const paced = paceDeepRound({ ...result.output, questions: repeated.questions }, Boolean(focusLine), INTERVIEW_PACE.roundQuestions);
     // The profile module's cards for this stage (flow v2): they count in the round's questions, so the model's give way to them.
     // The item texts exist in Chinese only so far (our own translation, docs/profile-and-agent-kit.md §二): an English interview gets none.
     const cardsLeft = !focusLine && flow === "v2" && locale !== "en"
-      ? cardsForRound(paced.output.stage, settledItems(readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING))), INTERVIEW_PACE.cardItems, INTERVIEW_PACE.cards)
+      ? cardsForRound(result.output.stage, settledItems(readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING))), INTERVIEW_PACE.cardItems, INTERVIEW_PACE.cards)
       : [];
     // Rating cards no longer take the round's question slots (the owner, 2026-11-12: 「量表题也不会占额度了」). The short set has no
     // interest cards (想不想做), so none waits for a round of its own (onboarding-depth.ts).
     // Nor beside the safety reply (2026-11-14 audit: a rating card could still show there).
-    const cards = paced.output.nextAction === "ask" && !safetyRound(paced.output) ? cardsLeft : [];
-    // Every question the model wrote was taken out (already answered, screened) and none of its cards are left: what the round asks now is
-    // the app's own, read off the checklist. That checklist waits for the extraction once more, or it asks what this reply just said (the
-    // 2026-11-01 rerun asked the illustrator line's current project right under the answer naming it).
-    const touched = { lines: recorded.identities, projects: recorded.projects, portrait: Boolean(readProfile().portrait) };
-    const startStands = !focusLine && !startOpen();
-    const checked = paced.deep ? paced.output
-      : withGapQuestions(paced.output, gapsNow, messages, { freshDocuments: sent.map(([, doc]) => doc.id), touched, locale, roundMax: INTERVIEW_PACE.roundMax });
-    // A round with cards has something to answer even when every question of the model was screened out.
-    // While the profile module runs (flow v2) the app's own fact questions wait for the Crossline part.
-    const holdGaps = flow === "v2" && PROFILE_MODULE_STAGES.has(checked.stage as OnboardingStage);
-    // A round left with nothing to ask does not end the main interview: it asks whether there is anything else (`withSomethingToAnswer`).
-    const assembled = cards.length && checked.nextAction === "ask" ? { ...checked, cards }
-      : withSomethingToAnswer(checked, holdGaps ? [] : gapsNow, messages, locale, focusLine || holdGaps ? [] : openChecklist(Infinity, (item) => !item.start, sessionId));
-    // What the app added (the checklist's and the start items' own questions) goes through the screen the page applies when it lists the
-    // round: a goal question the left column's picker already asks was listed as nothing, and the 2026-11-01 rerun showed 「开始之前还想再问
-    // 几件事。」 over an empty batch twice.
-    const roundOut = withFreshOpenQuestion(shownOrOpen(assembled, questionScreenFor(store, workspaceId), locale),
-      checklistAskable(store, workspaceId, sessionId), locale, startStands ? closingQuestion(locale) : undefined);
+    const cards = result.output.nextAction === "ask" && !safetyRound(result.output) ? cardsLeft : [];
+    // Which project a file that came with this reply belongs to: the app's own bookkeeping question, put beside the round as it wrote it.
+    const freshDocs = new Set(sent.map(([, doc]) => doc.id));
+    const filing = currentGaps().filter((gap) => gap.code === "FILE_UNFILED" && freshDocs.has(gap.documentId ?? "")
+      && !desk.questions.some((question) => question.id === gap.question.id)).map((gap) => gap.question);
+    const roundOut = { ...result.output, questions: [...desk.questions, ...filing], ...(cards.length ? { cards } : {}) };
     // The safety round's reply ends at its help lines (onboarding-reply.ts). The wording rules the app used to apply to the reply and the
     // questions behind the model's back (plain terms, 「还在记录」, a card said twice, 「除了前面讲过的那件」, the closing question after
     // 「没有了」) are the Skill's alone since the 2026-11-14 audit: each rewrite misread someone (「没什么好说的，但我最近很焦虑」 closed the
     // round), and the person's own 「硬约束」 was replaced in what they read.
     const output = { ...roundOut, reply: safetyRound(roundOut) ? safetyReplyOnly(roundOut.reply) : roundOut.reply };
-    // The observation is kept only when its quotes are in the replies it names; the progress record goes back to the model next round.
-    const replies = Object.fromEntries(messages.filter((message) => message.role === "user")
-      .map((message) => [`reply-${message.seq}`, String((message.content as { text?: string }).text ?? "")]));
-    // What the person will not see of what the model wrote, and what the app put beside it: told to the model next round, and logged.
-    const written = new Set(result.output.questions.map((question) => question.id));
-    const shown = new Set(output.questions.map((question) => question.id));
-    const edits: RoundEdits = {
-      removed: [
-        ...screen.screened.map((item) => ({ text: item.question.text, why: `not shown: ${SCREEN_WHY[item.reason] ?? item.reason}` })),
-        ...repeated.dropped.map((item) => ({ text: item.text, why: item.why === "undecided" ? "not shown: the person said this day is not set yet; keep it open or as a rough window, never ask it again"
-          : item.why === "one_date" ? "not shown: one day question a round" : `not shown: already answered (#${item.repeats})` })),
-        ...repeated.questions.filter((question) => !shown.has(question.id))
-          .map((question) => ({ text: question.text, why: `not shown: over this round's limit of ${INTERVIEW_PACE.roundQuestions}; may be asked next round` }))
-      ],
-      added: output.questions.filter((question) => !written.has(question.id)).map((question) => question.text)
-    };
+    // What the person will not see of what the model wrote (only what still failed after the repairs), and what the app put beside it.
+    const edits: RoundEdits = { removed: desk.problems.map((why) => ({ text: "", why: `not shown: ${why}` })), added: filing.map((question) => question.text) };
     if (edits.removed.length || edits.added.length) store.appendEvent({ ownerId, workspaceId,
       idempotencyKey: `onboarding:round-edited:${sessionId}:${replyId}:${heardAt}`, type: "onboarding.round_edited", entityId: sessionId,
       payload: { replyId, ...edits } });
-    // Observations may come as often as there is evidence (the owner, 2026-11-12), never the same one twice: the Skill asks for a new
-    // inference each time, and an observation whose words were already shown is dropped here. Cards ready together come in one round and
-    // are answered one after another (the owner, 2026-11-14: 「同一轮有很多卡准备好了，连续回答，而不是分批插入各轮」).
-    const squeeze = (text: string) => text.replace(/\s/gu, "");
-    const earlierCards = messages.filter((message) => message.role === "assistant").flatMap((message) => {
-      const content = message.content as { insight?: TurnInsight; moreInsights?: TurnInsight[] };
-      return [content.insight, ...(content.moreInsights ?? [])].filter((card): card is TurnInsight => Boolean(card?.text));
-    });
-    const shownInsights = new Set(earlierCards.map((card) => squeeze(card.text)));
-    // Never beside the safety check, never built on a disclosure (`disclosureReplies`).
-    const sensitive = disclosureReplies(messages);
-    const rules = !focusLine && pointsRules(session.coverage);
+    // Observation cards that passed their check (`checkInsights`). Under the points rules every card is one hypothesis of the log: one on
+    // record by its id, or a new one added to the log here under the reply's number, so 准 / 不准 lands on what it rates. Cards ready together
+    // come in one round and are answered one after another (the owner, 2026-11-14). Never beside the safety check.
     const observed: TurnInsight[] = [];
     if (!safetyRound(output)) {
       const profile = readProfile();
-      // Under the points rules every card is one hypothesis of the log (2026-11-12): one on record by its id, never one a card already
-      // asked about; a new one only when the log offers none (replay 12: a card the dialogue made up afresh beside four offered ones put
-      // back a premise the person had corrected), added to the log here under the reply's number, so 准 / 不准 lands on what it rates.
-      const offered = rules ? cardCandidateIds(profile.hypotheses ?? [], CARDS_OFFERED) : [];
-      const askedIds = new Set(earlierCards.map((card) => card.hypothesisId ?? "").filter(Boolean));
       const made: Hypothesis[] = [];
-      for (const written of (result.output.insights ?? []).slice(0, INSIGHTS_PER_ROUND)) {
-        const named = rules ? written.hypothesisId?.trim() ?? "" : "";
-        const onRecord = named ? profile.hypotheses.find((item) => item.id === named) : undefined;
-        // An uncertain hypothesis the log offered on one reply puts both explanations to the person and may cite that one (`cardCandidates`).
-        const minReplies = onRecord && offered.includes(onRecord.id) && hypothesisReplies(onRecord).length < 2 ? 1 : 2;
-        const checked = checkInsight(written, replies, output.stage, minReplies);
-        if (!checked || checked.refs.some((ref) => sensitive.has(ref.replyId)) || shownInsights.has(squeeze(checked.text))
-          || observed.some((card) => squeeze(card.text) === squeeze(checked.text))) continue;
-        if (!rules) { observed.push(checked); continue; }
-        if (onRecord) {
-          if (onRecord.cardKey || askedIds.has(onRecord.id) || onRecord.status === "refuted" || observed.some((card) => card.hypothesisId === onRecord.id)) continue;
-          observed.push({ ...checked, hypothesisId: onRecord.id, dimension: onRecord.dimension });
-          continue;
-        }
-        if (offered.length || made.length) continue;
+      for (const { card, fresh } of desk.cards) {
+        if (!fresh) { observed.push(card); continue; }
         // `c<seq>`, or with a suffix if an id like it is already on record.
         let id = `c${userMessage.seq}`;
         for (let n = 2; profile.hypotheses.some((item) => item.id === id); n += 1) id = `c${userMessage.seq}-${n}`;
-        const hypothesis = hypothesisFromCard(checked, id, written.dimension);
+        const hypothesis = hypothesisFromCard(card, id, fresh.dimension);
         made.push(hypothesis);
-        observed.push({ ...checked, hypothesisId: id, dimension: hypothesis.dimension });
+        observed.push({ ...card, hypothesisId: id, dimension: hypothesis.dimension });
       }
       if (made.length) store.setSetting(workspaceId, "profile.model", JSON.stringify({ ...profile,
         hypotheses: [...profile.hypotheses.filter((item) => !made.some((new_) => new_.id === item.id)), ...made] }));
     }
     const progress = readTurnProgress(result.output.progress);
-    const { insights: _raw, progress: _rawProgress, ...rest } = output;
+    const { insights: _raw, progress: _rawProgress, openItems: _items, ...rest } = output;
     const stored = { ...rest, ...(observed.length ? { insight: observed[0]!, ...(observed.length > 1 ? { moreInsights: observed.slice(1) } : {}) } : {}),
       ...(progress ? { progress } : {}) };
     const roundSeq = store.appendOnboardingMessage({ sessionId, workspaceId, role: "assistant", content: stored, createdAt: new Date().toISOString() });
@@ -674,69 +622,6 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
 }
 
 /**
- * A round that still asks always has something to answer. The model's questions can all be screened out (already on record, not the
- * person's to answer), and in a deep stage the app's own questions used to wait for a fact round: the hosted walkthrough of 2026-10-16 met
- * a round with a reply and an empty box the moment the start standard stood. Then the app's waiting questions join, else one open question
- * for the stage.
- */
-export function withSomethingToAnswer<T extends OnboardingDialogue>(output: T, gaps: ProfileGap[], messages: StoredOnboardingMessage[], locale?: Locale,
-  /** Open start items: the one thing the round can usefully ask when nothing else is left (2026-10-30, before the stage's open question). */
-  startOwed: Array<{ label: string; detail: string; ask?: string }> = []): T {
-  if (output.nextAction !== "ask" || output.questions.length) return output;
-  const withGaps = withGapQuestions(output, gaps, messages, { ...(locale ? { locale } : {}) });
-  if (withGaps.questions.length) return withGaps;
-  const start = startOwed.find((item) => item.ask);
-  if (start) return { ...output, questions: [{ id: "start-open", text: tFor(locale)("{{ask}}实在说不准，可以先说一个暂定的答案。", { ask: start.ask! }),
-    kind: "free", allowOther: true, identityId: "", projectId: "", options: [] }] };
-  return { ...output, questions: [openStageQuestion(output.stage, locale)] };
-}
-
-/**
- * The round as the page will list it: questions the screen takes out (`screenQuestions`) are dropped here, and a round that still asks
- * but is left with nothing to answer, and no cards, gets the stage's open question.
- */
-export function shownOrOpen<T extends OnboardingDialogue & { cards?: unknown[] }>(output: T, screen: QuestionScreenInput, locale?: Locale): T {
-  if (output.nextAction !== "ask" || !output.questions.length) return output;
-  const { keep } = screenQuestions(output.questions, screen);
-  if (keep.length === output.questions.length) return output;
-  return { ...output, questions: keep.length || output.cards?.length ? keep : [openStageQuestion(output.stage, locale)] };
-}
-
-/**
- * The stage's open question is the app's own, added after the ledger's repeat check (`resolveRepeats`) has read the model's questions, so
- * nothing stopped it coming back: W-184 asked 「做这些事，你最终想得到什么？」 again, word for word, the round after the person answered it.
- * One the ledger says may not be asked again (`checklistAskable`: answered with something that settles it, or asked twice) gives way to
- * the next stage's open question that may.
- */
-export function withFreshOpenQuestion<T extends OnboardingDialogue>(output: T, askable: (text: string) => boolean, locale?: Locale,
-  /** Once every open question is used up and the start standard stands: whether there is anything else, and the finish button. */
-  closing?: TurnQuestion): T {
-  const stale = (question: TurnQuestion) => question.id.startsWith("open-") && !askable(question.text);
-  if (!output.questions.some(stale)) return output;
-  const next = openStageQuestion(output.stage, locale, askable);
-  // The 2026-11-12 replay asked 「哪条主线你最想先说清楚」 nine rounds running once all seven were used: the stage's own came back each time.
-  const fresh = askable(next.text) || !closing ? next : closing;
-  return { ...output, questions: output.questions.map((question) => stale(question) ? fresh : question) };
-}
-
-/** Besides those that block, at most this many of the app's own questions join one round, so a batch stays answerable. */
-export const GAPS_PER_ROUND = 3;
-
-/**
- * At most this many of the model's own questions in one round, any stage (four in the deep stages and five in fact rounds until the
- * 2026-10-31 walkthrough: five fact questions plus the app's own made a screen nobody read to the end).
- */
-export const DEEP_QUESTIONS_PER_ROUND = 3;
-/** The app's own questions that do not block join only while a round has fewer than this many in all. */
-export const ROUND_QUESTIONS_MAX = 4;
-
-/**
- * Pacing in the deep stages — the situation, motive and vision, energy (docs/onboarding-v3.md). Decided 2026-10-14 as one question a
- * round; changed by the owner on 2026-10-16: questions that do not depend on each other's answers are asked together (at most four), and
- * only a question that builds on another's answer waits for a later round — which the model is told to judge. The app's own fact
- * questions still wait for a fact round (the screen lists them beside the conversation meanwhile), so a deep round stays about depth.
- */
-/**
  * The cards a round of the profile-first flow carries: in a profile stage, what is left of the stages already passed and then this one's,
  * two at most; past the module (the Crossline part), whatever is still unanswered one card at a time, so the start item can close.
  * `set` is the card set (`INTERVIEW_PACE.cards`: the short one).
@@ -750,66 +635,9 @@ export function cardsForRound(stage: string | undefined, settled: ReadonlySet<st
   return upTo.length ? upTo : cardsFor(module, settled, 1, items, set);
 }
 
-export function paceDeepRound<T extends OnboardingDialogue>(output: T, focus: boolean, limit = DEEP_QUESTIONS_PER_ROUND): { output: T; deep: boolean } {
-  const deep = !focus && DEEP_STAGES.has(output.stage as OnboardingStage) && output.nextAction === "ask";
-  return { deep, output: !focus && output.nextAction === "ask" ? { ...output, questions: output.questions.slice(0, limit) } : output };
-}
-
 /** The parts of the main interview in order; the details part belongs to a line's own interview only. */
 export const stageOrderFor = (flow: InterviewFlow): OnboardingStage[] =>
   INTERVIEW_FLOW_STAGES[flow].filter((stage) => stage !== "details");
-
-/**
- * Adds the app's own questions (`profileGaps`) to the round, **the ones about this round** first (decided 2026-10-08): a question about a
- * line or project the model is asking about now, a file that arrived with this reply, the portrait once this round wrote it. With nothing
- * relevant, one other joins, so nothing waits forever. A gap the model already asked in its own words is not asked twice; one that blocks
- * is asked every round until answered, and turns a premature 「ready」 back into 「ask」.
- */
-export function withGapQuestions<T extends OnboardingDialogue>(output: T, gaps: ProfileGap[], messages: StoredOnboardingMessage[],
-  round: {
-    freshDocuments?: string[];
-    /** What the extraction recorded since the last round (lines, projects) and whether a portrait is written: what this round touched. */
-    touched?: { lines: string[]; projects: string[]; portrait: boolean };
-    /** The interview's language: the app's own question texts are written in it. */
-    locale?: Locale;
-    /** `INTERVIEW_PACE.roundMax`; `ROUND_QUESTIONS_MAX` when not given. */
-    roundMax?: number;
-  } = {}): T {
-  const asked = new Set(messages.flatMap((message) => message.role === "assistant"
-    ? ((message.content as { questions?: Array<{ id: string }> }).questions ?? []).map((question) => question.id) : []));
-  const open = gaps.filter((gap) => {
-    // Whether the portrait fits is answered on the portrait page, where it is read (2026-10-28); the interview only links there.
-    if (gap.code === "PORTRAIT_UNCONFIRMED") return false;
-    if (output.questions.some((question) => question.id === gap.question.id)) return false;
-    // Already asked by the model in its own words: a line it asks anything about, a project question that is about the same thing.
-    if (gapCoveredBy(gap, output.questions, gaps)) return false;
-    return gap.blocking || !asked.has(gap.question.id);
-  });
-  const lines = new Set([...output.questions.map((question) => question.identityId), ...(round.touched?.lines ?? [])].filter(Boolean));
-  const projects = new Set([...output.questions.map((question) => question.projectId), ...(round.touched?.projects ?? [])].filter(Boolean));
-  const fresh = new Set(round.freshDocuments ?? []);
-  const relevant = (gap: ProfileGap) => gap.code === "FILE_UNFILED" ? fresh.has(gap.documentId ?? "")
-    : gap.code === "PORTRAIT_UNCONFIRMED" || gap.code === "APPEARANCE" ? Boolean(round.touched?.portrait)
-    : gap.projectId ? projects.has(gap.projectId) || lines.has(gap.identityId) : lines.has(gap.identityId);
-  const blockingGaps = open.filter((gap) => gap.blocking);
-  const near = open.filter((gap) => !gap.blocking && relevant(gap));
-  const rest = open.filter((gap) => !gap.blocking && !relevant(gap));
-  // The questions that block (goals, appearance) always come; the model's give way to them down to one, so the round stays within its
-  // limit (the 2026-11-01 rerun showed three of the model's, two goal pickers and the appearance question in one batch).
-  const max = round.roundMax ?? ROUND_QUESTIONS_MAX;
-  const own = blockingGaps.length ? output.questions.slice(0, Math.max(1, max - blockingGaps.length)) : output.questions;
-  const room = Math.max(0, max - own.length - blockingGaps.length);
-  const added = [...blockingGaps, ...(near.length ? near : rest.slice(0, 1)).slice(0, Math.min(GAPS_PER_ROUND, room))];
-  const blocking = gaps.some((gap) => gap.blocking);
-  if (!added.length && !(blocking && output.nextAction === "ready_for_milestones")) return output;
-  return {
-    ...output,
-    questions: [...own, ...added.map((gap) => gap.question)],
-    nextAction: blocking ? "ask" : output.nextAction,
-    ...(blocking && output.nextAction === "ready_for_milestones"
-      ? { reply: `${output.reply}\n\n${tFor(round.locale)("开始使用前，还需要本人回答下面几项。")}` } : {})
-  };
-}
 
 /**
  * The conversation as plain lines, for a thread that has to be rebuilt. Questions are kept; option lists are not. The whole conversation,
@@ -839,12 +667,6 @@ export function withoutEndHint(reply: string): string {
 }
 
 /** A session id the browser can mint for itself before the first turn. */
-
-/** What the dialogue asks when it has nothing more of its own: whether there is anything else, and that the person ends it with the button. */
-export function closingQuestion(locale?: Locale): TurnQuestion {
-  return { id: "closing-open", kind: "free", allowOther: true, identityId: "", projectId: "", options: [],
-    text: tFor(locale)("还有没有别的想聊的？没有的话，可以按「结束并出报告」。") };
-}
 
 /**
  * How long the person waits after 「结束并出报告」 for the extraction before the portrait is written from what is on record. The writer reads

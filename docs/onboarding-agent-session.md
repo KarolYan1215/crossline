@@ -586,6 +586,17 @@
 
 **P2b-2 完成（2026-11-14）：app 自己加的等待删掉。** 删了三处等整理的等待（对话前 60 秒、阻塞题 30 秒、空轮 300 秒，IR-040 到 IR-042）和 `cardsWait`（更正后整轮停卡，IR-043）。一轮不再为整理停下：还没记下的回复由 `startStandard.answered` 告诉模型；本人刚更正、假设日志还没重看时，卡照出，更正放在旁边（`cardsCheck`，Skill 规则 IR-111）。结束时的 `FINISH_WAIT_MS` 和 `extract: "await"` 模式保留：前者等的是报告要读的整理，后者是测试和回放用的同步模式。
 
+**P2b-3a 完成（2026-11-14）：一轮的组装不再静默改模型的东西。** 应用的核对（`apps/worker/src/onboarding-cards.ts`）在同一轮把问题清单退回模型（`SKILL_SCHEMA_INVALID` 带 `detail`），修复用完还没过的那几项不发出去，下一轮在 `lastRound.removed` 里告诉模型，并记 `onboarding.round_edited`：
+
+- 重复题：`resolveRepeats` 删掉。和答过的题像同一个问题（相似度只作提示），把本人当时的回答发回去；是往深一层的追问就由模型标 `followUp: true` 照发（IR-047）。同一件事最多问两次照旧，第三次退回（IR-014）。选项重复、id 重复、一轮超过五题都退回（IR-051），不再静默去重或截掉。
+- app 自己的问题：`withGapQuestions`、`holdGaps`、`gapCoveredBy` 删掉。缺项列在上下文的 `openItems`，模型要问哪一项就把 id 写进输出的 `openItems`，应用按自己的写法和选项发出，点选照旧直接记成事实（IR-048）；模型用自己的话问（`repeats` 指向 app 的题）会被退回。新文件归属题仍是应用的簿记题，照旧放在旁边。
+- 空轮：`withSomethingToAnswer`、`withFreshOpenQuestion`、`closingQuestion`、`openStageQuestion` 和网页端的空轮补题删掉。还没问完的一轮必须有题（`questions` 或 `openItems`），否则退回（IR-052）。
+- 筛题：`screenQuestions`、`screenAssumption`、`screenedNote`、`questionsOwnedElsewhere`、`questionScreenFor` 删掉（IR-020）；网页的待决事项和访谈页按模型写的原样显示这一轮。
+- 观察卡和调研：不合格的卡、重复的调研不再丢掉，连同原因退回（IR-049、IR-050）。
+- 画像阶段一轮三题（`paceDeepRound`）只留在 Skill（IR-017 退役）。
+
+Skill 同步改了 `questionLedger`、`lastRound`、`openItems`、`followUp` 和「核对后退回」的说法（IR-112 到 IR-114），删了「应用会拿掉收尾问题」「应用会删掉「还在记录」」这些已经不成立的句子。这一步仍走 JSON 字段；同样的核对作为工具调用（D1）是 P2b-3b。
+
 **往后加机制的规矩**：新发现的问题，先改 Skill 或工具说明。只有涉及 §3.7 六类的，才加代码，而且是拒收后让模型改，不静默改写。
 
 ---

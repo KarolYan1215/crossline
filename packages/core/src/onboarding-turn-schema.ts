@@ -44,6 +44,11 @@ export type TurnQuestion = {
    * question, never guessed from its wording, which turned 「你一周里哪天状态最好？」 into a date box and dropped its options.
    */
   date?: boolean;
+  /**
+   * The question builds on an answer already given (2026-11-14 audit): the app's likeness check against answered questions is a hint, and a
+   * follow-up worded like the question it follows is not a repeat. Said by the model, never guessed.
+   */
+  followUp?: boolean;
 };
 /**
  * A fact as the rest of the app reads it. The model does not write `sourceRef` or `sourceQuote` any more (2026-10-19): it cites numbered
@@ -204,6 +209,11 @@ export type OnboardingTurn = {
   /** Questions the dialogue hands to research threads this round (contract C); the worker opens one thread per question. */
   research?: ResearchRequest[];
   /**
+   * The app's own waiting questions (`openItems` in the round's input, by id) the dialogue puts to the person this round: shown as the
+   * app wrote them, so a tap is read as the fact it settles (2026-11-14 audit: the app no longer adds them to a round by itself).
+   */
+  openItems?: string[];
+  /**
    * The extraction's hypothesis log, career directions and dimension notes (contract B): only the items new or changed this run, merged
    * into the ones on record by id (`mergeProfileInsights`, 2026-11-12); a direction that no longer holds is named in `dropCareers`.
    */
@@ -281,6 +291,11 @@ export type OnboardingTurnContext = {
   stageOrder?: OnboardingStage[];
   /** The completion list's items still open (`interviewChecklist`): what the interview owes before it may say it is ready, and what waits on the person. */
   checklist?: Array<{ label: string; detail: string; owner: "interview" | "person"; start?: boolean }>;
+  /**
+   * The app's own questions still waiting (2026-11-14 audit): put to the person only when the dialogue names them in its `openItems`, as
+   * the app wrote them. `start` marks one the start standard waits on.
+   */
+  openItems?: Array<{ id: string; text: string; start?: boolean }>;
   /** Hours spent in Codex and Claude Code per folder and when in the day (`agentHistoryLines`), when the person allowed it: habits, not a plan. */
   workHistory?: string[];
   /** The connected calendars' events in the next seven days (`calendarWeek`), when any calendar is connected: what the week already holds. */
@@ -537,7 +552,9 @@ function turnFields(ids?: TurnIds) {
         date: { type: "boolean" },
         identityId: about, projectId: askedProject,
         // The ledger number of the question this one repeats (`questionLedger`), 0 when it is new.
-        repeats: { type: "integer", minimum: 0 }
+        repeats: { type: "integer", minimum: 0 },
+        // True when it builds on an answer already given: worded like that question, it is still not a repeat.
+        followUp: { type: "boolean" }
       })
     },
     slotUpdates: {
@@ -583,6 +600,8 @@ function turnFields(ids?: TurnIds) {
       falsifier: { type: "string", maxLength: 200 } }) },
     // Questions for research threads (contract C): what needs the web to answer, why it matters, the dimension it bears on.
     research: { type: "array", maxItems: 3, items: object({ question: text(300), why: text(300), dimension: DIMENSION_FIELD }) },
+    // The app's own waiting questions put to the person this round, by the ids the round's `openItems` lists.
+    openItems: { type: "array", maxItems: 5, items: { type: "string", maxLength: 80 } },
     // The hypothesis log, career directions and dimension notes (contract B): only what is new or changed this run, merged by id.
     hypotheses: { type: "array", maxItems: 40, items: HYPOTHESIS_ITEM_FIELD },
     careers: { type: "array", maxItems: 6, items: careerItemSchema(line) },
@@ -620,7 +639,7 @@ function turnFields(ids?: TurnIds) {
  * and the next questions. The **extraction** — facts with their sentence numbers, projects, dates, line attributes, hours, the
  * portrait — is written by its own run in the background, so its repairs never hold the conversation up.
  */
-export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage", "insights", "progress", "research", "safety"] as const;
+export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage", "insights", "progress", "research", "safety", "openItems"] as const;
 export const EXTRACT_KEYS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles", "goalEdits", "availability", "settings", "profileSections", "itemScores",
   "hypotheses", "careers", "dimensions", "dropCareers", "pointChanges"] as const;
 export const onboardingDialogueSchema = (ids?: TurnIds) => object(pick(turnFields(ids), DIALOGUE_KEYS));
@@ -664,7 +683,7 @@ export function listsAtLimit(output: unknown, schema: unknown = ONBOARDING_EXTRA
   });
 }
 /** What the person waits for, and what is stored as the round. */
-export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage" | "insights" | "progress" | "research" | "safety">;
+export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage" | "insights" | "progress" | "research" | "safety" | "openItems">;
 /** What the background run writes to the ledger. */
 export type OnboardingExtraction = Pick<OnboardingTurn, "slotUpdates" | "projectsDetected" | "flywheelCandidates" | "lineProfiles" | "goalEdits"
   | "availability" | "settings" | "hypotheses" | "careers" | "dimensions" | "dropCareers" | "pointChanges"> & { fileDates?: DateExtraction; profileSections?: ProfileSections; itemScores?: ItemScore[] };
@@ -751,7 +770,7 @@ function checkTurn(value: unknown, known: KnownSources, minimumCandidates: numbe
       reject("ONBOARDING_OPTIONS_REQUIRED", `问题「${question.id}」是选择题，至少要给 2 个候选；难以回忆的内容要多给候选。`);
     }
   }
-  if (turn.nextAction === "ask" && !turn.questions.length) reject("ONBOARDING_QUESTION_REQUIRED", "还没问完，这一轮必须至少提出一个问题。");
+  if (turn.nextAction === "ask" && !turn.questions.length && !turn.openItems?.length) reject("ONBOARDING_QUESTION_REQUIRED", "还没问完，这一轮必须至少提出一个问题（自己的 questions，或 openItems 里应用的待办题）。");
   for (const line of turn.lineProfiles ?? []) {
     if (!identities.has(line.lineId) || line.lineId === PERSON_LINE) reject("ONBOARDING_IDENTITY_UNKNOWN", `主线描述里的主线「${line.lineId}」不存在。`);
     const problem = candidatesProblem(line.attributeCandidates ?? [], citable, minimumCandidates, known.lineLabels?.[line.lineId], known.attributesOnRecord?.[line.lineId] ?? 0);

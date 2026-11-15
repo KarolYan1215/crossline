@@ -1,4 +1,4 @@
-import { cardsSettled, flowOf, GOAL_CANDIDATES_MIN, PROFILE_SECTIONS_SETTING, PROFILE_INSTRUMENTS_SETTING, readInstrumentAnswers, settledItems, ATTENTION_SETTING, START_CONFIRMED_SETTING, START_CONFIRM_SINCE, interviewChecklist, lineAttributes, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, portraitConfirmedByInsights, readInsightRatings, ONBOARDING_INSIGHTS, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile, type Locale } from "@crossline/core";
+import { cardsSettled, flowOf, PROFILE_SECTIONS_SETTING, PROFILE_INSTRUMENTS_SETTING, readInstrumentAnswers, settledItems, ATTENTION_SETTING, START_CONFIRMED_SETTING, START_CONFIRM_SINCE, interviewChecklist, lineAttributes, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, portraitConfirmedByInsights, readInsightRatings, ONBOARDING_INSIGHTS, type ChecklistItem, type ProfileGap, type ProfileModel, type StoredLineProfile, type Locale } from "@crossline/core";
 import { interviewLocale, readLocale } from "./locale";
 import { unfiledFilesIn } from "./file-belonging";
 import { latestFileDates } from "./index";
@@ -132,22 +132,6 @@ export function calendarRecurringTitles(store: CrosslineStore, workspaceId: stri
     days.set(key, entry);
   }
   return [...days.values()].filter((entry) => entry.days.size >= 2).map((entry) => entry.title);
-}
-
-/** What the app needs to keep from the person the interview's questions that are not theirs to answer (`screenQuestions`). */
-export function questionScreenFor(store: CrosslineStore, workspaceId: string): QuestionScreenInput {
-  const meetingFacts = store.listProfileFacts(workspaceId).filter((fact) => fact.projectId && /^(meeting|class)_?times?$|^no_meetings$/.test(fact.slot)
-    && fact.status === "confirmed").map((fact) => fact.projectId);
-  let profiles: Record<string, StoredLineProfile> = {};
-  try { profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") as Record<string, StoredLineProfile>; } catch { /* none */ }
-  return {
-    projects: store.listProjects(workspaceId).map(({ id, name }) => ({ id, name })),
-    meetings: [...new Set([...meetingProjects(store, workspaceId), ...meetingFacts])],
-    calendarRecurring: calendarRecurringTitles(store, workspaceId),
-    // A picker the person can choose from (`GOAL_CANDIDATES_MIN`): with one or two candidates the interview still asks what the person
-    // wants to become on the line, or neither the picker nor the dialogue would ask (docs/onboarding-agent-session.md C7).
-    goalPickerLines: Object.entries(profiles).filter(([, profile]) => lineAttributes(profile, "").length >= GOAL_CANDIDATES_MIN).map(([id]) => id)
-  };
 }
 
 /**

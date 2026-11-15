@@ -23,16 +23,16 @@ const runtime = (item: Record<string, unknown>) => fakeRuntime([turn(), turn(), 
 test("a tool the run never offered, which the runtime answered with an error, does not end the turn; one that completed does", async () => {
   // 2026-10-19: two sponsor candidates called a tool the interview never offers; the runtime found no such server and the call failed.
   const failed = runtime({ type: "mcpToolCall", id: "m1", server: "functions", tool: "search_evidence", status: "failed", error: { message: "unknown MCP server" } });
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => failed.rpc, { checklist: false, extract: "off" });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => failed.rpc, { extract: "off" });
   expect(await run({ sessionId: "s", text: "我在读研。" })).toMatchObject({ state: "asked" });
 
   const done = runtime({ type: "mcpToolCall", id: "m2", server: "notion", tool: "search", status: "completed", error: null, result: { content: [] } });
-  const refused = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => done.rpc, { checklist: false, extract: "off" });
+  const refused = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => done.rpc, { extract: "off" });
   expect(await refused({ sessionId: "s2", text: "第二段对话。" })).toMatchObject({ state: "blocked", code: "SKILL_TOOL_FORBIDDEN", detail: "item:mcpToolCall" });
 
   // The runtime's own resource listing, which it offered: read-only, so the turn goes on (Step-3.5-Flash, 2026-10-19).
   const listed = runtime({ type: "mcpToolCall", id: "m3", server: "codex", tool: "list_mcp_resources", status: "completed", error: null, result: { content: [] } });
-  const allowed = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => listed.rpc, { checklist: false, extract: "off" });
+  const allowed = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => listed.rpc, { extract: "off" });
   expect(await allowed({ sessionId: "s3", text: "第三段对话。" })).toMatchObject({ state: "asked" });
 });
 

@@ -4,7 +4,7 @@ vi.mock("server-only", () => ({}));
 const supervisor = vi.hoisted(() => vi.fn(async () => ({})));
 vi.mock("./codex-runtime", () => ({ requestCodexSupervisor: supervisor, CodexSupervisorRequestError: class extends Error {} }));
 import { answerAsk, collectAsks } from "./asks";
-import { interviewStatus, questionsOwnedElsewhere, takePendingAnswers } from "./interview-status";
+import { interviewStatus, takePendingAnswers } from "./interview-status";
 import { seedReadyToStart, TEST_CTX } from "./test-support";
 
 afterEach(() => { vi.unstubAllEnvs(); globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; supervisor.mockClear(); });
@@ -26,18 +26,11 @@ function setup(nextAction: "ask" | "ready_for_milestones" = "ask") {
   store.saveOnboardingSession({ id: "s1", ownerId: "o", workspaceId: ws, state: "active", createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-08T00:00:00Z", coverage: { stage: "lines",
     coverage: [{ identityId: "research", filled: [], missing: ["ECE 548 固定课时", "组会时段"] }] } });
   const questions = [
-    { id: "q-course-map", text: "两份半导体器件课程文件与 ECE 548 的关系？", kind: "single", allowOther: true, identityId: "research", projectId: "",
-      options: [{ id: "both", label: "均属于 ECE 548", detail: "《Course Overview》和《TENTATIVE Lecture Plan》均为 ECE 548 材料。" }, { id: "no", label: "都不是", detail: "" }] },
     { id: "q-meetings", text: "组会和导师 1V1 的固定时间？", kind: "free", allowOther: true, identityId: "research", projectId: "", options: [] }];
   store.appendOnboardingMessage({ workspaceId: ws, sessionId: "s1", role: "assistant", createdAt: "2026-10-08T00:00:00Z",
     content: { reply: "…", questions, nextAction, stage: "lines" } });
   return { store, questions };
 }
-
-test("a model question about which project a file belongs to gives way to the app's own question about the file", () => {
-  const { questions } = setup();
-  expect([...questionsOwnedElsewhere(TEST_CTX, questions)]).toEqual(["q-course-map"]);
-});
 
 test("W-247: the stage is the furthest part reached, of the interview's own parts, and an ended interview says so", () => {
   const { store } = setup();
@@ -56,7 +49,7 @@ test("while the interview runs its questions stay in it; nothing about it is on 
   setup();
   const status = interviewStatus(TEST_CTX);
   expect(status).toMatchObject({ started: true, complete: false, parked: false, readyToStart: false, stage: "lines", stageIndex: 2, stageCount: 5, ended: false });
-  // The model's round (its file question left out) and the app's own questions: both courses' class times.
+  // The model's round and the app's own questions: both courses' class times.
   expect(status.questions.map((question) => question.id)).toEqual(["q-meetings", "gap-meetings-ece555", "gap-meetings-ece548"]);
   const asks = collectAsks(TEST_CTX, SOON);
   expect(asks.some((ask) => ["interview_open", "interview_question", "source_project"].includes(ask.kind))).toBe(false);
@@ -70,12 +63,14 @@ test("未达可开始时访谈问题不进待决事项，哪怕一天没回复",
   expect(asks.some((ask) => ["interview_open", "interview_question", "source_project"].includes(ask.kind))).toBe(false);
 });
 
-test("a course's class times the round already asks about are not asked again in the app's own words", () => {
+// 2026-11-14 audit (docs/onboarding-validation-audit.md §3.2): whether a model question already asks an app question is no longer guessed
+// from its words (`gapCoveredBy`); the Skill has the model name an app question in `openItems` instead of asking it in its own words.
+test("the app's own questions are listed beside the round as they are: whether the round asks one is not guessed from its words", () => {
   const { store } = setup();
   store.appendOnboardingMessage({ workspaceId: ws, sessionId: "s1", role: "assistant", createdAt: "2026-10-08T01:00:00Z",
     content: { reply: "…", nextAction: "ask", stage: "lines", questions: [
       { id: "ece548-fixed-class", text: "ECE 548 每周固定上课的星期、起止时间和地点？", kind: "free", allowOther: true, identityId: "research", projectId: "ece548", options: [] }] } });
-  expect(interviewStatus(TEST_CTX).questions.map((question) => question.id)).toEqual(["ece548-fixed-class", "gap-meetings-ece555"]);
+  expect(interviewStatus(TEST_CTX).questions.map((question) => question.id)).toEqual(["ece548-fixed-class", "gap-meetings-ece555", "gap-meetings-ece548"]);
 });
 
 test("used without finishing it, the interview's questions are asked on 待决事项, and the round goes to the interview once all are answered", async () => {
@@ -113,9 +108,9 @@ test("the model saying it is ready does not finish the interview while the list 
   expect(interviewStatus(TEST_CTX).complete).toBe(false);
 });
 
-// The real account's round of 2026-10-15: a goal question the card offered as a single choice, a room asked for, a question about which
-// calendar events repeat, and three dead questions (one TBD date twice, answered; a portrait already confirmed) holding the round.
-test("several options and the person's own words go to the interview; questions not theirs to answer neither show nor hold the round", async () => {
+// The real account's round of 2026-10-15: a goal question the card offered as a single choice. The room and the calendar question of that
+// round are no longer screened out here (2026-11-14 audit): what is the person's to answer is the Skill's rule.
+test("several options and the person's own words go to the interview", async () => {
   const { store } = setup();
   seedReadyToStart(store, ws);
   store.upsertProfileFact({ workspaceId: ws, identityId: "research", projectId: "ece548", slot: "meeting_time", value: "每周二、周四 13:00–14:15。", status: "confirmed",
@@ -126,12 +121,9 @@ test("several options and the person's own words go to the interview; questions 
   store.appendOnboardingMessage({ workspaceId: ws, sessionId: "s1", role: "assistant", createdAt: "2026-10-08T01:00:00Z",
     content: { reply: "…", nextAction: "ask", stage: "details", questions: [
       // The model writes the kind; it is no longer read off 「目标」 in the wording (2026-11-14 audit).
-      { id: "q-goal", text: "ECE 548 本学期最重要的目标？", kind: "multi", allowOther: true, identityId: "research", projectId: "ece548", options: options("总评达到 A", "真正掌握器件物理", "期末考进前 10%") },
-      { id: "q-location", text: "ECE 548 每周上课地点？", kind: "free", allowOther: true, identityId: "research", projectId: "ece548", options: [] },
-      { id: "q-calendar", text: "日历中的两项活动，哪些属于持续安排？", kind: "multi", allowOther: true, identityId: "startup", projectId: "", options: options("Build Nights 每周", "DEJA-VU 每月") }] } });
+      { id: "q-goal", text: "ECE 548 本学期最重要的目标？", kind: "multi", allowOther: true, identityId: "research", projectId: "ece548", options: options("总评达到 A", "真正掌握器件物理", "期末考进前 10%") }] } });
   const status = interviewStatus(TEST_CTX);
   expect(status.questions.map((question) => [question.id, question.kind])).toEqual([["q-goal", "multi"]]);
-  expect(status.screened.map((item) => item.reason)).toEqual(["location", "calendar_inferable"]);
   const ask = collectAsks(TEST_CTX, SOON).find((item) => item.id === "iq:q-goal")!;
   expect(ask).toMatchObject({ select: "many", important: false, freeText: { placeholder: expect.stringContaining("总评达到 A") } });
   // The single-option shape still answers, and a single-choice question refuses two.
@@ -139,7 +131,7 @@ test("several options and the person's own words go to the interview; questions 
   const sent = JSON.parse(String((supervisor.mock.calls[0] as unknown as [unknown, string, { body: string }])[2].body)) as { text: string };
   const lines = sent.text.split("\n");
   expect(lines[0]).toBe("【ECE 548 本学期最重要的目标？】选择：总评达到 A；真正掌握器件物理。补充：顺便把课程项目做成论文素材");
-  expect(lines[1]).toMatch(/^（系统说明，不是本人的回答：以下问题未交给本人——「ECE 548 每周上课地点？」/);
+  expect(lines).toHaveLength(1);
   expect(store.listEvents(ws, { type: "ask.answered" }).at(-1)!.payload).toMatchObject({ askId: "iq:q-goal", optionIds: ["o0", "o1"], note: "顺便把课程项目做成论文素材" });
 });
 
@@ -171,41 +163,6 @@ test("the same TBD date twice in one batch is one card, and an answered one is n
   store.upsertProfileFact({ workspaceId: ws, identityId: "research", projectId: "ece555", slot: "undated_6uyhx6",
     value: "「ECE 555」的「ECE 555 期末课程项目报告截止」文件里写的是待定，不是日期。还不知道", status: "confirmed", sourceRef: "reply-21", sourceQuote: "还不知道", updatedAt: "2026-10-08T00:00:00Z" });
   expect(interviewStatus(TEST_CTX).questions.some((question) => question.id.startsWith("gap-undated-"))).toBe(false);
-});
-
-test("answers given before the screen to questions it now keeps from the person are dropped; with nothing left, nothing is sent", async () => {
-  const { store } = setup();
-  seedReadyToStart(store, ws);
-  for (const project of ["ece548", "ece555"]) store.upsertProfileFact({ workspaceId: ws, identityId: "research", projectId: project, slot: "meeting_times",
-    value: "周二四", status: "confirmed", sourceRef: "src-1", sourceQuote: "周二四", updatedAt: "2026-10-08T00:00:00Z" });
-  const options = (...labels: string[]) => labels.map((label, index) => ({ id: `o${index}`, label, detail: "" }));
-  const seq = store.appendOnboardingMessage({ workspaceId: ws, sessionId: "s1", role: "assistant", createdAt: "2026-10-08T01:00:00Z",
-    content: { reply: "…", nextAction: "ask", stage: "details", questions: [
-      { id: "q-room", text: "ECE 548 每周上课地点？", kind: "free", allowOther: true, identityId: "research", projectId: "ece548", options: [] },
-      { id: "q-calendar", text: "日历中的两项活动，哪些属于持续安排？", kind: "single", allowOther: true, identityId: "startup", projectId: "", options: options("Build Nights 每周", "DEJA-VU 每月") },
-      { id: "q-data", text: "MoS₂ 真实测量数据处于什么状态？", kind: "single", allowOther: true, identityId: "research", projectId: "", options: options("仍未收到", "已收到") }] } });
-  const answers = { "q-room": "【ECE 548 每周上课地点？】补充：engineering hall 3418", "q-calendar": "【日历中的两项活动，哪些属于持续安排？】选择：DEJA-VU 每月" };
-  store.setSetting(ws, "onboarding.pendingAnswers", JSON.stringify({ sessionId: "s1", afterSeq: seq, answers }));
-  const { flushPendingAnswers } = await import("./interview-status");
-  const sends: string[] = [];
-  // Only the screened answers wait, and one question is still open: nothing to flush yet.
-  expect(await flushPendingAnswers(TEST_CTX, async (_session, text) => { sends.push(text); })).toBe(false);
-  expect(await answerAsk(TEST_CTX, "iq:q-data", "o0", {})).toMatchObject({ ok: true });
-  const sent = JSON.parse(String((supervisor.mock.calls[0] as unknown as [unknown, string, { body: string }])[2].body)) as { text: string };
-  expect(sent.text).toContain("【MoS₂ 真实测量数据处于什么状态？】选择：仍未收到");
-  expect(sent.text).not.toContain("engineering hall");
-  expect(sent.text).not.toContain("选择：DEJA-VU 每月");
-  // A round whose waiting answers were all to screened questions sends nothing and starts no interview round.
-  store.setSetting(ws, "onboarding.pendingAnswers", JSON.stringify({ sessionId: "s1", afterSeq: seq, answers }));
-  store.appendOnboardingMessage({ workspaceId: ws, sessionId: "s1", role: "assistant", createdAt: "2026-10-08T02:00:00Z",
-    content: { reply: "…", nextAction: "ask", stage: "details", questions: [
-      { id: "q-room", text: "ECE 548 每周上课地点？", kind: "free", allowOther: true, identityId: "research", projectId: "ece548", options: [] },
-      { id: "q-calendar", text: "日历中的两项活动，哪些属于持续安排？", kind: "single", allowOther: true, identityId: "startup", projectId: "", options: options("Build Nights 每周", "DEJA-VU 每月") }] } });
-  const last = store.listOnboardingMessages(ws, "s1").at(-1)!.seq;
-  store.setSetting(ws, "onboarding.pendingAnswers", JSON.stringify({ sessionId: "s1", afterSeq: last, answers }));
-  expect(await flushPendingAnswers(TEST_CTX, async (_session, text) => { sends.push(text); })).toBe(false);
-  expect(sends).toEqual([]);
-  expect(store.getSetting(ws, "onboarding.pendingAnswers")).toBe("null");
 });
 
 // W-13: the badge counted the profile's blocking gaps unscreened, so it showed 「访谈问题 1」 that no page listed.
