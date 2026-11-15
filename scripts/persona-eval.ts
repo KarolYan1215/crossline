@@ -51,7 +51,9 @@ register("data:text/javascript,export async function resolve(s,c,n){if(s==='serv
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const args = process.argv.slice(2);
-const arg = (name: string): string | undefined => { const at = args.indexOf(`--${name}`); return at >= 0 ? args[at + 1] : undefined; };
+// The last occurrence wins: the server workflow's `persona` action puts its own `--set` first, and the dispatch's args (e.g.
+// `--set /persona/sets/<name>`) must be able to replace it.
+const arg = (name: string): string | undefined => { const at = args.lastIndexOf(`--${name}`); return at >= 0 ? args[at + 1] : undefined; };
 const setDir = arg("set"), outRoot = arg("out");
 if (!setDir || !outRoot) { console.error("usage: persona-eval.ts --set <dir> --out <dir> [--only a,b] [--turns 26] [--model <id>] [--player-model <id>]"); process.exit(2); }
 const sponsor = sponsorFromEnv();
