@@ -1,5 +1,5 @@
 import { ONBOARDING_RESEARCH_SCHEMA, PORTRAIT_DIMENSION_LABEL, validateResearchTurn, type DimensionId, type OnboardingResearchContext,
-  type ProfileModel, type ResearchThread, type ResearchTurn } from "@crossline/core";
+  type ProfileModel, type ResearchThread, type ResearchTurn, withProfileFramework } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { interviewLocale, type CrosslineStore } from "@crossline/db";
 import { readProfileModel } from "./onboarding-persist";
@@ -19,9 +19,9 @@ export const RESEARCH_OPEN_MAX = 4;
 // i18n-ignore-start: instructions to the research Skill (model-facing)
 const INSTRUCTIONS = "你是 Crossline 访谈的调研子任务。Skill crossline-onboarding-research 写了全部规则，照它做。"
   + "输入给你一个问题、为什么要查、它属于画像的哪个维度、画像摘要和线程到目前为止的消息。联网查证，只写有来源的结论。"
-  + "只在确实需要本人补充时写 ask；结论写在 conclusion，没查完就留空字符串，下一轮接着查。";
+  + "只在确实需要本人补充时写 ask；结论写在 conclusion，没查完就留空字符串，下一轮接着查；输入带 lastRun 时没有下一轮，写出阶段性结论。";
 // i18n-ignore-end
-/** Runs one step may take while the thread neither concludes nor asks (the Skill: 「没有就写 ""，下一轮继续查」). */
+/** Runs one step may take while the thread neither concludes nor asks; the last is told so (`lastRun`). */
 export const RESEARCH_RUNS_PER_STEP = 4;
 
 export function readResearch(store: CrosslineStore, workspaceId: string, sessionId: string): ResearchThread[] {
@@ -76,10 +76,12 @@ export function createResearchRunner(store: CrosslineStore, workspaceId: string,
   const running = new Set<string>();
 
   /** The run's input (`OnboardingResearchContext`): the question, the portrait in brief, and the whole thread, sent on every run. */
-  const contextFor = (thread: ResearchThread): OnboardingResearchContext => ({
+  // The step's last run is told so (`lastRun`): the thread closes after it, so it gives what it has as a provisional conclusion
+  // rather than leaving it for a next run that never comes (docs/onboarding-agent-session.md C25).
+  const contextFor = (thread: ResearchThread, lastRun: boolean): OnboardingResearchContext => ({
     version: "crossline.onboarding.research.v1", today: new Date().toISOString().slice(0, 10),
     question: thread.question, why: thread.why, dimension: thread.dimension,
-    profile: profileBrief(readProfileModel(store, workspaceId), thread.dimension), messages: thread.messages
+    profile: profileBrief(readProfileModel(store, workspaceId), thread.dimension), messages: thread.messages, ...(lastRun ? { lastRun: true as const } : {})
   });
 
   async function step(sessionId: string, threadId: string, said?: string): Promise<void> {
@@ -106,8 +108,8 @@ export function createResearchRunner(store: CrosslineStore, workspaceId: string,
       let codexThread = thread.threadId;
       for (let run = 0; run < RESEARCH_RUNS_PER_STEP; run += 1) {
         const current: ResearchThread = readResearch(store, workspaceId, sessionId).find((item) => item.id === threadId) ?? thread;
-        const input = contextFor(current);
-        const fresh = () => runCodexSkill<ResearchTurn>(client, input, { ...common, developerInstructions: INSTRUCTIONS,
+        const input = contextFor(current, run === RESEARCH_RUNS_PER_STEP - 1);
+        const fresh = () => runCodexSkill<ResearchTurn>(client, input, { ...common, developerInstructions: withProfileFramework(INSTRUCTIONS),
           keepThread: true, prepareInput: (value) => value, onAudit: (audit) => { if (audit.threadId) codexThread = audit.threadId; } });
         let result = codexThread
           ? await continueSkillTurn<ResearchTurn>(client, codexThread, JSON.stringify(input), { ...common, onAudit: () => {} })

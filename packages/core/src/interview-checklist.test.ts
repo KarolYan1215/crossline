@@ -157,13 +157,12 @@ test("project items read slots by meaning, and a course's part needs no grading 
   expect(withSchedule.filter((item) => item.id.startsWith("project:")).map((item) => [item.id, item.done])).toEqual([["project:ece555", true], ["project:ece555-final", true]]);
 });
 
-// 2026-11-12: the tiers are gone; whatever depth an account once stored, a project's details wait for its planning, as the quick tier's did.
-test("a project's details wait for planning whatever tier an account once chose", () => {
+// 2026-11-12: the tiers are gone; a project's details wait for its planning.
+test("a project's details wait for planning", () => {
   const sparse = { ...full, facts: full.facts.filter((fact) => fact.projectId !== "ece555"), dates: [] };
-  const deferredOf = (depth: ChecklistInput["depth"]) => Object.fromEntries(interviewChecklist({ ...sparse, depth })
-    .filter((item) => item.id.endsWith(":ece555") && item.id.startsWith("project")).map((item) => [item.id, Boolean(item.deferred)]));
-  for (const depth of [undefined, "quick", "standard", "thorough", "open"] as const)
-    expect(deferredOf(depth)).toEqual({ "project:ece555": true, "project_course:ece555": true });
+  expect(Object.fromEntries(interviewChecklist(sparse)
+    .filter((item) => item.id.endsWith(":ece555") && item.id.startsWith("project")).map((item) => [item.id, Boolean(item.deferred)])))
+    .toEqual({ "project:ece555": true, "project_course:ece555": true });
 });
 
 test("the portrait's parts are read by meaning: the slot names the extraction writes for risks, priorities and motives count", () => {

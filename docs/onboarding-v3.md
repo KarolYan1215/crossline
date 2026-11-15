@@ -192,7 +192,7 @@
 
 ## 时间挡位（2026-10-31，机主的决定）
 
-上面每一次压缩都是为了省时间。机主决定让本人自己选：开场卡上先问「访谈问多细？」，开始后对话上方也能改（`onboarding.depth`，`/api/onboarding/depth`；没选过的账号按 `quick`）。挡位只决定问多少，本人原话、文件优先、不重复问、说人话这些规则在每一挡都一样。数值在 `packages/core/src/onboarding-depth.ts`（`DEPTH_PACE`），提示词在访谈 SKILL.md 的「How thorough」一节。
+（2026-11-14：挡位已从代码里删掉，见 onboarding-agent-session.md 的 P0。下面是当时的记录。）上面每一次压缩都是为了省时间。机主决定让本人自己选：开场卡上先问「访谈问多细？」，开始后对话上方也能改（`onboarding.depth`，`/api/onboarding/depth`；没选过的账号按 `quick`）。挡位只决定问多少，本人原话、文件优先、不重复问、说人话这些规则在每一挡都一样。数值在 `packages/core/src/onboarding-depth.ts`（`DEPTH_PACE`），提示词在访谈 SKILL.md 的「How thorough」一节。
 
 | | 快速 `quick` | 标准 `standard` | 事无巨细 `thorough` |
 |---|---|---|---|

@@ -360,7 +360,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
 
     <section className="ob-centre" aria-label={t("访谈对话")}>
       <header className="ob-centre-head">
-        <StageBar stage={stage} line={state.focusLine?.label} flow={state.flow} depth={state.depth} progress={state.progress} />
+        <StageBar stage={stage} line={state.focusLine?.label} flow={state.flow} progress={state.progress} />
         {/* Only the person ends the interview (decisions 13 and 27): from the start standard on, at any time; the bar is how complete it is. */}
         {!opening && !state.focusLine && !complete && state.session && <FinishButton sessionId={state.session.id} completeness={state.completeness} disabled={busy !== "" || background} />}
         {/* Inside the header: the column is a fixed grid of rows, and a note that comes and goes must not shift the thread's row. */}

@@ -18,6 +18,8 @@ export type OnboardingResearchContext = {
   profile: string[];
   /** The thread so far, oldest first; the last `person` message is what the person just answered or asked. */
   messages: ResearchThread["messages"];
+  /** The step's last run: the thread closes after it, so it concludes with what it has. */
+  lastRun?: true;
 };
 
 const object = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });

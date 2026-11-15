@@ -28,9 +28,9 @@ import path from "node:path";
 import { configureModelGate, runCodexSkill, setProviderResolver, setUsageSink, startCodexAppServer, startCodexSupervisor, startModelGateway,
   threadProvider, withUsageWorkspace, type ProviderRouting, type SkillUsage } from "../packages/codex/src/index";
 import {
-  ONBOARDING_INSIGHTS, ONBOARDING_TONE_SETTING, PROFILE_CLAIMS_SETTING, PROFILE_INSTRUMENTS_SETTING, THIRD_PARTY_CAPABILITIES, cardWordsHead,
+  ONBOARDING_INSIGHTS, PROFILE_CLAIMS_SETTING, PROFILE_INSTRUMENTS_SETTING, THIRD_PARTY_CAPABILITIES, cardWordsHead,
   composeGoal, instrumentClaims, interviewCompleteness, instrumentReadings, interviewComplete, parseSponsorModels, readInsightRatings, readInstrumentAnswers, readyToStart,
-  scaleAnswerLine, screenQuestions, sponsorSpend, type AccessContext, type OnboardingTone, type ProfileCard, type StoredLineProfile
+  scaleAnswerLine, screenQuestions, sponsorSpend, type AccessContext, type ProfileCard, type StoredLineProfile
 } from "../packages/core/src/index";
 import { CrosslineStore, interviewChecklistFor, questionScreenFor, rateInsight } from "../packages/db/src/index";
 import { composeAnswers, type Question } from "../apps/web/app/onboarding/onboarding-types";
@@ -61,7 +61,7 @@ const playerModel = arg("player-model") ?? model;
 for (const item of [model, playerModel]) if (!priced.some((listed) => listed.model === item)) { console.error(`${item} is not in CROSSLINE_SPONSOR_MODELS`); process.exit(2); }
 const turnLimit = Number(arg("turns")) || 26;
 
-type Opening = { life: string; tone: OnboardingTone; lines: string[]; base: string; fixed: string[] };
+type Opening = { life: string; tone?: string; lines: string[]; base: string; fixed: string[] };
 const openings = JSON.parse(readFileSync(path.join(setDir, "openings.json"), "utf8")) as Record<string, Opening>;
 const only = (arg("only") ?? "").split(",").map((item) => item.trim()).filter(Boolean);
 const names = Object.keys(openings).filter((name) => !only.length || only.includes(name));
@@ -162,7 +162,6 @@ async function runPerson(name: string, opening: Opening) {
   const log = (event: Record<string, unknown>) => console.info(JSON.stringify({ person: name, ...event }));
 
   // The opening card: tone and lines are written at once, the base first, then sent as the first reply.
-  store.setSetting(workspaceId, ONBOARDING_TONE_SETTING, opening.tone);
   const ordered = [opening.base, ...opening.lines.filter((label) => label !== opening.base)];
   const set = withStore(() => lib.setupLines(ctx, ordered.map((label) => ({ label, ranked: label === opening.base, hard: opening.fixed.includes(label) }))));
   if (!set.ok) throw new Error(`${name}: setupLines refused: ${set.code}`);

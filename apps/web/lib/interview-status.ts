@@ -1,5 +1,5 @@
 import "server-only";
-import { INTERVIEW_FLOW_STAGES, ONBOARDING_DEPTH_SETTING, flowOf, progressView, readDepth, readTurnProgress, answerLine, gapCoveredBy, questionKind, readyToStart as startReady, screenQuestions, screenedNote, startMissing as startOpen, type AccessContext, type ChecklistItem,
+import { INTERVIEW_FLOW_STAGES, flowOf, progressView, readTurnProgress, answerLine, gapCoveredBy, questionKind, readyToStart as startReady, screenQuestions, screenedNote, startMissing as startOpen, type AccessContext, type ChecklistItem,
   type ScreenReason } from "@crossline/core";
 import { interviewChecklistFor, interviewGapsFor, questionScreenFor } from "@crossline/db";
 import { identityLines } from "./lines";
@@ -127,7 +127,6 @@ export function interviewStatus(ctx: AccessContext): InterviewStatus {
   return { started: true, complete, awaitingPerson: open.length > 0 && open.every((item) => item.owner === "person"), parked, readyToStart, startMissing,
     stage, ...(({ reached, total }) => ({ stageIndex: Math.min(reached, total), stageCount: total }))(progressView(
       readTurnProgress((session.coverage as { progress?: unknown }).progress), stage, flowOf(session.coverage),
-      readDepth(store.getSetting(ctx.workspaceId, ONBOARDING_DEPTH_SETTING)),
       messages.filter((message) => message.role === "assistant").map((message) => String((message.content as AssistantContent).stage ?? "")))),
     ended: session.state === "complete",
     questions, screened, openQuestions: questions.length, checklist, sessionId: session.id };

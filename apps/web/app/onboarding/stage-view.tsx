@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Check, Circle } from "lucide-react";
-import { depthPace, interviewParts, pointsRules, SCHWARTZ_VALUES, type InterviewFlow, type OnboardingDepth } from "@crossline/core";
+import { interviewParts, pointsRules, SCHWARTZ_VALUES, type InterviewFlow } from "@crossline/core";
 import { ValuesRadar } from "../portrait/portrait-charts";
 import { FlywheelPreview, type Link } from "./flywheel-preview";
 import { StartConfirm } from "./start-confirm";
@@ -42,19 +42,17 @@ const MODULE_PARTS = 4;
 
 /** Rough minutes to the start standard and to the end, from what is still open: honest enough to plan a sitting, never a promise. */
 export function minutesLeft(state: Pick<OnboardingState, "readyToStart" | "startMissing">, stage: string, flow: InterviewFlow = "v1",
-  depth?: OnboardingDepth, reached = 0): { label: string; minutes: number } {
-  const order: string[] = interviewParts(flow, depth);
+  reached = 0): { label: string; minutes: number } {
+  const order: string[] = interviewParts(flow);
   // Counted from the furthest part reached: going back to an earlier part for one question does not add its parts' time again (W-235).
   const here = Math.max(order.indexOf(stage), reached - 1);
-  // The rates below are the quick tier's (about 50 minutes in all); a deeper tier asks more of every part, so each estimate scales with it.
-  const scale = depthPace(depth).minutes / depthPace("quick").minutes;
   // A start item is per line and most are settled by one answer, several to a round: about 2.5 minutes each, never more than half an hour.
   const facts = Math.min(30, Math.ceil(state.startMissing.filter((item) => item.id !== "profile_cards").length * 2.5));
   // The profile module (flow v2) comes before the start: about ten minutes a part still ahead of it.
   const module = flow === "v2" ? Math.max(0, MODULE_PARTS - Math.max(0, here)) * 10 : 0;
-  if (!state.readyToStart) return { label: "开始使用前约", minutes: Math.max(3, Math.round((module + facts) * scale)) };
+  if (!state.readyToStart) return { label: "开始使用前约", minutes: Math.max(3, module + facts) };
   const left = Math.max(1, order.length - Math.max(0, here));
-  return { label: "画像访谈还剩约", minutes: Math.round(left * 5 * scale) };
+  return { label: "画像访谈还剩约", minutes: left * 5 };
 }
 
 /** Codes that mean no model can run for this account yet: the conversation already says so in the same words, under the reply. */
@@ -81,7 +79,7 @@ export function StageView({ state, stage, complete, onChanged }: {
   useEffect(() => setShown(current), [current]);
   const reached = VIEWS.findIndex((view) => view.key === current);
   const total = state.startTotal;
-  const left = minutesLeft(state, stage, state.flow, state.depth, state.progress?.reached);
+  const left = minutesLeft(state, stage, state.flow, state.progress?.reached);
   // A long-term goal is adopted in the left column, not answered in the conversation: its missing item links there (W-8).
   const missing = state.startMissing.map((item) => ({ label: item.label, href: item.id.startsWith("line_goal:") ? "#ob-goals" : "" }));
   const progress = state.progress;
@@ -132,8 +130,7 @@ export function StageView({ state, stage, complete, onChanged }: {
         ? t("第 {{index}}/{{total}} 部分 · {{label}} · 已谈清 {{clear}}/{{of}}", { index: progress.index, total: progress.total, label: t(progress.label), clear: progress.clear, of: progress.of })
         : t("第 {{index}}/{{total}} 部分 · {{label}}", { index: progress.index, total: progress.total, label: t(progress.label) })}</small>}
       {!complete && progress?.next && <small>{t("接下来：")}<span className="gen">{progress.next}</span></small>}
-      {state.readyToStart && !complete && <small>{depthPace(state.depth).unlimited ? t("不限时，随时可以按「结束并出报告」结束访谈")
-        : t("{{label}} {{minutes}} 分钟", { label: t(left.label), minutes: left.minutes })}</small>}
+      {state.readyToStart && !complete && <small>{t("不限时，随时可以按「结束并出报告」结束访谈")}</small>}
       {state.portraitState?.written
         ? state.portraitState.confirmed ? <a href="/portrait">{t("画像已确认符合本人 · 查看画像 →")}</a>
           : <a href="/portrait#pt-s-type">{t("画像已写好，去画像页确认是否符合 →")}</a>

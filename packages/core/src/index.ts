@@ -27,6 +27,7 @@ export * from "./money-events";
 export * from "./ledger";
 export * from "./wealth";
 export * from "./profile-gaps";
+export * from "./profile-framework";
 export * from "./profile-instruments";
 export * from "./profile-report";
 export * from "./profile-claims";

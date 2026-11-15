@@ -125,20 +125,20 @@ export const ITEMS_PER_ROUND = 3;
 
 export type ProfileCard = { id: string; instrument: InstrumentId; title: string; stage: ProfileStage; items: ScaleItem[] };
 
-/** Which of the bank's items a tier's cards ask (`DepthPace.cards`, onboarding-depth.ts). */
+/** Which of the bank's items the cards ask (`INTERVIEW_PACE.cards`, onboarding-depth.ts). */
 export type CardSet = "short" | "all";
 /**
- * The quick tier's cards (W-186, 2026-11-03: 「快速」 still asked all 43 items before the person could start): whole dimensions only, so each
+ * The short set (W-186, 2026-11-03: 「快速」 still asked all 43 items before the person could start): whole dimensions only, so each
  * one still scores — conscientiousness and neuroticism (how tightly a week can be packed and how much slack it needs) and the six value
  * tradeoffs (which line comes first), 14 items. Interests, extraversion, openness, agreeableness and life satisfaction feed only the
- * portrait, which the quick tier does not hold the end for; the standard tier and up ask the whole bank.
+ * portrait; the whole bank (`"all"`) is kept for the scoring of earlier answers.
  */
 const inShortSet = (item: ScaleItem) => item.instrument === "values" || (item.instrument === "mini_ipip" && (item.dimension === "C" || item.dimension === "N"));
 export const cardBank = (set: CardSet = "all"): readonly ScaleItem[] => set === "all" ? PROFILE_ITEMS : PROFILE_ITEMS.filter(inShortSet);
 
 /**
- * The next cards: items of the tier's set (`set`) not yet answered or skipped, in bank order, grouped by instrument, at most `ITEMS_PER_CARD` each and
- * `CARDS_PER_ROUND` and `ITEMS_PER_ROUND` (or the tier's, onboarding-depth.ts) in all. `stages` is the current stage, or several in order — the stages the interview already left come first, so an
+ * The next cards: items of the card set (`set`) not yet answered or skipped, in bank order, grouped by instrument, at most `ITEMS_PER_CARD` each and
+ * `CARDS_PER_ROUND` and `ITEMS_PER_ROUND` (or `INTERVIEW_PACE`'s, onboarding-depth.ts) in all. `stages` is the current stage, or several in order — the stages the interview already left come first, so an
  * item a stage never got to is still asked later (otherwise the profile module could never finish). A card's id is its first item's, so a
  * card asked again after a reload keeps its id.
  */
@@ -159,7 +159,7 @@ export function cardsFor(stages: ProfileStage | readonly ProfileStage[], settled
   return cards;
 }
 
-/** How many of the tier's items (`set`) are answered or skipped, of all of them: the profile module's start item. */
+/** How many of the card set's items (`set`) are answered or skipped, of all of them: the profile module's start item. */
 export const cardsSettled = (settled: ReadonlySet<string>, set: CardSet = "all") => {
   const bank = cardBank(set);
   return { settled: bank.filter((item) => settled.has(item.id)).length, total: bank.length };

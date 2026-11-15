@@ -3,7 +3,6 @@ import { DATE_ASK } from "./question-ledger";
 import { DATE_EXTRACTION_SCHEMA, type DateExtraction } from "./date-schema";
 import { SCHWARTZ_VALUES } from "./portrait";
 import type { ProfileCard } from "./profile-instruments";
-import type { OnboardingDepth } from "./onboarding-depth";
 import { INTERVIEW_SETTING_KEYS } from "./interview-settings";
 import { DIMENSION_FIELD, DIMENSION_IDS, DIMENSION_NOTE_FIELD, HYPOTHESIS_ITEM_FIELD, URL_FIELD, careerItemSchema, cleanCareers, cleanDimensionNotes, cleanHypotheses, isWebUrl, oneOf,
   type CareerOption, type DimensionId, type DimensionNote, type Hypothesis } from "./profile-hypotheses";
@@ -88,20 +87,6 @@ export const stageIndexIn = (flow: InterviewFlow, stage: string): number => Math
  * for, what absorbs and drains them. The others gather facts in a batch of option cards.
  */
 export const DEEP_STAGES: ReadonlySet<OnboardingStage> = new Set<OnboardingStage>(["narrative", "situation", "compass", "energy"]);
-/**
- * How the interview talks. One built-in voice since 2026-11-12 (the owner's decision 10 of the interview redesign): 「直接犀利」 —
- * matter-of-fact, willing to judge from evidence, no flattery, no lecturing, no rhetoric — written into the Skill, not chosen by the
- * person. The 2026-10-18 voices (neutral, warm) and an older direct one stored in `ONBOARDING_TONE_SETTING` all read as it (`readTone`).
- */
-export const ONBOARDING_TONES = ["direct"] as const;
-export type OnboardingTone = (typeof ONBOARDING_TONES)[number];
-export const ONBOARDING_TONE_SETTING = "onboarding.tone";
-export const ONBOARDING_TONE_LABEL: Record<OnboardingTone, { label: string; detail: string }> = {
-  direct: { label: "直接犀利", detail: "就事论事，有证据就下判断，不讨好，不说教" }
-};
-export function readTone(_value?: string | null): OnboardingTone {
-  return "direct";
-}
 
 export * from "./profile-hypotheses";
 export * from "./profile-points";
@@ -288,10 +273,6 @@ export type OnboardingTurnContext = {
   profile?: ProfileModel; stage?: OnboardingStage;
   /** The order this interview's stages run in (`INTERVIEW_FLOW_STAGES`); absent in a line's own interview, which runs `details` only. */
   stageOrder?: OnboardingStage[];
-  /** How the person asked to be spoken to (`ONBOARDING_TONE_SETTING`); also sent with every later turn, since it can change. */
-  tone?: OnboardingTone;
-  /** How thorough the person asked the interview to be (`ONBOARDING_DEPTH_SETTING`, onboarding-depth.ts); sent with every turn, since it can change. */
-  depth?: OnboardingDepth;
   /** The completion list's items still open (`interviewChecklist`): what the interview owes before it may say it is ready, and what waits on the person. */
   checklist?: Array<{ label: string; detail: string; owner: "interview" | "person"; start?: boolean }>;
   /** Hours spent in Codex and Claude Code per folder and when in the day (`agentHistoryLines`), when the person allowed it: habits, not a plan. */
@@ -305,14 +286,6 @@ export type OnboardingTurnContext = {
   publicAssessment?: { code: string; typeName: string; axes: Record<string, number>; takenAt: string; note: string };
   /** New files that did not fit this turn's reading budget; they come with the next turns. */
   sourcesWaiting?: number;
-  /**
-   * How many rounds the interview has spent in its current stage. From the second round on, `moveOn` says to go to the next stage — an
-   * interview that waits for an answer the person does not have never ends (a simulated user who said 不确定 kept one in 「能量」 for seven
-   * rounds). What the person cannot answer is written as an assumption (「假设：…」) in the same round, by a standing rule of the Skill.
-   * The front stages are the exception: while a start item is open there is no `moveOn`, because those items accept only the person's word.
-   */
-  stageRounds?: number;
-  moveOn?: string;
   /** Only when the conversation had to be rebuilt in a fresh thread: what was said before, oldest first. */
   history?: Array<{ id: string; role: "user" | "assistant"; text: string }>;
   /**
@@ -595,7 +568,7 @@ function turnFields(ids?: TurnIds) {
     // quote in the reply it names.
     insights: { type: "array", maxItems: INSIGHTS_PER_ROUND, items: object({ hypothesisId: { type: "string", maxLength: 12 }, dimension: DIMENSION_FIELD,
       text: { type: "string", maxLength: 400 },
-      refs: { type: "array", maxItems: 4, items: object({ replyId: { type: "string", maxLength: 20 }, quote: { type: "string", maxLength: 80 } }) },
+      refs: { type: "array", maxItems: 4, items: object({ replyId: { type: "string", maxLength: 20 }, quote: { type: "string", maxLength: 40 } }) },
       external: { type: "array", maxItems: 3, items: object({ text: text(300), url: URL_FIELD }) },
       falsifier: { type: "string", maxLength: 200 } }) },
     // Questions for research threads (contract C): what needs the web to answer, why it matters, the dimension it bears on.
@@ -706,8 +679,8 @@ export function validateOnboardingTurn(value: unknown, known: KnownSources): Onb
 }
 
 /**
- * The turn's rules. `minimumCandidates` is how many attribute candidates a non-empty list must hold: three for a model's answer, one for
- * a turn `keepOnboardingTurn` already pruned, whose short lists `keepCandidates` let through on purpose.
+ * The turn's rules. `minimumCandidates` is how many attribute candidates a non-empty list must hold when the line has more on record:
+ * three for a model's answer, one for a turn `keepOnboardingTurn` already pruned, whose short lists `keepCandidates` let through on purpose.
  */
 function checkTurn(value: unknown, known: KnownSources, minimumCandidates: number): OnboardingTurn {
   const turn = value as OnboardingTurn | undefined;
@@ -771,7 +744,7 @@ function checkTurn(value: unknown, known: KnownSources, minimumCandidates: numbe
   if (turn.nextAction === "ask" && !turn.questions.length) reject("ONBOARDING_QUESTION_REQUIRED", "还没问完，这一轮必须至少提出一个问题。");
   for (const line of turn.lineProfiles ?? []) {
     if (!identities.has(line.lineId) || line.lineId === PERSON_LINE) reject("ONBOARDING_IDENTITY_UNKNOWN", `主线描述里的主线「${line.lineId}」不存在。`);
-    const problem = candidatesProblem(line.attributeCandidates ?? [], citable, minimumCandidates, known.lineLabels?.[line.lineId]);
+    const problem = candidatesProblem(line.attributeCandidates ?? [], citable, minimumCandidates, known.lineLabels?.[line.lineId], known.attributesOnRecord?.[line.lineId] ?? 0);
     if (problem) reject(problem.code, `主线「${line.lineId}」的定语候选：${problem.detail}`);
   }
   for (const edit of turn.goalEdits ?? []) {
@@ -882,18 +855,19 @@ const cleanCandidates = (list: AttributeCandidate[]) => list.map((item) => ({ te
 
 /** What every repair about a candidate's wording ends with: what an attribute is, and that fewer real ones beat made-up ones. */
 /* i18n-ignore-start: a repair message to the model */
-const ATTRIBUTE_HOW = "定语说的是本人想在这条线上成为什么样的人，取自本人原话：形容词或形容性短语（严谨、高产、独立、有影响力、值得信赖、受学生欢迎）或短的领域限定（器件物理方向）；"
+const ATTRIBUTE_HOW = "定语说的是本人想在这条线上成为什么样的人，按本人说过的话归纳，不必是原词：形容词或形容性短语（严谨、高产、独立、有影响力、值得信赖、受学生欢迎）或短的领域限定（器件物理方向）；"
   + "本人只说了要做什么、要拿到什么时，不要硬改成定语，去掉这一个，少给几个也可以。";
 /* i18n-ignore-end */
 
 /**
  * What is wrong with one line's attribute candidates, if anything: an empty list is allowed (it keeps the ones on record); otherwise
- * 3–12, each cited to a reply or file, each one thing, each describing the person rather than an action or an achievement
+ * 3–12, or fewer when the line has no more than that on record (`onRecord`: a thin line gets its one or two real attributes, never
+ * padding; the repair used to ask for three and invited made-up ones, docs/onboarding-agent-session.md C6), each cited to a reply or file, each one thing, each describing the person rather than an action or an achievement
  * (`attributeProblem`), and no two saying the same (after removing 「的」 and punctuation, one contains the other). The detail names
  * the offending attributes, all of them at once for wording, so one repair can fix them together.
  */
 /* i18n-ignore-start: repair messages to the model */
-function candidatesProblem(list: AttributeCandidate[], citable: (ref: string) => boolean, minimum = ATTRIBUTE_CANDIDATES_MIN, label?: string): { code: string; detail: string } | undefined {
+function candidatesProblem(list: AttributeCandidate[], citable: (ref: string) => boolean, minimum = ATTRIBUTE_CANDIDATES_MIN, label?: string, onRecord = 0): { code: string; detail: string } | undefined {
   if (!list.length) return undefined;
   for (const item of list) {
     if (!citable(item.sourceRef)) return { code: "ONBOARDING_UNKNOWN_SOURCE_REF", detail: `「${item.text}」没有引用本轮给出的句子；每个定语在 refs 里写出它来自的句子编号。` };
@@ -904,11 +878,10 @@ function candidatesProblem(list: AttributeCandidate[], citable: (ref: string) =>
   if (wording.length) return { code: "ONBOARDING_ATTRIBUTE_NOT_DESCRIPTIVE", detail: `${wording.slice(0, 3).join("；")}。${ATTRIBUTE_HOW}` };
   const duplicate = duplicateAttributes(list.map((item) => cleanAttribute(item.text)))[0];
   if (duplicate) return { code: "ONBOARDING_ATTRIBUTE_DUPLICATE", detail: `「${duplicate[0]}」与「${duplicate[1]}」重复：去掉「的」和标点后一个包含另一个，只保留一个或改成互不重叠的两个。` };
-  if (list.length < minimum || list.length > ATTRIBUTE_CANDIDATES_MAX) {
-    return { code: "ONBOARDING_ATTRIBUTES_COUNT", detail: list.length < ATTRIBUTE_CANDIDATES_MIN
-      ? `写 ${ATTRIBUTE_CANDIDATES_MIN}–${ATTRIBUTE_CANDIDATES_MAX} 个，现在是 ${list.length} 个：从本人已说的话和文件里补到至少 ${ATTRIBUTE_CANDIDATES_MIN} 个（每个引用句子编号）；`
-        + "只补本人用过的形容说法，本人确实只说了这些时就保持这几个；本人对这条线几乎什么都没说时才留空数组。"
-      : `写 ${ATTRIBUTE_CANDIDATES_MIN}–${ATTRIBUTE_CANDIDATES_MAX} 个，现在是 ${list.length} 个，留下最有区别的 ${ATTRIBUTE_CANDIDATES_MAX} 个。` };
+  if ((list.length < minimum && list.length < onRecord) || list.length > ATTRIBUTE_CANDIDATES_MAX) {
+    return { code: "ONBOARDING_ATTRIBUTES_COUNT", detail: list.length > ATTRIBUTE_CANDIDATES_MAX
+      ? `最多 ${ATTRIBUTE_CANDIDATES_MAX} 个，现在是 ${list.length} 个，留下最有区别的 ${ATTRIBUTE_CANDIDATES_MAX} 个。`
+      : `这条线已经记有 ${onRecord} 个定语，这次只写了 ${list.length} 个：写出完整的 ${ATTRIBUTE_CANDIDATES_MIN}–${ATTRIBUTE_CANDIDATES_MAX} 个，或写空数组保留已有的；不要为凑数补本人没说过的。` };
   }
   return undefined;
 }

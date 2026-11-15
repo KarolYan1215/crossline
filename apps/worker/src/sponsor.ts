@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { caseTools } from "./conformance-tools";
 import path from "node:path";
 import {
-  admittedSkills, chooseSponsorModel, dominatedCandidates, skillKey, sponsorFallbacks, sponsorModelForSkill, ONBOARDING_TONE_SETTING, plainVoiceMarkers, plainVoiceRate, conformanceCases, evaluationYuanPerRun, conformanceCurrent, conformanceProblems, parseSponsorModels, thinkingVariant, sponsorMonth, sponsorSpend,
+  admittedSkills, chooseSponsorModel, dominatedCandidates, skillKey, sponsorFallbacks, sponsorModelForSkill, plainVoiceMarkers, plainVoiceRate, conformanceCases, evaluationYuanPerRun, conformanceCurrent, conformanceProblems, parseSponsorModels, thinkingVariant, sponsorMonth, sponsorSpend,
   SPONSOR_MONTHLY_CAP_CNY, summarizeConformance, type ConformanceRecord, type ConformanceRun, type CostSignal, type ProviderCapabilities,
   type SponsorEvaluation, type SponsorModel
 } from "@crossline/core";
@@ -552,7 +552,6 @@ export function createSponsorService(options: {
     const scratch = new CrosslineStore(":memory:");
     try {
       const workspaceId = scratch.createPrincipalWithWorkspace(`sponsor-eval-${slug(model.model)}`, "检验").workspace.id;
-      scratch.setSetting(workspaceId, ONBOARDING_TONE_SETTING, "warm");
       // The lines the fictional person chose, saved as the opening card saves them (without, every candidate asked about a fourth line).
       const at = new Date(0).toISOString();
       scratch.setSetting(workspaceId, LINE_SETTING, JSON.stringify([

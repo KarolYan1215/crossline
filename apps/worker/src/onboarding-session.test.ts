@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore, rateInsight, writeExtractState } from "@crossline/db";
-import { cardWordsHead, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
-  DEPTH_PACE, type OnboardingProgress, type ProfileCard } from "@crossline/core";
-import { cardsForRound, closingQuestion, createOnboardingSessionRunner as createRunner, finishInterview, INSTRUCTIONS, ONBOARDING_SKILL, paceDeepRound, shownOrOpen, stageOrderFor, stagePace, withChecklist, withFreshOpenQuestion, withoutEndHint } from "./onboarding-session";
+import { cardWordsHead, PROFILE_FRAMEWORK, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
+  type OnboardingProgress, type ProfileCard } from "@crossline/core";
+import { cardsForRound, closingQuestion, createOnboardingSessionRunner as createRunner, finishInterview, INSTRUCTIONS, ONBOARDING_SKILL, paceDeepRound, shownOrOpen, stageOrderFor, withFreshOpenQuestion, withoutEndHint } from "./onboarding-session";
 import { cardsWait, correctedSince, correctionUnread, INSTRUCTIONS as EXTRACT_INSTRUCTIONS } from "./onboarding-extract";
 import { ONBOARDING_EXTRACT_SKILL } from "./onboarding-extract";
 import { fakeRuntime as runtimeWithRoutes } from "./testing/fake-runtime";
@@ -106,6 +106,8 @@ test("the second turn continues the same thread and only carries what is new, wi
   expect(dialogue(prompts)).toHaveLength(2);
   expect(extraction(prompts)).toHaveLength(2);
   expect(threadStarts()).toHaveLength(3);
+  // The dialogue and the extraction both carry the one portrait framework (D0–D9).
+  for (const start of threadStarts()) expect(String(start.developerInstructions)).toContain(PROFILE_FRAMEWORK);
   expect(dialogue(prompts)[1]).not.toContain("identities");
   expect(dialogue(prompts)[1]).toContain("reply-3");
   // The first turn's extraction wrote the deadline; the dialogue hears of it on the next turn.
@@ -464,29 +466,29 @@ test("a round keeps independent questions together, at most three in any stage",
   expect(paceDeepRound({ ...six, stage: "lines" }, false)).toMatchObject({ deep: false });
   expect(paceDeepRound({ ...six, stage: "lines" }, false).output.questions).toHaveLength(3);
   expect(paceDeepRound(six, true).output.questions).toHaveLength(6);
-  // A deeper tier keeps more of them (onboarding-depth.ts).
-  expect(paceDeepRound(six, false, DEPTH_PACE.thorough.roundQuestions).output.questions).toHaveLength(5);
+  // A larger limit keeps more of them.
+  expect(paceDeepRound(six, false, 5).output.questions).toHaveLength(5);
 });
 
-test("there are no tiers: a stored choice is ignored, no part is told to move on and there is no per-project details part", async () => {
-  expect(stageOrderFor("v1", DEPTH_PACE.open)).not.toContain("details");
-  const long = Array.from({ length: 40 }, () => ({ role: "assistant", content: { stage: "compass" } }));
-  expect(stagePace(long, { startOpen: false, after: DEPTH_PACE.open.moveOnAfter }).moveOn).toBeUndefined();
+test("there are no tiers: a stored choice is never read, no tier, tone or stage count is sent, and there is no per-project details part", async () => {
+  expect(stageOrderFor("v1")).not.toContain("details");
   store.setSetting(workspaceId, "onboarding.depth", "quick");
+  store.setSetting(workspaceId, "onboarding.tone", "warm");
   const { rpc, prompts } = fakeRuntime([firstAnswer]);
   await createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc)({ sessionId: "s1", text: "开始" });
-  expect(dialogue(prompts)[0]).toContain('"depth":"open"');
+  for (const field of ['"depth"', '"tone"', '"stageRounds"', '"moveOn"']) expect(dialogue(prompts)[0]).not.toContain(field);
   expect(dialogue(prompts)[0]).not.toContain('"details"]');
 });
-test("one voice: whatever tone an account stored, every turn is written in it", async () => {
-  // Decision 10 of the 2026-11-12 redesign: 「直接犀利」 is built in; the 2026-10-18 choices (neutral, warm) read as it.
+test("one voice: whatever tone an account stored, no turn carries one (the Skill has the only voice)", async () => {
+  // Decision 10 of the 2026-11-12 redesign: 「直接犀利」 is built in; the 2026-10-18 choices (neutral, warm) are never read (P0, 2026-11-14).
   store.setSetting(workspaceId, "onboarding.tone", "warm");
   const { rpc, prompts } = fakeRuntime([firstAnswer, turn()]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   await run({ sessionId: "s1", text: "开始" });
   store.setSetting(workspaceId, "onboarding.tone", "neutral");
   await run({ sessionId: "s1", text: "继续" });
-  expect(dialogue(prompts).every((prompt) => prompt.includes('"tone":"direct"'))).toBe(true);
+  expect(dialogue(prompts)).toHaveLength(2);
+  expect(dialogue(prompts).some((prompt) => prompt.includes('"tone"'))).toBe(false);
 });
 
 test("a round keeps from the person what is not theirs to answer, writes the calendar's recurrence as an assumption, and reads a goal question as multiple choice", async () => {
@@ -829,6 +831,16 @@ test("a line's goal is chosen inside the conversation: its candidates come as a 
   expect(store.listEvents(workspaceId, { type: "line.updated" }).at(-1)?.payload).toMatchObject({ via: "interview" });
 });
 
+test("the portrait framework has one copy: no Skill keeps its own table or points at another Skill's", async () => {
+  const { readFileSync } = await import("node:fs");
+  const skill = (name: string) => readFileSync(new URL(`../../../skills/marketplace/plugins/crossline/skills/${name}/SKILL.md`, import.meta.url), "utf8");
+  for (const name of ["crossline-onboarding", "crossline-onboarding-extract", "crossline-onboarding-research", "crossline-portrait-writer"]) {
+    expect(skill(name)).not.toContain("| D0 背景与约束 |");
+    expect(skill(name)).not.toMatch(/见访谈 Skill[^。]*画像框架/u);
+  }
+  expect(PROFILE_FRAMEWORK).toContain("| D9 维持循环 |");
+});
+
 test("the runners carry only the scenario: the Skill holds the rules, and the language comes from the shared style", () => {
   for (const text of [INSTRUCTIONS, EXTRACT_INSTRUCTIONS]) {
     expect(text.length).toBeLessThan(900);
@@ -876,11 +888,9 @@ test("what the extraction could not record is named to the next round with why, 
   expect(second).not.toContain("午饭 —");
 });
 
-test("a round the page would list as empty gets the stage's open question; a checklist ask carries its line", () => {
-  const base = { reply: "记下了。", nextAction: "ready_for_milestones" as const, stage: "lines", coverage: [], questions: [] } as unknown as Parameters<typeof withChecklist>[0];
-  const turned = withChecklist(base, [{ id: "line_desc:line-a", label: "", detail: "", owner: "interview", ask: "在「设计」这条线上，三五年后你希望成为什么样的人？" }]);
-  expect(turned.nextAction).toBe("ask");
-  expect(turned.questions[0]?.identityId).toBe("line-a");
+test("a round the page would list as empty gets the stage's open question", () => {
+  const turned = { reply: "记下了。", nextAction: "ask" as const, stage: "lines", coverage: [], questions: [{ id: "checklist-open-1", kind: "free" as const,
+    allowOther: true, identityId: "line-a", projectId: "", options: [], text: "在「设计」这条线上，三五年后你希望成为什么样的人？" }] } as unknown as Parameters<typeof shownOrOpen>[0];
   const screen = { projects: [], meetings: [], goalPickerLines: ["line-a"] };
   const shown = shownOrOpen(turned, screen);
   expect(shown.questions).toHaveLength(1);

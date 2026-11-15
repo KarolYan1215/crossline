@@ -130,14 +130,17 @@ const attribute = (text: string, kind: "domain" | "ability" | "state" = "domain"
 const SIX = [attribute("神经形态计算"), attribute("器件物理"), attribute("严谨", "ability"), attribute("独立", "ability"),
   attribute("持续产出", "state"), attribute("被同行认可", "state")];
 
-test("a line's attribute candidates are 3–12 independent, cited attributes, or none at all", () => {
+test("a line's attribute candidates are 3–12 independent, cited attributes, fewer on a thin line, or none at all", () => {
   const ok = validateOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "研究描述", attributeCandidates: SIX }] }), known);
   expect(ok.lineProfiles?.[0]?.attributeCandidates.map((item) => item.text)).toEqual(SIX.map((item) => item.text));
   // An empty list keeps the candidates on record (a line still thin, or a turn that only refines the description).
   expect(validateOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: [] }] }), known).lineProfiles).toHaveLength(1);
-  // Three is enough to compose a goal from (2026-10-19: asked for six, a real run left every line empty); two is not.
+  // Three is enough to compose a goal from (2026-10-19: asked for six, a real run left every line empty).
   expect(validateOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: SIX.slice(0, 3) }] }), known).lineProfiles?.[0]?.attributeCandidates).toHaveLength(3);
-  expectRejected(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: SIX.slice(0, 2) }] }), "ONBOARDING_ATTRIBUTES_COUNT");
+  // Two real ones on a line with nothing on record are kept, not padded to three (C6); a line with more on record is not shrunk.
+  expect(validateOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: SIX.slice(0, 2) }] }), known).lineProfiles?.[0]?.attributeCandidates).toHaveLength(2);
+  try { validateOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: SIX.slice(0, 2) }] }), { ...known, attributesOnRecord: { research: 4 } }); expect.unreachable(); }
+  catch (error) { expect((error as Error).message).toBe("ONBOARDING_ATTRIBUTES_COUNT"); expect((error as Error & { detail?: string }).detail).not.toContain("补到"); }
   expectRejected(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: [...SIX, attribute("x", "domain", "reply-9")] }] }), "ONBOARDING_UNKNOWN_SOURCE_REF");
   expectRejected(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: [...SIX, attribute("严谨、高产", "state")] }] }), "ONBOARDING_ATTRIBUTE_NOT_ATOMIC");
 });

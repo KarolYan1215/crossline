@@ -119,7 +119,6 @@
   "Codex 运行时不可用。": "The Codex runtime is unavailable.",
   "找不到这个工作区的所有者。": "This workspace's owner cannot be found.",
   "请先写点什么，或选一个选项。": "Write something first, or pick an option.",
-  "开始之前还想再问几件事。": "A few more things before we start.",
   "还有哪条主线、哪份材料没提到？": "Which track or material haven't you mentioned yet?",
   "哪条主线你最想先说清楚：现在在做什么、想做成什么样？": "Which track do you most want to explain first: what are you doing in it now, and what do you want it to become?",
   "说说你现在的处境：这几周最占你精力、最让你担心的是什么？": "Tell me where you stand: what has taken most of your energy these weeks, and what worries you most?",
@@ -902,6 +901,5 @@
   "日期": "Date",
   "每周安排": "Weekly arrangements",
   "没写日期的项": "Items with no date",
-  "关于日期的问题": "Questions about dates",
-  "这一档的访谈轮数已用完：可以开始使用，剩下的问题会放进待确认，随时回来接着答。": "This tier's interview rounds are used up: you can start using the app. The remaining questions go to Decisions; come back to them any time."
+  "关于日期的问题": "Questions about dates"
 }

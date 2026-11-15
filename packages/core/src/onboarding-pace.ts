@@ -1,7 +1,6 @@
 import type { AvailabilityWindow } from "./availability";
 import { joinList, monthDay, tFor, type Locale } from "./i18n";
 import { locateQuote } from "./sentences";
-import { depthPace, type OnboardingDepth } from "./onboarding-depth";
 import { INTERVIEW_FLOW_STAGES, ONBOARDING_STAGES, isWebUrl, type InterviewFlow, type OnboardingStage, type TurnInsight, type TurnProgress, type TurnQuestion } from "./onboarding-turn-schema";
 
 /**
@@ -10,16 +9,11 @@ import { INTERVIEW_FLOW_STAGES, ONBOARDING_STAGES, isWebUrl, type InterviewFlow,
  * week looks like — the capacity a person has against what is fixed and due, and a draft of the week once the start standard stands.
  */
 
-/** The parts of the main interview, in order. `details` is gone from it except in the thorough tier (line interviews still use it). */
+/** The parts of the main interview, in order. `details` is not one of them (line interviews still use it). */
 export const INTERVIEW_PARTS: OnboardingStage[] = ["orientation", "lines", "situation", "compass", "energy"];
-/**
- * The parts of a flow's main interview, in order (`v2` puts the profile module first, docs/profile-and-agent-kit.md §四); the thorough
- * tier ends with the details part (onboarding-depth.ts).
- */
-export const interviewParts = (flow: InterviewFlow = "v1", depth?: OnboardingDepth): OnboardingStage[] => {
-  const parts = flow === "v1" ? INTERVIEW_PARTS : INTERVIEW_FLOW_STAGES[flow].filter((stage) => stage !== "details");
-  return depthPace(depth).detailsPart ? [...parts, "details"] : parts;
-};
+/** The parts of a flow's main interview, in order (`v2` puts the profile module first, docs/profile-and-agent-kit.md §四). */
+export const interviewParts = (flow: InterviewFlow = "v1"): OnboardingStage[] =>
+  flow === "v1" ? INTERVIEW_PARTS : INTERVIEW_FLOW_STAGES[flow].filter((stage) => stage !== "details");
 export const PART_LABEL: Record<OnboardingStage, string> = {
   narrative: "经历", orientation: "开场", lines: "主线", situation: "处境", compass: "指南针", energy: "能量", details: "细节"
 };
@@ -98,14 +92,14 @@ export function readTurnProgress(raw: unknown): TurnProgress | undefined {
 }
 
 /**
- * How far the main interview is, for the screen: the part (1-based of `interviewParts(flow, depth)`), its label, and how much of it is
+ * How far the main interview is, for the screen: the part (1-based of `interviewParts(flow)`), its label, and how much of it is
  * clear. The one count every part indicator shows (the bar above the conversation and the right column, W-186). The part is the round's
  * `stage` — what the app paces and offers cards by — and the model's own progress record counts only while it is about that part: the
  * 2026-11-03 walkthrough had the bar at 「第 2/6 部分 · 指南针」 and the right column at the progress record's 「主线」, part 6 of 6.
  */
-export function progressView(progress: TurnProgress | undefined, stage: string, flow: InterviewFlow = "v1", depth?: OnboardingDepth,
+export function progressView(progress: TurnProgress | undefined, stage: string, flow: InterviewFlow = "v1",
   earlier: string[] = []): { index: number; total: number; label: string; clear: number; of: number; next: string; reached: number } {
-  const parts = interviewParts(flow, depth);
+  const parts = interviewParts(flow);
   const part = (ONBOARDING_STAGES as readonly string[]).includes(stage) ? stage as OnboardingStage : progress?.part ?? (stage as OnboardingStage);
   const at = parts.indexOf(part);
   const index = at < 0 ? (part === "details" ? parts.length : 1) : at + 1;
@@ -120,9 +114,9 @@ export function progressView(progress: TurnProgress | undefined, stage: string, 
 
 /** The progress record as the lines the next round starts from (for the dialogue model, not shown). */
 /* i18n-ignore-start */
-export function progressLines(progress: TurnProgress | undefined, flow: InterviewFlow = "v1", depth?: OnboardingDepth): string[] {
+export function progressLines(progress: TurnProgress | undefined, flow: InterviewFlow = "v1"): string[] {
   if (!progress) return [];
-  const parts = interviewParts(flow, depth);
+  const parts = interviewParts(flow);
   return [`上轮判断：第 ${Math.max(1, parts.indexOf(progress.part) + 1)}/${parts.length} 部分「${PART_LABEL[progress.part]}」${progress.partDone ? "已完成" : "未完成"}`,
     ...(progress.covered.length ? [`已谈清：${progress.covered.join("；")}`] : []),
     ...(progress.open.length ? [`未谈：${progress.open.join("；")}`] : []),

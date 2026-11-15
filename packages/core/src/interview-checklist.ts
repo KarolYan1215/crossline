@@ -2,7 +2,6 @@ import { courseCodeOf } from "./task-title";
 import { METHOD_SLOT } from "./drill-forms";
 import type { ProfileModel } from "./onboarding-turn-schema";
 import { joinList, tFor, type Locale } from "./i18n";
-import { depthPace, type OnboardingDepth } from "./onboarding-depth";
 
 /**
  * When the interview is finished, as a list anyone can tick (decided 2026-10-08). It used to be the model's own call — 「material rich
@@ -37,8 +36,7 @@ export type ChecklistItem = {
   /**
    * Not the interview's to hold up (2026-10-19, the owner's decision): a project's goal, evidence, grading and class times are worked out
    * from the files and the conversation, and what is still missing is asked later — when its task is planned, or on 待决事项 — instead of
-   * in a details stage at the end of the interview. Shown, never counted against finishing. The `standard` and `thorough` tiers ask them
-   * in the interview again (`DepthPace.projects`, 2026-10-31).
+   * in a details stage at the end of the interview. Shown, never counted against finishing.
    */
   deferred?: true;
 };
@@ -62,8 +60,6 @@ export type ChecklistInput = {
    * an interview that started on the earlier flow, which has no cards.
    */
   profileCards?: { settled: number; total: number } | undefined;
-  /** How thorough the interview is (`ONBOARDING_DEPTH_SETTING`): whether a project's details are asked now or when its task is planned. */
-  depth?: OnboardingDepth | undefined;
   /** The portrait's sections (`situation`, `compass`, `energy`) the extraction wrote from at least one numbered sentence. */
   groundedSections?: string[] | undefined;
   /** The language of each item's label and detail (default Chinese). */
@@ -222,13 +218,12 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
         : t("「{{line}}」这条线眼下在做的一件事是什么？大概什么时候要完成，没有截止也可以说。", { line: line.label }) });
   }
 
-  const projectDepth = depthPace(input.depth).projects;
   for (const project of input.projects.filter((item) => !isDefaultProject(item.id))) {
     const own = input.facts.filter((fact) => fact.projectId === project.id && settledFact(fact));
     const dated = input.dates.some((entry) => entry.project === project.id || entry.project === project.name);
     const course = (Boolean(courseCodeOf(project.name) ?? courseCodeOf(project.id)) && !COURSE_PART.test(project.name)) || own.some((fact) => fact.slot === "grading");
     const missing = PROJECT_SLOTS.filter(([slot, label]) => !(own.some((fact) => slot.test(fact.slot)) || (label === "截止日期" && dated))).map(([, label]) => label);
-    // A course's grading and class times: deferred unless the interview is the thorough one (`thorough` asks them here).
+    // A course's grading and class times: deferred, asked when its task is planned.
     const courseMissing: string[] = [];
     if (course && !own.some((fact) => fact.slot === "grading")) courseMissing.push("评分占比");
     // A course meets: its weekly class times are the frame of the person's week (a course whose meetings nobody asked about left a hole).
@@ -238,10 +233,10 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
     const projectAsk = t("「{{project}}」要做成什么样，做到哪一步了？", { project: project.name });
     items.push({ id: `project:${project.id}`, group: "项目", label: t("「{{project}}」目标、截止与进展证据", { project: project.name }),
       done: !missing.length, detail: missing.length ? t("缺：{{items}}", { items: list(missing) }) : "", owner: "interview",
-      ...(projectDepth === "deferred" ? { deferred: true as const } : {}), ...(missing.length ? { ask: projectAsk } : {}) });
+      deferred: true as const, ...(missing.length ? { ask: projectAsk } : {}) });
     if (course) items.push({ id: `project_course:${project.id}`, group: "项目", label: t("「{{project}}」评分占比与上课时间", { project: project.name }),
       done: !courseMissing.length, detail: courseMissing.length ? t("缺：{{items}}", { items: list(courseMissing) }) : "", owner: "interview",
-      ...(projectDepth === "all" ? {} : { deferred: true as const }),
+      deferred: true as const,
       // One question asks one thing: the grading first, the class times once it is known.
       ...(courseMissing.length ? { ask: courseMissing[0] === "评分占比" ? t("「{{project}}」的成绩是怎么算的？各部分各占多少？", { project: project.name })
         : t("「{{project}}」每周什么时候上课？", { project: project.name }) } : {}) });

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import type { ResearchThread } from "@crossline/core";
+import { PROFILE_FRAMEWORK, type ResearchThread } from "@crossline/core";
 import { createResearchRunner, newResearchQuestions, profileBrief, readResearch, RESEARCH_OPEN_MAX, RESEARCH_RUNS_PER_STEP, RESEARCH_SKILL, researchFindings, researchForDialogue } from "./onboarding-research";
 import { fakeRuntime } from "./testing/fake-runtime";
 
@@ -44,10 +44,13 @@ test("a thread that asks waits for the person; their answer goes to that thread 
 });
 
 test("a thread with neither a conclusion nor a question runs again, and after its runs closes with what it found", async () => {
-  const { rpc } = fakeRuntime(Array.from({ length: RESEARCH_RUNS_PER_STEP }, () => turn({ message: "公开 JD 太少，查不到比例。" })), RESEARCH_SKILL);
+  const { rpc, prompts, threadStarts } = fakeRuntime(Array.from({ length: RESEARCH_RUNS_PER_STEP }, () => turn({ message: "公开 JD 太少，查不到比例。" })), RESEARCH_SKILL);
   createResearchRunner(store, workspaceId, "C:\\repo", () => rpc).start("s", [asked]);
   await vi.waitFor(() => expect(threadsNow()[0]?.status).toBe("done"));
   expect(threadsNow()[0]!.messages).toHaveLength(RESEARCH_RUNS_PER_STEP);
+  // Only the last run is told it is the last, so it concludes with what it has (C25); the run carries the portrait framework.
+  expect(prompts().map((prompt) => prompt.includes('"lastRun":true'))).toEqual([...Array.from({ length: RESEARCH_RUNS_PER_STEP - 1 }, () => false), true]);
+  expect(String(threadStarts()[0]?.developerInstructions)).toContain(PROFILE_FRAMEWORK);
   expect(researchForDialogue(threadsNow())[0]).toMatchObject({ status: "done", found: "公开 JD 太少，查不到比例。" });
   expect(researchForDialogue(threadsNow())[0]).not.toHaveProperty("conclusion");
 });

@@ -1,4 +1,4 @@
-import { cardsSettled, flowOf, PROFILE_SECTIONS_SETTING, ONBOARDING_DEPTH_SETTING, readDepth, PROFILE_INSTRUMENTS_SETTING, readInstrumentAnswers, settledItems, ATTENTION_SETTING, START_CONFIRMED_SETTING, START_CONFIRM_SINCE, interviewChecklist, lineAttributes, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, portraitConfirmedByInsights, readInsightRatings, ONBOARDING_INSIGHTS, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile, type Locale } from "@crossline/core";
+import { cardsSettled, flowOf, GOAL_CANDIDATES_MIN, PROFILE_SECTIONS_SETTING, PROFILE_INSTRUMENTS_SETTING, readInstrumentAnswers, settledItems, ATTENTION_SETTING, START_CONFIRMED_SETTING, START_CONFIRM_SINCE, interviewChecklist, lineAttributes, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, portraitConfirmedByInsights, readInsightRatings, ONBOARDING_INSIGHTS, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile, type Locale } from "@crossline/core";
 import { interviewLocale, readLocale } from "./locale";
 import { unfiledFilesIn } from "./file-belonging";
 import { latestFileDates } from "./index";
@@ -68,8 +68,6 @@ export function interviewChecklistFor(store: CrosslineStore, workspaceId: string
     // A portrait part whose section the extraction wrote from numbered sentences rests on the person's words, whatever the facts' slots.
     groundedSections: Object.entries(json<Record<string, { sentences?: unknown[] }>>(PROFILE_SECTIONS_SETTING, {}))
       .filter(([, record]) => Array.isArray(record?.sentences) && record.sentences.length > 0).map(([name]) => name),
-    // The person's tier decides whether a project's details are asked in the interview or when its task is planned.
-    depth: readDepth(store.getSetting(workspaceId, ONBOARDING_DEPTH_SETTING)),
     portraitConfirmed: portraitStillConfirmed(confirmed?.fingerprint, profile) || portraitConfirmedByInsights(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS))),
     // Labels in the interview's language (docs/i18n.md): the list is about the interview.
     locale: extras.locale ?? interviewLocale(store, workspaceId) ?? readLocale(store, workspaceId)
@@ -146,7 +144,9 @@ export function questionScreenFor(store: CrosslineStore, workspaceId: string): Q
     projects: store.listProjects(workspaceId).map(({ id, name }) => ({ id, name })),
     meetings: [...new Set([...meetingProjects(store, workspaceId), ...meetingFacts])],
     calendarRecurring: calendarRecurringTitles(store, workspaceId),
-    goalPickerLines: Object.entries(profiles).filter(([, profile]) => lineAttributes(profile, "").length > 0).map(([id]) => id)
+    // A picker the person can choose from (`GOAL_CANDIDATES_MIN`): with one or two candidates the interview still asks what the person
+    // wants to become on the line, or neither the picker nor the dialogue would ask (docs/onboarding-agent-session.md C7).
+    goalPickerLines: Object.entries(profiles).filter(([, profile]) => lineAttributes(profile, "").length >= GOAL_CANDIDATES_MIN).map(([id]) => id)
   };
 }
 

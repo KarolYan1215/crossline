@@ -66,7 +66,7 @@ export function syncGapQuestions(store: CrosslineStore, workspaceId: string, gap
 /**
  * What the model is shown of the ledger: the questions still waiting and the latest answered ones. The app's own waiting questions
  * (`gap:`) take at most a third of the room: on the owner's real interview the fifteen places were all the app's file-belonging
- * questions, and the dialogue could not see what it had itself asked and been told (docs/onboarding-prompts.md).
+ * questions, and the dialogue could not see what it had itself asked and been told (docs/archive/onboarding-prompts.md).
  */
 export function ledgerForModel(store: CrosslineStore, workspaceId: string, sessionId: string, limit = 60): string[] {
   const all = interviewQuestions(store, workspaceId, sessionId).filter((question) => question.status !== "dropped");

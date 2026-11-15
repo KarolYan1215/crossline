@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { PROFILE_SECTIONS_SETTING, sectionClosed, type SectionRecord } from "@crossline/core";
-import { INTERVIEW_FLOW_STAGES, flowOf, ONBOARDING_INSIGHTS, progressView, readInsightRatings, readTurnProgress, FIRST_DRAFTS_SETTING, ONBOARDING_LAST_FAILURE, readOnboardingFailure, ONBOARDING_TONE_SETTING, ONBOARDING_DEPTH_SETTING, readDepth, firstDraftsState, interviewCompleteness, openStageQuestion, questionKind, readTone, sameQuestion, screenQuestions, unsureAnswer, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
+import { INTERVIEW_FLOW_STAGES, flowOf, ONBOARDING_INSIGHTS, progressView, readInsightRatings, readTurnProgress, FIRST_DRAFTS_SETTING, ONBOARDING_LAST_FAILURE, readOnboardingFailure, firstDraftsState, interviewCompleteness, openStageQuestion, questionKind, sameQuestion, screenQuestions, unsureAnswer, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
 import { INTERVIEW_LOCALE_SETTING, extractBacklog, interviewLocale, questionScreenFor } from "@crossline/db";
 import { isLocale } from "@crossline/i18n";
 import { resolveAccessContext } from "../../../../lib/access-guard";
@@ -89,7 +89,6 @@ export async function GET(request: Request) {
     ...start,
     // Where the interview is, by its own record (`progress` of the last round), for the right column.
     progress: progressView(readTurnProgress((session?.coverage as { progress?: unknown } | undefined)?.progress), stageNow, flow,
-      readDepth(store.getSetting(workspaceId, ONBOARDING_DEPTH_SETTING)),
       raw.filter((message) => message.role === "assistant").map((message) => String((message.content as { stage?: unknown }).stage ?? ""))),
     flow,
     capacity, skeleton: start.readyToStart ? draft : [],
@@ -120,11 +119,7 @@ export async function GET(request: Request) {
     // The worker designs the first milestone drafts on its own once the start standard holds: the screen says so instead of offering a
     // second, concurrent run.
     firstDrafts: firstDraftsState(store.getSetting(workspaceId, FIRST_DRAFTS_SETTING), store.listMilestones(workspaceId).some((item) => item.status !== "archived")),
-    // The right column's week and project axis (docs/onboarding-v3.md), and how the person asked to be spoken to.
-    tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)),
-    toneChosen: Boolean(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)),
-    // How thorough the interview is (onboarding-depth.ts), changeable above the thread like the tone.
-    depth: readDepth(store.getSetting(workspaceId, ONBOARDING_DEPTH_SETTING)),
+    // The right column's week and project axis (docs/onboarding-v3.md).
     week, timeline,
     session: session ? { id: session.id, state: session.state, coverage: session.coverage } : null,
     // The interview keeps the language it started in (docs/i18n.md); the page says so when it differs from its own.

@@ -5,7 +5,7 @@ import {
   AVAILABILITY_PROPOSED_SETTING, ONBOARDING_KEEP_EARLY_MAX, type ProfileSection, PROFILE_CONFIRMED, droppedOnboardingItems, keepOnboardingExtraction, LIMITED_LISTS, listsAtLimit, prunedOnboardingItems, lineAttributes, numberedText, onboardingExtractSchema,
   portraitFingerprint, sectionClosed, validateOnboardingExtraction, type SectionRecord,
   type EvidenceSentence, type KnownSources, type OnboardingExtractContext, type OnboardingExtraction, type OnboardingStage, type StoredLineProfile,
-  ONBOARDING_INSIGHTS, readInsightRatings, EXTRACT_LANE_KEYS, EXTRACT_KEYS, type ExtractLaneName, pointLines, pointsRules, cardCandidates
+  ONBOARDING_INSIGHTS, readInsightRatings, EXTRACT_LANE_KEYS, EXTRACT_KEYS, type ExtractLaneName, pointLines, pointsRules, cardCandidates, withProfileFramework
 } from "@crossline/core";
 import { runCodexSkill, withUsagePurpose, type CodexRpcBoundary, type SkillTools } from "@crossline/codex";
 import {
@@ -353,7 +353,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     // Read from the answer as the model gave it, before any check prunes it: a list at its cap may have stopped short (W-228).
     let full: Array<{ path: string; max: number }> = [];
     const result = await runCodexSkill<OnboardingExtraction>(client, context, {
-      skillName: ONBOARDING_EXTRACT_SKILL, cwd, developerInstructions: INSTRUCTIONS,
+      skillName: ONBOARDING_EXTRACT_SKILL, cwd, developerInstructions: withProfileFramework(INSTRUCTIONS),
       // The points ledger is written only under the points rules: an interview from before keeps its paragraphs.
       outputSchema: onboardingExtractSchema(ids, (lane === "all" ? EXTRACT_KEYS : EXTRACT_LANE_KEYS[lane]).filter((key) => rules || key !== "pointChanges")),
       prepareInput: () => context, tools,

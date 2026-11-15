@@ -79,8 +79,8 @@ test("each stage brings its own picture, and the time left is said before and af
 test("going back to an earlier part for one question does not add that part's time again (W-235)", () => {
   // v2 order: narrative, compass, energy, situation, orientation, lines. The interview had reached 「主线」 (6 of 6), then asked a compass question.
   const ready = { readyToStart: true, startMissing: [] };
-  expect(minutesLeft(ready, "compass", "v2", "quick")).toEqual({ label: "画像访谈还剩约", minutes: 25 });
-  expect(minutesLeft(ready, "compass", "v2", "quick", 6)).toEqual({ label: "画像访谈还剩约", minutes: 5 });
+  expect(minutesLeft(ready, "compass", "v2")).toEqual({ label: "画像访谈还剩约", minutes: 25 });
+  expect(minutesLeft(ready, "compass", "v2", 6)).toEqual({ label: "画像访谈还剩约", minutes: 5 });
 });
 
 test("a card is five dots labelled at both ends and the middle, and what is tapped or written is the line the worker reads back", () => {

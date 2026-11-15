@@ -1,7 +1,7 @@
 // i18n-exempt: the short ledger handed to the interview model each round (model-facing)
 import {
   AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, ONBOARDING_INSIGHTS, fixedScheduleLines, interviewAbstract, lineAttributes, progressLines, readInsightRatings, readTurnProgress,
-  resolveAvailability, type InterviewFlow, type OnboardingDepth, type StoredLineProfile, type TurnProgress, cardCandidates, hypothesisLogLines, pointLines, GOAL_CANDIDATES_MIN, CARDS_OFFERED
+  resolveAvailability, type InterviewFlow, type StoredLineProfile, type TurnProgress, cardCandidates, hypothesisLogLines, pointLines, GOAL_CANDIDATES_MIN, CARDS_OFFERED
 } from "@crossline/core";
 import { datedItems, type CrosslineStore } from "@crossline/db";
 import { readProfileModel } from "./onboarding-persist";
@@ -22,8 +22,6 @@ export function paceContext(store: CrosslineStore, workspaceId: string, sessionI
   today: string; lines: Array<{ id: string; label: string; goals: string[] }>; recent: string[]; progress: TurnProgress | undefined;
   /** The interview's flow: the order of the parts the progress lines name. */
   flow?: InterviewFlow;
-  /** The tier the person chose: the thorough one has a sixth part. */
-  depth?: OnboardingDepth;
   /** The points rules: the hypothesis log and the points ledger go with every round. */
   rules?: boolean;
   /** The person corrected a card the inferences' lane has not read yet (`cardsWait`): no card this round. */
@@ -64,7 +62,7 @@ export function paceContext(store: CrosslineStore, workspaceId: string, sessionI
     .filter(([key]) => key.startsWith(`${sessionId}#`)).sort((a, b) => a[1].at.localeCompare(b[1].at)).slice(-OBSERVATIONS_SHOWN)
     // Whole, not cut at 60 characters: a premise cut off is a premise the next card cannot see was corrected (replay 12).
     .map(([, rating]) => `观察「${(rating.text ?? "").slice(0, 300)}」：本人说${rating.verdict === "fits" ? "准" : rating.verdict === "partial" ? `部分对，更正为「${(rating.correction ?? "").slice(0, 300)}」` : "不准"}`);
-  const progress = progressLines(input.progress, input.flow, input.depth);
+  const progress = progressLines(input.progress, input.flow);
   // Lines with no long-term goal yet, and whether the picker beside the conversation already offers candidates for one: the dialogue asks
   // what the person wants to become on a line only while it offers none (W-8: asking beside the picker asked the same thing twice).
   const goalPicker = input.lines.filter((line) => !line.goals.length).map((line) => {
