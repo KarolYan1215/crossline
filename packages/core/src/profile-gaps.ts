@@ -155,7 +155,7 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
       // i18n-ignore: for the model
       detail: `「${project.name}」还不知道截止日期，也没有说明没有截止。`,
       question: {
-        id: `gap-deadline-${project.id}`, kind: "single", allowOther: true, identityId: project.identityId, projectId: project.id,
+        id: `gap-deadline-${project.id}`, kind: "single", allowOther: true, date: true, identityId: project.identityId, projectId: project.id,
         text: t("「{{project}}」有截止日期吗？", { project: project.name }),
         options: [
           ...(guess ? [{ id: "inferred", label: `${input.locale === "en" ? DEADLINE_GUESS_PREFIX_EN : DEADLINE_GUESS_PREFIX}${guess}`, detail: t("按访谈推断的时间") }] : []),
@@ -186,7 +186,7 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
         // i18n-ignore: for the model (and the start of the stored answer)
         detail: `「${item.title}」：文件写的是「${words}」，没有具体日期。`,
         question: {
-          id: `gap-undated-${project?.id ?? "file"}-${key.slice(0, 30)}`, kind: "single", allowOther: true,
+          id: `gap-undated-${project?.id ?? "file"}-${key.slice(0, 30)}`, kind: "single", allowOther: true, date: true,
           identityId: project?.identityId ?? "", projectId: project?.id ?? "",
           text: t("文件里写的「{{words}}」（{{item}}）是哪一天？", { words, item: item.title }),
           options: [
@@ -217,7 +217,7 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
       // i18n-ignore: for the model (and the start of the stored answer)
       detail: `「${project.name}」的「${item.title}」还没有具体日期。`,
       question: {
-        id: `gap-undated-${project.id}-${key.slice(0, 30)}`, kind: "single", allowOther: true,
+        id: `gap-undated-${project.id}-${key.slice(0, 30)}`, kind: "single", allowOther: true, date: true,
         identityId: project.identityId, projectId: project.id,
         text: t("「{{project}}」的「{{item}}」还没有具体日期，大致什么时候？", { project: project.name, item: item.title }),
         options: [

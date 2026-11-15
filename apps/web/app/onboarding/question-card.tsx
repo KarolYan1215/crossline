@@ -1,6 +1,5 @@
 "use client";
 
-import { DATE_ASK } from "@crossline/core";
 import { useLocale, useT } from "../locale-context";
 import { VoiceField } from "../ui/voice/voice-input";
 import type { Answer, Identity, Project, Question } from "./onboarding-types";
@@ -19,7 +18,7 @@ export function QuestionCard({ question, answer, onChange, identities, projects,
   const t = useT();
   const locale = useLocale();
   // A day question takes words (「下周」「12 月中」「明年一季度」「还没定」) or a day off the calendar, which writes the day into the box.
-  const dated = DATE_ASK.test(question.text);
+  const dated = question.date === true;
   const pickDay = (value: string) => {
     if (!value) return;
     const day = new Date(`${value}T12:00:00`);

@@ -125,7 +125,8 @@ test("several options and the person's own words go to the interview; questions 
   const options = (...labels: string[]) => labels.map((label, index) => ({ id: `o${index}`, label, detail: "" }));
   store.appendOnboardingMessage({ workspaceId: ws, sessionId: "s1", role: "assistant", createdAt: "2026-10-08T01:00:00Z",
     content: { reply: "…", nextAction: "ask", stage: "details", questions: [
-      { id: "q-goal", text: "ECE 548 本学期最重要的目标？", kind: "single", allowOther: true, identityId: "research", projectId: "ece548", options: options("总评达到 A", "真正掌握器件物理", "期末考进前 10%") },
+      // The model writes the kind; it is no longer read off 「目标」 in the wording (2026-11-14 audit).
+      { id: "q-goal", text: "ECE 548 本学期最重要的目标？", kind: "multi", allowOther: true, identityId: "research", projectId: "ece548", options: options("总评达到 A", "真正掌握器件物理", "期末考进前 10%") },
       { id: "q-location", text: "ECE 548 每周上课地点？", kind: "free", allowOther: true, identityId: "research", projectId: "ece548", options: [] },
       { id: "q-calendar", text: "日历中的两项活动，哪些属于持续安排？", kind: "multi", allowOther: true, identityId: "startup", projectId: "", options: options("Build Nights 每周", "DEJA-VU 每月") }] } });
   const status = interviewStatus(TEST_CTX);

@@ -1,5 +1,4 @@
 import { RELATION_KINDS } from "./flywheel-schema";
-import { DATE_ASK } from "./question-ledger";
 import { DATE_EXTRACTION_SCHEMA, type DateExtraction } from "./date-schema";
 import { SCHWARTZ_VALUES } from "./portrait";
 import type { ProfileCard } from "./profile-instruments";
@@ -40,6 +39,11 @@ export type TurnQuestion = {
    * question asked again is dropped from the round; one of the app's own waiting questions asked in the model's words is not added again.
    */
   repeats?: number;
+  /**
+   * The question asks for a day (2026-11-14 audit): answered in words or a day off the calendar beside the box. Said by whoever wrote the
+   * question, never guessed from its wording, which turned 「你一周里哪天状态最好？」 into a date box and dropped its options.
+   */
+  date?: boolean;
 };
 /**
  * A fact as the rest of the app reads it. The model does not write `sourceRef` or `sourceQuote` any more (2026-10-19): it cites numbered
@@ -529,6 +533,8 @@ function turnFields(ids?: TurnIds) {
           items: object({ id: slug, label: text(120), detail: { type: "string", maxLength: 80 } })
         },
         allowOther: { type: "boolean" },
+        // True when the question asks for a day: shown with words and a day picker, no options (the Skill's 日期 rules).
+        date: { type: "boolean" },
         identityId: about, projectId: askedProject,
         // The ledger number of the question this one repeats (`questionLedger`), 0 when it is new.
         repeats: { type: "integer", minimum: 0 }
@@ -826,21 +832,11 @@ export function cleanProfileInsights(value: Partial<Pick<OnboardingTurn, "hypoth
 }
 
 /**
- * Whether a question takes several answers at once. `kind` says so (`multi`), and the Skill is told when to use it; a choice question
- * whose own words ask for several — 「哪些」, 「哪几」, a goal (「本学期最重要的目标？」: a grade and a skill can both be goals) — is read as
- * `multi` even when the model wrote `single`, because a single choice there forces a wrong answer. A goal measured as one number
- * (目标分数, 目标成绩) stays single.
+ * The kind a question is shown as: what its writer said. It is no longer read off the wording (2026-11-14 audit: 「最想先推进哪一个」
+ * became multi, 「哪天状态最好」 lost its options for a date box); a day question says so with `date`.
  */
-// English as well as Chinese: "which ones", "select all that apply", a goal (but not a target score or grade, which is one number).
-const MANY = /哪些|哪几|多选|可多选|都有什么|目标(?!分|成绩|绩点|线|是多少)|\bwhich (ones|of these|of the following|of them)\b|\bwhat are (all|the)\b|\bselect all\b|\bchoose all\b|\b(all|any) that apply\b|\bpick (any|several|all)\b|\bgoals?\b(?!\s+(score|scores|grade|grades|gpa|mark|marks|number))/iu;
-/**
- * The dialogue's own day questions are answered in words, not picked (2026-11-14, the owner): 「下周」「12 月中」「明年一季度」 or a day off
- * the calendar beside the box, which `roughWindow` and the date readers turn into days behind the scenes. A list of ranges forced one
- * granularity on every thing. The app's own questions (`gap-`) keep their chips (「没有截止」, the inferred date), and have the box too.
- */
-export function questionKind(question: Pick<TurnQuestion, "kind" | "text"> & { id?: string }): TurnQuestion["kind"] {
-  if (question.kind !== "free" && question.id !== undefined && !question.id.startsWith("gap-") && DATE_ASK.test(question.text)) return "free";
-  return question.kind === "single" && MANY.test(question.text) ? "multi" : question.kind;
+export function questionKind(question: Pick<TurnQuestion, "kind">): TurnQuestion["kind"] {
+  return question.kind;
 }
 
 /** Known values only, each once, scores clamped: a profile from before values existed has none. */

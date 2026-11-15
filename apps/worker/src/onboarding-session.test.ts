@@ -491,7 +491,7 @@ test("one voice: whatever tone an account stored, no turn carries one (the Skill
   expect(dialogue(prompts).some((prompt) => prompt.includes('"tone"'))).toBe(false);
 });
 
-test("a round keeps from the person what is not theirs to answer, writes the calendar's recurrence as an assumption, and reads a goal question as multiple choice", async () => {
+test("a round keeps from the person what is not theirs to answer, writes the calendar's recurrence as an assumption, and keeps the kind the model wrote", async () => {
   const options = (...labels: string[]) => labels.map((label, index) => ({ id: `o${index}`, label, detail: "" }));
   const { rpc } = fakeRuntime([turn({ questions: [
     { id: "q-goal", text: "西湖合作这学期最重要的目标？", kind: "single", allowOther: true, identityId: "research", projectId: "", options: options("投出论文", "跑通片上训练") },
@@ -500,7 +500,8 @@ test("a round keeps from the person what is not theirs to answer, writes the cal
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc);
   await run({ sessionId: "s1", text: "西湖那篇 10/31 前要投出，数据下周到。" });
   const stored = store.listOnboardingMessages(workspaceId, "s1").at(-1)!.content as { questions: Array<{ id: string; kind: string }> };
-  expect(stored.questions.filter((question) => question.id.startsWith("q-")).map((question) => [question.id, question.kind])).toEqual([["q-goal", "multi"]]);
+  expect(stored.questions.filter((question) => question.id.startsWith("q-")).map((question) => [question.id, question.kind])).toEqual([["q-goal", "single"]]);
+  // The kind is the model's: no longer read off 「目标」 in the wording (2026-11-14 audit).
   expect(store.listProfileFacts(workspaceId).find((fact) => fact.slot.startsWith("assumed_")))
     .toMatchObject({ status: "inferred", sourceRef: "inference", value: expect.stringMatching(/^假设：日历中的两项活动/) });
 });
@@ -759,7 +760,7 @@ test("a reply naming self-harm is sent back once when the round is not the safet
   expect(safe.insight).toBeUndefined();
 });
 
-test("as the person reads a round: the safety reply ends at its help lines, a card is not said twice, a told story is excluded", async () => {
+test("as the person reads a round: the safety reply ends at its help lines; the rest of the reply and the questions are the model's own", async () => {
   const help = "全国心理援助热线 12356；身处危险时打 120 或 110，或去最近的医院急诊。";
   const card = { text: "你最投入的两次都是有人一起、每天有反馈的事，一个人做的研究推得最慢。", falsifier: "如果独自时也常投入",
     refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-7", quote: "一个人做研究" }] };
@@ -777,22 +778,10 @@ test("as the person reads a round: the safety reply ends at its help lines, a ca
   await last("现在没有了，继续吧。");
   const round = await last("一个人做研究时最慢。");
   expect(round.insight?.text).toBe(card.text);
-  expect(round.reply).toBe("记下了。周末先排整块时间。");
-  expect(round.questions[0]!.text).toBe("除了前面讲过的那件，近一年最骄傲的一件事是什么？");
-});
-
-test("once the person said there is nothing more, the next round does not ask the closing question again", async () => {
-  const { rpc } = fakeRuntime([turn({ questions: [], nextAction: "ready_for_milestones" }),
-    turn({ reply: "好，按页面上的「结束并出报告」就会出报告。", questions: [{ id: "q9", text: "还有什么想聊的吗？", kind: "free", allowOther: true, identityId: "", projectId: "", options: [] }] })]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false, extract: "off" });
-  await run({ sessionId: "s", text: "都说完了" });
-  const closing = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { questions: Array<{ id: string; text: string }> };
-  expect(closing.questions.map((question) => question.id)).toEqual(["closing-open"]);
-  expect(await run({ sessionId: "s", text: `【${closing.questions[0]!.text}】选择：没有了` })).toEqual({ state: "asked", sessionId: "s" });
-  const after = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string; nextAction: string; questions: unknown[] };
-  expect(after).toMatchObject({ nextAction: "ask", questions: [] });
-  expect(after.reply).toContain("结束并出报告");
-  expect(store.getOnboardingSession(workspaceId, "s")?.state).toBe("active");
+  // Not cut or prefixed by the app any more (2026-11-14 audit): saying the card twice or asking for the best story again is the Skill's
+  // to avoid, measured in the replay evaluation.
+  expect(round.reply).toBe("记下了。你最投入的两次都是有人一起、每天有反馈的事，一个人的研究推得最慢。周末先排整块时间。");
+  expect(round.questions[0]!.text).toBe("近一年最骄傲的一件事是什么？");
 });
 
 test("a reply that sets a date nobody gave is sent back once; the rewrite leaves the day to the person", async () => {

@@ -5,8 +5,8 @@ import {
   validateOnboardingDialogue, locateQuote,
   gapCoveredBy, screenQuestions, screenAssumption, type QuestionScreenInput,
   type DimensionId, type ProfileGap, type ProfileModel, type OnboardingStage, DEEP_STAGES, ASSESS_RESULT_SETTING, TYPE_TABLE,
-  checkInsight, disclosureReplies, mentionsSelfHarm, safetyRound, readTurnProgress, safetyReplyOnly, withoutToldStory, researchCopied, RESEARCH_FIGURES_MAX,
-  withoutCardEcho, withoutRecordingTalk, saidNothingMore, CLOSING_ASK, inventedDates, openStageQuestion, withPlainTerms,
+  checkInsight, disclosureReplies, mentionsSelfHarm, safetyRound, readTurnProgress, safetyReplyOnly, researchCopied, RESEARCH_FIGURES_MAX,
+  inventedDates, openStageQuestion,
   type KnownSources, type OnboardingDialogue, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, ONBOARDING_LAST_FAILURE, readPartialTurn, type OnboardingProgress, calendarWeek,
   tFor, type Locale, flowOf, INTERVIEW_FLOW_STAGES, PROFILE_MODULE_STAGES, cardsFor, readCardAnswers, mergeInstrumentAnswers, readInstrumentAnswers,
   settledItems, PROFILE_INSTRUMENTS_SETTING, type CardSet, type InterviewFlow, type ProfileCard, type ProfileStage, INTERVIEW_PACE
@@ -368,7 +368,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // Whether the lower bound stands, said outright every round (2026-11-12 replay 4: the model told the person 「你可以开始使用应用了」
     // seven rounds before it did, reading the open items of `checklist` as settled). Only a line's own interview goes without.
     // An item the person answered that the extraction has not written down yet is not missing: it is listed as answered, so the dialogue
-    // neither asks it again nor tells the person it is 「还在记录」 (replay 10, `withoutRecordingTalk`).
+    // neither asks it again nor tells the person it is 「还在记录」 (replay 10).
     const startStandard = () => {
       if (focusLine) return {};
       const answered = new Set(openChecklist(Infinity, (item) => !item.start, sessionId).filter((item) => item.recording).map((item) => item.label));
@@ -391,6 +391,10 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       const invented = setDates(valid.reply);
       if (invented.length) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
         detail: `reply 说事情定在 ${invented.join("、")}，可本人没说过这个日期。日期由本人定：reply 里不写它，要定就在 questions 里用不带选项的 free 问本人想放在什么时候。` }); // i18n-ignore: model-facing repair note
+      // Before the start standard stands the end button refuses: a reply pointing at it, or saying the app can be used, goes back to the
+      // model (2026-11-14 audit: it used to be cut silently).
+      if (!focusLine && startOpen() && endHinted(valid.reply)) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
+        detail: "开始标准还没齐（见 startStandard.missing）：reply 不提「结束并出报告」，也不说已经可以开始使用；接着问缺的那几项。" }); // i18n-ignore: model-facing repair note
       // The person's reply names self-harm and the round is not the safety reply: sent back once, since the words may be about someone
       // else or a research topic, which the model can tell and the pattern cannot (2026-11-14 audit). Its second answer stands.
       if (mentionsSelfHarm(replyText) && !safetyRound(valid) && !safetyAsked) {
@@ -406,7 +410,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const withoutInventedDates = (reply: string) => (reply.match(/[^。！？!?\n]+[。！？!?]?|\n+/gu) ?? []).filter((sentence) => !setDates(sentence).length).join("").trim();
     const softAccept = (_rejection: Error, output: unknown) => {
       const kept = keepOnboardingDialogue(output, known);
-      return kept && { ...kept, reply: withoutInventedDates(kept.reply) };
+      // Past the repairs a sentence pointing at a button that would refuse is left out too (interview-rules IR-035).
+      return kept && { ...kept, reply: withoutInventedDates(!focusLine && startOpen() ? withoutEndHint(kept.reply) : kept.reply) };
     };
     // A turn that only needs one or two questions dropped is kept now instead of rewritten in full by a repair; one that lists the research is not.
     const keepEarly = (rejection: Error, output: unknown) => {
@@ -414,7 +419,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       if ((rejection as Error & { safety?: boolean }).safety) return undefined;
       const kept = keepOnboardingDialogue(output, known);
       return kept && droppedOnboardingItems(output, kept) <= ONBOARDING_KEEP_EARLY_MAX
-        && researchCopied(kept.reply, findings()).length <= RESEARCH_FIGURES_MAX && !setDates(kept.reply).length ? kept : undefined;
+        && researchCopied(kept.reply, findings()).length <= RESEARCH_FIGURES_MAX && !setDates(kept.reply).length
+        && !(!focusLine && startOpen() && endHinted(kept.reply)) ? kept : undefined;
     };
 
     // The public quick test's result, only when the person pressed 「使用该结果」 (apps/web/lib/assess-link.ts): corroboration for the
@@ -585,18 +591,11 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // 几件事。」 over an empty batch twice.
     const roundOut = withFreshOpenQuestion(shownOrOpen(assembled, questionScreenFor(store, workspaceId), locale),
       checklistAskable(store, workspaceId, sessionId), locale, startStands ? closingQuestion(locale) : undefined);
-    // Before the start standard stands the button would refuse: the reply does not point at it.
-    const plain = withPlainTerms(startStands || focusLine ? roundOut : { ...roundOut, reply: withoutEndHint(roundOut.reply) });
-    // What the reply and the questions keep, as the person reads them (onboarding-reply.ts, replay 10): the safety round's reply ends at its
-    // help lines; nothing is 「还在记录」; a best story already told is excluded from the question asking for one; and once the person said
-    // there is nothing more, the closing question is not asked again (the box stays open for anything they think of).
-    const closed = plain.nextAction === "ask" && saidNothingMore(asked, replyText);
-    const askedBefore = messages.filter((message) => message.role === "assistant")
-      .flatMap((message) => ((message.content as { questions?: TurnQuestion[] }).questions ?? []).map((question) => question.text));
-    const output = { ...plain,
-      reply: withoutRecordingTalk(safetyRound(plain) ? safetyReplyOnly(plain.reply) : plain.reply),
-      questions: closed ? plain.questions.filter((question) => question.id !== "closing-open" && !question.id.startsWith("open-") && !CLOSING_ASK.test(question.text))
-        : withoutToldStory(plain.questions, askedBefore) };
+    // The safety round's reply ends at its help lines (onboarding-reply.ts). The wording rules the app used to apply to the reply and the
+    // questions behind the model's back (plain terms, 「还在记录」, a card said twice, 「除了前面讲过的那件」, the closing question after
+    // 「没有了」) are the Skill's alone since the 2026-11-14 audit: each rewrite misread someone (「没什么好说的，但我最近很焦虑」 closed the
+    // round), and the person's own 「硬约束」 was replaced in what they read.
+    const output = { ...roundOut, reply: safetyRound(roundOut) ? safetyReplyOnly(roundOut.reply) : roundOut.reply };
     // The observation is kept only when its quotes are in the replies it names; the progress record goes back to the model next round.
     const replies = Object.fromEntries(messages.filter((message) => message.role === "user")
       .map((message) => [`reply-${message.seq}`, String((message.content as { text?: string }).text ?? "")]));
@@ -664,9 +663,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     }
     const progress = readTurnProgress(result.output.progress);
     const { insights: _raw, progress: _rawProgress, ...rest } = output;
-    // A card is rated where it stands: the reply does not say it a second time (`withoutCardEcho`).
-    const replyKept = observed.reduce((reply, card) => withoutCardEcho(reply, card.text), rest.reply);
-    const stored = { ...rest, ...(observed.length ? { reply: replyKept, insight: observed[0]!, ...(observed.length > 1 ? { moreInsights: observed.slice(1) } : {}) } : {}),
+    const stored = { ...rest, ...(observed.length ? { insight: observed[0]!, ...(observed.length > 1 ? { moreInsights: observed.slice(1) } : {}) } : {}),
       ...(progress ? { progress } : {}) };
     const roundSeq = store.appendOnboardingMessage({ sessionId, workspaceId, role: "assistant", content: stored, createdAt: new Date().toISOString() });
     // The hypothesis a card shows is asked from now on, answered or not: `cardKey` keeps it out of the next observed' candidates.
@@ -848,9 +845,11 @@ function conversationSoFar(messages: StoredOnboardingMessage[]): NonNullable<Onb
  * refused (2026-11-12 replay 3: 「按页面上的「结束并出报告」就会出报告」 in seven rounds while her fixed schedule was still open). A claim
  * that the app can be used now goes too (replay 4: 「你可以开始使用应用了」 seven rounds before the start standard stood).
  */
+const END_HINT = /结束并出报告|End and write the report|可以开始(使用|用)|start using/iu; // i18n-ignore: the button's label and the start claim in both languages
+export const endHinted = (reply: string): boolean => END_HINT.test(reply);
 export function withoutEndHint(reply: string): string {
   const sentences = reply.match(/[^。！？!?\n]+[。！？!?]?|\n+/gu) ?? [];
-  return sentences.filter((sentence) => !/结束并出报告|End and write the report|可以开始(使用|用)|start using/iu.test(sentence)).join("").trim() || reply; // i18n-ignore: the button's label and the start claim in both languages
+  return sentences.filter((sentence) => !END_HINT.test(sentence)).join("").trim() || reply;
 }
 
 /** A session id the browser can mint for itself before the first turn. */

@@ -354,24 +354,3 @@ export function openStageQuestion(stage: string | undefined, locale?: Locale, as
   return { id: `open-${pick}`, text: t(OPEN_QUESTION[pick]), kind: "free", allowOther: true, identityId: "", projectId: "", options: [] };
 }
 
-/**
- * The app's own terms, put back into everyday words wherever the interview says them to the person (2026-10-31: 「硬约束」 and 「定语候选」
- * reached people word for word). Only exact terms with one meaning: the dialogue is told not to use them, and this is the backstop.
- */
-const INTERNAL_TERMS: Array<[RegExp, string]> = [
-  [/候选定语|定语候选/g, "候选词"], [/定语/g, "形容词"], [/硬约束/g, "固定安排"], [/开始标准/g, "开始前要定的几件事"], [/检查清单/g, "要问的事"]
-];
-/** Text a round left out (an option with no detail, 2026-10-31 walkthrough C) passes through as it is. */
-export const plainTerms = <T extends string | undefined>(text: T): T =>
-  typeof text === "string" ? INTERNAL_TERMS.reduce((out, [pattern, word]) => out.replace(pattern, word), text as string) as T : text;
-
-/** A round with the app's own terms put into everyday words: the reply, every question and option, and what the progress says next. */
-export function withPlainTerms<T extends { reply: string; questions: TurnQuestion[]; progress?: TurnProgress }>(round: T): T {
-  return {
-    ...round,
-    reply: plainTerms(round.reply),
-    questions: round.questions.map((question) => ({ ...question, text: plainTerms(question.text),
-      options: question.options.map((option) => ({ ...option, label: plainTerms(option.label), detail: plainTerms(option.detail) })) })),
-    ...(round.progress ? { progress: { ...round.progress, next: plainTerms(round.progress.next) } } : {})
-  };
-}

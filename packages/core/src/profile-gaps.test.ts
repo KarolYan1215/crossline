@@ -1,6 +1,5 @@
 import { describe, expect, test } from "vitest";
 import { answeredGapFacts, gapCoveredBy, isCourse, profileGaps, screenAssumption, screenedNote, screenQuestions, undatedKey, type ProfileGapInput } from "./profile-gaps";
-import { questionKind } from "./onboarding-turn-schema";
 
 const identities = [{ id: "research", label: "科研" }, { id: "startup", label: "创业" }];
 const base: ProfileGapInput = {
@@ -217,22 +216,6 @@ test("questions that are not the person's to answer are kept from them; a calend
     slot: expect.stringMatching(/^assumed_/), value: expect.stringMatching(/^假设：日历中的两项活动/) })]);
   expect(screenedNote(screen.screened)).toContain("「ECE 548 每周上课地点？」（只问地点，地点不影响排程）");
   expect(screenedNote([])).toBe("");
-});
-
-test("a question that asks for several things takes several answers; one with exclusive options stays single", () => {
-  expect(questionKind({ kind: "single", text: "ECE 548 本学期最重要的目标？" })).toBe("multi");
-  expect(questionKind({ kind: "single", text: "哪些结果可以证明 ECE 548 正在取得进展？" })).toBe("multi");
-  expect(questionKind({ kind: "single", text: "ECE 548 的目标成绩？" })).toBe("single");
-  expect(questionKind({ kind: "single", text: "「ECE 548」有截止日期吗？" })).toBe("single");
-  expect(questionKind({ kind: "free", text: "还有哪些？" })).toBe("free");
-  // The dialogue's own day questions are answered in words or off the calendar; the app's deadline question keeps its chips.
-  expect(questionKind({ id: "cv-when", kind: "single", text: "投简历这件事，大概哪个时间范围内要投出去？" })).toBe("free");
-  expect(questionKind({ id: "gap-deadline-cv", kind: "single", text: "「投简历」有截止日期吗？" })).toBe("single");
-  // Every question the app builds itself has options that exclude each other.
-  const all = profileGaps({ ...base, projects: [...base.projects, { id: "x", identityId: "startup", name: "X" }],
-    undated: [{ project: "ece555", kind: "exam", title: "期末" }], unfiled: [{ id: "d", fileName: "a.pdf" }], portrait: { written: true, confirmed: false } });
-  expect(all.length).toBeGreaterThan(4);
-  expect(all.every((gap) => gap.question.kind === "single" && questionKind(gap.question) === "single")).toBe(true);
 });
 
 test("a step question the task's own files answer is recognised; one only the person knows is not", async () => {

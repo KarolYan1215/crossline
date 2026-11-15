@@ -11,7 +11,6 @@ import { presetImportance } from "./importance";
 import { advanceWorkOrder, validateCommandEnvelope, validateSuccessCriteria } from "./index";
 import { ASSUMPTION_PREFIX, interviewChecklist } from "./interview-checklist";
 import { openAccessVerdict } from "./manualbook-schema";
-import { questionKind } from "./onboarding-turn-schema";
 import { portraitLabels, typeFromScores } from "./portrait-type";
 import { answerLine, answeredGapFacts, gapCoveredBy, profileGaps, readAnswerLine, readableFromMaterial, screenQuestions, undatedKey } from "./profile-gaps";
 import { licenseVerdict } from "./public-skills";
@@ -109,17 +108,6 @@ describe("text built in English, unchanged in Chinese", () => {
 });
 
 describe("heuristics read English as well as Chinese", () => {
-  test("questionKind: several answers wanted", () => {
-    const ask = (text: string) => questionKind({ kind: "single", text });
-    expect(ask("本学期哪些课程最重要？")).toBe("multi");
-    expect(ask("ECE 555 的目标分数？")).toBe("single");
-    expect(ask("Which of these courses matter most this term?")).toBe("multi");
-    expect(ask("Select all that apply: where do you lose time?")).toBe("multi");
-    expect(ask("What are your goals for this term?")).toBe("multi");
-    expect(ask("What target grade do you want in ECE 555?")).toBe("single");
-    expect(ask("What is your goal score for ECE 555?")).toBe("single");
-    expect(ask("Which day does the class meet?")).toBe("single");
-  });
 
   test("answeredGapFacts reads Chinese and English replies, across the switch", () => {
     const zh = profileGaps({ identities: [{ id: "media", label: "自媒体" }], projects: [{ id: "channel", identityId: "media", name: "频道" }],

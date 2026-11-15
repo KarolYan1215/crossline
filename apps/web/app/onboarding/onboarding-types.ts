@@ -18,6 +18,8 @@ export type Question = {
   id: string; text: string; kind: "single" | "multi" | "free";
   options: Array<{ id: string; label: string; detail: string }>;
   allowOther: boolean; identityId: string; projectId: string;
+  /** The question asks for a day: a day picker beside the box (said by the writer, never read off the words). */
+  date?: boolean;
 };
 export type AssistantTurn = {
   reply: string; questions: Question[]; nextAction: "ask" | "ready_for_milestones"; stage?: string;

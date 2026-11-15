@@ -9,9 +9,10 @@ const render = (question: Question) => renderToStaticMarkup(<LocaleProvider loca
 </LocaleProvider>);
 
 test("a day question takes words or a day off the calendar, not a list of ranges (2026-11-14)", () => {
-  const html = render({ id: "cv-when", kind: "free", text: "投简历这件事，你打算大概什么时候投出去？", options: [], allowOther: true, identityId: "", projectId: "" });
+  const html = render({ id: "cv-when", kind: "free", text: "投简历这件事，你打算大概什么时候投出去？", options: [], allowOther: true, identityId: "", projectId: "", date: true });
   expect(html).toContain('type="date"');
   expect(html).toContain("明年一季度");
-  const other = render({ id: "busy", kind: "free", text: "每周什么时间段有空？", options: [], allowOther: true, identityId: "", projectId: "" });
+  // Said by the question, not read off its words: 「哪天状态最好」 is not a day to pick (2026-11-14 audit).
+  const other = render({ id: "best", kind: "single", text: "你一周里哪天状态最好？", options: [{ id: "a", label: "周一", detail: "" }, { id: "b", label: "周末", detail: "" }], allowOther: true, identityId: "", projectId: "" });
   expect(other).not.toContain('type="date"');
 });
