@@ -213,14 +213,15 @@ test("with no Codex runtime the turn is a blocker and saves nothing", async () =
 });
 
 test("a thread the runtime has forgotten is replaced, and the new one is told what was said before", async () => {
-  const { rpc, prompts } = fakeRuntime([turn()], { lostThreads: ["gone-thread"] });
+  const { rpc, prompts, threadStarts } = fakeRuntime([turn()], { lostThreads: ["gone-thread"] });
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   const now = "2026-10-02T00:00:00.000Z";
   const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
   store.saveOnboardingSession({ id: "s1", ownerId, workspaceId, state: "active", coverage: {}, codexThreadId: "gone-thread", createdAt: now, updatedAt: now });
   store.saveProject({ id: "westlake", ownerId, workspaceId, identityId: "research", name: "西湖合作", status: "active", summary: "", createdAt: now, updatedAt: now });
   store.appendOnboardingMessage({ sessionId: "s1", workspaceId, role: "user", content: { text: "西湖那篇 10/31 前要投出" }, createdAt: now });
-  store.appendOnboardingMessage({ sessionId: "s1", workspaceId, role: "assistant", content: JSON.parse(turn()), createdAt: now });
+  store.appendOnboardingMessage({ sessionId: "s1", workspaceId, role: "assistant", createdAt: now,
+    content: { ...JSON.parse(turn()), insight: { text: "你说投入的两次都是和人一起赶东西。", hypothesisId: "h1" } } });
 
   expect(await run({ sessionId: "s1", text: "图表清单在师兄给的文档里" })).toEqual({ state: "asked", sessionId: "s1" });
 
@@ -231,6 +232,13 @@ test("a thread the runtime has forgotten is replaced, and the new one is told wh
   expect(prompt).toContain("history");
   expect(prompt).toContain("西湖那篇 10/31 前要投出");
   expect(prompt).toContain("reply-1");
+  // P3: the round as the person saw it — the options and the card with the hypothesis it asked — not the question text alone.
+  expect(prompt).toContain("（选项：师兄给的文档 / 只在聊天记录里）");
+  expect(prompt).toContain("【观察卡 h1】你说投入的两次都是和人一起赶东西。");
+  // The new thread gets the card and read tools, and the compaction prompt that keeps what only the thread holds.
+  const start = threadStarts().at(-1)!;
+  expect((start.dynamicTools as Array<{ name: string }>).map((tool) => tool.name)).toEqual(expect.arrayContaining(["ask_question", "read_ledger", "read_file"]));
+  expect(JSON.stringify(start)).toContain("compact_prompt");
   expect(store.listOnboardingMessages(workspaceId, "s1").map((message) => message.role)).toEqual(["user", "assistant", "user", "assistant"]);
 });
 
@@ -940,4 +948,22 @@ test("the card tools: a question handed in is checked on the spot, a failing one
   // The next turn: the same question again is checked against the ledger, which now holds it unanswered — asked once, so it goes out.
   await run({ sessionId: "s1", text: "周末吧" });
   expect(answers[3]).toMatchObject({ success: true });
+});
+
+// C7 (docs/onboarding-agent-session.md): a rebuilt thread was sent every file, those past the reading budget with empty text, and all of
+// them were marked shown, so the model never read the last ones.
+test("a rebuilt thread is sent the files within the reading budget; the rest are not marked shown", async () => {
+  const { rpc } = fakeRuntime([turn()], { lostThreads: ["gone-thread"] });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc);
+  const now = "2026-10-02T00:00:00.000Z";
+  const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
+  store.saveOnboardingSession({ id: "s1", ownerId, workspaceId, state: "active", coverage: {}, codexThreadId: "gone-thread", createdAt: now, updatedAt: now });
+  for (let index = 1; index <= 6; index += 1) store.saveSourceDocument({ id: `doc-${index}`, ownerId, workspaceId, kind: "text", fileName: `File ${index}.txt`,
+    mediaType: "text/plain", sha256: String(index), uri: `file:///${index}`, extractedText: "字".repeat(14_000), extractionStatus: "done", createdAt: now });
+  store.appendOnboardingMessage({ sessionId: "s1", workspaceId, role: "user", content: { text: "文件都传了" }, createdAt: now });
+  store.appendOnboardingMessage({ sessionId: "s1", workspaceId, role: "assistant", content: JSON.parse(turn()), createdAt: now });
+  await run({ sessionId: "s1", text: "看看文件" });
+  const announced = (store.getOnboardingSession(workspaceId, "s1")!.coverage as { announcedSources?: string[] }).announcedSources ?? [];
+  expect(announced.length).toBeGreaterThan(0);
+  expect(announced.length).toBeLessThan(6);
 });

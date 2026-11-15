@@ -142,6 +142,11 @@ export type SkillRunOptions<T> = {
    * finished image is handed to `onImage` (base64 PNG) as it arrives; nothing is written by the runner itself.
    */
   allowImageGeneration?: boolean;
+  /**
+   * What the runtime's local compaction asks the model to keep when the thread nears its window (Codex `compact_prompt`, set for this
+   * thread only). Without it the runtime's own summary prompt is used. A remote compaction is opaque and ignores it.
+   */
+  compactPrompt?: string;
   onImage?: (image: { base64: string; revisedPrompt: string }) => void;
   onAudit: (audit: AnalysisAudit) => void;
   /** Called as the turn moves (throttled to twice a second while it writes); see `SkillProgress`. */
@@ -919,6 +924,7 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
     ...(options.connectors ? CONNECTORS_READ_ONLY : {}),
     ...(options.onPlan ? { "tools.update_plan.enabled": true } : {}),
     ...(options.askPerson ? ASK_PERSON_CONFIG : {}),
+    ...(options.compactPrompt ? { compact_prompt: options.compactPrompt } : {}),
     ...Object.fromEntries(Object.keys(mcp).map((key) => [`mcp_servers.${key}.enabled`, false])),
     ...ownOnly,
     // Another provider: defined for this thread only (memories are off above for every run).

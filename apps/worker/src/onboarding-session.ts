@@ -18,6 +18,8 @@ import { sourceIds } from "./source-ids";
 import { localeOf } from "./locale";
 import { adoptLineGoal, identityLines } from "./lines";
 import { checklistAnswered, interviewLedger, ledgerForModel, linesAnsweredUnread, recordReplyAnswers, recordRound, syncGapQuestions } from "./question-ledger";
+import { mergeTools } from "./ledger-index";
+import { interviewReadTools, READ_TOOLS_INSTRUCTIONS } from "./onboarding-read-tools";
 import { CARD_TOOLS_INSTRUCTIONS, cardTools, checkInsights, checkOpenItems, checkQuestions, checkResearch, emptyDraft, withDraft } from "./onboarding-cards";
 import { correctionUnread, createOnboardingExtractor, extractionReached, requestAllLanes, requestExtraction, type ExtractLane } from "./onboarding-extract";
 import { DATES_UNRECORDED_EVENT, ONBOARDING_UNRECORDED_EVENT, personTimeZone, readProfileModel } from "./onboarding-persist";
@@ -401,9 +403,11 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const itemSchema = (key: "questions" | "insights" | "research") =>
       ((outputSchema as { properties: Record<string, { items: Record<string, unknown> }> }).properties[key]!).items;
     const stageNow = (session.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : INTERVIEW_FLOW_STAGES[flow][0]!);
-    const tools = cardTools({ schemas: { question: itemSchema("questions"), insight: itemSchema("insights"), research: itemSchema("research") },
+    // With them, the read tools (P3): the ledger and the files in full, page by page, where the context shows only part of them.
+    const tools = mergeTools(cardTools({ schemas: { question: itemSchema("questions"), insight: itemSchema("insights"), research: itemSchema("research") },
       ids: () => ids, draft: () => draft,
-      check: (next) => deskCheck({ reply: "", coverage: [], nextAction: "ask", stage: stageNow, safety: false, ...next } as unknown as OnboardingDialogue).problems });
+      check: (next) => deskCheck({ reply: "", coverage: [], nextAction: "ask", stage: stageNow, safety: false, ...next } as unknown as OnboardingDialogue).problems }),
+    interviewReadTools(store, workspaceId, sessionId));
     // What the finished research threads found: a reply that lists their figures is sent back once (`researchCopied`); after the repairs
     // run out it is kept as it is (`softAccept`), a round is not lost for it.
     const findings = () => researchNow().flatMap((item) => [item.conclusion ?? "", item.found ?? ""]).filter(Boolean);
@@ -492,7 +496,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       return runCodexSkill<OnboardingDialogue>(client, context, {
         skillName: ONBOARDING_SKILL, cwd, developerInstructions: withProfileFramework(INSTRUCTIONS), outputSchema, keepThread: true, locale, secondPerson: SECOND_PERSON, allowWebSearch: true,
         prepareInput: () => context, validateOutput, softAccept, keepEarly,
-        optionalTools: { tools, instructions: CARD_TOOLS_INSTRUCTIONS, withoutTools: (input) => input, onMode: (mode) => { cardMode = mode; } },
+        optionalTools: { tools, instructions: `${CARD_TOOLS_INSTRUCTIONS}\n${READ_TOOLS_INSTRUCTIONS}`, withoutTools: (input) => input, onMode: (mode) => { cardMode = mode; } },
+        compactPrompt: COMPACT_PROMPT,
         onAudit: (audit) => { if (audit.threadId) threadId = audit.threadId; }, onProgress, onQueued,
         timeoutMs: 60 * 60_000
       });
@@ -547,7 +552,9 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
           threadId = undefined;
           draft = emptyDraft();
           announcedNow = new Set();
-          sent = [...docs].filter(([, doc]) => doc.extractionStatus === "done");
+          // Within the turn's reading budget only (docs/onboarding-agent-session.md C7): a file past it used to go with empty text and be
+          // marked shown all the same. The rest stay unread and go with the next turns, and `read_file` reads any of them in full.
+          sent = withinBudget([...docs].filter(([, doc]) => doc.extractionStatus === "done"));
           result = await startThread(sent, conversationSoFar(messages.slice(0, -1)));
         }
       }
@@ -664,15 +671,38 @@ export const stageOrderFor = (flow: InterviewFlow): OnboardingStage[] =>
  * uncut (2026-11-12: it was the last 24 messages of at most 4,000 characters each); the runtime compacts the thread when it nears the
  * model's window, and the ledger keeps every message for the extraction's `search_evidence`.
  */
-function conversationSoFar(messages: StoredOnboardingMessage[]): NonNullable<OnboardingTurnContext["history"]> {
+/* i18n-ignore-start: the rebuilt history the model reads */
+export function conversationSoFar(messages: StoredOnboardingMessage[]): NonNullable<OnboardingTurnContext["history"]> {
   return messages.map((message) => {
     if (message.role === "user") return { id: `reply-${message.seq}`, role: "user" as const,
       text: String((message.content as { text?: string }).text ?? "") };
-    const turn = message.content as { reply?: string; questions?: Array<{ text?: string }> };
+    // Each round as the person saw it (P3, docs/onboarding-agent-session.md 「重建」): the questions with their options, and the observation
+    // cards with the hypothesis each asked, so a rebuilt thread neither asks a card again nor loses what the person was choosing between.
+    const turn = message.content as { reply?: string; questions?: Array<{ id?: string; text?: string; options?: Array<{ label?: string }> }>;
+      insight?: { text?: string; hypothesisId?: string }; moreInsights?: Array<{ text?: string; hypothesisId?: string }> };
+    const cards = [turn.insight, ...(turn.moreInsights ?? [])].filter((card): card is { text: string; hypothesisId?: string } => Boolean(card?.text));
     return { id: `assistant-${message.seq}`, role: "assistant" as const,
-      text: [turn.reply ?? "", ...(turn.questions ?? []).map((question) => question.text ?? "")].filter(Boolean).join("\n") };
+      text: [turn.reply ?? "",
+        ...(turn.questions ?? []).map((question) => {
+          const labels = (question.options ?? []).map((option) => option.label ?? "").filter(Boolean);
+          return `【问${question.id ? ` ${question.id}` : ""}】${question.text ?? ""}${labels.length ? `（选项：${labels.join(" / ")}）` : ""}`;
+        }),
+        ...cards.map((card) => `【观察卡${card.hypothesisId ? ` ${card.hypothesisId}` : ""}】${card.text}`)].filter(Boolean).join("\n") };
   });
 }
+
+/**
+ * What the runtime's local compaction keeps of the interview's thread (`compact_prompt`). Every turn sends the ledger's state again, so the
+ * summary keeps what only the thread holds: the person's own words and what was put in front of them.
+ */
+export const COMPACT_PROMPT = "把这段访谈压缩成交接记录，给接着访谈的你自己看。必须保留："
+  + "（1）本人每条回复里的事实、原话里有分量的说法和情绪，带回复编号（reply-N），关键的话逐字照抄；"
+  + "（2）出过的每张观察卡：假设 id、一句话内容、本人的评价和更正；"
+  + "（3）问过、本人还没答的题和你答应过要回来问的事；"
+  + "（4）本人拒绝或说不需要的话题（整场不再问）；"
+  + "（5）你正在追的假设和下一步想问什么。"
+  + "不必保留：开始标准、问题记录、文件正文、调研结论——每轮的输入会重新给出，或可以用 read_ledger、read_file 读到。";
+/* i18n-ignore-end */
 
 /**
  * A reply without its sentences pointing at the end button, for a round before the start standard stands: pressed then, the button is

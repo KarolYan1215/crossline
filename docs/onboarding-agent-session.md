@@ -605,6 +605,16 @@ Skill 同步改了 `questionLedger`、`lastRound`、`openItems`、`followUp` 和
 - 最后一条消息没有缩成 `{reply, progress}`：降级路线还要这些字段，同一个输出 schema 两条路线共用。
 - `ask_date`、`show_goal_picker`、`show_scale_card` 没有单独的工具：日期题用题目自己的 `date` 字段（P2b-1），长期目标的候选是 openItems 里的 `gap-goal-*`，量表卡仍按阶段由应用放（`cardsForRound`），它们不是模型的判断。
 
+**P3 完成一部分（2026-11-14）：读工具、带卡重建、压缩提示。**
+
+- 读工具（`apps/worker/src/onboarding-read-tools.ts`）和出卡工具一起声明：`read_ledger{section: questions | facts | hypotheses | research, page}` 按 60 行一页读账本，`read_file{id, offset}` 每次读 14000 字。每轮上下文只给问题记录最近的 15 条、文件按阅读预算截断，要看全由模型自己读。
+- 重建（IR-054、IR-055）：丢线程后的历史带上每轮的选项和观察卡（连同假设 id）；文件只发阅读预算内的，其余不再记为「已展示」（修好 C7：以前超出预算的文件正文为空，却记成看过了）。
+- `compact_prompt`：运行时本地压缩时保留本人原话（带 reply 编号）、出过的卡和评价、没答的题、拒绝过的话题、正在追的假设；每轮会重发的状态不必保留。新增 `SkillRunOptions.compactPrompt`，只对这一条线程生效。
+
+**没做的：状态头取代大 JSON。** 每轮的上下文仍是现在的 JSON（`checklist`、`questionLedger`、`abstract` 等），没有压到 1.5k token 的固定格式。原因：这一步会让模型看到的东西变少，「不丢上下文和规则」只能靠真模型回放验证；按约定回放要本人同意（约 ¥2 一次）。读工具先上，回放显示模型确实会用它们以后，再按 P5 的指标逐项把上下文换成读工具。
+
+**P4 没做：子代理改形态。** 整理、假设、要点、画像撰写仍是各自的新线程；改成 fork 要先实测缓存命中和额度消耗（D5 写明「P4 要实测」），这需要真模型运行，同样要本人同意。现在的形态不受 P0–P3 影响。
+
 **往后加机制的规矩**：新发现的问题，先改 Skill 或工具说明。只有涉及 §3.7 六类的，才加代码，而且是拒收后让模型改，不静默改写。
 
 ---

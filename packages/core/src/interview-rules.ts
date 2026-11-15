@@ -182,6 +182,11 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
   // P2b-3b: the same checks, run as each item is handed in through a tool; a failing call is the tool's error, in the same turn.
   { id: "IR-053", layer: "L0", verdict: "return", status: "active", rule: "出卡工具当场核对每一项，不合格作为工具的回答退回，不收下",
     code: { file: `${WORKER}/onboarding-cards.ts`, symbol: "cardTools", test: `${WORKER}/onboarding-cards.test.ts` } },
+  // P3: a thread rebuilt from the ledger.
+  { id: "IR-054", layer: "L0", verdict: "keep", status: "active", rule: "线程丢失重建时只按阅读预算发文件，其余不记为已展示，留给后面的轮次",
+    code: { file: `${WORKER}/onboarding-session.ts`, symbol: "withinBudget", test: `${WORKER}/onboarding-session.test.ts`, by: "a rebuilt thread is sent the files within the reading budget" } },
+  { id: "IR-055", layer: "L0", verdict: "keep", status: "active", rule: "重建的对话历史带上每轮的选项和观察卡（连同假设 id）",
+    code: { file: `${WORKER}/onboarding-session.ts`, symbol: "conversationSoFar", test: `${WORKER}/onboarding-session.test.ts`, by: "【观察卡 h1】" } },
   { id: "IR-045", layer: "L0", verdict: "delete", status: "retired", rule: "事实合并（core 版）",
     code: { file: `${CORE}/profile-gaps.ts`, symbol: "mergeFacts" },
     reason: "没有生产调用者；「推断不覆盖已确认」由数据库的 upsert 规则保证" },
