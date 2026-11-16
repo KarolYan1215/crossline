@@ -425,9 +425,11 @@ export function answeredGapFacts(replyText: string, gaps: ProfileGap[]): GapAnsw
       const none = pickedFor("none");
       const guess = picked.find((label) => label.startsWith(DEADLINE_GUESS_PREFIX) || label.startsWith(DEADLINE_GUESS_PREFIX_EN));
       if (other && statesDay(other)) out.push({ ...base, slot: "deadline", value: other, quote: other });
+      // A picked 「没有截止」 is the answer whatever is added under it: replay 16 (2026-11-16) asked 「寒假深度实习」 three rounds running
+      // because 「各家招聘自己定时间，我这边没设过日期」 was typed under it and the pick was dropped with the words.
+      else if (none) out.push({ ...base, slot: "no_deadline", value: none, quote: none });
       else if (other) continue;
       else if (guess) out.push({ ...base, slot: "deadline", value: guess.replace(DEADLINE_GUESS_PREFIX, "").replace(DEADLINE_GUESS_PREFIX_EN, ""), quote: guess });
-      else if (none) out.push({ ...base, slot: "no_deadline", value: none, quote: none });
     } else if (gap.code === "DATE_UNDATED") {
       // 「知道具体日期」 without the date is not an answer.
       if (other && !statesDay(other)) continue;

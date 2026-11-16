@@ -120,6 +120,10 @@ test("一个非默认项目没有截止时，问「有截止日期吗」，答�
   // the reply for the extraction to read.
   expect(answeredGapFacts(`【${gap.question.text}】选择：我来写日期。补充：还不知道`, gaps)).toEqual([]);
   expect(answeredGapFacts(`【${gap.question.text}】选择：我来写日期。补充：看导师安排`, gaps)).toEqual([]);
+  // A picked 「没有截止」 stands with words under it (replay 16 asked the same project three rounds running); a day typed under it wins.
+  expect(answeredGapFacts(`【${gap.question.text}】选择：没有截止。补充：各家招聘自己定时间，我这边没设过日期。`, gaps))
+    .toEqual([expect.objectContaining({ slot: "no_deadline", value: "没有截止" })]);
+  expect(answeredGapFacts(`【${gap.question.text}】选择：没有截止。补充：其实 12 月中要交`, gaps)).toEqual([expect.objectContaining({ slot: "deadline" })]);
 });
 
 // Found walking the app as an invitee (2026-10-15): the interview asked when 「RBT 610 期末项目」 meets, and for 「大致日期」 of a weekly
