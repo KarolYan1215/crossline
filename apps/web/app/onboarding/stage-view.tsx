@@ -7,6 +7,7 @@ import { ValuesRadar } from "../portrait/portrait-charts";
 import { FlywheelPreview, type Link } from "./flywheel-preview";
 import { StartConfirm } from "./start-confirm";
 import { DivergenceView } from "./divergence-view";
+import { LifelineView, LoopView, ScaleReadings } from "./story-views";
 import type { DimensionId } from "./interview-contract";
 import type { OnboardingState } from "./onboarding-types";
 import type { ProjectTimeline, WeekSkeleton } from "../../lib/onboarding-board";
@@ -151,7 +152,10 @@ export function StageView({ state, stage, complete, onChanged }: {
       {shown === "map" && <DivergenceView hypotheses={state.profile?.hypotheses} dimensions={state.profile?.dimensions} insights={insightsOf(state)}
         ratings={state.insightRatings} initial={dimensionForStage(stage)} {...(rules ? { points: state.profile?.points ?? [] } : {})}
         detail={(dimension) => dimension === "D4" ? viewOnce("compass", <CompassView profile={state.profile} />)
-          : dimension === "D1" || dimension === "D7" ? viewOnce("energy", <EnergyView profile={state.profile} />) : dimension === "D5" ? <LinesView state={state} onChanged={onChanged} /> : null} />}
+          : dimension === "D1" || dimension === "D7" ? viewOnce("energy", <EnergyView profile={state.profile} />) : dimension === "D5" ? <LinesView state={state} onChanged={onChanged} />
+          : dimension === "D8" ? <LifelineView theme={state.profile?.careerTheme} turns={state.profile?.turningPoints} next={state.profile?.futureScript} />
+          : dimension === "D9" ? <LoopView hypotheses={state.profile?.hypotheses} /> : null} />}
+      {shown === "map" && <ScaleReadings readings={state.scaleReadings} />}
       {shown === "projects" && <ProjectsView timeline={state.timeline} lines={state.lines} />}
       {shown === "structure" && <StructureView state={state} />}
     </div>

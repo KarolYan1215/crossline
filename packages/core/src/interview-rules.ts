@@ -295,5 +295,14 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
   // The Skill split (2026-11-15): a resident core of fifteen rules, and each stage's checklist sent by code with the stage.
   { id: "IR-146", layer: "L0", verdict: "keep", status: "active", rule: "当前阶段的清单（stages/<stage>.md）在阶段变了或线程重建时随这一轮发给对话",
     code: { file: `${WORKER}/onboarding-session.ts`, symbol: "stageGuide", test: `${WORKER}/onboarding-session.test.ts`, by: "each stage's checklist goes with the round that starts in it" } },
+  // The right column's pictures (2026-11-15, step 5): each draws only what the record holds; the cards' readings come back in words.
+  { id: "IR-147", layer: "L0", verdict: "keep", status: "active", rule: "量表读数在画像图上交还本人：每个计分维度一个偏高、中等或偏低，从不显示分数",
+    code: { file: `${CORE}/profile-claims.ts`, symbol: "instrumentLevels", test: `${CORE}/profile-claims.test.ts`, by: "the person's page gets each scored dimension's level in words" } },
+  { id: "IR-148", layer: "L0", verdict: "keep", status: "active", rule: "假设看板按证据把假设分成已支持、待定、已推翻三栏",
+    code: { file: "apps/web/app/onboarding/story-views.tsx", symbol: "boardColumns", test: "apps/web/app/onboarding/story-views.test.tsx", by: "the board sorts the hypotheses by where the evidence left them" } },
+  { id: "IR-149", layer: "L0", verdict: "keep", status: "active", rule: "D8 画成生命线：主题、按记录顺序的转折和本人说的下一章；没有内容时说会画什么",
+    code: { file: "apps/web/app/onboarding/story-views.tsx", symbol: "LifelineView", test: "apps/web/app/onboarding/story-views.test.tsx", by: "the lifeline draws only what the record holds" } },
+  { id: "IR-150", layer: "L0", verdict: "keep", status: "active", rule: "D9 维持循环画成一个圈：没被推翻的 D9 假设至少两条，最后一步回到第一步",
+    code: { file: "apps/web/app/onboarding/story-views.tsx", symbol: "LoopView", test: "apps/web/app/onboarding/story-views.test.tsx", by: "the loop draws the unrefuted D9 steps round a circle" } },
 ];
 /* i18n-ignore-end */

@@ -428,3 +428,30 @@ html:has(.ob-page){background:var(--ds-bg)}/* The profile module's cards (flow v
 .ob-points summary{cursor:pointer}
 .ob-insight-correction{display:grid;gap:6px}
 .ob-insight-correction textarea{font:inherit;min-height:56px;padding:6px 8px;border:1px solid var(--ds-line);border-radius:6px;background:var(--ds-surface,transparent);color:inherit}
+/* The pictures added after replay 15 (story-views.tsx, 2026-11-15): the hypothesis board, the lifeline, the maintenance loop, the readings. */
+.ob-board{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.ob-board-column{display:grid;align-content:start;gap:4px;padding:6px 8px;border-top:3px solid var(--ds-muted);font-size:13px}
+.ob-board-column[data-column="supported"]{border-top-color:var(--ds-accent)}
+.ob-board-column[data-column="refuted"]{border-top-color:var(--ds-alarm)}
+.ob-board-column b{display:flex;justify-content:space-between;gap:6px}
+.ob-board-column ul{margin:0;padding:0;list-style:none;display:grid;gap:4px}
+.ob-board-column button{all:unset;cursor:pointer;display:block}
+.ob-board-column button:focus-visible{outline:2px solid var(--ds-accent);outline-offset:2px}
+.ob-board-column small,.ob-readings small,.ob-loop>small,.ob-lifeline li small{color:var(--graphite)}
+@media (max-width:520px){.ob-board{grid-template-columns:1fr}}
+.ob-lifeline ol{margin:6px 0 0;padding:0 0 0 18px;list-style:none;border-left:2px solid var(--ds-line);display:grid;gap:8px}
+.ob-lifeline li{position:relative;font-size:13px}
+.ob-lifeline li::before{content:"";position:absolute;left:-26px;top:4px;width:10px;height:10px;border-radius:50%;background:var(--ds-card);border:2px solid var(--ink)}
+.ob-lifeline li[data-next]::before{border-style:dashed;border-color:var(--ds-muted)}
+.ob-lifeline li[data-next]{display:grid;gap:2px}
+.ob-loop{display:grid;gap:6px;justify-items:start}
+.ob-loop-svg{width:100%;max-width:220px;height:auto;justify-self:center}
+.ob-loop-svg .ob-loop-ring{fill:none;stroke:var(--ds-line);stroke-dasharray:3 4}
+.ob-loop-svg line{stroke:var(--ink);stroke-width:1.5}
+.ob-loop-svg marker path{fill:var(--ink)}
+.ob-loop-svg circle:not(.ob-loop-ring){fill:var(--ds-accent-soft);stroke:var(--ink);stroke-width:1.5}
+.ob-loop-svg text{font-size:11px;fill:var(--ink)}
+.ob-loop ol{margin:0;padding-left:20px;display:grid;gap:4px;font-size:13px}
+.ob-readings{display:grid;gap:4px;padding:8px 10px;border-left:3px solid var(--ds-line)}
+.ob-readings ul{margin:0;padding:0;list-style:none;display:grid;gap:2px;font-size:13px}
+.ob-readings li{display:flex;justify-content:space-between;gap:8px}

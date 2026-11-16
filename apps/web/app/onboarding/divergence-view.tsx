@@ -6,6 +6,7 @@ import { buildDivergenceGraph, fitsEntries, fitsFirst, isUrl, type FitsEntry, ty
 import { falsifierCondition } from "./insight-card";
 import { DIMENSION_IDS, DIMENSION_LABEL, type DimensionId, type Hypothesis } from "./interview-contract";
 import { PointsList } from "./points-list";
+import { HypothesisBoard } from "./story-views";
 import type { ProfilePoint } from "@crossline/core";
 
 const STATUS_LABEL: Record<Hypothesis["status"], string> = { open: "待验证", supported: "已支持", refuted: "已推翻", undecided: "未定论" };
@@ -39,6 +40,7 @@ export function DivergenceView({ hypotheses, dimensions, insights, ratings, init
   const label = (item: GraphNode) => item.kind === "dimension" ? `${item.id} ${t(item.label)}` : item.kind === "hypothesis" ? item.hypothesis.statement : item.basis.text;
   return <div className="ob-view ob-map">
     {points ? <PointsList points={points} /> : fits.length > 0 && <FitsList entries={fits} onOpen={(entry) => entry.hypothesisId && setSelected(entry.hypothesisId)} />}
+    <HypothesisBoard hypotheses={hypotheses} onOpen={setSelected} />
     <svg className="ob-map-svg" viewBox={`0 0 ${graph.size} ${graph.size}`} role="group" aria-label={t("画像发散图：维度、假设与证据")}>
       <circle cx={graph.centre} cy={graph.centre} r={graph.size * 0.27} className="ob-map-ring" />
       {graph.edges.map((edge) => <line key={edge.id} x1={edge.x1} y1={edge.y1} x2={edge.x2} y2={edge.y2} className="ob-map-edge" data-kind={edge.kind}

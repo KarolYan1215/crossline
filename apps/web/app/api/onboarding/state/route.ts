@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { PROFILE_SECTIONS_SETTING, sectionClosed, type SectionRecord } from "@crossline/core";
+import { instrumentLevels, PROFILE_INSTRUMENTS_SETTING, PROFILE_SECTIONS_SETTING, readInstrumentAnswers, sectionClosed, type SectionRecord } from "@crossline/core";
 import { INTERVIEW_FLOW_STAGES, flowOf, ONBOARDING_INSIGHTS, progressView, readInsightRatings, readTurnProgress, FIRST_DRAFTS_SETTING, ONBOARDING_LAST_FAILURE, readOnboardingFailure, firstDraftsState, interviewCompleteness, questionKind, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
 import { INTERVIEW_LOCALE_SETTING, extractBacklog, interviewLocale } from "@crossline/db";
 import { isLocale } from "@crossline/i18n";
@@ -102,6 +102,8 @@ export async function GET(request: Request) {
     lines: identityLines(access.ctx).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard), goals: line.goals ?? [], goalParts: line.goalParts ?? [] })),
     lineProfiles: json<Record<string, StoredLineProfile>>("lines.profiles", {}),
     profile: json<Record<string, unknown> | null>("profile.model", null),
+    // The cards' readings, handed back in words (2026-11-15): the dialogue reads the same levels and never quotes a score.
+    scaleReadings: instrumentLevels(readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING))),
     availabilityProposed: Boolean(store.getSetting(workspaceId, "schedule.availability.proposed")),
     // The worker designs the first milestone drafts on its own once the start standard holds: the screen says so instead of offering a
     // second, concurrent run.

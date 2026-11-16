@@ -16,6 +16,8 @@ export type ProfileModelView = {
   dimensions?: import("./interview-contract").DimensionNote[];
   /** The points ledger (the points rules, 2026-11-12); absent or empty on a portrait written in paragraphs. */
   points?: import("@crossline/core").ProfilePoint[];
+  /** The life story (flow v2), drawn as the lifeline; absent on a portrait written before. */
+  careerTheme?: string; turningPoints?: string[]; futureScript?: string;
 };
 export type LineView = { id: string; label: string; rank: number | null; hard: boolean; goals: string[]; goalParts: string[] };
 

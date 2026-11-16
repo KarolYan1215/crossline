@@ -113,6 +113,8 @@ export type OnboardingState = {
   /** Per line: the interview's description and attribute candidates (`goalCandidates` only on lines interviewed before attributes existed). */
   lineProfiles: Record<string, import("@crossline/core").StoredLineProfile>;
   profile: import("./portrait-panel").ProfileModelView | null;
+  /** The cards' readings in words (`instrumentLevels`); absent from a server before 2026-11-15. */
+  scaleReadings?: Array<{ label: string; level: string }>;
   availabilityProposed: boolean;
   /** The right column's week and project axis. */
   week: import("../../lib/onboarding-board").WeekSkeleton;
