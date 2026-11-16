@@ -5,7 +5,7 @@ description: Test-only. Play a new Crossline user answering the onboarding inter
 
 # Crossline Eval Persona
 
-Used only by `scripts/onboarding-eval.ts` and `scripts/persona-eval.ts` on a throwaway database. Accept `{version: "crossline.eval-persona.v1" | "crossline.eval-persona.v2", persona, reply, questions[], files[], cards?, insights?, earlier?}`:
+Used only by `scripts/onboarding-eval.ts` and `scripts/persona-eval.ts` on a throwaway database. Accept `{version: "crossline.eval-persona.v1" | "crossline.eval-persona.v2", persona, reply, questions[], files[], cards?, insights?, earlier?, next?, finish?}`:
 
 - `persona`: everything true about the person you play — their situation, courses, projects, deadlines, habits, views. The interviewer has **not** seen it. In v2 it is a first-person account of the person's life and feelings (a 「生活与感受」 sheet) with a section on how they answer (「作答习惯」): follow that section closely.
 - `reply`: what the interviewer just said; `questions[]`: its questions this round (`id`, `text`, `kind`, `options[]` with `label`).
@@ -13,6 +13,8 @@ Used only by `scripts/onboarding-eval.ts` and `scripts/persona-eval.ts` on a thr
 - `cards[]` (v2, may be empty): rating cards shown under the questions. Each card has `id`, `title` and `items[]` (`id`, `text`, `anchors` — the labels at 1, 3 and 5). The screen shows five dots per item; the person may tap one, leave it, or write a sentence in the card's box instead.
 - `insights` (v2, may be empty): the observations the interviewer made about the person this round, one to three, shown one under another; the screen offers 准 / 不准 / 部分对 under each, and the person answers them in a row.
 - `earlier[]` (v2): the last few rounds as the person saw them — what the interviewer said and what the person answered — so the answers stay consistent.
+- `next` (v2, may be empty): the next step the interviewer proposes, shown under its reply with a button 「好，往下」. Pressing it sends the answers with that line under them.
+- `finish` (v2): the button 「结束并出报告」. `offered` is whether it can be pressed now, `percent` the bar on it, `reminder` what the page says beside it this round (empty when it says nothing).
 
 Answer the way a busy new user does, so the test shows what the interview manages to draw out:
 
@@ -24,7 +26,10 @@ Answer the way a busy new user does, so the test shows what the interview manage
 - Cards: tap the way this person would, with their biases (the 「作答习惯」 section says which way they lean and where they are honest). Leave an item untapped (`score` 0) when the person would not know or would skip it. Use a card's box (`cardWords`) only when this person would rather say it in a sentence; then write it in their voice.
 - `insights`: one entry per card, `index` its place in the input `insights` (0 the first). `verdict` is `fits` when the person would recognise themselves in it, `off` when it would feel wrong or like something said about someone else, `partial` when part of it is right and part is not (then `correction` is the one sentence they would type saying what is right, in their own voice), empty when they would not bother. `correction` is empty unless `verdict` is `partial`. Judge each card on its own: a person who corrected a premise on one card says so again when a later card rests on it.
 
-Return raw JSON only: `{answers: [{questionId, picked, other}], freeText, upload}` for v1; for v2 add `cardTaps: [{itemId, score}]` (score 1–5, or 0 for left alone), `cardWords: [{cardId, words}]` and `insights: [{index, verdict, correction}]` (`verdict` `fits`, `off`, `partial` or empty). `picked` are option labels copied exactly, `freeText` one or two sentences or empty, `upload` file names copied exactly from `files`, item and card ids copied exactly from `cards`.
+- `goOn`: true when this person would press 「好，往下」 under `next` — they are fine moving on to it. False when `next` is empty, or when they would rather keep to something unfinished or say something else first (then say it in `freeText`).
+- `finish`: true when this person would press 「结束并出报告」 now. Only when `finish.offered`; then decide as the person would, from the 「作答习惯」 section and how much they still want to say. A person who would keep talking leaves it false.
+
+Return raw JSON only: `{answers: [{questionId, picked, other}], freeText, upload}` for v1; for v2 add `cardTaps: [{itemId, score}]` (score 1–5, or 0 for left alone), `cardWords: [{cardId, words}]`, `insights: [{index, verdict, correction}]` (`verdict` `fits`, `off`, `partial` or empty), `goOn` and `finish`. `picked` are option labels copied exactly, `freeText` one or two sentences or empty, `upload` file names copied exactly from `files`, item and card ids copied exactly from `cards`.
 
 ## Language
 

@@ -29,12 +29,13 @@ import { configureModelGate, runCodexSkill, setProviderResolver, setUsageSink, s
   installUndiciAssertionGuard, threadProvider, withUsageWorkspace, type ProviderRouting, type SkillUsage } from "../packages/codex/src/index";
 import {
   ONBOARDING_INSIGHTS, PROFILE_CLAIMS_SETTING, PROFILE_INSTRUMENTS_SETTING, THIRD_PARTY_CAPABILITIES, cardWordsHead,
-  composeGoal, instrumentClaims, interviewCompleteness, instrumentReadings, interviewComplete, parseSponsorModels, readInsightRatings, readInstrumentAnswers, readyToStart,
+  NEXT_ACCEPTED, composeGoal, instrumentClaims, interviewCompleteness, instrumentReadings, interviewComplete, parseSponsorModels, readInsightRatings, readInstrumentAnswers, readyToStart,
   scaleAnswerLine, sponsorSpend, type AccessContext, type ProfileCard, type StoredLineProfile
 } from "../packages/core/src/index";
 import { CrosslineStore, interviewChecklistFor, rateInsight } from "../packages/db/src/index";
 import { composeAnswers, type Question } from "../apps/web/app/onboarding/onboarding-types";
 import { openingReply } from "../apps/web/app/onboarding/opening-card";
+import { shouldRemindFull, shouldRemindStart } from "../apps/web/app/onboarding/finish-button";
 import { interviewMetrics } from "../apps/worker/src/interview-metrics";
 import { identityLines } from "../apps/worker/src/lines";
 import { createOnboardingExtractor, extractionSettled, requestExtraction } from "../apps/worker/src/onboarding-extract";
@@ -120,7 +121,7 @@ function cost(key: string) {
 }
 
 // ---- the player ----
-const PLAYER_SCHEMA = { type: "object", additionalProperties: false, required: ["answers", "freeText", "upload", "cardTaps", "cardWords", "insights"], properties: {
+const PLAYER_SCHEMA = { type: "object", additionalProperties: false, required: ["answers", "freeText", "upload", "cardTaps", "cardWords", "insights", "goOn", "finish"], properties: {
   answers: { type: "array", maxItems: 16, items: { type: "object", additionalProperties: false, required: ["questionId", "picked", "other"], properties: {
     questionId: { type: "string", minLength: 1, maxLength: 120 }, picked: { type: "array", maxItems: 6, items: { type: "string", minLength: 1, maxLength: 200 } },
     other: { type: "string", minLength: 0, maxLength: 600 } } } },
@@ -131,10 +132,12 @@ const PLAYER_SCHEMA = { type: "object", additionalProperties: false, required: [
     cardId: { type: "string", minLength: 1, maxLength: 80 }, words: { type: "string", minLength: 0, maxLength: 400 } } } },
   // One rating per observation card the round showed (2026-11-14: cards ready together come in one round), `index` its place in `insights`.
   insights: { type: "array", maxItems: 3, items: { type: "object", additionalProperties: false, required: ["index", "verdict", "correction"], properties: {
-    index: { type: "integer", minimum: 0, maximum: 2 }, verdict: { type: "string", enum: ["fits", "off", "partial", ""] }, correction: { type: "string", maxLength: 300 } } } } } };
+    index: { type: "integer", minimum: 0, maximum: 2 }, verdict: { type: "string", enum: ["fits", "off", "partial", ""] }, correction: { type: "string", maxLength: 300 } } } },
+  // The page's two buttons (2026-11-15): 「好，往下」 under the dialogue's proposed next step, and 「结束并出报告」 once the start standard stands.
+  goOn: { type: "boolean" }, finish: { type: "boolean" } } };
 type Played = { answers: Array<{ questionId: string; picked: string[]; other: string }>; freeText: string; upload: string[];
   cardTaps: Array<{ itemId: string; score: number }>; cardWords: Array<{ cardId: string; words: string }>;
-  insights: Array<{ index: number; verdict: "fits" | "off" | "partial" | ""; correction: string }> };
+  insights: Array<{ index: number; verdict: "fits" | "off" | "partial" | ""; correction: string }>; goOn: boolean; finish: boolean };
 
 /** The cards' part of the reply, as the screen sends it (`cardReplyLines` in profile-cards.tsx, which the worker reads back without a model). */
 function cardLines(cards: readonly ProfileCard[], taps: Record<string, number>, words: Record<string, string>): string[] {
@@ -177,6 +180,8 @@ async function runPerson(name: string, opening: Opening) {
   let turns = 0, state = "", goalsAdopted = 0;
   const started = Date.now();
   let readyAt: number | undefined;
+  // The page's reminders beside 「结束并出报告」, each said once a session (`shouldRemindStart`, `shouldRemindFull`).
+  let startReminded = false, fullReminded = false;
 
   /** A person adopting a long-term goal from the chips (「采用」): the first two attributes, or the one there is, for a line with none. */
   const adoptGoals = () => {
@@ -209,7 +214,7 @@ async function runPerson(name: string, opening: Opening) {
       if (outcome.state === "blocked") { transcript.push(`### 第 ${turns} 轮：中断 ${outcome.code} ${outcome.message}`); log({ turn: turns, blocked: outcome.code }); break; }
       const last = store.listOnboardingMessages(workspaceId, "eval").at(-1)!;
       const turn = last.content as { reply: string; questions: Question[]; cards?: ProfileCard[]; insight?: { text?: string }; moreInsights?: Array<{ text?: string }>;
-        stage?: string; nextAction: string };
+        stage?: string; nextAction: string; next?: string };
       const shownCards = [turn.insight, ...(turn.moreInsights ?? [])].map((card) => card?.text ?? "").filter(Boolean);
       // What the screen shows of the round (the state route): the round as the model wrote it, and the app's own questions not in it.
       const shown = withStore(() => {
@@ -228,9 +233,10 @@ async function runPerson(name: string, opening: Opening) {
       transcript.push(`### 第 ${turns} 轮（${turn.stage ?? ""}）`, "", turn.reply, "",
         ...batch.map((question, index) => `${index + 1}. ${question.text}${question.options.length ? `\n   选项：${question.options.map((option) => option.label).join(" / ")}` : ""}`),
         ...(cards.length ? ["", `卡片：${cards.map((card) => `${card.title}（${card.items.length} 题）`).join("、")}`] : []),
-        ...shownCards.flatMap((card, index) => ["", `洞察${shownCards.length > 1 ? ` ${index + 1}` : ""}：${card}`]), "");
+        ...shownCards.flatMap((card, index) => ["", `洞察${shownCards.length > 1 ? ` ${index + 1}` : ""}：${card}`]),
+        ...(turn.next?.trim() ? ["", `下一步：${turn.next}（按钮「好，往下」）`] : []), "");
       rounds.push({ turn: turns, stage: turn.stage, questions: batch.length, held: shown.extra.length, cards: cards.reduce((sum, card) => sum + card.items.length, 0),
-        insight: shownCards.length, next: turn.nextAction, modelSeconds: Math.round((Date.now() - turnStarted) / 1000),
+        insight: shownCards.length, next: turn.nextAction, proposed: turn.next ?? "", modelSeconds: Math.round((Date.now() - turnStarted) / 1000),
         startOpen: items.filter((item) => item.start && !item.done).map((item) => item.id),
         open: items.filter((item) => !item.done && !item.deferred && item.owner === "interview").map((item) => item.id) });
       log({ turn: turns, stage: turn.stage, questions: batch.length, cards: cards.length, next: turn.nextAction, ready: Boolean(readyAt) });
@@ -251,20 +257,22 @@ async function runPerson(name: string, opening: Opening) {
         const said = side.ok ? [side.output.answers[0]?.other, side.output.freeText].filter(Boolean).join(" ") : "";
         if (said) { research.answer("eval", thread.id, said); transcript.push(`**侧栏调研卡**：${thread.question}`, "", `问：${thread.ask}`, "", `答：${said}`, ""); }
       }
-      // The person presses 「结束并出报告」: once the start standard stands, when the page's completeness is full (it reminds them), or when
-      // the dialogue has nothing more of its own to ask and they have nothing else to say.
+      // The end is the person's (2026-11-15): the page offers 「结束并出报告」 once the start standard stands and says so once, then once more
+      // when the completeness is full; the player decides whether to press it, as a person reading the page would.
       const completeness = interviewCompleteness({ lowerBound: Boolean(readyAt), stagesSeen: rounds.map((round) => String(round.stage ?? "")),
         ...json<{ dimensions?: []; hypotheses?: []; careers?: [] }>("profile.model", {}) });
       log({ turn: turns, completeness: completeness.score, full: completeness.full });
-      // The page also says it in the reply: a person who already said there is nothing more presses the button when it is offered.
-      const closing = batch.some((question) => question.id === "closing-open")
-        || (batch.length <= 1 && /结束并出报告/u.test(turn.reply) && /没有了|没有别的|结束/u.test(text));
-      if (readyAt && (completeness.full || closing)) { transcript.push(`**本人按「结束并出报告」**（完善度 ${Math.round(completeness.score * 100)}%）`, ""); break; }
+      const reminder = shouldRemindFull(completeness.full, fullReminded) ? "访谈已经很完整，可以结束出报告；也可以继续聊"
+        : shouldRemindStart(Boolean(readyAt), completeness.full, startReminded) ? "开始使用需要的已经齐了，现在就可以结束出报告；接着聊，报告会更准" : "";
+      if (completeness.full) fullReminded = true;
+      if (readyAt) startReminded = true;
+      if (reminder) transcript.push(`**页面提示**：${reminder}`, "");
 
       const context = { version: "crossline.eval-persona.v2", persona: life, reply: turn.reply,
         questions: batch.map(({ id, text: body, kind, options }) => ({ id, text: body, kind, options: options.map((option) => ({ label: option.label })) })),
         files: [], cards: cards.map((card) => ({ id: card.id, title: card.title, items: card.items.map((item) => ({ id: item.id, text: item.text, anchors: item.anchors })) })),
-        insights: shownCards, earlier: earlier.slice(-3) };
+        insights: shownCards, earlier: earlier.slice(-3), next: turn.next?.trim() ?? "",
+        finish: { offered: Boolean(readyAt), percent: Math.round(completeness.score * 100), reminder } };
       const play = () => withUsageWorkspace(playerKey, () => runCodexSkill<Played>(client, context, { skillName: "crossline:crossline-eval-persona", cwd: repoRoot,
         // A test-only Skill is never routed to a provider by the rules, so the player names its thread's provider itself.
         provider: threadProvider(routing(playerKey, playerModel), playerModel, "crossline-eval-persona"),
@@ -274,6 +282,9 @@ async function runPerson(name: string, opening: Opening) {
       for (let attempt = 1; attempt <= 4 && !played.ok && rateLimited(played.blocker.message); attempt += 1) { await wait(attempt * 60_000); played = await play(); }
       if (!played.ok) { transcript.push(`模拟用户未能作答：${played.blocker.code} ${played.blocker.message}`); log({ turn: turns, playerBlocked: played.blocker.code }); break; }
       const answer = played.output;
+      if (readyAt && answer.finish) { transcript.push(`**本人按「结束并出报告」**（完善度 ${Math.round(completeness.score * 100)}%）`, ""); log({ turn: turns, finished: true }); break; }
+      const goOn = Boolean(answer.goOn && turn.next?.trim());
+      rounds[rounds.length - 1]!.goOn = goOn;
       const answers = Object.fromEntries((answer.answers ?? []).map((item) => {
         const question = batch.find((candidate) => candidate.id === item.questionId);
         const picked = (question?.options ?? []).filter((option) => (item.picked ?? []).includes(option.label)).map((option) => option.id);
@@ -287,7 +298,9 @@ async function runPerson(name: string, opening: Opening) {
       const rated = (answer.insights ?? []).filter((item, at, all) => item.verdict && item.index < shownCards.length && all.findIndex((other) => other.index === item.index) === at);
       for (const item of rated) rateInsight(store, workspaceId, { sessionId: "eval", seq: last.seq, index: item.index,
         verdict: item.verdict === "partial" && !item.correction.trim() ? "off" : item.verdict as "fits" | "off" | "partial", ...(item.correction.trim() ? { correction: item.correction } : {}) });
-      text = [composeAnswers(batch, answers, answer.freeText), ...cardLines(cards, taps, words)].filter((part) => part.trim()).join("\n") || "不确定。";
+      // 「好，往下」 sends the answers with its line under them, as the page's button does (`NEXT_ACCEPTED`, read back by `nextTaken`).
+      text = [composeAnswers(batch, answers, answer.freeText), ...cardLines(cards, taps, words), ...(goOn ? [NEXT_ACCEPTED] : [])]
+        .filter((part) => part.trim()).join("\n") || "不确定。";
       earlier.push({ interviewer: turn.reply.slice(0, 600), me: text.slice(0, 600) });
       transcript.push("**回答**", "", text, ...rated.map((item) => `（洞察${shownCards.length > 1 ? ` ${item.index + 1}` : ""}：${item.verdict === "fits" ? "准" : item.verdict === "partial" ? `部分对：${item.correction}` : "不准"}）`), "");
     }
