@@ -129,7 +129,6 @@ export function StageView({ state, stage, complete, onChanged }: {
         : progress.of
         ? t("第 {{index}}/{{total}} 部分 · {{label}} · 已谈清 {{clear}}/{{of}}", { index: progress.index, total: progress.total, label: t(progress.label), clear: progress.clear, of: progress.of })
         : t("第 {{index}}/{{total}} 部分 · {{label}}", { index: progress.index, total: progress.total, label: t(progress.label) })}</small>}
-      {!complete && progress?.next && <small>{t("接下来：")}<span className="gen">{progress.next}</span></small>}
       {state.readyToStart && !complete && <small>{t("不限时，随时可以按「结束并出报告」结束访谈")}</small>}
       {state.portraitState?.written
         ? state.portraitState.confirmed ? <a href="/portrait">{t("画像已确认符合本人 · 查看画像 →")}</a>

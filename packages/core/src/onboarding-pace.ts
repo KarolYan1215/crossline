@@ -138,6 +138,16 @@ export function withoutDisclosures<T extends ConversationMessage>(messages: read
 /** The person's consent to talk about what a hard time taught them: not asked, asked and waiting, yes or no (asked once a whole interview). */
 export type LessonConsent = "unasked" | "asked" | "yes" | "no";
 /** The one question that asks it, written by the app (the model only decides when, `askLesson`). */
+/**
+ * What the 「好，往下」 button under a round's `next` sends, on a line of its own (2026-11-15): the person took the step the dialogue
+ * proposed. A reply without it went its own way, which the next round is told (`nextTaken`).
+ */
+export const NEXT_ACCEPTED = "好，往下。"; // i18n-ignore: the reply line the button sends; matched by `nextTaken`
+/** Whether the person took the proposed step: a line of the reply is the button's own (in either language), and nothing else. */
+export function nextTaken(reply: string): boolean {
+  return reply.split("\n").some((line) => /^\s*(?:好，?往下|go on)[。.!！]?\s*$/iu.test(line));
+}
+
 export const LESSON_QUESTION = {
   id: "lesson-consent", kind: "single" as const, allowOther: false, identityId: "", projectId: "",
   // i18n-ignore-start: shown in the interview's language (Chinese only so far, like the profile cards)
@@ -192,8 +202,9 @@ export function readTurnProgress(raw: unknown): TurnProgress | undefined {
   const value = raw as Partial<TurnProgress> | undefined;
   if (!value || typeof value !== "object" || !(ONBOARDING_STAGES as readonly string[]).includes(String(value.part))) return undefined;
   const list = (items: unknown) => Array.isArray(items) ? items.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).slice(0, 8) : [];
+  const said = list(value.said);
   return { part: value.part as OnboardingStage, covered: list(value.covered), open: list(value.open), partDone: value.partDone === true,
-    next: typeof value.next === "string" ? value.next.slice(0, 160) : "" };
+    next: typeof value.next === "string" ? value.next.slice(0, 160) : "", ...(said.length ? { said } : {}) };
 }
 
 /**
@@ -203,7 +214,7 @@ export function readTurnProgress(raw: unknown): TurnProgress | undefined {
  * 2026-11-03 walkthrough had the bar at 「第 2/6 部分 · 指南针」 and the right column at the progress record's 「主线」, part 6 of 6.
  */
 export function progressView(progress: TurnProgress | undefined, stage: string, flow: InterviewFlow = "v1",
-  earlier: string[] = []): { index: number; total: number; label: string; clear: number; of: number; next: string; reached: number } {
+  earlier: string[] = []): { index: number; total: number; label: string; clear: number; of: number; reached: number } {
   const parts = interviewParts(flow);
   const part = (ONBOARDING_STAGES as readonly string[]).includes(stage) ? stage as OnboardingStage : progress?.part ?? (stage as OnboardingStage);
   const at = parts.indexOf(part);
@@ -214,7 +225,7 @@ export function progressView(progress: TurnProgress | undefined, stage: string, 
   // interview starting over (W-235: 「第 6/6 部分 · 还剩约 5 分钟」 became 「第 2/6 部分 · 还剩约 25 分钟」 one round later).
   const reached = Math.max(index, ...earlier.map((one) => parts.indexOf(one as OnboardingStage) + 1));
   return { index, total: parts.length, label: PART_LABEL[part] ?? "定向", clear: own?.partDone ? Math.max(clear, of) : clear,
-    of: own?.partDone ? Math.max(clear, of) : of, next: progress?.next ?? "", reached };
+    of: own?.partDone ? Math.max(clear, of) : of, reached };
 }
 
 /** The progress record as the lines the next round starts from (for the dialogue model, not shown). */
@@ -225,7 +236,8 @@ export function progressLines(progress: TurnProgress | undefined, flow: Intervie
   return [`上轮判断：第 ${Math.max(1, parts.indexOf(progress.part) + 1)}/${parts.length} 部分「${PART_LABEL[progress.part]}」${progress.partDone ? "已完成" : "未完成"}`,
     ...(progress.covered.length ? [`已谈清：${progress.covered.join("；")}`] : []),
     ...(progress.open.length ? [`未谈：${progress.open.join("；")}`] : []),
-    ...(progress.next ? [`下一步：${progress.next}`] : [])];
+    ...(progress.next ? [`下一步：${progress.next}`] : []),
+    ...(progress.said?.length ? [`已经对本人说过的张力：${progress.said.join("；")}`] : [])];
 }
 
 /**

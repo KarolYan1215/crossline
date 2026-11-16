@@ -276,7 +276,9 @@ export type TurnInsight = {
 /** A domain line's checklist as the interview is given it (built by `domainGuides` in @crossline/identity-packs). */
 export type DomainGuideContext = { lineId: string; label: string; domain: string; ask: string[]; slots: string[]; attributeHints: string[] };
 
-export type TurnProgress = { part: OnboardingStage; covered: string[]; open: string[]; partDone: boolean; next: string };
+export type TurnProgress = { part: OnboardingStage; covered: string[]; open: string[]; partDone: boolean; next: string;
+  /** The tensions and patterns already said to the person, a few words each (2026-11-15: replay 15 said one tension nine times). */
+  said?: string[] };
 
 /**
  * What the dialogue is shown at the start of the interview (later turns only carry the new reply). The dialogue cites nothing, so it reads
@@ -640,7 +642,8 @@ function turnFields(ids?: TurnIds) {
     pointChanges: { type: "array", maxItems: 20, items: POINT_CHANGE_FIELD },
     // The interview's own progress record, rewritten every round and handed back at the start of the next (`TurnProgress`).
     progress: object({ part: { type: "string", enum: [...ONBOARDING_STAGES] }, covered: { type: "array", maxItems: 8, items: text(60) },
-      open: { type: "array", maxItems: 8, items: text(60) }, partDone: { type: "boolean" }, next: text(160) }),
+      open: { type: "array", maxItems: 8, items: text(60) }, partDone: { type: "boolean" }, next: text(160),
+      said: { type: "array", maxItems: 8, items: text(40) } }),
     lineProfiles: { type: "array", maxItems: 8, items: object({ lineId: line, description: { type: "string", maxLength: 800 },
       attributeCandidates: { type: "array", maxItems: ATTRIBUTE_CANDIDATES_MAX,
         items: object({ text: text(ATTRIBUTE_MAX_LENGTH), kind: ATTRIBUTE_KIND_FIELD, refs: REFS }) } }) },

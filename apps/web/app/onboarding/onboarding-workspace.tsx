@@ -318,6 +318,12 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     return <div className="ob-turn ob-assistant" key={message.seq}>
       <p className="gen">{turn.reply}</p>
       {insightCards(message, !folded, folded ? "rated" : "all")}
+      {latest && !complete && !waiting && turn.next?.trim() && <p className="ob-next">
+        <span className="gen">{turn.next}</span>
+        {/* The step the dialogue proposes (2026-11-15): the button sends the round's answers with its own line, which the next round reads as taken. */}
+        <button type="button" className="ob-btn ob-quiet" disabled={busy !== "" || background}
+          onClick={() => void runTurn([composed, t("好，往下。")].filter((part) => part.trim()).join("\n"))}>{t("好，往下")}</button>
+      </p>}
       {latest && turn.nextAction === "ready_for_milestones" && state.readyToStart && <p className="ob-done">{t("信息已基本完整，可以在下方设计里程碑；画像报告随后生成。")}</p>}
     </div>;
   };

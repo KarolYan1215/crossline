@@ -4,7 +4,7 @@ import {
   PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, type TurnQuestion, keepOnboardingDialogue, droppedOnboardingItems, ONBOARDING_KEEP_EARLY_MAX, onboardingDialogueSchema,
   validateOnboardingDialogue, locateQuote,
   type ProfileGap, type ProfileModel, type OnboardingStage, ASSESS_RESULT_SETTING, TYPE_TABLE,
-  mentionsSelfHarm, safetyRound, sensitiveReplies, withoutDisclosures, disclosureEchoes, lessonAnswer, LESSON_QUESTION, type LessonConsent, readTurnProgress, safetyReplyOnly, researchCopied, RESEARCH_FIGURES_MAX,
+  mentionsSelfHarm, safetyRound, sensitiveReplies, withoutDisclosures, disclosureEchoes, lessonAnswer, LESSON_QUESTION, nextTaken, type LessonConsent, readTurnProgress, safetyReplyOnly, researchCopied, RESEARCH_FIGURES_MAX,
   inventedDates, type KnownSources, type OnboardingDialogue, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, ONBOARDING_LAST_FAILURE, readPartialTurn, type OnboardingProgress, calendarWeek,
   tFor, flowOf, INTERVIEW_FLOW_STAGES, PROFILE_MODULE_STAGES, cardsFor, readCardAnswers, mergeInstrumentAnswers, readInstrumentAnswers,
   settledItems, PROFILE_INSTRUMENTS_SETTING, type CardSet, type InterviewFlow, type ProfileCard, type ProfileStage, INTERVIEW_PACE
@@ -19,7 +19,7 @@ import { localeOf } from "./locale";
 import { adoptLineGoal, identityLines } from "./lines";
 import { checklistAnswered, interviewLedger, ledgerForModel, linesAnsweredUnread, recordReplyAnswers, recordRound, syncGapQuestions } from "./question-ledger";
 import { mergeTools } from "./ledger-index";
-import { standingLines } from "./onboarding-standing";
+import { SATURATED_RUNS, standingLines } from "./onboarding-standing";
 import { interviewReadTools, READ_TOOLS_INSTRUCTIONS } from "./onboarding-read-tools";
 import { CARD_TOOLS_INSTRUCTIONS, ECHO_RUN, cardTools, checkInsights, checkOpenItems, checkQuestions, checkResearch, emptyDraft, sharedRun, undecidedDay, withDraft,
   type DateSubject } from "./onboarding-cards";
@@ -394,6 +394,13 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       return out;
     };
     const startMetRound = focusLine || startOpen() ? null : coverage.startMetRound ?? assistantRounds.length + 1;
+    /** The step the round before proposed, which the person took with the button or went past (2026-11-15). */
+    const lastNext = String((assistantRounds.at(-1)?.content as { next?: string } | undefined)?.next ?? "").trim();
+    /** Facts the latest ledger extractions of this interview wrote, for the replies they read (`onboarding.extracted`). */
+    const extractedFacts = () => store.listEvents(workspaceId, { type: "onboarding.extracted", entityId: sessionId })
+      .map((event) => event.payload as { replies?: number; facts?: number; lane?: string })
+      .filter((payload) => (payload.lane ?? "ledger") === "ledger" && Number(payload.replies) > 0)
+      .slice(-SATURATED_RUNS).map((payload) => Number(payload.facts) || 0);
     const standing = () => {
       if (focusLine) return {};
       const ratings = readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS));
@@ -407,6 +414,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
           return { stage: content.stage ?? "", questions: content.questions?.length ?? 0, cards, verdicts };
         }),
         stage: stageNow, stageOrder: stageOrderFor(flow), startMetRound, undecided: dateSubjects().filter((item) => item.undecided).map((item) => item.about),
+        ...(lastNext ? { lastNext: { text: lastNext, taken: nextTaken(replyText) } } : {}), facts: extractedFacts(),
         startMissing: checklistNow().filter((item) => item.start && !item.done).map((item) => item.label),
         profile: { dimensions: profile.dimensions, hypotheses: profile.hypotheses, careers: profile.careers }
       }) };
@@ -527,6 +535,9 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       if (lessonWhy) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { detail: `askLesson 写 false：${lessonWhy}。` }); // i18n-ignore: model-facing repair note
       // The scale's scores in the reply (2026-11-15, replay 15 quoted 「5/5」 and read one item the wrong way round): the page shows the
       // readings; the dialogue says how a tendency shows in a day.
+      // The step the dialogue proposes, every round it asks (2026-11-15, the owner: the interview paces itself and says where it would go).
+      if (!safetyRound(valid) && valid.nextAction === "ask" && !valid.next?.trim()) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
+        detail: "next 是空的。每轮在 next 里写一句你提议的下一步（下一个步骤，不是下一个阶段），页面放在回复末尾，配「好，往下」按钮。" }); // i18n-ignore: model-facing repair note
       if (SCORE_TALK.test(`${valid.reply}\n${valid.next ?? ""}`)) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
         detail: "reply 或 next 报了量表的分数或说法（「n/5」「自评」「最重那一档」）。量表读数由页面交还本人，你手上是 scaleReadings 的读数：说这个倾向在本人的日子里怎么表现，不写分数和档位。" }); // i18n-ignore: model-facing repair note
       // Each question, waiting item, card and research question through its check: what fails comes back with why, the rest stands.
@@ -582,7 +593,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       return kept && droppedOnboardingItems(merged, kept) <= ONBOARDING_KEEP_EARLY_MAX
         && researchCopied(kept.reply, findings()).length <= RESEARCH_FIGURES_MAX && !setDates(kept.reply).length
         && (safetyRound(kept) || !(echoOf(kept.reply) || echoOf(kept.next ?? ""))) && !lessonRefused(kept)
-        && !SCORE_TALK.test(`${kept.reply}\n${kept.next ?? ""}`)
+        && !SCORE_TALK.test(`${kept.reply}\n${kept.next ?? ""}`) && (safetyRound(kept) || kept.nextAction !== "ask" || Boolean(kept.next?.trim()))
         && !(!focusLine && startOpen() && endHinted(kept.reply)) ? kept : undefined;
     };
 

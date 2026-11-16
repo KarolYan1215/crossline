@@ -834,7 +834,6 @@
   "第 {{index}}/{{total}} 部分 · {{label}}": "Part {{index}}/{{total}} · {{label}}",
   "回到第 {{index}} 部分「{{label}}」补问（已到第 {{reached}}/{{total}} 部分）": "Back to part {{index}} ({{label}}) for one more question (reached part {{reached}}/{{total}})",
   "第 {{index}}/{{total}} 部分 · {{label}} · 已谈清 {{clear}}/{{of}}": "Part {{index}}/{{total}} · {{label}} · {{clear}}/{{of}} covered",
-  "接下来：": "Next: ",
   "开场": "Opening",
   "处境": "Situation",
   "技术信息": "Technical details",

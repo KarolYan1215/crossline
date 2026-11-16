@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore, rateInsight, writeExtractState } from "@crossline/db";
-import { cardWordsHead, DISCLOSURE_PLACEHOLDER, LESSON_QUESTION, PROFILE_FRAMEWORK, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
+import { cardWordsHead, DISCLOSURE_PLACEHOLDER, LESSON_QUESTION, NEXT_ACCEPTED, PROFILE_FRAMEWORK, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
   type OnboardingProgress, type ProfileCard } from "@crossline/core";
 import { cardsForRound, createOnboardingSessionRunner as createRunner, finishInterview, INSTRUCTIONS, ONBOARDING_SKILL, stageOrderFor, withoutEndHint } from "./onboarding-session";
 import { correctedSince, correctionUnread, INSTRUCTIONS as EXTRACT_INSTRUCTIONS } from "./onboarding-extract";
@@ -37,7 +37,7 @@ const turn = ({ insight, ...over }: { insight?: { text: string; [key: string]: u
   reply: "收到，我先确认几件事。",
   questions: [{ id: "q1", text: "项目 A 的图表清单在哪？", kind: "single", allowOther: true, identityId: "research", projectId: "westlake", followUp: true,
     options: [{ id: "a", label: "师兄给的文档", detail: "" }, { id: "b", label: "只在聊天记录里", detail: "" }] }],
-  slotUpdates: [], projectsDetected: [], flywheelCandidates: [], coverage: [], nextAction: "ask", ...over
+  slotUpdates: [], projectsDetected: [], flywheelCandidates: [], coverage: [], nextAction: "ask", next: "接着问项目 A 的图表清单。", ...over
 });
 
 const firstAnswer = turn({
@@ -835,6 +835,18 @@ test("a reply saying what the card beside it says goes back once (2026-11-15)", 
   const content = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string; insight?: { text: string } };
   expect(content).toMatchObject({ reply: "周末呢？", insight: { text: insight.text } });
   expect(dialogue(prompts).filter((prompt) => prompt.includes("reply 和观察卡说了同一段话"))).toHaveLength(1);
+});
+
+test("a round that asks proposes its next step, and the next round is told whether the person took it (2026-11-15)", async () => {
+  const { rpc, prompts } = fakeRuntime([turn({ next: "" }), turn({ next: "聊聊创业线现在的项目" }), turn(), turn()]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  await run({ sessionId: "s", text: "周末一般在家。" });
+  expect(dialogue(prompts).filter((prompt) => prompt.includes("next 是空的"))).toHaveLength(1);
+  expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { next?: string }).next).toBe("聊聊创业线现在的项目");
+  await run({ sessionId: "s", text: `【项目 A 的图表清单在哪？】选择：师兄给的文档\n${NEXT_ACCEPTED}` });
+  expect(dialogue(prompts).at(-1)).toContain("上轮提议的下一步「聊聊创业线现在的项目」：本人按了「好，往下」。");
+  await run({ sessionId: "s", text: "先说一下周末的事。" });
+  expect(dialogue(prompts).at(-1)).toContain("本人没按，写了自己的话。");
 });
 
 test("as the person reads a round: the safety reply ends at its help lines; the rest of the reply and the questions are the model's own", async () => {

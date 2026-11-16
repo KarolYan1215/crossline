@@ -345,6 +345,8 @@ html:has(.ob-page){background:var(--ds-bg)}/* The profile module's cards (flow v
 .ob-finish-track i{display:block;height:100%;background:var(--ds-accent)}
 .ob-finish-missing{font-size:12px;color:var(--graphite);text-align:right}
 .ob-finish-reminder{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin:0;padding:6px 12px;font-size:13px;border-left:3px solid var(--ds-accent);background:var(--ds-accent-soft);border-radius:0 8px 8px 0}
+.ob-next{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin:8px 0 0;padding:6px 0 0;border-top:1px dashed var(--ds-line, currentColor)}
+.ob-next > span{flex:1 1 16em}
 .ob-map-svg{width:100%;max-width:340px;height:auto;justify-self:center;overflow:visible}
 .ob-map-ring{fill:none;stroke:var(--ds-line);stroke-dasharray:2 4}
 .ob-map-centre{fill:var(--ink)}

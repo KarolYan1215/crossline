@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, test } from "vitest";
 import { capacityConflict, timelineDeadlines, checkInsight, fixedScheduleLines, interviewAbstract, lineWeights, portraitConfirmedByInsights, progressLines, progressView, readTurnProgress, skeletonDraft,
-  DISCLOSURE_PLACEHOLDER, SAFETY_ROUND_PLACEHOLDER, LESSON_QUESTION, disclosureEchoes, lessonAnswer, sensitiveReplies, withoutDisclosures } from "./onboarding-pace";
+  DISCLOSURE_PLACEHOLDER, SAFETY_ROUND_PLACEHOLDER, LESSON_QUESTION, NEXT_ACCEPTED, disclosureEchoes, lessonAnswer, nextTaken, sensitiveReplies, withoutDisclosures } from "./onboarding-pace";
 import { DEADLINE_GUESS_PREFIX, answeredGapFacts, profileGaps } from "./profile-gaps";
 import { interviewChecklist, interviewComplete, interviewOwnedOpen } from "./interview-checklist";
 
@@ -48,6 +48,12 @@ describe("进度账", () => {
     expect(progressView(progress, "situation")).toMatchObject({ index: 3, total: 5, clear: 1, of: 2 });
     expect(readTurnProgress({ part: "nope" })).toBeUndefined();
     expect(progressView(undefined, "details").index).toBe(5);
+  });
+  it("说过的张力记在进度里，下一轮读回（2026-11-15）", () => {
+    const progress = readTurnProgress({ part: "energy", covered: [], open: [], partDone: false, next: "", said: ["和人一起才投入", " "] });
+    expect(progress?.said).toEqual(["和人一起才投入"]);
+    expect(progressLines(progress)).toContain("已经对本人说过的张力：和人一起才投入");
+    expect(readTurnProgress({ part: "energy", covered: [], open: [], partDone: false, next: "" })).not.toHaveProperty("said");
   });
   it("最远到过的部分记下来：回到前面的部分补问一题，不算重新开始（W-235）", () => {
     expect(progressView(undefined, "compass", "v2", ["narrative", "compass", "lines", "compass"])).toMatchObject({ index: 2, total: 6, reached: 6 });
@@ -177,4 +183,12 @@ it("the lesson question's answer: only 「可以聊聊」 is a yes", () => {
   expect(lessonAnswer(`【${LESSON_QUESTION.text}】选择：可以聊聊`)).toBe("yes");
   expect(lessonAnswer(`【${LESSON_QUESTION.text}】选择：先不聊`)).toBe("no");
   expect(lessonAnswer("我想先说说别的。")).toBe("no");
+});
+
+test("the person took the proposed step only when a line of the reply is the button's own (2026-11-15)", () => {
+  expect(nextTaken(NEXT_ACCEPTED)).toBe(true);
+  expect(nextTaken(`【项目 A 的图表清单在哪？】选择：师兄给的文档\n${NEXT_ACCEPTED}`)).toBe(true);
+  expect(nextTaken("Go on.")).toBe(true);
+  expect(nextTaken("好，往下之前我想先说一下周末的事。")).toBe(false);
+  expect(nextTaken("周末一般在家。")).toBe(false);
 });

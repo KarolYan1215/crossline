@@ -22,12 +22,18 @@ export type StandingInput = {
   startMissing: string[];
   /** Days the person said are not set yet, by the subject they were asked under (`about`). */
   undecided?: string[];
+  /** The step the last round proposed (`next`), and whether the person took it with the button (`nextTaken`) or wrote their own. */
+  lastNext?: { text: string; taken: boolean };
+  /** Facts the latest extraction runs wrote, oldest first: how much the latest replies still add (a fact, never a budget). */
+  facts?: number[];
   /** The working portrait's dimension notes, hypotheses and career options (`ProfileModel`). */
   profile: Pick<CompletenessInput, "dimensions" | "hypotheses" | "careers">;
 };
 
 /** Rounds the latest cards and question counts are reported for. */
 export const STANDING_RECENT = 3;
+/** Extraction runs in a row with no new fact that the header calls out as such. */
+export const SATURATED_RUNS = 3;
 
 const VERDICT = { fits: "准", partial: "部分对", off: "不准" } as const;
 
@@ -50,6 +56,10 @@ export function standingLines(input: StandingInput): string[] {
     `阶段：走过 ${walked.join("、") || "无"}${left.length ? `；还没走 ${left.join("、")}` : "；全部走过"}。`,
     input.startMetRound !== null ? `开始标准：从第 ${input.startMetRound} 轮起已齐，本人可以按「结束并出报告」。`
       : `开始标准：还没齐，缺 ${input.startMissing.join("、") || "几项"}。`,
+    ...(input.lastNext ? [input.lastNext.taken ? `上轮提议的下一步「${input.lastNext.text}」：本人按了「好，往下」。`
+      : `上轮提议的下一步「${input.lastNext.text}」：本人没按，写了自己的话。`] : []),
+    ...(input.facts?.length ? [`最近 ${input.facts.length} 次整理记下的事实：${input.facts.join("、")} 条`
+      + (input.facts.length >= SATURATED_RUNS && input.facts.every((count) => count === 0) ? "（连续几次没有新事实）。" : "。")] : []),
     ...(input.undecided?.length ? [`本人说还没定的日子（不再问，沿用这些叫法）：${input.undecided.join("；")}。`] : []),
     ...(input.startMetRound === null ? []
       : completeness.full ? ["ready_for_milestones 的条件全部齐了。"]

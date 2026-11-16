@@ -38,3 +38,12 @@ test("days the person said are not set are listed, so the dialogue keeps their n
   const lines = standingLines({ rounds: [round("lines")], stage: "lines", stageOrder: ORDER, startMetRound: null, startMissing: [], undecided: ["恢复投递", "开始写论文"], profile: {} });
   expect(lines).toContain("本人说还没定的日子（不再问，沿用这些叫法）：恢复投递；开始写论文。");
 });
+
+test("the header says whether the person took the last proposed step, and how much the latest extractions found (2026-11-15)", () => {
+  const base = { rounds: [round("lines")], stage: "lines", stageOrder: ORDER, startMetRound: null, startMissing: [], profile: {} };
+  expect(standingLines({ ...base, lastNext: { text: "聊聊创业线", taken: true } })).toContain("上轮提议的下一步「聊聊创业线」：本人按了「好，往下」。");
+  expect(standingLines({ ...base, lastNext: { text: "聊聊创业线", taken: false } })).toContain("上轮提议的下一步「聊聊创业线」：本人没按，写了自己的话。");
+  expect(standingLines({ ...base, facts: [4, 0, 1] })).toContain("最近 3 次整理记下的事实：4、0、1 条。");
+  expect(standingLines({ ...base, facts: [0, 0, 0] })).toContain("最近 3 次整理记下的事实：0、0、0 条（连续几次没有新事实）。");
+  expect(standingLines(base).some((line) => line.includes("下一步") || line.includes("整理"))).toBe(false);
+});

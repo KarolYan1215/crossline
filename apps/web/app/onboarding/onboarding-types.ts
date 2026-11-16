@@ -33,6 +33,8 @@ export type AssistantTurn = {
   moreInsights?: TurnInsightView[];
   /** The profile module's cards the app put in this round (flow v2): answered by tapping one of five dots, or in words in the card's box. */
   cards?: import("@crossline/core").ProfileCard[];
+  /** The step the dialogue proposes, shown at the reply's end with a 「好，往下」 button (2026-11-15); absent on rounds stored before. */
+  next?: string;
 };
 export type TurnInsightView = {
   /** The hypothesis it asks about (the points rules); 「部分对」 is offered only then. */
@@ -89,7 +91,7 @@ export type OnboardingState = {
   /** What was read from the files and adopted without a click (or left out as unsure), each removable (`loadAdoptedDates`). */
   adoptedDates?: { items: Array<DateBatchItem & { batchId: string; adopted: boolean }>; dropped: string[] };
   /** Where the interview is, by its own progress record: part n of five, how much of it is clear, and what it asks next. */
-  progress?: { index: number; total: number; label: string; clear: number; of: number; next: string; reached?: number };
+  progress?: { index: number; total: number; label: string; clear: number; of: number; reached?: number };
   /** The capacity conflict and, once the start standard stands, the week's draft (`weekCapacity`). */
   capacity?: import("@crossline/core").WeekCapacity;
   skeleton?: import("@crossline/core").SkeletonBlock[];
