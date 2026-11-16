@@ -235,5 +235,17 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     text: { file: INTERVIEW_SKILL, anchor: "**最近三轮的卡多被评「部分对」，这一轮先问再出卡。**" } },
   { id: "IR-120", layer: "L2", verdict: "model", status: "active", rule: "不把本人刚定的安排换说法写成卡",
     text: { file: INTERVIEW_SKILL, anchor: "**不把本人刚定的安排写成卡。**" } },
+  // Disclosures (2026-11-15, after replay 15 retold one in a card): no model reads the words again, what points back at them is returned,
+  // and what the hard time taught is talked about only after the person said yes to the app's own question.
+  { id: "IR-121", layer: "L0", verdict: "keep", status: "active", rule: "披露所在的回复，在整理、画像、问题记录和重建的对话线程里都换成占位，模型读不到原文",
+    code: { file: `${CORE}/onboarding-pace.ts`, symbol: "withoutDisclosures", test: `${CORE}/onboarding-pace.test.ts` } },
+  { id: "IR-122", layer: "L0", verdict: "keep", status: "active", rule: "对话线程还留着披露原文时，答完它的下一轮重建线程",
+    code: { file: `${WORKER}/onboarding-session.ts`, symbol: "unredacted", test: `${WORKER}/onboarding-session.test.ts`, by: "a disclosure's words leave the dialogue's thread" } },
+  { id: "IR-123", layer: "L0", verdict: "return", status: "active", rule: "回复、下一步、题目和卡用了自伤字眼或披露独有的四字原话，退回；修复用完后去掉那一句",
+    code: { file: `${CORE}/onboarding-pace.ts`, symbol: "disclosureEchoes", test: `${CORE}/onboarding-pace.test.ts` } },
+  { id: "IR-124", layer: "L0", verdict: "keep", status: "active", rule: "谈艰难时期学到什么，只由应用的固定题征得同意，整场一次，不答或「先不聊」就整场不提",
+    code: { file: `${CORE}/onboarding-pace.ts`, symbol: "lessonAnswer", test: `${CORE}/onboarding-pace.test.ts` } },
+  { id: "IR-125", layer: "L2", verdict: "model", status: "active", rule: "同意之后只谈先兆、帮到的人和事、怎么缓过来的，不问不复述经过",
+    text: { file: INTERVIEW_SKILL, anchor: "**本人同意以后，只谈先兆、帮到的人和事、怎么缓过来的。**" } },
 ];
 /* i18n-ignore-end */

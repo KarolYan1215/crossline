@@ -1,4 +1,4 @@
-import { answersInReply, freeTextAnswers, ledgerLines, unsureAnswer, type LedgerQuestion, type ProfileGap, type TurnQuestion } from "@crossline/core";
+import { DISCLOSURE_PLACEHOLDER, answersInReply, freeTextAnswers, ledgerLines, sensitiveReplies, unsureAnswer, type LedgerQuestion, type ProfileGap, type TurnQuestion } from "@crossline/core";
 import type { CrosslineStore, StoredSentence } from "@crossline/db";
 
 /**
@@ -10,8 +10,25 @@ const roundKey = (sessionId: string, seq: number, id: string) => `iq:${sessionId
 /** The dialogue's own answered questions shown by text alone beyond the latest ones (`ledgerForModel`). */
 export const EARLIER_SHOWN = 80;
 
-const interviewQuestions = (store: CrosslineStore, workspaceId: string, sessionId: string) => store.listQuestions(workspaceId, { kind: "interview" })
-  .filter((question) => question.key.startsWith("gap:") || question.key.startsWith(`iq:${sessionId}:`));
+const interviewQuestions = (store: CrosslineStore, workspaceId: string, sessionId: string) => withoutDisclosedAnswers(store, workspaceId, sessionId,
+  store.listQuestions(workspaceId, { kind: "interview" }).filter((question) => question.key.startsWith("gap:") || question.key.startsWith(`iq:${sessionId}:`)));
+
+/**
+ * The ledger with every answer given in a reply a disclosure sits in (`sensitiveReplies`) replaced by the placeholder (2026-11-15): the
+ * ledger is shown to the dialogue every round and read by `read_ledger`, so an answer quoting the disclosure would carry it back. An answer
+ * is the reply's by the sentences it was given in, or else by the moment it was recorded (the reply's own).
+ */
+function withoutDisclosedAnswers<T extends LedgerQuestion>(store: CrosslineStore, workspaceId: string, sessionId: string, questions: T[]): T[] {
+  const messages = store.listOnboardingMessages(workspaceId, sessionId);
+  const hidden = sensitiveReplies(messages);
+  if (!hidden.size) return questions;
+  const replies = messages.filter((message) => message.role === "user" && hidden.has(`reply-${message.seq}`));
+  const sentences = new Set(replies.flatMap((message) => store.ensureEvidence(workspaceId, "reply", `${sessionId}#${message.seq}`,
+    String((message.content as { text?: string }).text ?? "")).map((sentence) => sentence.id)));
+  const times = new Set(replies.map((message) => message.createdAt));
+  return questions.map((question) => question.answer && (question.answerSentences.some((id) => sentences.has(id)) || times.has(question.answeredAt ?? ""))
+    ? { ...question, answer: DISCLOSURE_PLACEHOLDER, answerSentences: [] } : question);
+}
 /** The interview's ledger as a round's questions are checked against it (`checkQuestions`): every question but the dropped ones. */
 export const interviewLedger = (store: CrosslineStore, workspaceId: string, sessionId: string): LedgerQuestion[] =>
   interviewQuestions(store, workspaceId, sessionId).filter((question) => question.status !== "dropped");

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { capacityConflict, timelineDeadlines, checkInsight, fixedScheduleLines, interviewAbstract, lineWeights, portraitConfirmedByInsights, progressLines, progressView, readTurnProgress, skeletonDraft } from "./onboarding-pace";
+import { capacityConflict, timelineDeadlines, checkInsight, fixedScheduleLines, interviewAbstract, lineWeights, portraitConfirmedByInsights, progressLines, progressView, readTurnProgress, skeletonDraft,
+  DISCLOSURE_PLACEHOLDER, SAFETY_ROUND_PLACEHOLDER, LESSON_QUESTION, disclosureEchoes, lessonAnswer, sensitiveReplies, withoutDisclosures } from "./onboarding-pace";
 import { DEADLINE_GUESS_PREFIX, answeredGapFacts, profileGaps } from "./profile-gaps";
 import { interviewChecklist, interviewComplete, interviewOwnedOpen } from "./interview-checklist";
 
@@ -147,4 +148,33 @@ it("counts a project's deadline once when one of its items falls on it, and name
     { date: "2026-11-21", title: "ECE 555 作业 5" },
     { date: "2026-11-20", title: "ECE 548 期中考试" }
   ]);
+});
+
+it("the replies no model reads again: a disclosure answered as one, its answer, and one naming self-harm no round has answered yet", () => {
+  const user = (seq: number, text: string) => ({ role: "user", seq, content: { text } });
+  const round = (seq: number, safety: boolean) => ({ role: "assistant", seq, content: { reply: "好。", safety } });
+  const topic = [user(1, "我在写综述，题目是大学生自杀预防。"), round(2, false), user(3, "下周交。")];
+  expect([...sensitiveReplies(topic)]).toEqual([]);
+  const own = [user(1, "大二自残过。"), round(2, true), user(3, "现在没有了。"), round(4, false), user(5, "周末在家。")];
+  expect([...sensitiveReplies(own)].sort()).toEqual(["reply-1", "reply-3"]);
+  // The extraction reads a reply beside its round: before the round says what it was, it is held back.
+  expect([...sensitiveReplies([user(1, "有过不想活的念头。")])]).toEqual(["reply-1"]);
+  const shown = withoutDisclosures(own, sensitiveReplies(own));
+  expect(shown.map((message) => (message.content as { text?: string; reply?: string }).text ?? (message.content as { reply?: string }).reply))
+    .toEqual([DISCLOSURE_PLACEHOLDER, SAFETY_ROUND_PLACEHOLDER, DISCLOSURE_PLACEHOLDER, "好。", "周末在家。"]);
+});
+
+it("a text echoes a disclosure by four Chinese characters only it said, not by words the other replies also hold", () => {
+  const disclosure = ["大二那段时间压力很大，没人可说，晚上睡不着。"];
+  const ordinary = ["那段时间我在实习，晚上睡不着就写代码。"];
+  expect(disclosureEchoes("你那时没人可说，后来转了专业。", disclosure, ordinary)).toEqual(["没人可说"]);
+  expect(disclosureEchoes("那段时间你晚上睡不着。", disclosure, ordinary)).toEqual([]);
+  expect(disclosureEchoes("压力很大没人可说的时候", disclosure, ordinary)).toEqual(["压力很大没人可说"]);
+  expect(disclosureEchoes("Nobody would listen to me then.", ["back then nobody would listen to me"], [])).toEqual(["nobody would listen to", "would listen to me"]);
+});
+
+it("the lesson question's answer: only 「可以聊聊」 is a yes", () => {
+  expect(lessonAnswer(`【${LESSON_QUESTION.text}】选择：可以聊聊`)).toBe("yes");
+  expect(lessonAnswer(`【${LESSON_QUESTION.text}】选择：先不聊`)).toBe("no");
+  expect(lessonAnswer("我想先说说别的。")).toBe("no");
 });

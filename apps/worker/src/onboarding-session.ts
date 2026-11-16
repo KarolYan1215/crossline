@@ -4,7 +4,7 @@ import {
   PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, type TurnQuestion, keepOnboardingDialogue, droppedOnboardingItems, ONBOARDING_KEEP_EARLY_MAX, onboardingDialogueSchema,
   validateOnboardingDialogue, locateQuote,
   type ProfileGap, type ProfileModel, type OnboardingStage, ASSESS_RESULT_SETTING, TYPE_TABLE,
-  disclosureReplies, mentionsSelfHarm, safetyRound, readTurnProgress, safetyReplyOnly, researchCopied, RESEARCH_FIGURES_MAX,
+  mentionsSelfHarm, safetyRound, sensitiveReplies, withoutDisclosures, disclosureEchoes, lessonAnswer, LESSON_QUESTION, type LessonConsent, readTurnProgress, safetyReplyOnly, researchCopied, RESEARCH_FIGURES_MAX,
   inventedDates, type KnownSources, type OnboardingDialogue, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, ONBOARDING_LAST_FAILURE, readPartialTurn, type OnboardingProgress, calendarWeek,
   tFor, flowOf, INTERVIEW_FLOW_STAGES, PROFILE_MODULE_STAGES, cardsFor, readCardAnswers, mergeInstrumentAnswers, readInstrumentAnswers,
   settledItems, PROFILE_INSTRUMENTS_SETTING, type CardSet, type InterviewFlow, type ProfileCard, type ProfileStage, INTERVIEW_PACE
@@ -72,7 +72,11 @@ type Announced = { announcedSources?: string[]; calendarSent?: string; heardAt?:
    */
   cardTools?: "tools" | "fallback";
   /** The round the start standard first stood in (the progress header's 「从第几轮起已齐」). */
-  startMetRound?: number };
+  startMetRound?: number;
+  /** The disclosures (`reply-N`) the thread was last rebuilt without: one not among them rebuilds it before the round (2026-11-15). */
+  redacted?: string[];
+  /** Whether the person was asked, and agreed, to talk about what a hard time taught them (`LESSON_QUESTION`). */
+  lesson?: LessonConsent };
 
 /**
  * What of the dialogue's last round the person did not see, and what the app put beside it (2026-10-31). Since the 2026-11-14 audit the
@@ -300,6 +304,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const timeZone = personTimeZone(store, workspaceId);
     const today = todayIso();
     const coverage = session.coverage as Announced;
+    // The person's answer to the lesson question the last round put (asked once a whole interview): anything but 「可以聊聊」 is a no.
+    const lesson: LessonConsent = coverage.lesson === "asked" ? lessonAnswer(replyText) : coverage.lesson ?? "unasked";
     // A re-read hands every file over again, as if none had been seen.
     const announced = input.reread ? new Set<string>() : new Set(coverage.announcedSources ?? []);
     // A file shown before and read again since (new text, so new sentence numbers) is shown again, and extracted again.
@@ -405,9 +411,30 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       const content = message.content as { insight?: TurnInsight; moreInsights?: TurnInsight[] };
       return [content.insight, ...(content.moreInsights ?? [])].filter((card): card is TurnInsight => Boolean(card?.text));
     });
-    const sensitive = disclosureReplies(messages);
+    /* i18n-ignore-start: problems and notes sent to the model */
+    // Replies a disclosure sits in (2026-11-15): never a card's evidence, and no model reads their words after the round that answers
+    // them. `hidden` is those but this reply, which the round in hand answers.
+    const sensitive = sensitiveReplies(messages);
+    const hidden = new Set([...sensitive].filter((id) => id !== replyId));
+    const disclosedTexts = [...hidden].map((id) => replies[id] ?? "");
+    const ordinaryTexts = Object.entries(replies).filter(([id]) => !sensitive.has(id)).map(([, said]) => said);
+    /** What in a piece of the round points back at a disclosure: a self-harm word, or words only the disclosure said (`disclosureEchoes`). */
+    const echoOf = (said: string): string => {
+      if (!hidden.size || !said) return "";
+      if (mentionsSelfHarm(said)) return "有自伤的字眼";
+      const spans = disclosureEchoes(said, disclosedTexts, ordinaryTexts);
+      return spans.length ? `用了本人谈那段艰难时期的原话（「${spans.join("」「")}」）` : "";
+    };
+    /** What the dialogue is told of a disclosure, by where the person's consent stands. */
+    const disclosureNote = (): { disclosure?: string } => {
+      if (!hidden.size || focusLine) return {};
+      const where = [...hidden].join("、");
+      const note = lesson === "yes" ? "本人愿意谈那段时期教会了自己什么：只问先兆、帮到的人和事、怎么缓过来的，不问也不复述经过和细节，一两轮就够。"
+        : lesson === "no" ? "本人不想谈那段时期：整场不提它，也不再问。"
+        : "从中学到的东西（压力来之前的先兆、什么帮到了本人、怎么缓过来的）对以后的安排有用。要谈，先把 askLesson 设为 true，应用会出一道固定的题问本人愿不愿意；整场只问一次，挑本人状态平稳的时候。在那之前不提这段经历。";
+      return { disclosure: `本人在 ${where} 谈到过一段艰难时期，原文已换成占位，不给你看。${note}` };
+    };
     const rules = !focusLine && pointsRules(session.coverage);
-    /* i18n-ignore-start: problems sent back to the model */
     const deskCheck = (output: OnboardingDialogue) => {
       const asked = checkQuestions(output.questions, { ledger: interviewLedger(store, workspaceId, sessionId), openItems: askable() });
       const items = checkOpenItems(output.openItems ?? [], askable(), asked.accepted);
@@ -415,8 +442,21 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         : checkInsights(output.insights ?? [], { replies, sensitive, focusLine: Boolean(focusLine), stage: output.stage ?? "", rules,
           hypotheses: readProfile().hypotheses ?? [], earlier: earlierCards });
       const research = focusLine ? { accepted: [], problems: [] } : checkResearch(output.research ?? [], readResearch(store, workspaceId, sessionId));
-      return { questions: [...asked.accepted, ...items.accepted], cards: cards.accepted, research: research.accepted,
-        problems: [...asked.problems, ...items.problems, ...cards.problems, ...research.problems] };
+      // A question or card that points back at a disclosure goes back to the model; the round answering one is the safety reply's to word.
+      const echoes: string[] = [];
+      const quiet = safetyRound(output);
+      const ownQuestions = asked.accepted.filter((question) => {
+        const echo = quiet ? "" : echoOf([question.text, ...question.options.map((option) => option.label)].join("\n"));
+        if (echo) echoes.push(`问题「${question.text.slice(0, 30)}」${echo}：那段经历整场不复述，换个问法或不问。`);
+        return !echo;
+      });
+      const ownCards = cards.accepted.filter(({ card }) => {
+        const echo = echoOf(`${card.text}\n${card.falsifier}`);
+        if (echo) echoes.push(`观察卡「${card.text.slice(0, 30)}」${echo}：那段经历不作观察卡的材料，换一张或不出。`);
+        return !echo;
+      });
+      return { questions: [...ownQuestions, ...items.accepted], cards: ownCards, research: research.accepted,
+        problems: [...asked.problems, ...items.problems, ...cards.problems, ...research.problems, ...echoes] };
     };
     /* i18n-ignore-end */
     const outputSchema = onboardingDialogueSchema(ids);
@@ -451,6 +491,12 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       // model (2026-11-14 audit: it used to be cut silently).
       if (!focusLine && startOpen() && endHinted(valid.reply)) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
         detail: "开始标准还没齐（见 startStandard.missing）：reply 不提「结束并出报告」，也不说已经可以开始使用；接着问缺的那几项。" }); // i18n-ignore: model-facing repair note
+      // The reply and the next step pointing back at a disclosure (2026-11-15): sent back, the safety round's own reply aside.
+      const echo = safetyRound(valid) ? "" : echoOf(valid.reply) || echoOf(valid.next ?? "");
+      if (echo) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
+        detail: `reply 或 next ${echo}。那段经历整场不复述：去掉那句，接着说别的。` }); // i18n-ignore: model-facing repair note
+      const lessonWhy = lessonRefused(valid);
+      if (lessonWhy) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { detail: `askLesson 写 false：${lessonWhy}。` }); // i18n-ignore: model-facing repair note
       // Each question, waiting item, card and research question through its check: what fails comes back with why, the rest stands.
       const desk = deskCheck(valid);
       if (desk.problems.length) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { cards: true,
@@ -465,13 +511,25 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       return valid;
     };
     let safetyAsked = false;
+    /** Why the lesson question may not go this round, or "" when it may (or was not asked for). */
+    function lessonRefused(output: OnboardingDialogue): string {
+      if (!output.askLesson) return "";
+      if (!hidden.size || focusLine) return "本人没有谈过需要先征得同意才能聊的经历"; // i18n-ignore: model-facing
+      if (lesson !== "unasked") return "这道题整场只问一次，已经问过了"; // i18n-ignore: model-facing
+      return safetyRound(output) ? "安全这一轮不问它" : ""; // i18n-ignore: model-facing
+    }
+    /** A reply or next step past the repairs, without the sentences that still point back at a disclosure (interview-rules IR-121). */
+    const withoutEchoes = (said: string) => (said.match(/[^。！？!?\n]+[。！？!?]?|\n+/gu) ?? []).filter((sentence) => !echoOf(sentence)).join("").trim();
     // A date nobody gave stays out of the reply even when the repairs ran out: the sentence that sets it is left out. The one silent edit
     // kept on the reply (interview-rules IR-006), because a made-up date read as the person's own plan is worse than a shorter reply.
     const withoutInventedDates = (reply: string) => (reply.match(/[^。！？!?\n]+[。！？!?]?|\n+/gu) ?? []).filter((sentence) => !setDates(sentence).length).join("").trim();
     const softAccept = (_rejection: Error, output: unknown) => {
       const kept = keepOnboardingDialogue(withDraft(output, draft), known);
       // Past the repairs a sentence pointing at a button that would refuse is left out too (interview-rules IR-035).
-      return kept && { ...kept, reply: withoutInventedDates(!focusLine && startOpen() ? withoutEndHint(kept.reply) : kept.reply) };
+      if (!kept) return kept;
+      const quiet = safetyRound(kept);
+      return { ...kept, reply: withoutInventedDates(quiet ? kept.reply : withoutEchoes(!focusLine && startOpen() ? withoutEndHint(kept.reply) : kept.reply)),
+        ...(kept.next !== undefined && !quiet ? { next: withoutEchoes(kept.next) } : {}), ...(lessonRefused(kept) ? { askLesson: false } : {}) };
     };
     // A turn that only needs one or two questions dropped is kept now instead of rewritten in full by a repair; one that lists the research is not.
     const keepEarly = (rejection: Error, output: unknown) => {
@@ -481,6 +539,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       const kept = keepOnboardingDialogue(merged, known);
       return kept && droppedOnboardingItems(merged, kept) <= ONBOARDING_KEEP_EARLY_MAX
         && researchCopied(kept.reply, findings()).length <= RESEARCH_FIGURES_MAX && !setDates(kept.reply).length
+        && (safetyRound(kept) || !(echoOf(kept.reply) || echoOf(kept.next ?? ""))) && !lessonRefused(kept)
         && !(!focusLine && startOpen() && endHinted(kept.reply)) ? kept : undefined;
     };
 
@@ -505,7 +564,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         identities: identities(),
         projects: store.listProjects(workspaceId).map(({ id, identityId, name, summary }) => ({ id, identityId, name, summary })),
         facts: store.listProfileFacts(workspaceId).map(({ identityId, projectId, slot, value, status }) => ({ identityId, projectId, slot, value, status })),
-        today, timeZone, sources: clipDocuments(documents), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}), ...(history ? { history } : {}), reply: { id: replyId, text: replyText },
+        today, timeZone, sources: clipDocuments(documents), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}), ...(history ? { history } : {}), ...disclosureNote(), reply: { id: replyId, text: replyText },
         focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : INTERVIEW_FLOW_STAGES[flow][0]!)),
         ...(focusLine ? {} : { stageOrder: stageOrderFor(flow) }),
         checklist: openChecklist(8, undefined, sessionId), ...startStandard(), ...openItems(),
@@ -554,14 +613,29 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const heartbeat = setInterval(() => { if (latest) write({ ...latest, updatedAt: new Date().toISOString() }); }, 15_000);
 
     let result;
+    // A fresh thread told what was said, with every disclosure's words replaced (`withoutDisclosures`): after the runtime lost the thread,
+    // and once a disclosure the thread still holds in the person's words has been answered (2026-11-15) — the thread is the one input
+    // the app cannot edit, and replay 15's card retold a disclosure from it.
+    const rebuild = () => {
+      threadId = undefined;
+      draft = emptyDraft();
+      announcedNow = new Set();
+      // Within the turn's reading budget only (docs/onboarding-agent-session.md C7): a file past it used to go with empty text and be
+      // marked shown all the same. The rest stay unread and go with the next turns, and `read_file` reads any of them in full.
+      sent = withinBudget([...docs].filter(([, doc]) => doc.extractionStatus === "done"));
+      return startThread(sent, conversationSoFar(withoutDisclosures(messages.slice(0, -1), hidden)));
+    };
+    const unredacted = [...hidden].some((id) => !(coverage.redacted ?? []).includes(id));
     try {
       if (!session.codexThreadId) {
         result = await startThread(fresh);
+      } else if (unredacted) {
+        result = await rebuild();
       } else {
         // Later turns carry only what is new: the reply, any file that arrived since the last turn, and what the extraction recorded.
         const newSources = clipDocuments(fresh);
         // The completion list goes with every turn, so the model knows what it still owes without being told twice in prose.
-        const message = JSON.stringify({ ...standing(), reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(8, undefined, sessionId), ...startStandard(), ...openItems(),
+        const message = JSON.stringify({ ...standing(), ...disclosureNote(), reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(8, undefined, sessionId), ...startStandard(), ...openItems(),
           ...(focusLine ? {} : { stageOrder: stageOrderFor(flow) }),
           questionLedger: ledgerForModel(store, workspaceId, sessionId, LEDGER_SHOWN), ...pace(), ...roundNotes(),
           ...(calendarChanged ? { calendar: week } : {}),
@@ -573,15 +647,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         });
         // The runtime forgets a conversation when it restarts. The interview does not: the profile, the files and
         // every message are in the ledger, so a new thread is told what was said and carries on from there.
-        if (!result.ok && result.blocker.code === "SKILL_THREAD_LOST") {
-          threadId = undefined;
-          draft = emptyDraft();
-          announcedNow = new Set();
-          // Within the turn's reading budget only (docs/onboarding-agent-session.md C7): a file past it used to go with empty text and be
-          // marked shown all the same. The rest stay unread and go with the next turns, and `read_file` reads any of them in full.
-          sent = withinBudget([...docs].filter(([, doc]) => doc.extractionStatus === "done"));
-          result = await startThread(sent, conversationSoFar(messages.slice(0, -1)));
-        }
+        if (!result.ok && result.blocker.code === "SKILL_THREAD_LOST") result = await rebuild();
       }
     } finally { clearInterval(heartbeat); store.deleteSetting(workspaceId, progressKey); }
     if (!result.ok) return blocked(result.blocker.code, result.blocker.message, result.blocker.detail);
@@ -616,7 +682,9 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const freshDocs = new Set(sent.map(([, doc]) => doc.id));
     const filing = currentGaps().filter((gap) => gap.code === "FILE_UNFILED" && freshDocs.has(gap.documentId ?? "")
       && !desk.questions.some((question) => question.id === gap.question.id)).map((gap) => gap.question);
-    const roundOut = { ...result.output, questions: [...desk.questions, ...filing], ...(cards.length ? { cards } : {}) };
+    // The lesson question, as the app wrote it, when the dialogue asked for it and may (`lessonRefused`): its answer is read next round.
+    const lessonAsked = Boolean(result.output.askLesson) && !lessonRefused(result.output);
+    const roundOut = { ...result.output, questions: [...desk.questions, ...filing, ...(lessonAsked ? [LESSON_QUESTION] : [])], ...(cards.length ? { cards } : {}) };
     // The safety round's reply ends at its help lines (onboarding-reply.ts). The wording rules the app used to apply to the reply and the
     // questions behind the model's back (plain terms, 「还在记录」, a card said twice, 「除了前面讲过的那件」, the closing question after
     // 「没有了」) are the Skill's alone since the 2026-11-14 audit: each rewrite misread someone (「没什么好说的，但我最近很焦虑」 closed the
@@ -666,7 +734,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       state: output.nextAction === "ready_for_milestones" ? "complete" : "active",
       coverage: { ...current.coverage, coverage: output.coverage, ...(output.stage ? { stage: output.stage } : {}), ...(progress ? { progress } : {}),
         announcedSources: [...announcedNow, ...sent.map(([id]) => id)], heardAt, ...(week.length ? { calendarSent: weekSent } : {}), lastRound: edits,
-        ...(cardMode ? { cardTools: cardMode } : {}), ...(startMetRound !== null ? { startMetRound } : {}) },
+        ...(cardMode ? { cardTools: cardMode } : {}), ...(startMetRound !== null ? { startMetRound } : {}),
+        ...(hidden.size ? { redacted: [...hidden] } : {}), ...(lessonAsked ? { lesson: "asked" as const } : lesson !== "unasked" ? { lesson } : {}) },
       updatedAt: new Date().toISOString()
     });
     return { state: output.nextAction === "ready_for_milestones" ? "ready" : "asked", sessionId };

@@ -5,7 +5,8 @@ import {
   AVAILABILITY_PROPOSED_SETTING, ONBOARDING_KEEP_EARLY_MAX, type ProfileSection, PROFILE_CONFIRMED, droppedOnboardingItems, keepOnboardingExtraction, LIMITED_LISTS, listsAtLimit, prunedOnboardingItems, lineAttributes, numberedText, onboardingExtractSchema,
   portraitFingerprint, sectionClosed, validateOnboardingExtraction, type SectionRecord,
   type EvidenceSentence, type KnownSources, type OnboardingExtractContext, type OnboardingExtraction, type OnboardingStage, type StoredLineProfile,
-  ONBOARDING_INSIGHTS, readInsightRatings, EXTRACT_LANE_KEYS, EXTRACT_KEYS, type ExtractLaneName, pointLines, pointsRules, cardCandidates, withProfileFramework
+  ONBOARDING_INSIGHTS, readInsightRatings, EXTRACT_LANE_KEYS, EXTRACT_KEYS, type ExtractLaneName, pointLines, pointsRules, cardCandidates, withProfileFramework,
+  DISCLOSURE_PLACEHOLDER, sensitiveReplies
 } from "@crossline/core";
 import { runCodexSkill, withUsagePurpose, type CodexRpcBoundary, type SkillTools } from "@crossline/codex";
 import {
@@ -234,10 +235,12 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     // What each file's entry said when this run took it: a file queued again meanwhile (a re-read) is not marked done by this run.
     const takenAt = readExtractDocs(store, workspaceId);
 
+    // A reply a disclosure sits in is read by no model (2026-11-15): its words are replaced, its sentences neither numbered nor searchable.
+    const hidden = sensitiveReplies(messages);
     const known: KnownSources = {
       identities: identityLines(store, workspaceId).map((line) => line.id),
       projectIds: store.listProjects(workspaceId, { includeArchived: true }).map((project) => project.id),
-      replies: Object.fromEntries(messages.filter((message) => message.role === "user").map((message) => [`reply-${message.seq}`, textOf(message)])),
+      replies: Object.fromEntries(messages.filter((message) => message.role === "user").map((message) => [`reply-${message.seq}`, hidden.has(`reply-${message.seq}`) ? DISCLOSURE_PLACEHOLDER : textOf(message)])),
       sources: Object.fromEntries([...docsByRef].filter(([, doc]) => doc.extractionStatus === "done").map(([ref, doc]) => [ref, doc.extractedText])),
       sentences: new Map<number, EvidenceSentence>()
     };
@@ -253,6 +256,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       const asked = messages.filter((other) => other.role === "assistant" && other.seq < message.seq).at(-1);
       const questions = notes ? (about ? [about] : [])
         : ((asked?.content as { questions?: Array<{ text?: string }> } | undefined)?.questions ?? []).map((question) => String(question.text ?? "")).filter(Boolean);
+      if (hidden.has(`reply-${message.seq}`)) return { id: `reply-${message.seq}`, asked: questions, sentences: DISCLOSURE_PLACEHOLDER };
       return { id: `reply-${message.seq}`, asked: questions, sentences: numberedText(cite(`reply-${message.seq}`, replySentences(message))) };
     });
     let left = TEXT_TOTAL;
@@ -277,7 +281,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
 
     // Everything the run may look up: this conversation's replies and every file read, as numbered sentences in order.
     const corpus = (): Array<StoredSentence & { ref: string; label: string }> => [
-      ...messages.filter((message) => message.role === "user").flatMap((message) => replySentences(message)
+      ...messages.filter((message) => message.role === "user" && !hidden.has(`reply-${message.seq}`)).flatMap((message) => replySentences(message)
         .map((sentence) => ({ ...sentence, ref: `reply-${message.seq}`, label: `reply-${message.seq}` }))),
       ...[...docsByRef].filter(([, doc]) => doc.extractionStatus === "done").flatMap(([ref, doc]) => store.ensureEvidence(workspaceId, "document", doc.id, doc.extractedText)
         .map((sentence) => ({ ...sentence, ref, label: `${ref} · ${doc.fileName}` })))];

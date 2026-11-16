@@ -94,6 +94,99 @@ export function disclosureReplies(messages: ReadonlyArray<{ role: string; seq: n
   return ids;
 }
 
+/**
+ * What every model is shown in place of a reply a disclosure sits in (2026-11-15, docs/onboarding-agent-session.md 「敏感披露」): never
+ * the person's words. Replay 15's card retold the disclosure in other words three rounds later, which a check on the cited reply ids
+ * could not see: the words were still in the hypotheses' and the extraction's input, so they came back.
+ */
+export const DISCLOSURE_PLACEHOLDER = "（本人在这条回复里谈到一段艰难时期。原文不给模型看，整场不复述。）"; // i18n-ignore: model-facing
+
+type ConversationMessage = { role: string; seq: number; content: unknown };
+const replyTextOf = (message: ConversationMessage) => String((message.content as { text?: unknown } | undefined)?.text ?? "");
+
+/**
+ * The replies whose words no model reads again: `disclosureReplies`, and a reply naming self-harm (`mentionsSelfHarm`) that no round has
+ * answered yet, or whose round answered it as a disclosure. The extraction reads a reply beside the round that answers it, so a reply is
+ * held back before its round says what it was; one the dialogue judged to be about someone else or a topic (`safety: false`) is read.
+ */
+export function sensitiveReplies(messages: ReadonlyArray<ConversationMessage>): Set<string> {
+  const ids = disclosureReplies(messages);
+  messages.forEach((message, index) => {
+    if (message.role !== "user" || !mentionsSelfHarm(replyTextOf(message))) return;
+    const round = messages.slice(index + 1).find((item) => item.role === "assistant");
+    if (!round || safetyRound(round.content as { safety?: unknown; reply?: unknown })) ids.add(`reply-${message.seq}`);
+  });
+  return ids;
+}
+
+/** What a rebuilt thread is shown of a round that answered a disclosure: its reply spoke to the disclosure, so it goes too. */
+export const SAFETY_ROUND_PLACEHOLDER = "（这一轮按「安全」一节回应了本人。）"; // i18n-ignore: model-facing
+
+/**
+ * The conversation with the replies in `hidden` (`reply-N`) replaced by `DISCLOSURE_PLACEHOLDER`, and the reply of every round that
+ * answered a disclosure by `SAFETY_ROUND_PLACEHOLDER`.
+ */
+export function withoutDisclosures<T extends ConversationMessage>(messages: readonly T[], hidden: ReadonlySet<string>): T[] {
+  return messages.map((message) => {
+    if (message.role === "user" && hidden.has(`reply-${message.seq}`)) return { ...message, content: { ...(message.content as object), text: DISCLOSURE_PLACEHOLDER } };
+    if (message.role === "assistant" && safetyRound(message.content as { safety?: unknown; reply?: unknown }))
+      return { ...message, content: { ...(message.content as object), reply: SAFETY_ROUND_PLACEHOLDER } };
+    return message;
+  });
+}
+
+/** The person's consent to talk about what a hard time taught them: not asked, asked and waiting, yes or no (asked once a whole interview). */
+export type LessonConsent = "unasked" | "asked" | "yes" | "no";
+/** The one question that asks it, written by the app (the model only decides when, `askLesson`). */
+export const LESSON_QUESTION = {
+  id: "lesson-consent", kind: "single" as const, allowOther: false, identityId: "", projectId: "",
+  // i18n-ignore-start: shown in the interview's language (Chinese only so far, like the profile cards)
+  text: "你之前提到过一段很难的时期。如果你愿意，可以聊聊那段时间之前有什么先兆、什么帮到了你，这能帮我以后在你压力大时早点留意。不想聊也完全没关系。",
+  options: [{ id: "yes", label: "可以聊聊", detail: "" }, { id: "no", label: "先不聊", detail: "" }]
+  // i18n-ignore-end
+};
+/** The person's answer to `LESSON_QUESTION` in their reply (`【题干】选择：…`): no answer, or anything but 「可以聊聊」, is a no. */
+export function lessonAnswer(reply: string): "yes" | "no" {
+  const at = reply.indexOf(`【${LESSON_QUESTION.text}】`);
+  if (at < 0) return "no";
+  const line = reply.slice(at + LESSON_QUESTION.text.length + 2).split("\n")[0] ?? "";
+  return line.includes(LESSON_QUESTION.options[0]!.label) && !line.includes(LESSON_QUESTION.options[1]!.label) ? "yes" : "no";
+}
+
+const HAN_RUN = /\p{Script=Han}+/gu;
+/**
+ * The runs of at least `size` Chinese characters a text shares with a disclosure, leaving out every run the conversation's other replies
+ * also hold (their ordinary words: 「那段时间」 said about a job is not the disclosure). An English disclosure is compared by four words.
+ */
+export function disclosureEchoes(text: string, disclosures: readonly string[], ordinary: readonly string[], size = 4): string[] {
+  const grams = (value: string): Set<string> => {
+    const out = new Set<string>();
+    for (const run of value.match(HAN_RUN) ?? []) for (let at = 0; at + size <= run.length; at += 1) out.add(run.slice(at, at + size));
+    const words = value.toLowerCase().match(/[a-z']+/gu) ?? [];
+    for (let at = 0; at + 4 <= words.length; at += 1) out.add(words.slice(at, at + 4).join(" "));
+    return out;
+  };
+  const common = new Set(ordinary.flatMap((value) => [...grams(value)]));
+  const disclosed = new Set(disclosures.flatMap((value) => [...grams(value)]));
+  const shared = (gram: string) => disclosed.has(gram) && !common.has(gram);
+  // Overlapping runs reported once, as the stretch of the text they cover together.
+  const spans: string[] = [];
+  for (const run of text.match(HAN_RUN) ?? []) {
+    const covered = new Array<boolean>(run.length).fill(false);
+    for (let at = 0; at + size <= run.length; at += 1) if (shared(run.slice(at, at + size))) covered.fill(true, at, at + size);
+    for (let at = 0; at < run.length;) {
+      if (!covered[at]) { at += 1; continue; }
+      let end = at;
+      while (end < run.length && covered[end]) end += 1;
+      spans.push(run.slice(at, end));
+      at = end;
+    }
+  }
+  const words = text.toLowerCase().match(/[a-z']+/gu) ?? [];
+  for (let at = 0; at + 4 <= words.length; at += 1) { const gram = words.slice(at, at + 4).join(" "); if (shared(gram)) spans.push(gram); }
+  return [...new Set(spans)].slice(0, 3);
+}
+
 /** The progress record as stored; anything malformed reads as none (an older round, or a model that left it out). */
 export function readTurnProgress(raw: unknown): TurnProgress | undefined {
   const value = raw as Partial<TurnProgress> | undefined;

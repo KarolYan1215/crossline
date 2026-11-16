@@ -1,6 +1,6 @@
 import { folderDocuments } from "./source-folders";
 import { PORTRAIT_GAP_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_SCHEMA_VERSION, typeSummaryProblem, validatePortrait, type PortraitReport, AGENT_HISTORY_SUMMARY, agentHistoryLines, tFor, type AgentHistorySummary, ACTIVITY_HOURLY, atComputerLines, type ActivityHour,
-  PROFILE_CLAIMS_SETTING, PROFILE_CLAIM_STATUS_SETTING, PROFILE_INSTRUMENTS_SETTING, instrumentReadings, readClaimStatus, readInstrumentAnswers, resolveWrittenClaims, withProfileFramework } from "@crossline/core";
+  PROFILE_CLAIMS_SETTING, PROFILE_CLAIM_STATUS_SETTING, PROFILE_INSTRUMENTS_SETTING, instrumentReadings, readClaimStatus, sensitiveReplies, withoutDisclosures, readInstrumentAnswers, resolveWrittenClaims, withProfileFramework } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { interviewLocale, sayDoFor, type CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
@@ -115,7 +115,9 @@ export function createPortraitWriter(store: CrosslineStore, workspaceId: string,
     const session = store.getLatestOnboardingSession(workspaceId);
     // Every reply, by the id the interview's extraction cites (`reply-N`): the life story is told first, and a window of the latest
     // 12,000 characters used to cut it off before the portrait was written (2026-11-12). The model's own context is the limit now.
-    const userMessages = (session ? store.listOnboardingMessages(workspaceId, session.id) : []).filter((message) => message.role === "user");
+    // A reply a disclosure sits in goes as the placeholder (2026-11-15): the portrait never retells it.
+    const conversation = session ? store.listOnboardingMessages(workspaceId, session.id) : [];
+    const userMessages = withoutDisclosures(conversation, sensitiveReplies(conversation)).filter((message) => message.role === "user");
     const allReplies = userMessages.map((message) => String((message.content as { text?: string }).text ?? ""));
     const replies = userMessages.map((message, index) => ({ id: `reply-${message.seq}`, text: allReplies[index]! }));
     const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.status === "confirmed" || fact.slot.startsWith("flywheel_")).slice(0, 120)

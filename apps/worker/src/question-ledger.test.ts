@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
+import { DISCLOSURE_PLACEHOLDER } from "@crossline/core";
 import { checklistAnswered, ledgerForModel, linesAnsweredUnread } from "./question-ledger";
 
 const ws = "w";
@@ -66,3 +67,21 @@ test("a checklist question answered with something that settles it counts as ans
   expect(checklistAnswered(store, ws, "s1")(text)).toBe(true);
 });
 
+
+test("an answer given in a reply a disclosure sits in is shown as the placeholder: the ledger never carries the words back (2026-11-15)", () => {
+  store = new CrosslineStore(":memory:");
+  const workspaceId = store.createPrincipalWithWorkspace("user-1", "个人 workspace").workspace.id;
+  const now = new Date().toISOString();
+  store.saveOnboardingSession({ id: "s1", ownerId: "user-1", workspaceId, state: "active", coverage: {}, createdAt: now, updatedAt: now });
+  const say = (text: string, at: string) => store!.appendOnboardingMessage({ sessionId: "s1", workspaceId, role: "user", content: { text }, createdAt: at });
+  const ask = (text: string) => store!.recordQuestion(workspaceId, { kind: "interview", key: `iq:s1:1:${text}`, text, status: "open", at: now });
+  const hard = "2026-11-15T10:00:00.000Z";
+  say("大二自残过，没人可说。", hard);
+  store.appendOnboardingMessage({ sessionId: "s1", workspaceId, role: "assistant", content: { reply: "谢谢你说出来。", safety: true }, createdAt: hard });
+  store.answerQuestion(workspaceId, ask("那段时间怎么样？"), { text: "大二自残过，没人可说。", at: hard });
+  store.answerQuestion(workspaceId, ask("周末做什么？"), { text: "在家。", at: "2026-11-15T10:05:00.000Z" });
+  const shown = ledgerForModel(store, workspaceId, "s1", 15).join("\n");
+  expect(shown).not.toContain("自残过");
+  expect(shown).toContain(DISCLOSURE_PLACEHOLDER);
+  expect(shown).toContain("在家。");
+});

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore, rateInsight, writeExtractState } from "@crossline/db";
-import { cardWordsHead, PROFILE_FRAMEWORK, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
+import { cardWordsHead, DISCLOSURE_PLACEHOLDER, LESSON_QUESTION, PROFILE_FRAMEWORK, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
   type OnboardingProgress, type ProfileCard } from "@crossline/core";
 import { cardsForRound, createOnboardingSessionRunner as createRunner, finishInterview, INSTRUCTIONS, ONBOARDING_SKILL, stageOrderFor, withoutEndHint } from "./onboarding-session";
 import { correctedSince, correctionUnread, INSTRUCTIONS as EXTRACT_INSTRUCTIONS } from "./onboarding-extract";
@@ -756,6 +756,53 @@ test("a reply naming self-harm is sent back once when the round is not the safet
   const safe = await last("我写综述的时候，自己也有过不想活的念头。");
   expect(safe.safety).toBe(true);
   expect(safe.insight).toBeUndefined();
+});
+
+test("a disclosure's words leave the dialogue's thread once answered, a card retelling it goes back, and the lesson is asked once by the app (2026-11-15)", async () => {
+  const good = { text: "你最投入的时候身边都有人，一个人做研究推得最慢。", falsifier: "如果独自时也常投入",
+    refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-7", quote: "一个人做研究" }] };
+  // Replay 15: the card retold the disclosure in its own words; here it uses the disclosure's 「没人可说」.
+  const echo = { ...good, text: "那时没人可说，你最投入的时候身边都有人。" };
+  const { rpc, prompts, threadStarts } = fakeRuntime([turn({ stage: "narrative" }),
+    turn({ stage: "narrative", reply: "谢谢你愿意说出来。全国心理援助热线 12356。现在还有这样的念头吗？", safety: true }),
+    turn({ stage: "narrative" }),
+    turn({ stage: "energy", insight: echo }), turn({ stage: "energy", insight: good }),
+    turn({ stage: "energy", askLesson: true }),
+    turn({ stage: "energy" })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  const last = async (text: string) => {
+    await run({ sessionId: "s", text });
+    return store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { insight?: { text: string }; questions: Array<{ id: string }> };
+  };
+  await last("我最投入的是和同学一起赶比赛的时候。");
+  await last("大二有一段压力很大，自残过，没人可说。");
+  expect(threadStarts()).toHaveLength(1);
+  // The answer to the safety check: the thread is rebuilt with the disclosure's words replaced.
+  await last("现在没有了。");
+  expect(threadStarts()).toHaveLength(2);
+  const rebuilt = dialogue(prompts).at(-1)!;
+  expect(rebuilt).toContain(DISCLOSURE_PLACEHOLDER);
+  expect(rebuilt).not.toContain("自残过");
+  expect(rebuilt).toContain("本人在 reply-3 谈到过一段艰难时期");
+  // The card that uses the disclosure's words goes back once; the one that does not is shown.
+  expect((await last("一个人做研究时最慢。")).insight).toMatchObject({ text: good.text });
+  expect(dialogue(prompts).filter((prompt) => prompt.includes("那段经历不作观察卡的材料"))).toHaveLength(1);
+  expect(dialogue(prompts).some((prompt) => prompt.includes("自残过") || prompt.includes("现在没有了"))).toBe(true);
+  expect(dialogue(prompts).at(-1)).not.toContain("自残过");
+  // The model asks for the lesson question; the app puts it as written, and reads the answer next round.
+  expect((await last("周末一般在家。")).questions.map((question) => question.id)).toContain(LESSON_QUESTION.id);
+  await last(`【${LESSON_QUESTION.text}】选择：可以聊聊`);
+  expect(dialogue(prompts).at(-1)).toContain("本人愿意谈那段时期");
+  expect(store.getOnboardingSession(workspaceId, "s")!.coverage).toMatchObject({ lesson: "yes", redacted: ["reply-3", "reply-5"] });
+});
+
+test("the extraction never reads a disclosure's words: the reply goes to it as the placeholder, unnumbered (2026-11-15)", async () => {
+  const safety = turn({ stage: "narrative", reply: "谢谢你愿意说出来。全国心理援助热线 12356。", safety: true });
+  const { rpc, prompts } = fakeRuntime([safety, safety]);
+  await createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc)({ sessionId: "s", text: "大二自残过，没人可说。" });
+  expect(extraction(prompts).length).toBeGreaterThan(0);
+  expect(extraction(prompts).some((prompt) => prompt.includes("自残过"))).toBe(false);
+  expect(extraction(prompts).some((prompt) => prompt.includes(DISCLOSURE_PLACEHOLDER))).toBe(true);
 });
 
 test("as the person reads a round: the safety reply ends at its help lines; the rest of the reply and the questions are the model's own", async () => {
