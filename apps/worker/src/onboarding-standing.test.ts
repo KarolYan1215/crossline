@@ -33,3 +33,8 @@ test("with every condition met the header says so", () => {
   expect(lines).toContain("ready_for_milestones 的条件全部齐了。");
   expect(lines.at(-1)).toBe("最近 3 轮：每轮题数 2、2、2；出卡 0 张。");
 });
+
+test("days the person said are not set are listed, so the dialogue keeps their names and does not ask them again (2026-11-15)", () => {
+  const lines = standingLines({ rounds: [round("lines")], stage: "lines", stageOrder: ORDER, startMetRound: null, startMissing: [], undecided: ["恢复投递", "开始写论文"], profile: {} });
+  expect(lines).toContain("本人说还没定的日子（不再问，沿用这些叫法）：恢复投递；开始写论文。");
+});

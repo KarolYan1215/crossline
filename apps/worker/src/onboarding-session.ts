@@ -21,11 +21,12 @@ import { checklistAnswered, interviewLedger, ledgerForModel, linesAnsweredUnread
 import { mergeTools } from "./ledger-index";
 import { standingLines } from "./onboarding-standing";
 import { interviewReadTools, READ_TOOLS_INSTRUCTIONS } from "./onboarding-read-tools";
-import { CARD_TOOLS_INSTRUCTIONS, cardTools, checkInsights, checkOpenItems, checkQuestions, checkResearch, emptyDraft, withDraft } from "./onboarding-cards";
+import { CARD_TOOLS_INSTRUCTIONS, ECHO_RUN, cardTools, checkInsights, checkOpenItems, checkQuestions, checkResearch, emptyDraft, sharedRun, undecidedDay, withDraft,
+  type DateSubject } from "./onboarding-cards";
 import { correctionUnread, createOnboardingExtractor, extractionReached, requestAllLanes, requestExtraction, type ExtractLane } from "./onboarding-extract";
 import { DATES_UNRECORDED_EVENT, ONBOARDING_UNRECORDED_EVENT, personTimeZone, readProfileModel } from "./onboarding-persist";
 import { paceContext, storedProgress } from "./onboarding-pace";
-import { hypothesisFromCard, ONBOARDING_INSIGHTS, POINTS_RULES, pointsRules, readInsightRatings, withProfileFramework, type Hypothesis, type TurnInsight } from "@crossline/core";
+import { hypothesisFromCard, instrumentReadings, ONBOARDING_INSIGHTS, POINTS_RULES, pointsRules, readInsightRatings, withProfileFramework, type Hypothesis, type TurnInsight } from "@crossline/core";
 import { readResearch, researchForDialogue, researchRunnerFor } from "./onboarding-research";
 import { DOMAIN_PACKS, domainGuides } from "@crossline/identity-packs";
 
@@ -379,6 +380,19 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // The progress header (onboarding-standing.ts), first in every round's input: the rounds so far, the parts walked, since when the start
     // standard stands, what `ready_for_milestones` still lacks and the latest cards. Only the main interview has one.
     const assistantRounds = messages.filter((message) => message.role === "assistant");
+    // The days asked before, by subject (`about`), with the person's answer, the latest per subject (2026-11-15).
+    const dateSubjects = (): DateSubject[] => {
+      const ledger = new Map(interviewLedger(store, workspaceId, sessionId).map((question) => [question.key, question]));
+      const asked = assistantRounds.flatMap((message) => ((message.content as { questions?: TurnQuestion[] }).questions ?? [])
+        .filter((question) => question.date && question.about?.trim())
+        .map((question) => ({ about: question.about!.trim(), entry: ledger.get(`iq:${sessionId}:${message.seq}:${question.id}`) })));
+      const out: DateSubject[] = [];
+      for (const { about, entry } of asked.reverse()) {
+        if (!entry || (entry.status !== "answered" && entry.status !== "assumed") || out.some((item) => item.about === about)) continue;
+        out.push({ about, answer: entry.answer, undecided: undecidedDay(entry.answer) });
+      }
+      return out;
+    };
     const startMetRound = focusLine || startOpen() ? null : coverage.startMetRound ?? assistantRounds.length + 1;
     const standing = () => {
       if (focusLine) return {};
@@ -392,7 +406,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
             .filter((verdict): verdict is "fits" | "partial" | "off" => verdict === "fits" || verdict === "partial" || verdict === "off");
           return { stage: content.stage ?? "", questions: content.questions?.length ?? 0, cards, verdicts };
         }),
-        stage: stageNow, stageOrder: stageOrderFor(flow), startMetRound,
+        stage: stageNow, stageOrder: stageOrderFor(flow), startMetRound, undecided: dateSubjects().filter((item) => item.undecided).map((item) => item.about),
         startMissing: checklistNow().filter((item) => item.start && !item.done).map((item) => item.label),
         profile: { dimensions: profile.dimensions, hypotheses: profile.hypotheses, careers: profile.careers }
       }) };
@@ -435,12 +449,24 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       return { disclosure: `本人在 ${where} 谈到过一段艰难时期，原文已换成占位，不给你看。${note}` };
     };
     const rules = !focusLine && pointsRules(session.coverage);
+    /** The latest two replies, this one included: a card resting on them alone retells what was just said. */
+    const recentReplies = new Set(messages.filter((message) => message.role === "user").slice(-2).map((message) => `reply-${message.seq}`));
+    /** Cards shown since the dialogue last came into `stage`, before this round. */
+    const stageCards = (stage: string) => {
+      let count = 0;
+      for (let at = assistantRounds.length - 1; at >= 0; at -= 1) {
+        const content = assistantRounds[at]!.content as { stage?: string; insight?: { text?: string }; moreInsights?: Array<{ text?: string }> };
+        if (content.stage !== stage) break;
+        count += [content.insight, ...(content.moreInsights ?? [])].filter((card) => Boolean(card?.text)).length;
+      }
+      return count;
+    };
     const deskCheck = (output: OnboardingDialogue) => {
-      const asked = checkQuestions(output.questions, { ledger: interviewLedger(store, workspaceId, sessionId), openItems: askable() });
+      const asked = checkQuestions(output.questions, { ledger: interviewLedger(store, workspaceId, sessionId), openItems: askable(), dates: dateSubjects(), today });
       const items = checkOpenItems(output.openItems ?? [], askable(), asked.accepted);
       const cards = safetyRound(output) ? { accepted: [], problems: (output.insights ?? []).length ? ["安全这一轮不出观察卡，insights 写 []。"] : [] }
         : checkInsights(output.insights ?? [], { replies, sensitive, focusLine: Boolean(focusLine), stage: output.stage ?? "", rules,
-          hypotheses: readProfile().hypotheses ?? [], earlier: earlierCards });
+          hypotheses: readProfile().hypotheses ?? [], earlier: earlierCards, recent: recentReplies, stageCards: stageCards(output.stage ?? "") });
       const research = focusLine ? { accepted: [], problems: [] } : checkResearch(output.research ?? [], readResearch(store, workspaceId, sessionId));
       // A question or card that points back at a disclosure goes back to the model; the round answering one is the safety reply's to word.
       const echoes: string[] = [];
@@ -453,7 +479,9 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       const ownCards = cards.accepted.filter(({ card }) => {
         const echo = echoOf(`${card.text}\n${card.falsifier}`);
         if (echo) echoes.push(`观察卡「${card.text.slice(0, 30)}」${echo}：那段经历不作观察卡的材料，换一张或不出。`);
-        return !echo;
+        const scores = !echo && SCORE_TALK.test(`${card.text}\n${card.falsifier}`);
+        if (scores) echoes.push(`观察卡「${card.text.slice(0, 30)}」报了量表的分数或说法：读数由页面交还本人，卡上写这个倾向在日子里怎么表现，不写分数、「自评」或档位。`);
+        return !echo && !scores;
       });
       return { questions: [...ownQuestions, ...items.accepted], cards: ownCards, research: research.accepted,
         problems: [...asked.problems, ...items.problems, ...cards.problems, ...research.problems, ...echoes] };
@@ -497,10 +525,18 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         detail: `reply 或 next ${echo}。那段经历整场不复述：去掉那句，接着说别的。` }); // i18n-ignore: model-facing repair note
       const lessonWhy = lessonRefused(valid);
       if (lessonWhy) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { detail: `askLesson 写 false：${lessonWhy}。` }); // i18n-ignore: model-facing repair note
+      // The scale's scores in the reply (2026-11-15, replay 15 quoted 「5/5」 and read one item the wrong way round): the page shows the
+      // readings; the dialogue says how a tendency shows in a day.
+      if (SCORE_TALK.test(`${valid.reply}\n${valid.next ?? ""}`)) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
+        detail: "reply 或 next 报了量表的分数或说法（「n/5」「自评」「最重那一档」）。量表读数由页面交还本人，你手上是 scaleReadings 的读数：说这个倾向在本人的日子里怎么表现，不写分数和档位。" }); // i18n-ignore: model-facing repair note
       // Each question, waiting item, card and research question through its check: what fails comes back with why, the rest stands.
       const desk = deskCheck(valid);
       if (desk.problems.length) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { cards: true,
         detail: `这一轮有几项要改，其余照旧：\n- ${desk.problems.join("\n- ")}` }); // i18n-ignore: model-facing repair note
+      // The reply saying what a card beside it says (2026-11-15: replay 15 said one tension in both, nine times over).
+      const twice = desk.cards.map(({ card }) => sharedRun(valid.reply, card.text)).find((run) => run.length >= ECHO_RUN);
+      if (twice) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { cards: true,
+        detail: `reply 和观察卡说了同一段话（「${twice}」）。卡就摆在 reply 旁边：reply 不再说一遍，说卡之外的东西，或直接问。` }); // i18n-ignore: model-facing repair note
       // The person's reply names self-harm and the round is not the safety reply: sent back once, since the words may be about someone
       // else or a research topic, which the model can tell and the pattern cannot (2026-11-14 audit). Its second answer stands.
       if (mentionsSelfHarm(replyText) && !safetyRound(valid) && !safetyAsked) {
@@ -511,6 +547,12 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       return valid;
     };
     let safetyAsked = false;
+    /** The scale's readings in words (`instrumentReadings`), never the taps: what the dialogue reads of the cards (2026-11-15). */
+    const scaleReadings = (): { scaleReadings?: string[] } => {
+      if (focusLine) return {};
+      const readings = instrumentReadings(readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING)));
+      return readings.length ? { scaleReadings: readings } : {};
+    };
     /** Why the lesson question may not go this round, or "" when it may (or was not asked for). */
     function lessonRefused(output: OnboardingDialogue): string {
       if (!output.askLesson) return "";
@@ -540,6 +582,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       return kept && droppedOnboardingItems(merged, kept) <= ONBOARDING_KEEP_EARLY_MAX
         && researchCopied(kept.reply, findings()).length <= RESEARCH_FIGURES_MAX && !setDates(kept.reply).length
         && (safetyRound(kept) || !(echoOf(kept.reply) || echoOf(kept.next ?? ""))) && !lessonRefused(kept)
+        && !SCORE_TALK.test(`${kept.reply}\n${kept.next ?? ""}`)
         && !(!focusLine && startOpen() && endHinted(kept.reply)) ? kept : undefined;
     };
 
@@ -564,7 +607,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         identities: identities(),
         projects: store.listProjects(workspaceId).map(({ id, identityId, name, summary }) => ({ id, identityId, name, summary })),
         facts: store.listProfileFacts(workspaceId).map(({ identityId, projectId, slot, value, status }) => ({ identityId, projectId, slot, value, status })),
-        today, timeZone, sources: clipDocuments(documents), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}), ...(history ? { history } : {}), ...disclosureNote(), reply: { id: replyId, text: replyText },
+        today, timeZone, sources: clipDocuments(documents), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}), ...(history ? { history } : {}), ...disclosureNote(), ...scaleReadings(), reply: { id: replyId, text: withoutTaps(replyText) },
         focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : INTERVIEW_FLOW_STAGES[flow][0]!)),
         ...(focusLine ? {} : { stageOrder: stageOrderFor(flow) }),
         checklist: openChecklist(8, undefined, sessionId), ...startStandard(), ...openItems(),
@@ -623,7 +666,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       // Within the turn's reading budget only (docs/onboarding-agent-session.md C7): a file past it used to go with empty text and be
       // marked shown all the same. The rest stay unread and go with the next turns, and `read_file` reads any of them in full.
       sent = withinBudget([...docs].filter(([, doc]) => doc.extractionStatus === "done"));
-      return startThread(sent, conversationSoFar(withoutDisclosures(messages.slice(0, -1), hidden)));
+      return startThread(sent, conversationSoFar(withoutDisclosures(messages.slice(0, -1), hidden).map((message) => message.role !== "user" ? message
+        : { ...message, content: { ...(message.content as object), text: withoutTaps(String((message.content as { text?: string }).text ?? "")) } })));
     };
     const unredacted = [...hidden].some((id) => !(coverage.redacted ?? []).includes(id));
     try {
@@ -635,7 +679,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         // Later turns carry only what is new: the reply, any file that arrived since the last turn, and what the extraction recorded.
         const newSources = clipDocuments(fresh);
         // The completion list goes with every turn, so the model knows what it still owes without being told twice in prose.
-        const message = JSON.stringify({ ...standing(), ...disclosureNote(), reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(8, undefined, sessionId), ...startStandard(), ...openItems(),
+        const message = JSON.stringify({ ...standing(), ...disclosureNote(), ...scaleReadings(), reply: { id: replyId, text: withoutTaps(replyText) }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(8, undefined, sessionId), ...startStandard(), ...openItems(),
           ...(focusLine ? {} : { stageOrder: stageOrderFor(flow) }),
           questionLedger: ledgerForModel(store, workspaceId, sessionId, LEDGER_SHOWN), ...pace(), ...roundNotes(),
           ...(calendarChanged ? { calendar: week } : {}),
@@ -805,6 +849,12 @@ export const COMPACT_PROMPT = "把这段访谈压缩成交接记录，给接着�
  */
 const END_HINT = /结束并出报告|End and write the report|可以开始(使用|用)|start using/iu; // i18n-ignore: the button's label and the start claim in both languages
 export const endHinted = (reply: string): boolean => END_HINT.test(reply);
+
+/** A card's tap line (`scaleAnswerLine`, 「【题】点选：5/5（…）」) as the dialogue reads it: the score is the readings' to say (2026-11-15). */
+const TAP_LINE = /^(\s*【[^】\n]+】)点选：[1-5]\/5(?:（[^）\n]*）)?/gmu; // i18n-ignore: the tap line's own form
+export const withoutTaps = (text: string): string => text.replace(TAP_LINE, "$1已点选（读数见 scaleReadings）"); // i18n-ignore: model-facing
+/** The scale talked about in its own numbers or the cards' words, which the dialogue reads off taps and gets wrong (replay 15). */
+export const SCORE_TALK = /(?<![\d/])[1-5]\s*\/\s*5(?![\d/])|\d{1,3}\s*\/\s*100|自评|最重那一档/u; // i18n-ignore: matched against the model's words
 export function withoutEndHint(reply: string): string {
   const sentences = reply.match(/[^。！？!?\n]+[。！？!?]?|\n+/gu) ?? [];
   return sentences.filter((sentence) => !END_HINT.test(sentence)).join("").trim() || reply;

@@ -265,6 +265,8 @@ export type TurnInsight = {
   refs: Array<{ replyId: string; quote: string }>;
   external?: Array<{ text: string; url: string }>;
   falsifier: string;
+  /** What the card adds that the stage's earlier cards did not, written once the stage has `STAGE_CARDS` (2026-11-15); "" otherwise. */
+  why?: string;
 };
 /**
  * The interview's progress record (2026-10-19, the owner's decision): which part it is in, what of that part is clear and what is not,
@@ -621,7 +623,9 @@ function turnFields(ids?: TurnIds) {
       text: { type: "string", maxLength: 400 },
       refs: { type: "array", maxItems: 4, items: object({ replyId: { type: "string", maxLength: 20 }, quote: { type: "string", maxLength: 40 } }) },
       external: { type: "array", maxItems: 3, items: object({ text: text(300), url: URL_FIELD }) },
-      falsifier: { type: "string", maxLength: 200 } }) },
+      falsifier: { type: "string", maxLength: 200 },
+      // What it adds that this stage's earlier cards did not: written once the stage has three cards, "" before.
+      why: { type: "string", maxLength: 120 } }) },
     // Questions for research threads (contract C): what needs the web to answer, why it matters, the dimension it bears on.
     research: { type: "array", maxItems: 3, items: object({ question: text(300), why: text(300), dimension: DIMENSION_FIELD }) },
     // The app's own waiting questions put to the person this round, by the ids the round's `openItems` lists.

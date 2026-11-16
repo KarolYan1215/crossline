@@ -20,6 +20,8 @@ export type StandingInput = {
   startMetRound: number | null;
   /** What the start standard still lacks, while it does not stand. */
   startMissing: string[];
+  /** Days the person said are not set yet, by the subject they were asked under (`about`). */
+  undecided?: string[];
   /** The working portrait's dimension notes, hypotheses and career options (`ProfileModel`). */
   profile: Pick<CompletenessInput, "dimensions" | "hypotheses" | "careers">;
 };
@@ -48,6 +50,7 @@ export function standingLines(input: StandingInput): string[] {
     `阶段：走过 ${walked.join("、") || "无"}${left.length ? `；还没走 ${left.join("、")}` : "；全部走过"}。`,
     input.startMetRound !== null ? `开始标准：从第 ${input.startMetRound} 轮起已齐，本人可以按「结束并出报告」。`
       : `开始标准：还没齐，缺 ${input.startMissing.join("、") || "几项"}。`,
+    ...(input.undecided?.length ? [`本人说还没定的日子（不再问，沿用这些叫法）：${input.undecided.join("；")}。`] : []),
     ...(input.startMetRound === null ? []
       : completeness.full ? ["ready_for_milestones 的条件全部齐了。"]
       : [`ready_for_milestones 还差：${completeness.missing.join("；")}。`]),

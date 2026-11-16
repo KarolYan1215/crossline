@@ -39,6 +39,7 @@ const CORE = "packages/core/src";
 const WORKER = "apps/worker/src";
 const SKILLS = "skills/marketplace/plugins/crossline/skills";
 const INTERVIEW_SKILL = `${SKILLS}/crossline-onboarding/SKILL.md`;
+const EXTRACT_SKILL = `${SKILLS}/crossline-onboarding-extract/SKILL.md`;
 
 // The register is read by its test and by people, never shown on a screen.
 /* i18n-ignore-start */
@@ -247,5 +248,33 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     code: { file: `${CORE}/onboarding-pace.ts`, symbol: "lessonAnswer", test: `${CORE}/onboarding-pace.test.ts` } },
   { id: "IR-125", layer: "L2", verdict: "model", status: "active", rule: "同意之后只谈先兆、帮到的人和事、怎么缓过来的，不问不复述经过",
     text: { file: INTERVIEW_SKILL, anchor: "**本人同意以后，只谈先兆、帮到的人和事、怎么缓过来的。**" } },
+  // Days, cards and the scale (2026-11-15, after replay 15 asked one day six times, retold just-made plans on cards, said one tension in
+  // the reply and the card, and quoted 「5/5」).
+  { id: "IR-126", layer: "L0", verdict: "return", status: "active", rule: "日期题要写 about；同一件事的日子问过、或本人说了「还没定」，再问退回",
+    code: { file: `${WORKER}/onboarding-cards.ts`, symbol: "sameAbout", test: `${WORKER}/onboarding-cards.test.ts`, by: "a subject answered is not asked again" } },
+  { id: "IR-127", layer: "L0", verdict: "return", status: "active", rule: "两个以上选项是日子的题退回，改成不带选项的 free",
+    code: { file: `${WORKER}/onboarding-cards.ts`, symbol: "dayOption", test: `${WORKER}/onboarding-cards.test.ts`, by: "options that are days come back" } },
+  { id: "IR-128", layer: "L0", verdict: "keep", status: "active", rule: "本人说还没定的日子列在进度头里，沿用叫法",
+    code: { file: `${WORKER}/onboarding-standing.ts`, symbol: "undecided", test: `${WORKER}/onboarding-standing.test.ts`, by: "days the person said are not set are listed" } },
+  { id: "IR-129", layer: "L2", verdict: "model", status: "active", rule: "日期题的 about 写这个日子属于哪件事，用本人的叫法",
+    text: { file: INTERVIEW_SKILL, anchor: "**日期题的 `about` 写这个日子属于哪件事**" } },
+  { id: "IR-130", layer: "L0", verdict: "return", status: "active", rule: "卡的引文全在最近两条回答里，退回",
+    code: { file: `${WORKER}/onboarding-session.ts`, symbol: "recentReplies", test: `${WORKER}/onboarding-cards.test.ts`, by: "a card joins what was said at different times" } },
+  { id: "IR-131", layer: "L0", verdict: "return", status: "active", rule: "同一阶段出过三张卡，再出的卡不写 why 退回",
+    code: { file: `${WORKER}/onboarding-cards.ts`, symbol: "STAGE_CARDS", test: `${WORKER}/onboarding-cards.test.ts`, by: "a stage's fourth card says what it adds" } },
+  { id: "IR-132", layer: "L2", verdict: "model", status: "active", rule: "卡至少引一条更早的回答，第四张起说它多说了什么",
+    text: { file: INTERVIEW_SKILL, anchor: "**卡至少引一条更早的回答。**" } },
+  { id: "IR-133", layer: "L0", verdict: "return", status: "active", rule: "回复和旁边的卡共有十五字以上的同一段话，退回",
+    code: { file: `${WORKER}/onboarding-cards.ts`, symbol: "sharedRun", test: `${WORKER}/onboarding-session.test.ts`, by: "a reply saying what the card beside it says goes back once" } },
+  { id: "IR-134", layer: "L2", verdict: "model", status: "active", rule: "回复说卡之外的东西，或直接问",
+    text: { file: INTERVIEW_SKILL, anchor: "**`reply` 不说卡上已经说的。**" } },
+  { id: "IR-135", layer: "L0", verdict: "keep", status: "active", rule: "对话读量表只读读数，点选的分数换成占位",
+    code: { file: `${WORKER}/onboarding-session.ts`, symbol: "withoutTaps", test: `${WORKER}/onboarding-session.test.ts`, by: "reads the scale as readings, never taps" } },
+  { id: "IR-136", layer: "L0", verdict: "return", status: "active", rule: "回复、下一步和卡报量表分数或档位，退回",
+    code: { file: `${WORKER}/onboarding-session.ts`, symbol: "SCORE_TALK", test: `${WORKER}/onboarding-session.test.ts`, by: "a reply quoting scores goes back" } },
+  { id: "IR-137", layer: "L2", verdict: "model", status: "active", rule: "说量表只说倾向在日子里怎么表现",
+    text: { file: INTERVIEW_SKILL, anchor: "**说量表只说这个倾向在本人的日子里怎么表现，不写「n/5」「自评」「最重那一档」**" } },
+  { id: "IR-138", layer: "L2", verdict: "model", status: "active", rule: "整理不把本人定下的安排写成假设",
+    text: { file: EXTRACT_SKILL, anchor: "**安排不是假设。**" } },
 ];
 /* i18n-ignore-end */

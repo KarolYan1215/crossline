@@ -1,5 +1,5 @@
 import {
-  CARDS_OFFERED, INSIGHTS_PER_ROUND, cardCandidateIds, checkInsight, hypothesisReplies, isWebUrl, locateQuote, questionSimilarity,
+  CARDS_OFFERED, INSIGHTS_PER_ROUND, cardCandidateIds, checkInsight, hypothesisReplies, isWebUrl, locateQuote, questionSimilarity, roughWindow, unsureAnswer,
   type DimensionId, type Hypothesis, type LedgerQuestion, type ProfileGap, type ResearchRequest, type ResearchThread, type TurnInsight, type TurnQuestion
 } from "@crossline/core";
 import type { SkillTools } from "@crossline/codex";
@@ -29,8 +29,26 @@ export const MAX_ASKINGS = 2;
 
 export type CardCheck<T> = { accepted: T[]; problems: string[] };
 
-/** What the questions are checked against: the interview's ledger (dropped ones left out) and the app's own questions still waiting. */
-export type QuestionContext = { ledger: LedgerQuestion[]; openItems: ProfileGap[] };
+/**
+ * What the questions are checked against: the interview's ledger (dropped ones left out), the app's own questions still waiting, the
+ * days asked about before (`DateSubject`) and today, for reading an option as a day.
+ */
+export type QuestionContext = { ledger: LedgerQuestion[]; openItems: ProfileGap[]; dates?: DateSubject[]; today?: string };
+
+/** A date question asked before (its `about`) and the person's answer: `undecided` when they said it is not set yet. */
+export type DateSubject = { about: string; answer: string; undecided: boolean };
+
+/** An answer that leaves a day open: 「还没定」「看情况」 and the like, not only the bare words `unsureAnswer` takes. */
+export const undecidedDay = (answer: string): boolean => unsureAnswer(answer) || /还没定|没定|未定|不确定|待定|看情况|说不好|不知道|not (sure|set|decided)|undecided|tbd/iu.test(answer); // i18n-ignore: matched against the reply
+const aboutKey = (text: string) => text.replace(/[^\p{L}\p{N}]+/gu, "").toLowerCase();
+/** Whether two `about`s name the same thing: equal, or one holds the other (「复工」 and 「复工日期」). */
+export function sameAbout(a: string, b: string): boolean {
+  const x = aboutKey(a), y = aboutKey(b);
+  return Boolean(x && y) && (x === y || (Math.min(x.length, y.length) >= 2 && (x.includes(y) || y.includes(x))));
+}
+/** An option that is a day or a window of days (「十一月底」「下周二」「11/20」), not a weekday as such (「周一」). */
+export const dayOption = (label: string, today: string): boolean =>
+  Boolean(roughWindow(label, today)) || /\d{1,2}\s*[/月.]\s*\d{1,2}|[本这下]个?(周|星期|礼拜)[一二三四五六日天]/u.test(label); // i18n-ignore: matched against options
 
 const alike = (a: { text: string; identityId: string; projectId: string }, b: { text: string; identityId: string; projectId: string }) => {
   if (a.projectId && b.projectId && a.projectId !== b.projectId) return false;
@@ -38,6 +56,23 @@ const alike = (a: { text: string; identityId: string; projectId: string }, b: { 
   const similarity = questionSimilarity(a.text, b.text);
   return similarity >= LIKE_ANSWERED || (Boolean(a.identityId) && a.identityId === b.identityId && a.projectId === b.projectId && similarity >= LIKE_SAME_LINE);
 };
+/** The longest stretch two texts share, spaces and punctuation aside (a reply saying what a card beside it says). */
+export function sharedRun(a: string, b: string): string {
+  const x = [...a.replace(/[\s\p{P}]+/gu, "")], y = [...b.replace(/[\s\p{P}]+/gu, "")];
+  let best = 0, end = 0;
+  let previous = new Array<number>(y.length + 1).fill(0);
+  for (let i = 0; i < x.length; i += 1) {
+    const current = new Array<number>(y.length + 1).fill(0);
+    for (let j = 0; j < y.length; j += 1) if (x[i] === y[j]) {
+      current[j + 1] = previous[j]! + 1;
+      if (current[j + 1]! > best) { best = current[j + 1]!; end = i + 1; }
+    }
+    previous = current;
+  }
+  return x.slice(end - best, end).join("");
+}
+/** Characters a reply and a card beside it may share before the reply is sent back. */
+export const ECHO_RUN = 15;
 const optionKey = (label: string) => label.replace(/[\s，,。.、；;：:（）()「」]/g, "").toLowerCase();
 const short = (text: string, max = 60) => text.length > max ? `${text.slice(0, max)}…` : text;
 
@@ -62,6 +97,24 @@ export function checkQuestions(questions: TurnQuestion[], context: QuestionConte
     const labels = question.options.map((option) => optionKey(option.label ?? ""));
     const repeated = question.options.find((option, index) => labels.indexOf(optionKey(option.label ?? "")) !== index);
     if (repeated) { problems.push(`${label}的选项「${repeated.label}」重复了，每个选项说一件不同的事。`); continue; }
+    // Days (2026-11-15, replay 15 asked one resume date six times in other words): the day is the person's to set, so it is asked
+    // without options, under a subject kept the same each time, and a subject the person answered is not asked again.
+    const days = context.today ? question.options.filter((option) => dayOption(option.label ?? "", context.today!)) : [];
+    if (days.length >= 2) {
+      problems.push(`${label}的选项是日子（${days.slice(0, 3).map((option) => `「${option.label}」`).join("")}）：日期由本人定，改成不带选项的 free，date 设 true，about 写是哪件事的日子。`);
+      continue;
+    }
+    if (question.date) {
+      if (!question.about?.trim()) { problems.push(`${label}问的是日子：about 写这是哪件事的日子，几个字，同一件事每次用同一个叫法。`); continue; }
+      const before = (context.dates ?? []).find((item) => sameAbout(item.about, question.about!));
+      if (before) {
+        problems.push(before.undecided ? `${label}问「${before.about}」的日子，本人答过「${short(before.answer, 40)}」，还没定：不再问，本人定了会说；要排就按没定写。`
+          : `${label}问「${before.about}」的日子，本人答过「${short(before.answer, 60)}」，不再问。`);
+        continue;
+      }
+      const twinDay = round.find((other) => other.date && other.about && sameAbout(other.about, question.about!));
+      if (twinDay) { problems.push(`${label}和这一轮的「${short(twinDay.text)}」问的是同一件事的日子，留一个。`); continue; }
+    }
     const named = question.repeats ? byId.get(question.repeats) : undefined;
     // The app's own waiting question asked in the model's words: its answer would not be read as the fact it settles.
     const gapId = named?.key.startsWith("gap:") ? named.key.slice(4) : "";
@@ -120,7 +173,14 @@ export type InsightContext = {
   hypotheses: Hypothesis[];
   /** Cards shown in earlier rounds: their words and the hypotheses they asked about. */
   earlier: TurnInsight[];
+  /** The latest two replies (`reply-N`, this one included): a card resting on them alone retells what was just said. */
+  recent?: ReadonlySet<string>;
+  /** Cards shown since the dialogue last came into this round's stage, before this round (`STAGE_CARDS`). */
+  stageCards?: number;
 };
+
+/** Cards one stay in a stage carries before each further one says what it adds (`why`): a soft limit, never a refusal of the card itself. */
+export const STAGE_CARDS = 3;
 
 /** A card that passed: as it will be shown, and, when it is a new inference, the dimension the log adds it under. */
 export type CheckedInsight = { card: TurnInsight; fresh?: { dimension: DimensionId | undefined } };
@@ -149,6 +209,11 @@ export function checkInsights(insights: TurnInsight[], context: InsightContext, 
     if (missing) { problems.push(`${label}的引文「${short(missing.quote ?? "", 40)}」不在 ${missing.replyId} 里：逐字照抄本人原话，不超过 40 字。`); continue; }
     const disclosed = refs.find((ref) => context.sensitive.has(ref.replyId));
     if (disclosed) { problems.push(`${label}引了 ${disclosed.replyId}：那是本人谈到自伤的回答，不作观察卡的依据。`); continue; }
+    // Replay 15: seven of the eleven cards rated 准 restated the schedule the person had just set. An observation joins what was said at
+    // different times (2026-11-15).
+    if (context.recent && refs.length && refs.every((ref) => context.recent!.has(ref.replyId))) {
+      problems.push(`${label}只引了最近两条回答：观察是把不同时候说的事连起来，至少一条引文来自更早的回答。只是刚说的事，就在 reply 里接住，不出卡。`); continue;
+    }
     const badUrl = (written.external ?? []).find((item) => !isWebUrl(item?.url));
     if (badUrl) { problems.push(`${label}的 external「${short(badUrl.text ?? "", 30)}」没有可打开的网页地址；没有来源就不写这条。`); continue; }
     if (shown.has(squeeze(written.text)) || round.some((item) => squeeze(item.card.text) === squeeze(written.text))) {
@@ -172,6 +237,10 @@ export function checkInsights(insights: TurnInsight[], context: InsightContext, 
     }
     const checked = checkInsight(written, context.replies, context.stage, minReplies);
     if (!checked) { problems.push(`${label}没有通过核对（text、falsifier、引文）。`); continue; }
+    const inStage = (context.stageCards ?? 0) + round.length;
+    if (inStage >= STAGE_CARDS && !written.why?.trim()) {
+      problems.push(`${label}：这一阶段这一遍已经有 ${inStage} 张卡。它说出了前面没说到的东西，就在 why 里写一句新在哪，照常出；没有就先问。`); continue;
+    }
     if (!context.rules) { accepted.push({ card: checked }); continue; }
     accepted.push(onRecord ? { card: { ...checked, hypothesisId: onRecord.id, dimension: onRecord.dimension } }
       : { card: checked, fresh: { dimension: written.dimension } });

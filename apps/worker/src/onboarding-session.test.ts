@@ -613,12 +613,14 @@ test("a compacted conversation is not a forbidden tool; a round that stops says 
 test("the progress record goes back to the model next round, and an observation is kept only when its quotes are the person's", async () => {
   const progress = { part: "energy", covered: ["心流时刻"], open: ["耗能的事"], partDone: false, next: "问什么事做完很累" };
   const insight = (quote: string) => ({ text: "你说投入的两次都是和人一起赶东西；底座主线是一个人做的研究。",
-    refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-3", quote }], falsifier: "如果独自做研究时也常投入到忘了时间" });
-  const { rpc, prompts } = fakeRuntime([turn({ stage: "energy", progress, insight: { text: "", refs: [] } }),
+    refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-5", quote }], falsifier: "如果独自做研究时也常投入到忘了时间" });
+  // A card joins what was said at different times: the round after a first one cites the reply before the latest two (2026-11-15).
+  const { rpc, prompts } = fakeRuntime([turn({ stage: "energy", progress, insight: { text: "", refs: [] } }), turn({ stage: "energy", progress }),
     turn({ stage: "energy", progress: { ...progress, covered: ["心流时刻", "耗能的事"], open: [] }, insight: insight("一个人做研究") }),
     turn({ stage: "energy", progress, insight: insight("一个人做实验") })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
   await run({ sessionId: "s", text: "最投入的是和同学一起赶比赛的时候。" });
+  await run({ sessionId: "s", text: "周末一般在家。" });
   await run({ sessionId: "s", text: "底座是我一个人做研究。" });
   expect(dialogue(prompts)[1]).toContain("上轮判断：第 3/6 部分「能量」未完成");
   expect(dialogue(prompts)[1]).toContain("abstract");
@@ -633,8 +635,8 @@ test("the progress record goes back to the model next round, and an observation 
 
 test("observations come as often as there is evidence, never the same one twice", async () => {
   const insight = { text: "你说投入的两次都是和人一起赶东西；底座主线是一个人做的研究。",
-    refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-3", quote: "一个人做研究" }], falsifier: "如果独自做研究时也常投入到忘了时间" };
-  const { rpc } = fakeRuntime([turn({ stage: "energy", insight: { text: "", refs: [] } }), turn({ stage: "energy", insight }),
+    refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-5", quote: "一个人做研究" }], falsifier: "如果独自做研究时也常投入到忘了时间" };
+  const { rpc } = fakeRuntime([turn({ stage: "energy", insight: { text: "", refs: [] } }), turn({ stage: "energy" }), turn({ stage: "energy", insight }),
     turn({ stage: "energy", insight }), turn({ stage: "compass", insight })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });
   const kept = async (text: string) => {
@@ -642,6 +644,7 @@ test("observations come as often as there is evidence, never the same one twice"
     return Boolean((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { insight?: unknown }).insight);
   };
   expect(await kept("最投入的是和同学一起赶比赛的时候。")).toBe(false);
+  expect(await kept("周末一般在家。")).toBe(false);
   expect(await kept("底座是我一个人做研究。")).toBe(true);
   // The same words again are left out, in any part.
   expect(await kept("还有别的吗")).toBe(false);
@@ -649,34 +652,36 @@ test("observations come as often as there is evidence, never the same one twice"
 });
 
 test("a card's hypothesis is marked asked when it is shown, rated or not; one picked from the log keeps its id, a new one never takes an id on record", async () => {
-  const refs = [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-3", quote: "一个人做研究" }];
+  const refs = [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-5", quote: "一个人做研究" }];
   const fromLog = { text: "你说投入的两次都是和人一起赶东西。", refs, falsifier: "如果独自时也常投入", hypothesisId: "h1" };
   const fresh = { text: "你说底座主线是一个人做的研究。", refs, falsifier: "如果独自做研究时也常投入" };
-  const { rpc } = fakeRuntime([turn({ stage: "energy", insight: { text: "", refs: [] } }), turn({ stage: "energy", insight: fromLog }),
+  const { rpc } = fakeRuntime([turn({ stage: "energy", insight: { text: "", refs: [] } }), turn({ stage: "energy" }), turn({ stage: "energy", insight: fromLog }),
     turn({ stage: "energy", insight: fresh })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });
   await run({ sessionId: "s", text: "最投入的是和同学一起赶比赛的时候。" });
+  await run({ sessionId: "s", text: "周末一般在家。" });
   store.setSetting(workspaceId, "profile.model", JSON.stringify({ hypotheses: [{ id: "h1", dimension: "D2", statement: "和人一起时投入",
-    basis: [], falsifier: "", alternative: "", status: "open" }, { id: "c5", dimension: "D2", statement: "旧卡", basis: [], falsifier: "", alternative: "", status: "open" }] }));
+    basis: [], falsifier: "", alternative: "", status: "open" }, { id: "c7", dimension: "D2", statement: "旧卡", basis: [], falsifier: "", alternative: "", status: "open" }] }));
   await run({ sessionId: "s", text: "底座是我一个人做研究。" });
   const shown = store.listOnboardingMessages(workspaceId, "s").at(-1)!;
   const log = () => (JSON.parse(store.getSetting(workspaceId, "profile.model")!) as { hypotheses: Array<{ id: string; cardKey?: string }> }).hypotheses;
   expect(log().find((item) => item.id === "h1")?.cardKey).toBe(`s#${shown.seq}`);
   await run({ sessionId: "s", text: "还有别的吗" });
   const card = (store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { insight?: { hypothesisId?: string } }).insight;
-  expect(card?.hypothesisId).toBe("c5-2");
-  expect(log().find((item) => item.id === "c5-2")?.cardKey).toBe(`s#${store.listOnboardingMessages(workspaceId, "s").at(-1)!.seq}`);
-  expect(log().find((item) => item.id === "c5")?.cardKey).toBeUndefined();
+  expect(card?.hypothesisId).toBe("c7-2");
+  expect(log().find((item) => item.id === "c7-2")?.cardKey).toBe(`s#${store.listOnboardingMessages(workspaceId, "s").at(-1)!.seq}`);
+  expect(log().find((item) => item.id === "c7")?.cardKey).toBeUndefined();
 });
 
 test("cards ready together come in one round: each is kept, keyed and rated on its own, and a correction holds the next cards back", async () => {
-  const refs = [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-3", quote: "一个人做研究" }];
+  const refs = [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-5", quote: "一个人做研究" }];
   const card = (id: string, text: string) => ({ text, refs, falsifier: "如果独自时也常投入", hypothesisId: id, dimension: "D2" });
-  const { rpc } = fakeRuntime([turn({ stage: "energy", insight: { text: "", refs: [] } }),
+  const { rpc } = fakeRuntime([turn({ stage: "energy", insight: { text: "", refs: [] } }), turn({ stage: "energy" }),
     turn({ stage: "energy", insights: [card("h1", "你说投入的两次都是和人一起赶东西。"), card("h2", "你说底座主线是一个人做的研究。"),
       card("h3", "你说投入的两次都是和人一起赶东西。")] })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });
   await run({ sessionId: "s", text: "最投入的是和同学一起赶比赛的时候。" });
+  await run({ sessionId: "s", text: "周末一般在家。" });
   const hypothesis = (id: string) => ({ id, dimension: "D2", statement: id, basis: [], falsifier: "", alternative: "", status: "open" });
   store.setSetting(workspaceId, "profile.model", JSON.stringify({ hypotheses: [hypothesis("h1"), hypothesis("h2"), hypothesis("h3")] }));
   await run({ sessionId: "s", text: "底座是我一个人做研究。" });
@@ -704,7 +709,8 @@ test("cards ready together come in one round: each is kept, keyed and rated on i
 test("an uncertain hypothesis the log offers on one reply may be carded citing that one; any other card still needs two", async () => {
   // Replay 13 (2026-11-14): with only open hypotheses on two replies offered, nine rounds had no card. The extraction's uncertain ones fill in.
   const one = [{ replyId: "reply-3", quote: "一个人做研究" }];
-  const { rpc } = fakeRuntime([turn({ stage: "energy", insight: { text: "", refs: [] } }),
+  // The one reply is older than the latest two: a card does not rest on what was just said alone (2026-11-15).
+  const { rpc } = fakeRuntime([turn({ stage: "energy", insight: { text: "", refs: [] } }), turn({ stage: "energy" }), turn({ stage: "energy" }),
     turn({ stage: "energy", insights: [{ text: "你说「一个人做研究」，我猜是你更喜欢自己定节奏；也可能只是那学期课多。", refs: one, falsifier: "如果课少时也常约人一起做", hypothesisId: "h7", dimension: "D3" },
       { text: "你说一个人做研究时最慢。", refs: one, falsifier: "如果独自时也很快", hypothesisId: "h8", dimension: "D1" }] })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
@@ -714,6 +720,8 @@ test("an uncertain hypothesis the log offers on one reply may be carded citing t
     { id: "h7", dimension: "D3", statement: "更喜欢自己定节奏", basis, falsifier: "", alternative: "只是那学期课多", status: "supported" },
     { id: "h8", dimension: "D1", statement: "独处时慢", basis, falsifier: "", alternative: "", status: "open" }] }));
   await run({ sessionId: "s", text: "底座是我一个人做研究。" });
+  await run({ sessionId: "s", text: "周末一般在家。" });
+  await run({ sessionId: "s", text: "还有别的吗" });
   const content = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { insight?: { text: string; hypothesisId?: string }; moreInsights?: unknown[] };
   expect(content.insight).toMatchObject({ hypothesisId: "h7" });
   expect(content.moreInsights ?? []).toEqual([]);
@@ -803,6 +811,30 @@ test("the extraction never reads a disclosure's words: the reply goes to it as t
   expect(extraction(prompts).length).toBeGreaterThan(0);
   expect(extraction(prompts).some((prompt) => prompt.includes("自残过"))).toBe(false);
   expect(extraction(prompts).some((prompt) => prompt.includes(DISCLOSURE_PLACEHOLDER))).toBe(true);
+});
+
+test("the dialogue reads the scale as readings, never taps, and a reply quoting scores goes back (2026-11-15)", async () => {
+  const { rpc, prompts } = fakeRuntime([turn({ stage: "energy", reply: "你尽责性 5/5，很有条理。" }), turn({ stage: "energy", reply: "你做事很有条理。" })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  await run({ sessionId: "s", text: "【我做事有条理】点选：5/5（非常符合）\n周末一般在家。" });
+  expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string }).reply).toBe("你做事很有条理。");
+  expect(dialogue(prompts)[0]).toContain("【我做事有条理】已点选（读数见 scaleReadings）");
+  expect(dialogue(prompts)[0]).not.toContain("点选：5/5");
+  expect(dialogue(prompts).filter((prompt) => prompt.includes("报了量表的分数"))).toHaveLength(1);
+});
+
+test("a reply saying what the card beside it says goes back once (2026-11-15)", async () => {
+  const insight = { text: "你说投入的两次都是和人一起赶东西，底座却是一个人做的研究。", falsifier: "如果独自做研究时也常投入",
+    refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-5", quote: "一个人做研究" }] };
+  const { rpc, prompts } = fakeRuntime([turn({ stage: "energy" }), turn({ stage: "energy" }),
+    turn({ stage: "energy", reply: "投入的两次都是和人一起赶东西，底座却是一个人做的，这很明显。", insight }), turn({ stage: "energy", reply: "周末呢？", insight })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  await run({ sessionId: "s", text: "最投入的是和同学一起赶比赛的时候。" });
+  await run({ sessionId: "s", text: "周末一般在家。" });
+  await run({ sessionId: "s", text: "底座是我一个人做研究。" });
+  const content = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string; insight?: { text: string } };
+  expect(content).toMatchObject({ reply: "周末呢？", insight: { text: insight.text } });
+  expect(dialogue(prompts).filter((prompt) => prompt.includes("reply 和观察卡说了同一段话"))).toHaveLength(1);
 });
 
 test("as the person reads a round: the safety reply ends at its help lines; the rest of the reply and the questions are the model's own", async () => {

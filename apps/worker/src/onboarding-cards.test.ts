@@ -1,7 +1,8 @@
 import { afterEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { profileGaps, type Hypothesis, type ResearchThread, type TurnInsight, type TurnQuestion } from "@crossline/core";
-import { cardTools, checkInsights, checkOpenItems, checkQuestions, checkResearch, emptyDraft, ROUND_QUESTIONS, withDraft, type RoundDraft } from "./onboarding-cards";
+import { cardTools, checkInsights, checkOpenItems, checkQuestions, checkResearch, emptyDraft, ROUND_QUESTIONS, sharedRun, STAGE_CARDS, undecidedDay, withDraft,
+  type RoundDraft } from "./onboarding-cards";
 import { interviewLedger } from "./question-ledger";
 
 // 2026-11-14 audit (docs/onboarding-validation-audit.md §3.3–3.5): every check answers with a problem the model can act on; none rewrites
@@ -135,4 +136,36 @@ test("the card tools keep an item only once its checks pass, and the final answe
     questions: [expect.objectContaining({ id: "q1" }), expect.objectContaining({ id: "q9" })], openItems: ["gap-meetings-ece548"], insights: [], research: [] });
   draft = emptyDraft();
   expect(withDraft({ reply: "好", questions: [] }, draft)).toEqual({ reply: "好", questions: [] });
+});
+
+test("a day is the person's to set: options that are days come back, a date question names its subject, and a subject answered is not asked again (2026-11-15)", () => {
+  const context = (dates = [] as Array<{ about: string; answer: string; undecided: boolean }>) => ({ ledger: [], openItems: [], dates, today: "2026-11-15" });
+  const options = (...labels: string[]) => labels.map((label, index) => ({ id: `o${index}`, label, detail: "" }));
+  // Replay 15: 「什么时候恢复投递？」 with 十一月底 / 十二月初 / 寒假前, six times over.
+  expect(checkQuestions([ask("什么时候恢复投递？", { kind: "single", options: options("十一月底", "十二月初", "寒假前") })], context()).problems)
+    .toEqual([expect.stringContaining("选项是日子")]);
+  // A weekday as such is a preference, not a day.
+  expect(checkQuestions([ask("一周里哪天状态最好？", { kind: "single", options: options("周一", "周三", "周六") })], context()).accepted).toHaveLength(1);
+  expect(checkQuestions([ask("打算哪天恢复投递？", { date: true })], context()).problems).toEqual([expect.stringContaining("about")]);
+  const resume = ask("打算哪天恢复投递？", { date: true, about: "恢复投递" });
+  expect(checkQuestions([resume], context()).accepted).toHaveLength(1);
+  expect(checkQuestions([{ ...resume, about: "恢复投递的日子" }], context([{ about: "恢复投递", answer: "还没定", undecided: true }])).problems)
+    .toEqual([expect.stringContaining("还没定：不再问")]);
+  expect(checkQuestions([resume], context([{ about: "恢复投递", answer: "12 月 1 日", undecided: false }])).problems).toEqual([expect.stringContaining("12 月 1 日")]);
+  expect(checkQuestions([resume, { ...resume, id: "q2", text: "恢复投递放在哪天？" }], context()).problems).toEqual([expect.stringContaining("同一件事的日子")]);
+  expect([undecidedDay("还没定，看情况"), undecidedDay("选择：不确定"), undecidedDay("12 月 1 日")]).toEqual([true, true, false]);
+});
+
+test("a card joins what was said at different times, and a stage's fourth card says what it adds (2026-11-15)", () => {
+  const recent = new Set(["reply-1", "reply-2"]);
+  expect(checkInsights([card()], insightContext([], { recent })).problems).toEqual([expect.stringContaining("最近两条回答")]);
+  expect(checkInsights([card()], insightContext([], { recent: new Set(["reply-2", "reply-4"]) })).accepted).toHaveLength(1);
+  const full = insightContext([], { stageCards: STAGE_CARDS });
+  expect(checkInsights([card()], full).problems).toEqual([expect.stringContaining("why")]);
+  expect(checkInsights([card({ why: "前面三张都在说时间，这张说和谁一起" })], full).accepted).toHaveLength(1);
+});
+
+test("the stretch a reply and a card share, spaces and punctuation aside", () => {
+  expect(sharedRun("你说：投入的两次，都是和人一起赶东西。周末呢？", "投入的两次都是和人一起赶东西")).toBe("投入的两次都是和人一起赶东西");
+  expect(sharedRun("周末呢？", "投入的两次")).toBe("");
 });
