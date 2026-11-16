@@ -6,7 +6,7 @@ import {
   PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, type TurnQuestion, keepOnboardingDialogue, droppedOnboardingItems, ONBOARDING_KEEP_EARLY_MAX, onboardingDialogueSchema,
   validateOnboardingDialogue, locateQuote,
   type ProfileGap, type ProfileModel, type OnboardingStage, ASSESS_RESULT_SETTING, TYPE_TABLE,
-  mentionsSelfHarm, safetyRound, sensitiveReplies, withoutDisclosures, disclosureEchoes, lessonAnswer, LESSON_QUESTION, nextTaken, type LessonConsent, readTurnProgress, safetyReplyOnly, researchCopied, RESEARCH_FIGURES_MAX,
+  mentionsSelfHarm, safetyRound, sensitiveReplies, withoutDisclosures, disclosureEchoes, disclosureWords, interviewerWords, lessonAnswer, LESSON_QUESTION, nextTaken, type LessonConsent, readTurnProgress, safetyReplyOnly, researchCopied, RESEARCH_FIGURES_MAX,
   inventedDates, type KnownSources, type OnboardingDialogue, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, ONBOARDING_LAST_FAILURE, readPartialTurn, type OnboardingProgress, calendarWeek,
   tFor, flowOf, INTERVIEW_FLOW_STAGES, PROFILE_MODULE_STAGES, cardsFor, readCardAnswers, mergeInstrumentAnswers, readInstrumentAnswers,
   settledItems, PROFILE_INSTRUMENTS_SETTING, type CardSet, type InterviewFlow, type ProfileCard, type ProfileStage, INTERVIEW_PACE
@@ -453,8 +453,9 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // them. `hidden` is those but this reply, which the round in hand answers.
     const sensitive = sensitiveReplies(messages);
     const hidden = new Set([...sensitive].filter((id) => id !== replyId));
-    const disclosedTexts = [...hidden].map((id) => replies[id] ?? "");
-    const ordinaryTexts = Object.entries(replies).filter(([id]) => !sensitive.has(id)).map(([, said]) => said);
+    // Compared by the person's own words where the disclosure is; the interviewer's words and the other replies are ordinary.
+    const disclosedTexts = disclosureWords(messages, hidden);
+    const ordinaryTexts = [...Object.entries(replies).filter(([id]) => !sensitive.has(id)).map(([, said]) => said), ...interviewerWords(messages)];
     /** What in a piece of the round points back at a disclosure: a self-harm word, or words only the disclosure said (`disclosureEchoes`). */
     const echoOf = (said: string): string => {
       if (!hidden.size || !said) return "";

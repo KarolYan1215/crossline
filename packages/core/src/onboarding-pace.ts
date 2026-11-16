@@ -163,6 +163,46 @@ export function lessonAnswer(reply: string): "yes" | "no" {
   return line.includes(LESSON_QUESTION.options[0]!.label) && !line.includes(LESSON_QUESTION.options[1]!.label) ? "yes" : "no";
 }
 
+/**
+ * The person's own words in a reply: what they typed under an answer (after 「补充：」 or 「Added:」) and lines outside the answer format.
+ * The 【question】 and the picked labels are the interviewer's and the app's words, not the person's.
+ */
+export function ownWords(reply: string): string[] {
+  return reply.split("\n").flatMap((line) => {
+    const said = line.trim();
+    if (!said) return [];
+    if (!/^[【[]/u.test(said)) return [said];
+    const typed = (/补充：(.*)$/u.exec(said)?.[1] ?? /(?:^|\s|\.)\s*Added: (.*)$/u.exec(said)?.[1] ?? "").trim();
+    return typed ? [typed] : [];
+  });
+}
+
+/**
+ * What a text is compared with for echoes of a disclosure (`disclosureEchoes`): the person's own words in the hidden replies, and in a
+ * reply that names self-harm only those lines. A reply that only follows a safety round counts by its self-harm lines alone; the rest of
+ * it is the talk going on. Replay 16 (2026-11-16) sent rounds back for 「自己安排」 from a schedule answer in the same reply and for the
+ * app's own 「成为怎样的」: five of y's twelve rounds in one run.
+ */
+export function disclosureWords(messages: ReadonlyArray<ConversationMessage>, hidden: ReadonlySet<string>): string[] {
+  return messages.flatMap((message, index) => {
+    if (message.role !== "user" || !hidden.has(`reply-${message.seq}`)) return [];
+    const lines = ownWords(replyTextOf(message));
+    const harm = lines.filter(mentionsSelfHarm);
+    if (harm.length) return harm;
+    const before = messages.slice(0, index).reverse().find((item) => item.role === "assistant");
+    return before && safetyRound(before.content as { safety?: unknown; reply?: unknown }) ? [] : lines;
+  });
+}
+
+/** The interviewer's own words — its replies, questions and options — which are never the person's disclosure; a safety round's reply is left out. */
+export function interviewerWords(messages: ReadonlyArray<ConversationMessage>): string[] {
+  return messages.filter((message) => message.role === "assistant").flatMap((message) => {
+    const content = message.content as { reply?: unknown; safety?: unknown; questions?: Array<{ text?: unknown; options?: Array<{ label?: unknown }> }> } | undefined;
+    const questions = (content?.questions ?? []).flatMap((question) => [String(question.text ?? ""), ...(question.options ?? []).map((option) => String(option.label ?? ""))]);
+    return safetyRound(content) ? questions : [String(content?.reply ?? ""), ...questions];
+  });
+}
+
 const HAN_RUN = /\p{Script=Han}+/gu;
 /**
  * The runs of at least `size` Chinese characters a text shares with a disclosure, leaving out every run the conversation's other replies

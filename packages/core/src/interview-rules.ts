@@ -304,5 +304,8 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     code: { file: "apps/web/app/onboarding/story-views.tsx", symbol: "LifelineView", test: "apps/web/app/onboarding/story-views.test.tsx", by: "the lifeline draws only what the record holds" } },
   { id: "IR-150", layer: "L0", verdict: "keep", status: "active", rule: "D9 维持循环画成一个圈：没被推翻的 D9 假设至少两条，最后一步回到第一步",
     code: { file: "apps/web/app/onboarding/story-views.tsx", symbol: "LoopView", test: "apps/web/app/onboarding/story-views.test.tsx", by: "the loop draws the unrefuted D9 steps round a circle" } },
+  // Replay 16 (2026-11-16): IR-123 sent five of twelve rounds back for words that were not the disclosure.
+  { id: "IR-151", layer: "L0", verdict: "keep", status: "active", rule: "披露原话只按本人自己打的字比：回复里有自伤的句子时只比那几句，安全回应之后那条回复只比自伤的句子；题面、选项和访谈者自己的话都算普通的话",
+    code: { file: `${CORE}/onboarding-pace.ts`, symbol: "disclosureWords", test: `${CORE}/onboarding-pace.test.ts`, by: "a disclosure is compared by the person's own words where it is" } },
 ];
 /* i18n-ignore-end */

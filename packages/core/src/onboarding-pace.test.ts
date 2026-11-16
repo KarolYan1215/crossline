@@ -1,6 +1,6 @@
 import { describe, expect, it, test } from "vitest";
 import { capacityConflict, timelineDeadlines, checkInsight, fixedScheduleLines, interviewAbstract, lineWeights, portraitConfirmedByInsights, progressLines, progressView, readTurnProgress, skeletonDraft,
-  DISCLOSURE_PLACEHOLDER, SAFETY_ROUND_PLACEHOLDER, LESSON_QUESTION, NEXT_ACCEPTED, disclosureEchoes, lessonAnswer, nextTaken, sensitiveReplies, withoutDisclosures } from "./onboarding-pace";
+  DISCLOSURE_PLACEHOLDER, SAFETY_ROUND_PLACEHOLDER, LESSON_QUESTION, NEXT_ACCEPTED, disclosureEchoes, disclosureWords, interviewerWords, lessonAnswer, ownWords, nextTaken, sensitiveReplies, withoutDisclosures } from "./onboarding-pace";
 import { DEADLINE_GUESS_PREFIX, answeredGapFacts, profileGaps } from "./profile-gaps";
 import { interviewChecklist, interviewComplete, interviewOwnedOpen } from "./interview-checklist";
 
@@ -177,6 +177,27 @@ it("a text echoes a disclosure by four Chinese characters only it said, not by w
   expect(disclosureEchoes("那段时间你晚上睡不着。", disclosure, ordinary)).toEqual([]);
   expect(disclosureEchoes("压力很大没人可说的时候", disclosure, ordinary)).toEqual(["压力很大没人可说"]);
   expect(disclosureEchoes("Nobody would listen to me then.", ["back then nobody would listen to me"], [])).toEqual(["nobody would listen to", "would listen to me"]);
+});
+
+it("a disclosure is compared by the person's own words where it is, never by the question text or the talk around it", () => {
+  // Replay 16: the round of the disclosure also asked the week, and the round after it asked the goal; both came back as echoes.
+  expect(ownWords("【到现在最难的一段是什么时候？】补充：有过一段很低落的时候，不想多聊。\n【每周哪几天固定？】选择：工作日\n好，往下。"))
+    .toEqual(["有过一段很低落的时候，不想多聊。", "好，往下。"]);
+  const user = (seq: number, text: string) => ({ role: "user", seq, content: { text } });
+  const messages = [user(1, "【最难的一段？】补充：有过不想活的念头，现在没有了。\n【每周哪天空？】补充：周二和周末全天可以自己安排。"),
+    { role: "assistant", seq: 2, content: { reply: "谢谢你愿意说出来。", safety: true, questions: [{ text: "「学生」想成为怎样的学生？", options: [{ label: "学业扎实" }] }] } },
+    user(3, "【「学生」想成为怎样的学生？】选择：学业扎实\n【这周要做什么？】补充：本周内要交一版方案。"),
+    { role: "assistant", seq: 4, content: { reply: "方案放在周二。", questions: [{ text: "周二几点开始？" }] } }];
+  const hidden = new Set(["reply-1", "reply-3"]);
+  expect(disclosureWords(messages, hidden)).toEqual(["有过不想活的念头，现在没有了。"]);
+  expect(interviewerWords(messages)).toEqual(["「学生」想成为怎样的学生？", "学业扎实", "方案放在周二。", "周二几点开始？"]);
+  const echoes = (text: string) => disclosureEchoes(text, disclosureWords(messages, hidden), interviewerWords(messages));
+  expect(echoes("周二整天可以自己安排，本周内要交一版方案；想成为怎样的学生你选了学业扎实。")).toEqual([]);
+  expect(echoes("你说现在没有了")).toEqual(["现在没有了"]);
+  // Without a self-harm word the disclosure reply counts by all its own words; a reply after the safety round, by none of them.
+  const plain = [user(1, "【最难的一段？】补充：那段时间压力很大没人可说。"), { role: "assistant", seq: 2, content: { reply: "谢谢你愿意说出来。", safety: true } },
+    user(3, "现在好多了，周末在家。")];
+  expect(disclosureWords(plain, new Set(["reply-1", "reply-3"]))).toEqual(["那段时间压力很大没人可说。"]);
 });
 
 it("the lesson question's answer: only 「可以聊聊」 is a yes", () => {
