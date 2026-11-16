@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore, rateInsight, writeExtractState } from "@crossline/db";
-import { cardWordsHead, DISCLOSURE_PLACEHOLDER, LESSON_QUESTION, NEXT_ACCEPTED, PROFILE_FRAMEWORK, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
+import { cardWordsHead, DISCLOSURE_PLACEHOLDER, LESSON_QUESTION, NEXT_ACCEPTED, ONBOARDING_STAGES, PROFILE_FRAMEWORK, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
   type OnboardingProgress, type ProfileCard } from "@crossline/core";
-import { cardsForRound, createOnboardingSessionRunner as createRunner, finishInterview, INSTRUCTIONS, ONBOARDING_SKILL, stageOrderFor, withoutEndHint } from "./onboarding-session";
+import { cardsForRound, createOnboardingSessionRunner as createRunner, finishInterview, INSTRUCTIONS, ONBOARDING_SKILL, stageGuide, stageOrderFor, withoutEndHint } from "./onboarding-session";
 import { correctedSince, correctionUnread, INSTRUCTIONS as EXTRACT_INSTRUCTIONS } from "./onboarding-extract";
 import { ONBOARDING_EXTRACT_SKILL } from "./onboarding-extract";
 import { fakeRuntime as runtimeWithRoutes } from "./testing/fake-runtime";
@@ -847,6 +847,31 @@ test("a round that asks proposes its next step, and the next round is told wheth
   expect(dialogue(prompts).at(-1)).toContain("上轮提议的下一步「聊聊创业线现在的项目」：本人按了「好，往下」。");
   await run({ sessionId: "s", text: "先说一下周末的事。" });
   expect(dialogue(prompts).at(-1)).toContain("本人没按，写了自己的话。");
+});
+
+test("each stage's checklist goes with the round that starts in it, once per thread (2026-11-15)", async () => {
+  const { rpc, prompts } = fakeRuntime([turn({ stage: "narrative" }), turn({ stage: "compass" }), turn({ stage: "compass" })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  await run({ sessionId: "s", text: "最投入的是和同学一起赶比赛的时候。" });
+  await run({ sessionId: "s", text: "周末一般在家。" });
+  await run({ sessionId: "s", text: "底座是我一个人做研究。" });
+  expect(dialogue(prompts)[0]).toContain("本阶段：narrative 经历与转折");
+  expect(dialogue(prompts)[1]).not.toContain("stageGuide");
+  expect(dialogue(prompts)[2]).toContain("本阶段：compass 指南针");
+});
+
+test("the Skill's core keeps at most fifteen rules, and every stage has a checklist of at most ten (2026-11-15)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const core = readFileSync(new URL("../../../skills/marketplace/plugins/crossline/skills/crossline-onboarding/SKILL.md", import.meta.url), "utf8");
+  const rules = (text: string) => text.match(/^\d+\. \*\*/gmu)?.length ?? 0;
+  expect(rules(core.split("## 核心规则")[1]!.split("\n## ")[0]!)).toBeLessThanOrEqual(15);
+  for (const stage of ONBOARDING_STAGES) {
+    const guide = stageGuide(stage);
+    expect(guide, stage).toContain(`本阶段：${stage}`);
+    expect(rules(guide!), stage).toBeGreaterThan(0);
+    expect(rules(guide!), stage).toBeLessThanOrEqual(10);
+  }
+  expect(stageGuide("../SKILL")).toBeUndefined();
 });
 
 test("as the person reads a round: the safety reply ends at its help lines; the rest of the reply and the questions are the model's own", async () => {

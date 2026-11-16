@@ -292,5 +292,8 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     text: { file: INTERVIEW_SKILL, anchor: "**上轮提议的下一步本人没按，先接住本人的话。**" } },
   { id: "IR-145", layer: "L2", verdict: "model", status: "active", rule: "说过的张力记进 progress.said，不再换说法再说",
     text: { file: INTERVIEW_SKILL, anchor: "`said`（已经对本人说过的张力和模式" } },
+  // The Skill split (2026-11-15): a resident core of fifteen rules, and each stage's checklist sent by code with the stage.
+  { id: "IR-146", layer: "L0", verdict: "keep", status: "active", rule: "当前阶段的清单（stages/<stage>.md）在阶段变了或线程重建时随这一轮发给对话",
+    code: { file: `${WORKER}/onboarding-session.ts`, symbol: "stageGuide", test: `${WORKER}/onboarding-session.test.ts`, by: "each stage's checklist goes with the round that starts in it" } },
 ];
 /* i18n-ignore-end */

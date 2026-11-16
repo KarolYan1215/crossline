@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { transcriptDocumentIds } from "./recording-digest";
 import {
   AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary, ACTIVITY_HOURLY, atComputerLines, type ActivityHour,
@@ -31,6 +33,17 @@ import { readResearch, researchForDialogue, researchRunnerFor } from "./onboardi
 import { DOMAIN_PACKS, domainGuides } from "@crossline/identity-packs";
 
 export const ONBOARDING_SKILL = "crossline:crossline-onboarding";
+
+/**
+ * The interview Skill's stage checklists (2026-11-15, after replay 15: one Skill of some 120 rules was more than the dialogue model held):
+ * SKILL.md keeps the resident core, and `stages/<stage>.md` beside it how each stage is asked, sent by code with the stage it is in.
+ */
+const STAGE_GUIDES = path.resolve(import.meta.dirname, "../../../skills/marketplace/plugins/crossline/skills/crossline-onboarding/stages");
+/** A stage's checklist, or undefined when there is none (a copy without the Skill's files). */
+export function stageGuide(stage: string): string | undefined {
+  if (!/^[a-z]+$/u.test(stage)) return undefined;
+  try { return readFileSync(path.join(STAGE_GUIDES, `${stage}.md`), "utf8").trim() || undefined; } catch { return undefined; }
+}
 /** The dialogue's fields that speak to the person as 你; everything else it writes is third person. */
 const SECOND_PERSON = ["reply", "questions", "insights"];
 
@@ -77,7 +90,9 @@ type Announced = { announcedSources?: string[]; calendarSent?: string; heardAt?:
   /** The disclosures (`reply-N`) the thread was last rebuilt without: one not among them rebuilds it before the round (2026-11-15). */
   redacted?: string[];
   /** Whether the person was asked, and agreed, to talk about what a hard time taught them (`LESSON_QUESTION`). */
-  lesson?: LessonConsent };
+  lesson?: LessonConsent;
+  /** The stage whose checklist (`stageGuide`) the thread holds: another stage's is sent when the round starts in it (2026-11-15). */
+  guide?: string };
 
 /**
  * What of the dialogue's last round the person did not see, and what the app put beside it (2026-10-31). Since the 2026-11-14 audit the
@@ -503,6 +518,9 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const itemSchema = (key: "questions" | "insights" | "research") =>
       ((outputSchema as { properties: Record<string, { items: Record<string, unknown> }> }).properties[key]!).items;
     const stageNow = (session.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : INTERVIEW_FLOW_STAGES[flow][0]!);
+    // The stage's checklist goes with the round that starts in a stage the thread has no checklist of, and with every new thread.
+    const guideNow = stageGuide(stageNow);
+    const guideFor = (newThread: boolean): { stageGuide?: string } => guideNow && (newThread || coverage.guide !== stageNow) ? { stageGuide: guideNow } : {};
     // With them, the read tools (P3): the ledger and the files in full, page by page, where the context shows only part of them.
     const tools = mergeTools(cardTools({ schemas: { question: itemSchema("questions"), insight: itemSchema("insights"), research: itemSchema("research") },
       ids: () => ids, draft: () => draft,
@@ -613,7 +631,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     /** A first turn: everything the ledger knows goes in, because the thread starts empty. */
     const startThread = async (documents: typeof fresh, history?: OnboardingTurnContext["history"]) => {
       const context: OnboardingTurnContext = {
-        ...standing(),
+        ...standing(), ...guideFor(true),
         version: "crossline.onboarding.turn.v1",
         identities: identities(),
         projects: store.listProjects(workspaceId).map(({ id, identityId, name, summary }) => ({ id, identityId, name, summary })),
@@ -690,7 +708,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         // Later turns carry only what is new: the reply, any file that arrived since the last turn, and what the extraction recorded.
         const newSources = clipDocuments(fresh);
         // The completion list goes with every turn, so the model knows what it still owes without being told twice in prose.
-        const message = JSON.stringify({ ...standing(), ...disclosureNote(), ...scaleReadings(), reply: { id: replyId, text: withoutTaps(replyText) }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(8, undefined, sessionId), ...startStandard(), ...openItems(),
+        const message = JSON.stringify({ ...standing(), ...guideFor(false), ...disclosureNote(), ...scaleReadings(), reply: { id: replyId, text: withoutTaps(replyText) }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(8, undefined, sessionId), ...startStandard(), ...openItems(),
           ...(focusLine ? {} : { stageOrder: stageOrderFor(flow) }),
           questionLedger: ledgerForModel(store, workspaceId, sessionId, LEDGER_SHOWN), ...pace(), ...roundNotes(),
           ...(calendarChanged ? { calendar: week } : {}),
@@ -790,7 +808,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       coverage: { ...current.coverage, coverage: output.coverage, ...(output.stage ? { stage: output.stage } : {}), ...(progress ? { progress } : {}),
         announcedSources: [...announcedNow, ...sent.map(([id]) => id)], heardAt, ...(week.length ? { calendarSent: weekSent } : {}), lastRound: edits,
         ...(cardMode ? { cardTools: cardMode } : {}), ...(startMetRound !== null ? { startMetRound } : {}),
-        ...(hidden.size ? { redacted: [...hidden] } : {}), ...(lessonAsked ? { lesson: "asked" as const } : lesson !== "unasked" ? { lesson } : {}) },
+        ...(hidden.size ? { redacted: [...hidden] } : {}), ...(lessonAsked ? { lesson: "asked" as const } : lesson !== "unasked" ? { lesson } : {}),
+        ...(guideNow ? { guide: stageNow } : {}) },
       updatedAt: new Date().toISOString()
     });
     return { state: output.nextAction === "ready_for_milestones" ? "ready" : "asked", sessionId };

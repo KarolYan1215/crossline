@@ -287,6 +287,8 @@ export type TurnProgress = { part: OnboardingStage; covered: string[]; open: str
 export type OnboardingTurnContext = {
   /** The progress header, put first (apps/worker/src/onboarding-standing.ts): where the round stands in the whole interview. */
   standing?: string[];
+  /** The checklist of the stage the round starts in (`stages/<stage>.md` beside the Skill), when the thread does not hold it yet. */
+  stageGuide?: string;
   version: "crossline.onboarding.turn.v1";
   /** `YYYY-MM-DD` in the person's zone, so a date written without a year lands in the right one. */
   today?: string; timeZone?: string;
