@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { agentLanguageLine, runLocale, schemaForLocale, styleInstructions } from "./style";
 import { join } from "node:path";
-import { repairJsonBrackets } from "./json-repair";
+import { looksLooping, repairJsonBrackets } from "./json-repair";
 import { cleanAnswerStrings, designNoteText, instructionsText, tFor, type Locale } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
 import { routeForSkill, shiftEffort, tierForSkill, tierRoutes, type ModelRoute, type RouteTier, type SpendMode } from "./model-policy";
@@ -1113,14 +1113,23 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
   const parse = (answer: string): unknown => {
     const body = answer.trim().replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```$/, "");
     try { return cleanAnswerStrings(JSON.parse(body)); }
-    catch {
+    catch (error) {
       // One bracket wrong in a long answer is mended rather than regenerated (json-repair.ts); the content is still validated.
       const mended = repairJsonBrackets(body, run.outputSchema);
       if (mended !== undefined) {
         console.log(JSON.stringify({ type: "skill.json_mended", skill: run.skillName, length: body.length }));
         return cleanAnswerStrings(JSON.parse(mended));
       }
-      throw withDetail(new Error("SKILL_SCHEMA_INVALID"), "the answer was not valid JSON (cut off, or it repeated itself); return the complete JSON object once");
+      // What went wrong and where, never the text: the answer is the person's report (2026-11-16, after replay 16 left nothing to read).
+      const position = Number((error instanceof Error ? error.message : "").match(/position (\d+)/)?.[1] ?? -1);
+      const looping = looksLooping(body);
+      const closed = /[}\]]$/.test(body);
+      console.log(JSON.stringify({ type: "skill.json_unparsed", skill: run.skillName, length: body.length, position, closed, looping }));
+      throw withDetail(new Error("SKILL_SCHEMA_INVALID"), looping
+        ? "the answer repeated the same passage over and over until it was cut off; write each field once and close the JSON object"
+        : position >= 0
+          ? `the answer was not valid JSON at character ${position} of ${body.length} (a quote inside a text not escaped as \\", or a bracket out of place); return the complete JSON object once`
+          : "the answer was not valid JSON (cut off, or a bracket out of place); return the complete JSON object once");
     }
   };
 

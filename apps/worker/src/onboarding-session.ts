@@ -6,7 +6,7 @@ import {
   PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, type TurnQuestion, keepOnboardingDialogue, droppedOnboardingItems, ONBOARDING_KEEP_EARLY_MAX, onboardingDialogueSchema,
   validateOnboardingDialogue, locateQuote,
   type ProfileGap, type ProfileModel, type OnboardingStage, ASSESS_RESULT_SETTING, TYPE_TABLE,
-  mentionsSelfHarm, safetyRound, sensitiveReplies, withoutDisclosures, disclosureEchoes, disclosureWords, interviewerWords, lessonAnswer, LESSON_QUESTION, nextTaken, type LessonConsent, readTurnProgress, safetyReplyOnly, researchCopied, RESEARCH_FIGURES_MAX,
+  mentionsSelfHarm, safetyRound, sensitiveReplies, withoutDisclosures, disclosureEchoes, disclosureWords, interviewerWords, lessonAnswer, LESSON_QUESTION, nextTaken, wantsToStart, type LessonConsent, readTurnProgress, safetyReplyOnly, researchCopied, RESEARCH_FIGURES_MAX,
   inventedDates, type KnownSources, type OnboardingDialogue, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, ONBOARDING_LAST_FAILURE, readPartialTurn, type OnboardingProgress, calendarWeek,
   tFor, flowOf, INTERVIEW_FLOW_STAGES, PROFILE_MODULE_STAGES, cardsFor, readCardAnswers, mergeInstrumentAnswers, readInstrumentAnswers,
   settledItems, PROFILE_INSTRUMENTS_SETTING, type CardSet, type InterviewFlow, type ProfileCard, type ProfileStage, INTERVIEW_PACE
@@ -430,6 +430,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         }),
         stage: stageNow, stageOrder: stageOrderFor(flow), startMetRound, undecided: dateSubjects().filter((item) => item.undecided).map((item) => item.about),
         ...(lastNext ? { lastNext: { text: lastNext, taken: nextTaken(replyText) } } : {}), facts: extractedFacts(),
+        ...(wantsToStart(replyText) ? { wantsToStart: true } : {}),
         startMissing: checklistNow().filter((item) => item.start && !item.done).map((item) => item.label),
         profile: { dimensions: profile.dimensions, hypotheses: profile.hypotheses, careers: profile.careers }
       }) };
@@ -751,7 +752,9 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // Rating cards no longer take the round's question slots (the owner, 2026-11-12: 「量表题也不会占额度了」). The short set has no
     // interest cards (想不想做), so none waits for a round of its own (onboarding-depth.ts).
     // Nor beside the safety reply (2026-11-14 audit: a rating card could still show there).
-    const cards = result.output.nextAction === "ask" && !safetyRound(result.output) ? cardsLeft : [];
+    // Nor to a person who just said they want to start (replay 16: z asked 「能直接排一周吗」 nine rounds running and got cards in five
+    // of six); the header tells the dialogue so, and the Skill has it say what is still missing instead.
+    const cards = result.output.nextAction === "ask" && !safetyRound(result.output) && !wantsToStart(replyText) ? cardsLeft : [];
     // Which project a file that came with this reply belongs to: the app's own bookkeeping question, put beside the round as it wrote it.
     const freshDocs = new Set(sent.map(([, doc]) => doc.id));
     const filing = currentGaps().filter((gap) => gap.code === "FILE_UNFILED" && freshDocs.has(gap.documentId ?? "")

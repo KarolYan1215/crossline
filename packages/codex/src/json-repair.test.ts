@@ -1,6 +1,6 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import * as codex from "./index";
-import { repairJsonBrackets } from "./json-repair";
+import { looksLooping, repairJsonBrackets } from "./json-repair";
 
 // The shape of the portrait writer's answer, cut down: nested objects, arrays of objects, keys that recur at different depths.
 const obj = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
@@ -49,6 +49,27 @@ test("nothing is mended that is whole, cut off, or more than a few brackets wron
   expect(repairJsonBrackets(`${whole.slice(0, -1)}}}}}}}}`, SCHEMA)).toBeUndefined();
 });
 
+test("a quote inside a text left unescaped is escaped; one the JSON can go on after still ends the text", () => {
+  const whole = JSON.stringify(WHOLE);
+  // 「他说"好"就走了」 written with bare quotes, in a value and next to a missing brace.
+  const quoted = whole.replace("\"portrait\":\"她{先}做研究]\"", "\"portrait\":\"她说\"好\"就{先}做研究]\"");
+  expect(() => JSON.parse(quoted)).toThrow();
+  expect(JSON.parse(repairJsonBrackets(quoted, SCHEMA)!).cover.portrait).toBe("她说\"好\"就{先}做研究]");
+  const both = quoted.replace("\"drivers\":[\"a\",\"b\"]}", "\"drivers\":[\"a\",\"b\"]");
+  expect(JSON.parse(repairJsonBrackets(both, SCHEMA)!).formulation).toEqual(WHOLE.formulation);
+  // A quote followed by a comma reads as the end of the text: not mended, refused as before.
+  expect(repairJsonBrackets(whole.replace("\"insight\":\"看\\\"见\\\"\"", "\"insight\":\"看\"见\",了\""), SCHEMA)).toBeUndefined();
+  // Escaped quotes are left as they came.
+  expect(repairJsonBrackets(whole, SCHEMA)).toBeUndefined();
+});
+
+test("an answer that goes round in a loop to the end is told apart from one broken once", () => {
+  const passage = "\"insight\":\"她把研究当成安全感的来源，每次换方向都先问稳不稳\",";
+  expect(looksLooping(`{"insights":[{${passage.repeat(80)}`)).toBe(true);
+  expect(looksLooping(JSON.stringify({ ...WHOLE, sensitive: Array.from({ length: 200 }, (_, index) => `第 ${index} 条`) }))).toBe(false);
+  expect(looksLooping(passage.repeat(3))).toBe(false);
+});
+
 function runtime(answer: string) {
   const turns: number[] = [];
   const client = new codex.JsonLineRpcClient((line) => {
@@ -84,6 +105,13 @@ test("the runner takes a mended answer in the same turn and still validates it; 
   expect(mended.turns).toBe(1);
   const refused = await run(JSON.stringify(WHOLE).replace("\"impact\":3}]", "\"impact\":3}]}"), () => { throw new Error("PORTRAIT_EMPTY"); });
   expect(refused.result.ok).toBe(false);
+  const logged: string[] = [];
+  const log = vi.spyOn(console, "log").mockImplementation((line: unknown) => { logged.push(String(line)); });
   const cut = await run(JSON.stringify(WHOLE).slice(0, 40));
+  log.mockRestore();
   expect(!cut.result.ok && cut.result.blocker.code).toBe("SKILL_SCHEMA_INVALID");
+  // What is logged says where it broke and how long it was, never the text of the answer.
+  const unparsed = logged.map((line) => { try { return JSON.parse(line) as Record<string, unknown>; } catch { return {}; } }).find((entry) => entry.type === "skill.json_unparsed");
+  expect(unparsed).toMatchObject({ skill: "crossline:crossline-portrait-writer", length: 40, closed: false, looping: false });
+  expect(logged.join("\n")).not.toContain("她");
 });

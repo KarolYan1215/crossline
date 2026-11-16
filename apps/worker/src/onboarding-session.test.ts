@@ -462,6 +462,22 @@ test("the profile module's cards: added by the app beside the model's questions 
   expect(cardsForRound("compass", later).flatMap((card) => card.items).every((item) => item.stage === "energy")).toBe(true);
   expect(cardsForRound("compass", later)).toHaveLength(1);
 });
+
+test("a person who says they want to start gets no rating card that round, and the header tells the dialogue (replay 16)", async () => {
+  const free = (id: string) => ({ id, text: `题 ${id}`, kind: "free", allowOther: true, identityId: "person", projectId: "", options: [] });
+  const { rpc, prompts } = fakeRuntime([turn({ stage: "compass", questions: [free("q1")] }), turn({ stage: "compass", questions: [free("q2")] })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
+  const lastCards = () => ((store.listOnboardingMessages(workspaceId, "s").filter((message) => message.role === "assistant").at(-1)!.content) as { cards?: ProfileCard[] }).cards ?? [];
+  await run({ sessionId: "s", text: "先从经历说起吧" });
+  expect(lastCards().length).toBeGreaterThan(0);
+  await run({ sessionId: "s", text: "差不多了吧，能直接排一周吗" });
+  expect(lastCards()).toEqual([]);
+  expect(dialogue(prompts).at(-1)).toContain("本人这一轮说想先开始用");
+  // The next round without it has them again.
+  await run({ sessionId: "s", text: "周末一般在家。" });
+  expect(lastCards().length).toBeGreaterThan(0);
+  expect(dialogue(prompts).at(-1)).not.toContain("本人这一轮说想先开始用");
+});
 test("there are no tiers: a stored choice is never read, no tier, tone or stage count is sent, and there is no per-project details part", async () => {
   expect(stageOrderFor("v1")).not.toContain("details");
   store.setSetting(workspaceId, "onboarding.depth", "quick");

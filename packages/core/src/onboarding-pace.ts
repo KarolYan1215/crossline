@@ -148,6 +148,17 @@ export function nextTaken(reply: string): boolean {
   return reply.split("\n").some((line) => /^\s*(?:好，?往下|go on)[。.!！]?\s*$/iu.test(line));
 }
 
+/**
+ * Whether the person says, in their own words this round, that they want to stop being asked and start using the app (2026-11-16).
+ * Replay 16: z wrote 「差不多了吧，能直接排一周吗」 in nine rounds running, was never told what was still missing, and got rating cards in
+ * five of six rounds. Only the person's own words count (`ownWords`): the scale's 「两边差不多」 is a picked label.
+ */
+export function wantsToStart(reply: string): boolean {
+  const said = ownWords(reply).join("\n");
+  return /(?:能|可以|能不能|可不可以)(?:直接|先)(?:开始|排|用)|(?:能|可以)开始(?:用)?了|直接(?:开始用|排(?:一周|日程|一下))|差不多了吧|先用起来|别(?:再)?问了|不想(?:再)?(?:聊|问)了|就是想排一周|别的先不聊/u.test(said)
+    || /\b(?:can we|let'?s)\s+(?:just\s+)?(?:start|get started|schedule)\b|\bskip (?:the rest|ahead)\b|\benough questions\b/iu.test(said);
+}
+
 export const LESSON_QUESTION = {
   id: "lesson-consent", kind: "single" as const, allowOther: false, identityId: "", projectId: "",
   // i18n-ignore-start: shown in the interview's language (Chinese only so far, like the profile cards)

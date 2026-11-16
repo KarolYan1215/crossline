@@ -147,11 +147,18 @@ export function createPortraitWriter(store: CrosslineStore, workspaceId: string,
     const context = { version: "crossline.portrait.v1", lines, profile, facts, replies, documents, doing,
       ...(workHistory.length ? { workHistory } : {}), ...(cards.length ? { cards } : {}), ...(research.length ? { research } : {}),
       ...(rejected.length ? { rejectedClaims: rejected.map(([, entry]) => entry.statement).filter(Boolean).slice(0, 30) } : {}) };
-    const result = await runCodexSkill<PortraitReport>(client, context, { skillName: PORTRAIT_WRITER, cwd, secondPerson: ["type.summary"], ...languageOf(),
+    const write = () => runCodexSkill<PortraitReport>(client, context, { skillName: PORTRAIT_WRITER, cwd, secondPerson: ["type.summary"], ...languageOf(),
       developerInstructions: withProfileFramework(INSTRUCTIONS),
       outputSchema: PORTRAIT_SCHEMA, prepareInput: () => context, validateOutput: (output) => checked(output, lineIds, check),
       softAccept: (rejection, output) => keepIncomplete(rejection, () => checked(output, lineIds, { ...check, lenient: true })),
       onAudit: () => {}, timeoutMs: 60 * 60_000 });
+    let result = await write();
+    // Three answers in one thread that never parsed (replay 16): each repair turn carried the broken answers before it. One fresh
+    // run, a new thread with none of them, is a new draw; a second failure is the person's to retry from the page.
+    if (!result.ok && result.blocker.code === "SKILL_SCHEMA_INVALID") {
+      console.log(JSON.stringify({ type: "portrait.fresh_retry", workspaceId }));
+      result = await write();
+    }
     if (!result.ok) return { state: "blocked", code: result.blocker.code, message: result.blocker.message };
     const version = store.listEvents(workspaceId, { type: "portrait.written" }).length + 1;
     const at = new Date().toISOString();

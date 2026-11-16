@@ -88,7 +88,7 @@ test("the next card is chosen from the log: hypotheses never carded that rest on
   expect(cardCandidateIds([hypothesis({ id: "h2", dimension: "D2", basis: two }), hypothesis({ id: "h3", dimension: "D5", basis: two }),
     hypothesis({ id: "h4", dimension: "D5", basis: two, cardKey: "s#4.1" })], 4)).toEqual(["h2", "h3"]);
   // The competing explanation goes with it, so the card can leave the why open.
-  expect(cardCandidates([hypothesis({ id: "h7", dimension: "D2", basis: two, alternative: "截止临近才快" })])[0]).toMatch(/；另一种解释：截止临近才快$/);
+  expect(cardCandidates([hypothesis({ id: "h7", dimension: "D2", basis: two, alternative: "截止临近才快" })])[0]).toMatch(/；另一种解释（写进 falsifier，不写上卡面）：截止临近才快$/);
 });
 
 test("the extraction's new hypotheses are numbered after the log's h ids, never as a card's, and the careers follow", () => {

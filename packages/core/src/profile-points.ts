@@ -217,11 +217,13 @@ export const hypothesisReplies = (item: Hypothesis): Array<[string, string]> =>
  */
 export function cardCandidates(hypotheses: Hypothesis[], limit = 3): string[] {
   return candidateRows(hypotheses, limit)
-    // The competing explanation goes with it: a card states the pattern and leaves the why open unless the replies settle it (replays 10
-    // and 11, 2026-11-14: all seven cards rated 「部分对」 had the pattern right and the cause wrong).
+    // The competing explanation goes with it, so a card states the pattern and leaves the why open unless the replies settle it (replays
+    // 10 and 11, 2026-11-14: all seven cards rated 「部分对」 had the pattern right and the cause wrong). It goes into the falsifier, not
+    // onto the card's face: told to 「摆出另一种可能」, 28 of 34 cards in replay 16 ended on 「也可能只是……」 and read as hedging (2026-11-16).
+    // One resting on a single reply is put to the person as a plain either-or question.
     .map(({ item, cited }) => `${item.id} [${item.dimension}] ${item.statement.slice(0, 120)}（依据 ${cited.slice(0, 3).map(([ref, text]) => `${ref}「${text.slice(0, 40)}」`).join("、")}）`
-      + (cited.length < 2 ? `；待核实，只有一条回复：卡上把两种解释都摆出来，问本人哪个更接近——${item.statement.slice(0, 60)} / ${item.alternative.trim().slice(0, 60)}`
-        : item.alternative.trim() ? `；另一种解释：${item.alternative.trim().slice(0, 80)}` : ""));
+      + (cited.length < 2 ? `；待核实，只有一条回复：卡上直接问是哪一种——${item.statement.slice(0, 60)} / ${item.alternative.trim().slice(0, 60)}`
+        : item.alternative.trim() ? `；另一种解释（写进 falsifier，不写上卡面）：${item.alternative.trim().slice(0, 80)}` : ""));
 }
 
 function candidateRows(hypotheses: Hypothesis[], limit: number) {

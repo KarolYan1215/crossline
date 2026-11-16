@@ -21,7 +21,7 @@ test("replay 15's round 45: the rounds in the part, the part never walked, what 
     profile: { dimensions: evidenced, hypotheses: Array.from({ length: 5 }, () => ({ status: "supported" })), careers: [{ trial: { task: "投一份运营实习" } }] } });
   expect(lines[0]).toBe("这是第 36 轮；当前阶段 lines 连这一轮已经 32 轮。");
   expect(lines[1]).toBe("阶段：走过 narrative、compass、energy、situation、lines；还没走 orientation。");
-  expect(lines[2]).toBe("开始标准：从第 8 轮起已齐，本人可以按「结束并出报告」。");
+  expect(lines[2]).toBe("开始标准：从第 8 轮起已齐，本人可以按「结束并出报告」；右栏「一周」里有按记下的时间画的一周草稿。");
   expect(lines[3]).toBe("ready_for_milestones 还差：还没谈到「主线」。");
   expect(lines[4]).toBe("最近 3 轮：每轮题数 1、1、1；出卡 4 张（本人评：准 1、部分对 1、不准 1、未评 1）。");
 });
@@ -37,6 +37,13 @@ test("with every condition met the header says so", () => {
 test("days the person said are not set are listed, so the dialogue keeps their names and does not ask them again (2026-11-15)", () => {
   const lines = standingLines({ rounds: [round("lines")], stage: "lines", stageOrder: ORDER, startMetRound: null, startMissing: [], undecided: ["恢复投递", "开始写论文"], profile: {} });
   expect(lines).toContain("本人说还没定的日子（不再问，沿用这些叫法）：恢复投递；开始写论文。");
+});
+
+test("a person who wants to start is said so right under what the start standard lacks (replay 16)", () => {
+  const lines = standingLines({ rounds: [round("narrative")], stage: "narrative", stageOrder: ORDER, startMetRound: null, startMissing: ["做饭博主的长期目标"], wantsToStart: true, profile: {} });
+  expect(lines[2]).toBe("开始标准：还没齐，缺 做饭博主的长期目标。");
+  expect(lines[3]).toBe("本人这一轮说想先开始用；这一轮应用不放量表卡。");
+  expect(standingLines({ rounds: [], stage: "narrative", stageOrder: ORDER, startMetRound: null, startMissing: [], profile: {} }).join("\n")).not.toContain("想先开始用");
 });
 
 test("the header says whether the person took the last proposed step, and how much the latest extractions found (2026-11-15)", () => {

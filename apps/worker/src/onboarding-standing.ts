@@ -24,6 +24,8 @@ export type StandingInput = {
   undecided?: string[];
   /** The step the last round proposed (`next`), and whether the person took it with the button (`nextTaken`) or wrote their own. */
   lastNext?: { text: string; taken: boolean };
+  /** The person said this round, in their own words, that they want to start using the app (`wantsToStart`). */
+  wantsToStart?: boolean;
   /** Facts the latest extraction runs wrote, oldest first: how much the latest replies still add (a fact, never a budget). */
   facts?: number[];
   /** The working portrait's dimension notes, hypotheses and career options (`ProfileModel`). */
@@ -54,8 +56,9 @@ export function standingLines(input: StandingInput): string[] {
   return [
     `这是第 ${round} 轮；当前阶段 ${input.stage} 连这一轮已经 ${inStage} 轮。`,
     `阶段：走过 ${walked.join("、") || "无"}${left.length ? `；还没走 ${left.join("、")}` : "；全部走过"}。`,
-    input.startMetRound !== null ? `开始标准：从第 ${input.startMetRound} 轮起已齐，本人可以按「结束并出报告」。`
+    input.startMetRound !== null ? `开始标准：从第 ${input.startMetRound} 轮起已齐，本人可以按「结束并出报告」；右栏「一周」里有按记下的时间画的一周草稿。`
       : `开始标准：还没齐，缺 ${input.startMissing.join("、") || "几项"}。`,
+    ...(input.wantsToStart ? ["本人这一轮说想先开始用；这一轮应用不放量表卡。"] : []),
     ...(input.lastNext ? [input.lastNext.taken ? `上轮提议的下一步「${input.lastNext.text}」：本人按了「好，往下」。`
       : `上轮提议的下一步「${input.lastNext.text}」：本人没按，写了自己的话。`] : []),
     ...(input.facts?.length ? [`最近 ${input.facts.length} 次整理记下的事实：${input.facts.join("、")} 条`

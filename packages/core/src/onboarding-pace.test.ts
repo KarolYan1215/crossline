@@ -1,6 +1,6 @@
 import { describe, expect, it, test } from "vitest";
 import { capacityConflict, timelineDeadlines, checkInsight, fixedScheduleLines, interviewAbstract, lineWeights, portraitConfirmedByInsights, progressLines, progressView, readTurnProgress, skeletonDraft,
-  DISCLOSURE_PLACEHOLDER, SAFETY_ROUND_PLACEHOLDER, LESSON_QUESTION, NEXT_ACCEPTED, disclosureEchoes, disclosureWords, interviewerWords, lessonAnswer, ownWords, nextTaken, sensitiveReplies, withoutDisclosures } from "./onboarding-pace";
+  DISCLOSURE_PLACEHOLDER, SAFETY_ROUND_PLACEHOLDER, LESSON_QUESTION, NEXT_ACCEPTED, disclosureEchoes, disclosureWords, interviewerWords, lessonAnswer, ownWords, nextTaken, sensitiveReplies, wantsToStart, withoutDisclosures } from "./onboarding-pace";
 import { DEADLINE_GUESS_PREFIX, answeredGapFacts, profileGaps } from "./profile-gaps";
 import { interviewChecklist, interviewComplete, interviewOwnedOpen } from "./interview-checklist";
 
@@ -212,4 +212,11 @@ test("the person took the proposed step only when a line of the reply is the but
   expect(nextTaken("Go on.")).toBe(true);
   expect(nextTaken("好，往下之前我想先说一下周末的事。")).toBe(false);
   expect(nextTaken("周末一般在家。")).toBe(false);
+});
+
+test("the person wants to start when their own words say so; a picked label or a question about a day does not count (replay 16)", () => {
+  for (const said of ["差不多了吧，能直接排一周吗", "差不多了吧，能先排一周吗。", "能开始用了吗？", "【题目】补充：就是想排一周，别的先不聊。",
+    "先用起来再说", "Can we just start?"]) expect(wantsToStart(said)).toBe(true);
+  for (const said of ["【只能选一边时，更看重哪个？】点选：3/5（两边差不多）", "这个能排在周六吗", "【成长过程中你敬佩谁？】补充：跟排日程有关系吗。",
+    "好，往下。", "周末一般在家。"]) expect(wantsToStart(said)).toBe(false);
 });

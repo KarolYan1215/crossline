@@ -1,5 +1,5 @@
 /**
- * Mends the brackets of a long JSON answer, and nothing else (2026-11-14).
+ * Mends the brackets of a long JSON answer, and the quotes inside its texts, and nothing else (2026-11-14, quotes 2026-11-16).
  *
  * On the developer's model (DeepSeek-V4.1-Flash) the portrait writer's single ~12k-token answer came back unparseable about one
  * attempt in nine, and on replay 8 three times in a row. Every recorded failure had the content whole and one bracket wrong: a stray
@@ -8,12 +8,18 @@
  * (or would close the root before the answer ends) is dropped, a key that the open object does not have but an enclosing one does
  * closes the objects in between, and what is still open at the end is closed. Strings, numbers and keys are copied as they came; an
  * unterminated string, or more than a handful of edits, gives up. What comes out is validated as any other answer.
+ *
+ * On replay 16 the writer failed three answers in a row on the same model (about 9k tokens each, the size of a whole report, so not
+ * cut off) and bracket edits could not mend them. The raw answers were not kept; the other common way a model's JSON breaks is a
+ * quote inside a text left unescaped (「他说"好"」), so a quote that the JSON could not go on after is escaped as text.
  */
 
 type SchemaNode = Record<string, unknown> | undefined;
 type Open = { closer: "}" | "]"; schema: SchemaNode };
 
 const MAX_EDITS = 4;
+/** Quotes inside a text left unescaped (「他说"好"」): each one escaped is an edit of its own budget, since a report quotes often. */
+const MAX_QUOTE_EDITS = 24;
 
 const lastIndex = <T,>(items: T[], test: (item: T, index: number) => boolean): number => {
   for (let index = items.length - 1; index >= 0; index -= 1) if (test(items[index]!, index)) return index;
@@ -34,6 +40,7 @@ export function repairJsonBrackets(text: string, schema: unknown, maxEdits = MAX
   let expectKey = false;
   let pendingKey: string | undefined;
   let rootDone = false;
+  let quoteEdits = 0;
   const opened = (closer: "}" | "]") => {
     const parent = stack.at(-1);
     const schemaNode = parent ? childOf(parent.schema, parent.closer === "}" ? pendingKey : undefined) : asNode(schema);
@@ -46,15 +53,29 @@ export function repairJsonBrackets(text: string, schema: unknown, maxEdits = MAX
   for (let at = 0; at < text.length; at += 1) {
     const char = text[at]!;
     if (char === "\"") {
+      const top = stack.at(-1);
+      const isKey = top?.closer === "}" && expectKey;
+      // A quote ends the string only where the JSON can go on: a key's before `:`, a value's before `,`, a closer or the end.
+      // Anywhere else it is a quote inside the text that was not escaped, and it is escaped (2026-11-16).
+      let literal = "\"";
       let end = at + 1;
       for (; end < text.length; end += 1) {
-        if (text[end] === "\\") { end += 1; continue; }
-        if (text[end] === "\"") break;
+        if (text[end] === "\\") { literal += text.slice(end, end + 2); end += 1; continue; }
+        if (text[end] === "\"") {
+          let after = end + 1;
+          while (after < text.length && /\s/.test(text[after]!)) after += 1;
+          const next = text[after];
+          if (isKey ? next === ":" : next === undefined || next === "," || next === "}" || next === "]") break;
+          quoteEdits += 1;
+          if (quoteEdits > MAX_QUOTE_EDITS) return undefined;
+          literal += "\\\"";
+          continue;
+        }
+        literal += text[end];
       }
       if (end >= text.length) return undefined;
-      const literal = text.slice(at, end + 1);
-      const top = stack.at(-1);
-      if (top?.closer === "}" && expectKey) {
+      literal += "\"";
+      if (isKey) {
         let key: string;
         try { key = JSON.parse(literal) as string; } catch { return undefined; }
         const known = propertiesOf(top.schema);
@@ -128,7 +149,20 @@ export function repairJsonBrackets(text: string, schema: unknown, maxEdits = MAX
     if (edits > maxEdits) return undefined;
     out.push(...stack.reverse().map((item) => item.closer));
   }
-  if (!edits) return undefined;
+  if (!edits && !quoteEdits) return undefined;
   const mended = out.join("");
   try { JSON.parse(mended); return mended; } catch { return undefined; }
+}
+
+/**
+ * Whether an answer that did not parse ends by going round in a loop: the same passage, again and again, until the output ran out.
+ * Its last 80 characters found twice more in the 6000 before them (three times in all) is a loop, which a repair turn is told plainly.
+ */
+export function looksLooping(text: string): boolean {
+  if (text.length < 2000) return false;
+  const probe = text.slice(-80);
+  const window = text.slice(-6000, -80);
+  let count = 0;
+  for (let at = window.indexOf(probe); at >= 0; at = window.indexOf(probe, at + 1)) count += 1;
+  return count >= 2;
 }

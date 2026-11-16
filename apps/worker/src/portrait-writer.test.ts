@@ -57,6 +57,16 @@ test("an answer whose values stay incomplete after the repairs is kept; an unkno
   expect(saved().report.lines.items).toEqual([]);
 });
 
+test("three answers that never parse in one run are written again once in a fresh thread; a second failure stays blocked", async () => {
+  const broken = `${JSON.stringify(report()).slice(0, 300)}"`;
+  const runtime = fakeRuntime([broken, broken, broken, JSON.stringify(report())], PORTRAIT_WRITER);
+  expect(await createPortraitWriter(store, workspaceId, "C:\repo", () => runtime.rpc)()).toEqual({ state: "written", version: 1 });
+  expect(runtime.threadStarts()).toHaveLength(2);
+  const never = fakeRuntime([broken], PORTRAIT_WRITER);
+  expect(await createPortraitWriter(store, workspaceId, "C:\repo", () => never.rpc)()).toMatchObject({ state: "blocked", code: "SKILL_SCHEMA_INVALID" });
+  expect(never.threadStarts()).toHaveLength(2);
+});
+
 const NOW = new Date("2026-10-12T12:00:00.000Z");
 const keep = (value: object) => store.setSetting(workspaceId, "portrait.report", JSON.stringify(value));
 // Ten finished sessions from twenty days back: enough for the say–do readings to be drawn.

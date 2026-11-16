@@ -307,5 +307,18 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
   // Replay 16 (2026-11-16): IR-123 sent five of twelve rounds back for words that were not the disclosure.
   { id: "IR-151", layer: "L0", verdict: "keep", status: "active", rule: "披露原话只按本人自己打的字比：回复里有自伤的句子时只比那几句，安全回应之后那条回复只比自伤的句子；题面、选项和访谈者自己的话都算普通的话",
     code: { file: `${CORE}/onboarding-pace.ts`, symbol: "disclosureWords", test: `${CORE}/onboarding-pace.test.ts`, by: "a disclosure is compared by the person's own words where it is" } },
+  // Replay 16's follow-ups (2026-11-16).
+  { id: "IR-152", layer: "L2", verdict: "model", status: "active", rule: "next 只提对话做得到的事，不许诺把这一周排出来；本人要看一周，请本人看右栏的周草稿",
+    text: { file: INTERVIEW_SKILL, anchor: "**`next` 只提对话做得到的事：聊什么、问什么、请本人看右栏的哪张图。**" } },
+  { id: "IR-153", layer: "L2", verdict: "model", status: "active", rule: "观察卡说一个判断，不以「也可能只是……」收尾；另一种解释写进证伪条件，只有一条回复的直接问是哪一种",
+    text: { file: INTERVIEW_SKILL, anchor: "**说一个判断，不两头下注：**" } },
+  { id: "IR-154", layer: "L2", verdict: "model", status: "active", rule: "本人说想先开始用：没齐时第一句说还差哪几样、只问这几样、不出观察卡；齐了就说可以按结束",
+    text: { file: INTERVIEW_SKILL, anchor: "**本人说想先开始用（进度头会写）：**" } },
+  { id: "IR-155", layer: "L0", verdict: "keep", status: "active", rule: "本人这一轮用自己的话说想先开始用：这一轮不放量表卡，进度头写明",
+    code: { file: "apps/worker/src/onboarding-session.ts", symbol: "!wantsToStart(replyText)", test: "apps/worker/src/onboarding-session.test.ts", by: "a person who says they want to start gets no rating card that round" } },
+  { id: "IR-156", layer: "L0", verdict: "keep", status: "active", rule: "JSON 回答里没转义的引号按文字转义；解析不了时日志只记位置、长度和是否在打转，不记内容",
+    code: { file: "packages/codex/src/json-repair.ts", symbol: "MAX_QUOTE_EDITS", test: "packages/codex/src/json-repair.test.ts", by: "a quote inside a text left unescaped is escaped" } },
+  { id: "IR-157", layer: "L0", verdict: "keep", status: "active", rule: "画像三次都解析不了时换新线程重写一次，再失败才 blocked",
+    code: { file: "apps/worker/src/portrait-writer.ts", symbol: "portrait.fresh_retry", test: "apps/worker/src/portrait-writer.test.ts", by: "written again once in a fresh thread" } },
 ];
 /* i18n-ignore-end */
