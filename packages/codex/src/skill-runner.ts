@@ -1114,6 +1114,22 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
     const body = answer.trim().replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```$/, "");
     try { return cleanAnswerStrings(JSON.parse(body)); }
     catch (error) {
+      // Thinking that spilled into the answer: its tail, then `</think>`, then the whole object (replay 17, 2026-11-17, twice on
+      // DeepSeek-V4.1-Flash, the opening `<think>` never in the text). The bridge cannot see an opening tag that never came, so
+      // what precedes the last `</think>` is dropped here, and only when what follows it parses or mends on its own.
+      const cut = body.lastIndexOf("</think>");
+      if (cut >= 0) {
+        const after = body.slice(cut + "</think>".length).trim().replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```$/, "");
+        let value: unknown;
+        try { value = JSON.parse(after); } catch {
+          const mended = repairJsonBrackets(after, run.outputSchema);
+          if (mended !== undefined) value = JSON.parse(mended);
+        }
+        if (value !== undefined) {
+          console.log(JSON.stringify({ type: "skill.json_mended", skill: run.skillName, length: body.length, thinking: cut }));
+          return cleanAnswerStrings(value);
+        }
+      }
       // One bracket wrong in a long answer is mended rather than regenerated (json-repair.ts); the content is still validated.
       const mended = repairJsonBrackets(body, run.outputSchema);
       if (mended !== undefined) {

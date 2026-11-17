@@ -453,10 +453,13 @@ test("while an interview is under way the portrait's lanes wait for three replie
   expect(extractor.nextSession(["t"], "insights")).toBe("t");
 });
 
-// Replay 17 (2026-11-17): three extraction answers that did not parse, recorded on the server and mended there. Words replaced by
-// placeholders and refs by 1 (the people are made up, the repository is public); the brackets and the sentence before the object
-// are where the model put them. Each is taken in the run it came in: no second turn, no failure counted, the facts stored.
-test.each(["extract-r17-sentence-before-object", "extract-r17-root-brace-missing", "extract-r17-root-closed-early"])(
+// Replay 17 (2026-11-17): five extraction answers that did not parse, recorded on the server. Words replaced by placeholders, refs
+// by 1 and links by example.com (the people are made up, the repository is public); the brackets and the sentence before the object
+// are where the model put them. Three were mended there; the two `thinking-before-*` ones were refused there (the tail of the model's
+// thinking, then `</think>`, then the whole object; their thinking is rewritten, its shape kept). Each is taken in the run it came
+// in: no second turn, no failure counted, the facts stored.
+test.each(["extract-r17-sentence-before-object", "extract-r17-root-brace-missing", "extract-r17-root-closed-early",
+  "extract-r17-thinking-before-ledger", "extract-r17-thinking-before-insights"])(
   "a recorded extraction answer that needed mending (%s) is kept in the same run", async (fixture) => {
     const answer = recordedAnswer(fixture);
     expect(() => JSON.parse(answer)).toThrow();

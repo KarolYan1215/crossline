@@ -36,3 +36,5 @@ $env:CROSSLINE_RECORD_DIR='C:\path\to\recordings'; pnpm worker:start
 2026-11-10 起另有 `step-plan-drill-form-from-identity`：步骤规划器按「学生」身份套出「做 2 套往年卷并订正」「整理错题本」，还问「错题本用纸质还是电子？」，本人从没说过这样做。**这一份不是逐字录制**，是按 Skill 旧示例（机主账本里出现过的订正类任务）重建的回答；它让 `drill-forms.ts` 的后检走完 worker → 校验 → 落库：没有依据时剪掉、删步、先问做事方法；本人记过这种做法时原样保留（`step-planner.test.ts`）。
 
 2026-11-17 起另有 `extract-r17-*`（`apps/worker/src/onboarding-extract.test.ts`）：第十七次回放在服务器上录下的三份 extract 回答，都没能直接 `JSON.parse`、都被 `repairJsonBrackets` 修好——对象前面多一句「核对完成…」（`sentence-before-object`）、根对象少最后一个 `}`（`root-brace-missing`）、`profileSections` 之后多一个 `}` 把根对象提前关掉（`root-closed-early`）。人设是虚构的，但仓库公开：所有中文值换成「示例文字 N」、`refs` 换成 `[1]`，括号、键名、枚举值和对象前那句话的位置原样。测试锁住的是这三种坏法在同一轮被收下：不重问、不记失败、事实落库。
+
+同日另有 `extract-r17-thinking-before-ledger`、`extract-r17-thinking-before-insights`：同一次回放里被拒收的两份 extract 回答（服务器日志 `skill.json_unparsed`），模型推理的后半段漏进回答、开头没有 `<think>`、以 `</think>` 结束，后面是完整的对象。对象部分照上面的办法脱敏，链接换成 `https://example.com/N`；推理部分是改写的（原文是人设的材料），形状照旧：从半句开始、带引号和「」、以 `</think>` 结束。没有 `skill-runner.ts` 里那段处理时两条都失败。
