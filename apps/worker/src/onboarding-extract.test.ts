@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { ONBOARDING_INSIGHTS } from "@crossline/core";
 import { CrosslineStore, extractBacklog, readExtractState, writeExtractState } from "@crossline/db";
 import { createOnboardingSessionRunner as createRunner, ONBOARDING_SKILL } from "./onboarding-session";
 import { createOnboardingExtractor, evidenceTools, extractionSettled, ONBOARDING_EXTRACT_SKILL, readLaneState, requestExtraction, searchTerms } from "./onboarding-extract";
-import { fakeRuntime } from "./testing/fake-runtime";
+import { fakeRuntime, recordedAnswer } from "./testing/fake-runtime";
 
 const EXTRACT = "crossline.onboarding.extract.v1";
 // One run writes everything here, as the answer queues below are written for; the lanes have tests of their own (`lanes: true`).
@@ -452,3 +452,21 @@ test("while an interview is under way the portrait's lanes wait for three replie
   store.appendOnboardingMessage({ sessionId: "t", workspaceId, role: "user", content: { text: "早" }, createdAt: new Date(Date.now() - 11 * 60_000).toISOString() });
   expect(extractor.nextSession(["t"], "insights")).toBe("t");
 });
+
+// Replay 17 (2026-11-17): three extraction answers that did not parse, recorded on the server and mended there. Words replaced by
+// placeholders and refs by 1 (the people are made up, the repository is public); the brackets and the sentence before the object
+// are where the model put them. Each is taken in the run it came in: no second turn, no failure counted, the facts stored.
+test.each(["extract-r17-sentence-before-object", "extract-r17-root-brace-missing", "extract-r17-root-closed-early"])(
+  "a recorded extraction answer that needed mending (%s) is kept in the same run", async (fixture) => {
+    const answer = recordedAnswer(fixture);
+    expect(() => JSON.parse(answer)).toThrow();
+    const logged: string[] = [];
+    const log = vi.spyOn(console, "log").mockImplementation((line: unknown) => { logged.push(String(line)); });
+    const { rpc, prompts } = runtime([round], [answer]);
+    try { await createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "await" })({ sessionId: "s", text: "论文 12 月中投稿。" }); }
+    finally { log.mockRestore(); }
+    expect(logged.some((line) => line.includes("skill.json_mended"))).toBe(true);
+    expect(logged.some((line) => line.includes("skill.json_unparsed"))).toBe(false);
+    expect(prompts().filter((prompt) => prompt.includes(EXTRACT))).toHaveLength(1);
+    expect(readExtractState(store, workspaceId, "s")).toMatchObject({ upTo: 1, failures: 0 });
+  });

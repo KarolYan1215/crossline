@@ -90,21 +90,30 @@ const hypothesis = (id: string, over: Partial<Hypothesis> = {}): Hypothesis => (
 const insightContext = (hypotheses: Hypothesis[] = [], over = {}) =>
   ({ replies, sensitive: new Set(["reply-3"]), focusLine: false, stage: "narrative", rules: true, hypotheses, earlier: [], ...over });
 
-test("an observation card comes back naming what to fix: a quote not in its reply, a disclosure, one reply, a new inference beside candidates", () => {
+test("an observation card comes back naming what to fix: a quote not in its reply, a disclosure, one reply", () => {
   expect(checkInsights([card({ refs: [{ replyId: "reply-1", quote: "和朋友一起" }, { replyId: "reply-2", quote: "一个人做研究" }] })], insightContext()).problems)
     .toEqual([expect.stringContaining("「和朋友一起」不在 reply-1 里")]);
   expect(checkInsights([card({ refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-3", quote: "不想活了" }] })], insightContext()).problems)
     .toEqual([expect.stringContaining("自伤")]);
   expect(checkInsights([card({ refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }] })], insightContext()).problems)
     .toEqual([expect.stringContaining("至少 2 条不同回答")]);
-  // The log offers h1: a card made up afresh comes back; the card on h1 is kept under its id.
-  expect(checkInsights([card()], insightContext([hypothesis("h1")])).problems).toEqual([expect.stringContaining("h1")]);
+  // The card on h1 is kept under its id.
   expect(checkInsights([card({ hypothesisId: "h1" })], insightContext([hypothesis("h1")])).accepted)
     .toEqual([{ card: expect.objectContaining({ hypothesisId: "h1", dimension: "D2" }) }]);
   // One already put on a card is not asked again; with an empty log a new inference is kept for the log.
   expect(checkInsights([card({ hypothesisId: "h1" })], insightContext([hypothesis("h1", { cardKey: "s#3" })])).problems).toEqual([expect.stringContaining("已经出过卡")]);
   expect(checkInsights([card()], insightContext()).accepted).toEqual([{ card: expect.objectContaining({ text: card().text }), fresh: { dimension: "D2" } }]);
   expect(checkInsights([card()], insightContext([], { focusLine: true })).problems).toEqual([expect.stringContaining("单条主线")]);
+});
+
+test("the log's candidates are offered, not imposed: the dialogue's own inferences go on cards beside them, up to the round's cards", () => {
+  const second = card({ text: "你把一个人做的研究定为底座，又说最投入时都有同学在。", refs: [{ replyId: "reply-2", quote: "一个人做研究" }, { replyId: "reply-1", quote: "和同学一起赶比赛" }] });
+  const checked = checkInsights([card(), second, card({ hypothesisId: "h1", text: "从日志出的卡。" })], insightContext([hypothesis("h1"), hypothesis("h2")]));
+  expect(checked.problems).toEqual([]);
+  expect(checked.accepted.map((item) => item.fresh ? "fresh" : item.card.hypothesisId)).toEqual(["fresh", "fresh", "h1"]);
+  // The round's size still holds.
+  const fourth = checkInsights([card({ text: "第四张。" })], insightContext([hypothesis("h1")]), checked.accepted);
+  expect(fourth.problems).toEqual([expect.stringContaining("这一轮已有 3 张观察卡")]);
 });
 
 test("research comes back when its thread exists or too many are open", () => {

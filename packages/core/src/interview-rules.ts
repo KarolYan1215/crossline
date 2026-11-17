@@ -320,5 +320,16 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     code: { file: "packages/codex/src/json-repair.ts", symbol: "MAX_QUOTE_EDITS", test: "packages/codex/src/json-repair.test.ts", by: "a quote inside a text left unescaped is escaped" } },
   { id: "IR-157", layer: "L0", verdict: "keep", status: "active", rule: "画像三次都解析不了时换新线程重写一次，再失败才 blocked",
     code: { file: "apps/worker/src/portrait-writer.ts", symbol: "portrait.fresh_retry", test: "apps/worker/src/portrait-writer.test.ts", by: "written again once in a fresh thread" } },
+  // 2026-11-17, the owner: where a rule held back the model's judgement, follow-up or synthesis, give it the information and the aim
+  // instead. The deterministic checks (quotes, URLs, dates, approvals) stay.
+  { id: "IR-158", layer: "L0", verdict: "model", status: "retired", rule: "假设日志还有候选时退回对话自己的新推断，新推断一轮最多一张",
+    code: { file: `${WORKER}/onboarding-cards.ts`, symbol: "新推断等候选用完" },
+    reason: "对话读得到整场回答，整理的候选只是其中一部分；挡掉它自己的推断等于限制综合。候选改为给对话的材料，日志有没有被问到由回放看", replacedBy: "IR-159" },
+  { id: "IR-159", layer: "L2", verdict: "model", status: "active", rule: "cardFrom 是证据已齐的候选，对话自己的推断更站得住时照样出卡",
+    text: { file: INTERVIEW_SKILL, anchor: "**自己的推断比剩下的候选更站得住时就出，不必等候选用完。**" } },
+  { id: "IR-160", layer: "L2", verdict: "model", status: "active", rule: "动机和原因可以从话、行为和数据外推，写最有把握的那个、依据和把握；不否定本人说过的原因",
+    text: { file: INTERVIEW_SKILL, anchor: "**推断是补充，不是替换；原因可以推，要写把握。**" } },
+  { id: "IR-161", layer: "L2", verdict: "model", status: "active", rule: "一轮问几题由对话按本人的回答和状态判断，应用只管五题的上限",
+    text: { file: INTERVIEW_SKILL, anchor: "**一轮问几题由你判断：**" } },
 ];
 /* i18n-ignore-end */

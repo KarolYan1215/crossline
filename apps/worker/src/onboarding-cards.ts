@@ -189,7 +189,7 @@ const squeeze = (text: string) => text.replace(/\s/gu, "");
 
 /**
  * The round's observation cards, after `already`. Each refusal names what to fix: a quote not found in the reply it names, a disclosure
- * cited, too few replies, a hypothesis already asked or refuted, a new inference while the log still offers candidates.
+ * cited, too few replies, a hypothesis already asked or refuted. Whether a card comes from the log or is the dialogue's own is its choice.
  */
 export function checkInsights(insights: TurnInsight[], context: InsightContext, already: CheckedInsight[] = []): CardCheck<CheckedInsight> {
   const accepted: CheckedInsight[] = [];
@@ -226,10 +226,9 @@ export function checkInsights(insights: TurnInsight[], context: InsightContext, 
       problems.push(`${label}问的假设 ${onRecord.id} 已经出过卡或被推翻，不再出。`); continue;
     }
     if (onRecord && round.some((item) => item.card.hypothesisId === onRecord.id)) { problems.push(`${label}和这一轮另一张卡问的是同一条假设 ${onRecord.id}。`); continue; }
-    if (context.rules && !onRecord) {
-      if (offered.length) { problems.push(`${label}是新推断，可 cardFrom 里还有候选（${offered.join("、")}）：先从中出卡，新推断等候选用完。`); continue; }
-      if (round.some((item) => item.fresh)) { problems.push(`${label}：新推断一轮最多一张。`); continue; }
-    }
+    // The log's candidates are offered, not imposed (2026-11-17, the owner: give the model information and a goal, not a gate). A new
+    // inference the dialogue drew from the whole conversation goes on a card beside them, as many as the round holds; replay 6's failure
+    // (every card new, the log never asked) is watched in the replays, not refused here.
     // An uncertain hypothesis the log offered on one reply puts both explanations and may cite that one reply (`cardCandidates`).
     const minReplies = onRecord && offered.includes(onRecord.id) && hypothesisReplies(onRecord).length < 2 ? 1 : 2;
     if (new Set(refs.map((ref) => ref.replyId)).size < minReplies) {
