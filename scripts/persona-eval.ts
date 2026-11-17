@@ -7,7 +7,7 @@
  * the short answers). The interviewer never sees the sheet; the player never sees the core; the judges see the core and what the
  * interview wrote, and not the sheet's reasoning.
  *
- *   tsx scripts/persona-eval.ts --set <dir> --out <dir> [--only a,b] [--turns 26] [--model <id>] [--player-model <id>]
+ *   tsx scripts/persona-eval.ts --set <dir> --out <dir> [--only a,b] [--turns 26] [--max-yuan 1.5] [--model <id>] [--player-model <id>]
  *
  * `<dir>/openings.json` holds each person's opening card ({life, tone, lines, base, fixed}). Every person gets a throwaway ledger of
  * their own and the real path a new account takes: the opening card's lines and tone, the interview (dialogue and extraction, the
@@ -56,7 +56,7 @@ const args = process.argv.slice(2);
 // `--set /persona/sets/<name>`) must be able to replace it.
 const arg = (name: string): string | undefined => { const at = args.lastIndexOf(`--${name}`); return at >= 0 ? args[at + 1] : undefined; };
 const setDir = arg("set"), outRoot = arg("out");
-if (!setDir || !outRoot) { console.error("usage: persona-eval.ts --set <dir> --out <dir> [--only a,b] [--turns 26] [--model <id>] [--player-model <id>]"); process.exit(2); }
+if (!setDir || !outRoot) { console.error("usage: persona-eval.ts --set <dir> --out <dir> [--only a,b] [--turns 26] [--max-yuan 1.5] [--model <id>] [--player-model <id>]"); process.exit(2); }
 const sponsor = sponsorFromEnv();
 if (!sponsor) { console.error("CROSSLINE_SPONSOR_API_KEY / CROSSLINE_SPONSOR_MODELS are not set"); process.exit(2); }
 const priced = parseSponsorModels(process.env.CROSSLINE_SPONSOR_MODELS);
@@ -64,6 +64,10 @@ const model = arg("model") ?? sponsor.mainModel ?? priced[0]!.model;
 const playerModel = arg("player-model") ?? model;
 for (const item of [model, playerModel]) if (!priced.some((listed) => listed.model === item)) { console.error(`${item} is not in CROSSLINE_SPONSOR_MODELS`); process.exit(2); }
 const turnLimit = Number(arg("turns")) || 26;
+// What one person's interview rounds may spend (interview and player together, in yuan) before the run stops asking and goes on to the
+// finishing runs and the portrait. Replay 17 (2026-11-17): two people who could not reach the start ran to the 45-round cap and the
+// replay cost ¥7.39 against an estimate of ¥1–2; the round cap alone does not bound the bill.
+const spendLimit = Number(arg("max-yuan")) || 1.5;
 
 type Opening = { life: string; tone?: string; lines: string[]; base: string; fixed: string[] };
 const openings = JSON.parse(readFileSync(path.join(setDir, "openings.json"), "utf8")) as Record<string, Opening>;
@@ -248,6 +252,12 @@ async function runPerson(name: string, opening: Opening) {
       writeFileSync(path.join(dir, "progress.json"), JSON.stringify({ turns, readyAtRound: readyAt ?? null, rounds,
         metrics: interviewMetrics(store, workspaceId, "eval"), cost: { interview: cost(interviewKey), player: cost(playerKey) } }, null, 2), "utf8");
       if (outcome.state === "ready") break;
+      const spent = cost(interviewKey).yuan + cost(playerKey).yuan;
+      if (spent >= spendLimit) {
+        transcript.push(`**预算用完**：访谈轮已花 ¥${spent.toFixed(2)}（上限 ¥${spendLimit}），停在第 ${turns} 轮。`, "");
+        log({ turn: turns, spendLimit, spent: Math.round(spent * 10_000) / 10_000 });
+        break;
+      }
       // The research threads' questions to the person, answered by the player in the side card (never in the main conversation).
       const research = researchRunnerFor(store, workspaceId, repoRoot, () => client);
       for (const thread of readResearch(store, workspaceId, "eval").filter((item) => item.status === "asking" && item.ask)) {

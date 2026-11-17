@@ -101,6 +101,25 @@ test("the stream: reasoning (a field or inline <think>) becomes a reasoning item
   expect(parsed.map((event) => event.sequence_number)).toEqual(parsed.map((_, index) => index));
 });
 
+test("thinking that spilled into the text with no opening <think> is left out of the finished message (replay 17)", () => {
+  const translator = createChatStreamTranslator("r4");
+  const out = [...translator.start("m"),
+    ...translator.push({ choices: [{ delta: { reasoning_content: "let me check" } }] }),
+    ...translator.push({ choices: [{ delta: { content: "... the rest of it. \"引号\" OK.</think>" } }] }),
+    ...translator.push({ choices: [{ delta: { content: "{\"ok\":true}" }, finish_reason: "stop" }] }),
+    ...translator.end()];
+  const parsed = events(out);
+  const message = parsed.filter((event) => event.type === "response.output_item.done").map((event) => event.item as Record<string, unknown>)
+    .find((item) => item.type === "message");
+  expect(message).toMatchObject({ content: [{ type: "output_text", text: "{\"ok\":true}" }] });
+  expect(parsed.find((event) => event.type === "response.output_text.done")).toMatchObject({ text: "{\"ok\":true}" });
+  // A text that only mentions the tag, with nothing after it, is kept whole.
+  const other = createChatStreamTranslator("r5");
+  other.start("m");
+  other.push({ choices: [{ delta: { content: "写法是 </think>" }, finish_reason: "stop" }] });
+  expect(events(other.end()).find((event) => event.type === "response.output_text.done")).toMatchObject({ text: "写法是 </think>" });
+});
+
 test("a cut-off answer is reported as incomplete, not as a finished one", () => {
   const translator = createChatStreamTranslator("r3");
   translator.start("m");

@@ -146,6 +146,12 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
   /** The completion list as of now: the system's own record of what the interview still owes, never shown to the person. */
   const checklistNow = () => interviewChecklistFor(store, workspaceId, identityLines(store, workspaceId)
     .map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] })), { unfiledFiles: unfiled().length, today: todayIso() });
+  /** The profile cards are all the start standard still lacks: holding them from a person who wants to start would keep them from
+   * starting (replay 17, 2026-11-17: z and z2 asked to start from round 15 on, got no cards, and reached the 45-round cap). */
+  const onlyCardsLeft = () => {
+    const open = checklistNow().filter((item) => item.start && !item.done);
+    return open.length > 0 && open.every((item) => item.id === "profile_cards");
+  };
   // Start items first, then what the interview itself still owes; a project's details are deferred (asked when its task is planned).
   // An item's suggested question (`ask`) is offered to the dialogue until the person answered it; then the item waits for the extraction.
   const openChecklist = (limit = 8, skip: (item: { id: string; group: string; start?: boolean }) => boolean = () => false, sessionId?: string) => {
@@ -430,7 +436,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         }),
         stage: stageNow, stageOrder: stageOrderFor(flow), startMetRound, undecided: dateSubjects().filter((item) => item.undecided).map((item) => item.about),
         ...(lastNext ? { lastNext: { text: lastNext, taken: nextTaken(replyText) } } : {}), facts: extractedFacts(),
-        ...(wantsToStart(replyText) ? { wantsToStart: true } : {}),
+        ...(wantsToStart(replyText) ? { wantsToStart: onlyCardsLeft() ? "cards_left" as const : true } : {}),
         startMissing: checklistNow().filter((item) => item.start && !item.done).map((item) => item.label),
         profile: { dimensions: profile.dimensions, hypotheses: profile.hypotheses, careers: profile.careers }
       }) };
@@ -753,8 +759,10 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // interest cards (想不想做), so none waits for a round of its own (onboarding-depth.ts).
     // Nor beside the safety reply (2026-11-14 audit: a rating card could still show there).
     // Nor to a person who just said they want to start (replay 16: z asked 「能直接排一周吗」 nine rounds running and got cards in five
-    // of six); the header tells the dialogue so, and the Skill has it say what is still missing instead.
-    const cards = result.output.nextAction === "ask" && !safetyRound(result.output) && !wantsToStart(replyText) ? cardsLeft : [];
+    // of six); the header tells the dialogue so, and the Skill has it say what is still missing instead. Unless the cards are all that
+    // is missing (replay 17): then they are what starting takes, and they come.
+    const holdCardsForStart = wantsToStart(replyText) && !onlyCardsLeft();
+    const cards = result.output.nextAction === "ask" && !safetyRound(result.output) && !holdCardsForStart ? cardsLeft : [];
     // Which project a file that came with this reply belongs to: the app's own bookkeeping question, put beside the round as it wrote it.
     const freshDocs = new Set(sent.map(([, doc]) => doc.id));
     const filing = currentGaps().filter((gap) => gap.code === "FILE_UNFILED" && freshDocs.has(gap.documentId ?? "")

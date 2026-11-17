@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { CrosslineStore, rateInsight, writeExtractState } from "@crossline/db";
+import { CrosslineStore, interviewChecklistFor, rateInsight, writeExtractState } from "@crossline/db";
 import { cardWordsHead, DISCLOSURE_PLACEHOLDER, LESSON_QUESTION, NEXT_ACCEPTED, ONBOARDING_STAGES, PROFILE_FRAMEWORK, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
   type OnboardingProgress, type ProfileCard } from "@crossline/core";
 import { cardsForRound, createOnboardingSessionRunner as createRunner, finishInterview, INSTRUCTIONS, ONBOARDING_SKILL, stageGuide, stageOrderFor, withoutEndHint } from "./onboarding-session";
@@ -477,6 +477,22 @@ test("a person who says they want to start gets no rating card that round, and t
   await run({ sessionId: "s", text: "周末一般在家。" });
   expect(lastCards().length).toBeGreaterThan(0);
   expect(dialogue(prompts).at(-1)).not.toContain("本人这一轮说想先开始用");
+});
+test("a person who wants to start still gets the cards when they are all the start lacks, and the header says so (replay 17)", async () => {
+  const free = (id: string) => ({ id, text: `题 ${id}`, kind: "free", allowOther: true, identityId: "person", projectId: "", options: [] });
+  const { rpc, prompts } = fakeRuntime([turn({ stage: "compass", questions: [free("q1")] }), turn({ stage: "compass", questions: [free("q2")] })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
+  const lastCards = () => ((store.listOnboardingMessages(workspaceId, "s").filter((message) => message.role === "assistant").at(-1)!.content) as { cards?: ProfileCard[] }).cards ?? [];
+  const openStart = () => interviewChecklistFor(store, workspaceId, [], { unfiledFiles: 0 }).filter((item) => item.start && !item.done).map((item) => item.id);
+  // No line yet and the available hours on record: once the interview has begun, the cards are the only start item left.
+  store.setSetting(workspaceId, "lines.v1", "[]");
+  store.setSetting(workspaceId, "schedule.availability.proposed", JSON.stringify({ windows: [{ days: [1, 2, 3, 4, 5], startMinute: 540, endMinute: 720, energy: "high" }], why: "本人所述" }));
+  await run({ sessionId: "s", text: "先从经历说起吧" });
+  expect(openStart()).toEqual(["profile_cards"]);
+  await run({ sessionId: "s", text: "差不多了吧，能直接排一周吗" });
+  expect(lastCards().length).toBeGreaterThan(0);
+  expect(dialogue(prompts).at(-1)).toContain("本人这一轮说想先开始用；开始只差画像卡片题，这一轮应用照放卡片。");
+  expect(dialogue(prompts).at(-1)).not.toContain("这一轮应用不放量表卡");
 });
 test("there are no tiers: a stored choice is never read, no tier, tone or stage count is sent, and there is no per-project details part", async () => {
   expect(stageOrderFor("v1")).not.toContain("details");

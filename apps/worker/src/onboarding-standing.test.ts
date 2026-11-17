@@ -44,6 +44,9 @@ test("a person who wants to start is said so right under what the start standard
   expect(lines[2]).toBe("开始标准：还没齐，缺 做饭博主的长期目标。");
   expect(lines[3]).toBe("本人这一轮说想先开始用；这一轮应用不放量表卡。");
   expect(standingLines({ rounds: [], stage: "narrative", stageOrder: ORDER, startMetRound: null, startMissing: [], profile: {} }).join("\n")).not.toContain("想先开始用");
+  // Replay 17: when the cards are all the start lacks, they come this round, and the header says so.
+  const cardsLeft = standingLines({ rounds: [round("lines")], stage: "lines", stageOrder: ORDER, startMetRound: null, startMissing: ["画像模块的卡片题已答完"], wantsToStart: "cards_left", profile: {} });
+  expect(cardsLeft[3]).toBe("本人这一轮说想先开始用；开始只差画像卡片题，这一轮应用照放卡片。");
 });
 
 test("the header says whether the person took the last proposed step, and how much the latest extractions found (2026-11-15)", () => {

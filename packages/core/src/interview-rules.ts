@@ -314,8 +314,8 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     text: { file: INTERVIEW_SKILL, anchor: "**说一个判断，不两头下注：**" } },
   { id: "IR-154", layer: "L2", verdict: "model", status: "active", rule: "本人说想先开始用：没齐时第一句说还差哪几样、只问这几样、不出观察卡；齐了就说可以按结束",
     text: { file: INTERVIEW_SKILL, anchor: "**本人说想先开始用（进度头会写）：**" } },
-  { id: "IR-155", layer: "L0", verdict: "keep", status: "active", rule: "本人这一轮用自己的话说想先开始用：这一轮不放量表卡，进度头写明",
-    code: { file: "apps/worker/src/onboarding-session.ts", symbol: "!wantsToStart(replyText)", test: "apps/worker/src/onboarding-session.test.ts", by: "a person who says they want to start gets no rating card that round" } },
+  { id: "IR-155", layer: "L0", verdict: "keep", status: "active", rule: "本人这一轮用自己的话说想先开始用：这一轮不放量表卡，进度头写明；开始只差卡片题时照放（2026-11-17）",
+    code: { file: "apps/worker/src/onboarding-session.ts", symbol: "holdCardsForStart", test: "apps/worker/src/onboarding-session.test.ts", by: "a person who says they want to start gets no rating card that round" } },
   { id: "IR-156", layer: "L0", verdict: "keep", status: "active", rule: "JSON 回答里没转义的引号按文字转义；解析不了时日志只记位置、长度和是否在打转，不记内容",
     code: { file: "packages/codex/src/json-repair.ts", symbol: "MAX_QUOTE_EDITS", test: "packages/codex/src/json-repair.test.ts", by: "a quote inside a text left unescaped is escaped" } },
   { id: "IR-157", layer: "L0", verdict: "keep", status: "active", rule: "画像三次都解析不了时换新线程重写一次，再失败才 blocked",
@@ -331,5 +331,8 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     text: { file: INTERVIEW_SKILL, anchor: "**推断是补充，不是替换；原因可以推，要写把握。**" } },
   { id: "IR-161", layer: "L2", verdict: "model", status: "active", rule: "一轮问几题由对话按本人的回答和状态判断，应用只管五题的上限",
     text: { file: INTERVIEW_SKILL, anchor: "**一轮问几题由你判断：**" } },
+  // Replay 17 (2026-11-17): the cards held from a person who wanted to start were the only item the start lacked.
+  { id: "IR-162", layer: "L2", verdict: "model", status: "active", rule: "本人想开始而开始只差卡片题：说答完右侧卡片就能开始，不另出题，不用自己的话复述卡片题",
+    text: { file: INTERVIEW_SKILL, anchor: "**只差画像卡片题时**" } },
 ];
 /* i18n-ignore-end */

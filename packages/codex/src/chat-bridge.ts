@@ -199,6 +199,7 @@ export function createChatStreamTranslator(responseId: string, toolNames: Record
   let usage: Json | undefined;
   let finish: string | undefined;
   let thinkOpen = false;
+  let thinkSeen = false;
 
   const closeReasoning = () => {
     if (!reasoning) return;
@@ -236,7 +237,7 @@ export function createChatStreamTranslator(responseId: string, toolNames: Record
       } else {
         const start = !message || !message.text.trim() ? rest.indexOf("<think>") : -1;
         if (start < 0 || rest.slice(0, start).trim()) { addText(rest); return; }
-        rest = rest.slice(start + 7); thinkOpen = true;
+        rest = rest.slice(start + 7); thinkOpen = true; thinkSeen = true;
       }
     }
   };
@@ -270,7 +271,10 @@ export function createChatStreamTranslator(responseId: string, toolNames: Record
     end(): string[] {
       closeReasoning();
       if (message) {
-        const answer = message.text.trim();
+        // The tail of the thinking in the text with no opening `<think>`, then `</think>`, then the answer (replay 17, 2026-11-17,
+        // DeepSeek-V4.1-Flash): the finished message keeps only what follows the last `</think>`, so the person never reads the thinking.
+        const cut = thinkSeen ? -1 : message.text.lastIndexOf("</think>");
+        const answer = (cut >= 0 && message.text.slice(cut + 8).trim() ? message.text.slice(cut + 8) : message.text).trim();
         emit("response.output_text.done", { item_id: message.id, output_index: message.index, content_index: 0, text: answer });
         emit("response.output_item.done", { output_index: message.index,
           item: { type: "message", id: message.id, role: "assistant", status: "completed", content: [{ type: "output_text", text: answer, annotations: [] }] } });
