@@ -18,14 +18,29 @@ export type Question = {
   id: string; text: string; kind: "single" | "multi" | "free";
   options: Array<{ id: string; label: string; detail: string }>;
   allowOther: boolean; identityId: string; projectId: string;
+  /** The question asks for a day: a day picker beside the box (said by the writer, never read off the words). */
+  date?: boolean;
 };
 export type AssistantTurn = {
   reply: string; questions: Question[]; nextAction: "ask" | "ready_for_milestones"; stage?: string;
   coverage: Array<{ identityId: string; filled: string[]; missing: string[] }>;
-  /** The deep stages' observation, kept only when its quotes are in the replies it names (`checkInsight`). */
-  insight?: { text: string; refs: Array<{ replyId: string; quote: string }> };
+  /**
+   * The observation, kept only when its quotes are in the replies it names (`checkInsight`); `falsifier` and `external` from 2026-11-12
+   * (contract A), absent on rounds stored before.
+   */
+  insight?: TurnInsightView;
+  /** The round's other observations (2026-11-14: cards ready together come in one round), rated under `<seq>.<n>`. */
+  moreInsights?: TurnInsightView[];
   /** The profile module's cards the app put in this round (flow v2): answered by tapping one of five dots, or in words in the card's box. */
   cards?: import("@crossline/core").ProfileCard[];
+  /** The step the dialogue proposes, shown at the reply's end with a 「好，往下」 button (2026-11-15); absent on rounds stored before. */
+  next?: string;
+};
+export type TurnInsightView = {
+  /** The hypothesis it asks about (the points rules); 「部分对」 is offered only then. */
+  hypothesisId?: string;
+  text: string; refs: Array<{ replyId: string; quote: string }>;
+  external?: Array<{ text: string; url: string }>; falsifier?: string;
 };
 export type Message = { seq: number; role: "assistant" | "user"; content: unknown; createdAt: string };
 export type DateBatchItem = {
@@ -76,12 +91,18 @@ export type OnboardingState = {
   /** What was read from the files and adopted without a click (or left out as unsure), each removable (`loadAdoptedDates`). */
   adoptedDates?: { items: Array<DateBatchItem & { batchId: string; adopted: boolean }>; dropped: string[] };
   /** Where the interview is, by its own progress record: part n of five, how much of it is clear, and what it asks next. */
-  progress?: { index: number; total: number; label: string; clear: number; of: number; next: string; reached?: number };
+  progress?: { index: number; total: number; label: string; clear: number; of: number; reached?: number };
   /** The capacity conflict and, once the start standard stands, the week's draft (`weekCapacity`). */
   capacity?: import("@crossline/core").WeekCapacity;
   skeleton?: import("@crossline/core").SkeletonBlock[];
+  /** How far the interview is from its lower bound (the start standard) and from complete (contract D); absent before the route sends it. */
+  completeness?: import("./interview-contract").Completeness;
+  /** The research threads the interview opened (contract C), each with its own conversation; absent before the route sends them. */
+  research?: import("./interview-contract").ResearchThread[];
   /** The person's 准 / 不准 per round (round seq → verdict). */
-  insightRatings?: Record<string, "fits" | "off">;
+  insightRatings?: Record<string, "fits" | "off" | "partial">;
+  /** The portrait's sections whose stage is over (under the points rules, a stage's view is shown only then). */
+  sectionsFinal?: string[];
   identities: Identity[];
   session: { id: string; state: "active" | "complete"; coverage: { coverage?: AssistantTurn["coverage"]; stage?: string } } | null;
   /** A new account sets its lines before the conversation starts. */
@@ -92,12 +113,9 @@ export type OnboardingState = {
   /** Per line: the interview's description and attribute candidates (`goalCandidates` only on lines interviewed before attributes existed). */
   lineProfiles: Record<string, import("@crossline/core").StoredLineProfile>;
   profile: import("./portrait-panel").ProfileModelView | null;
+  /** The cards' readings in words (`instrumentLevels`); absent from a server before 2026-11-15. */
+  scaleReadings?: Array<{ label: string; level: string }>;
   availabilityProposed: boolean;
-  /** How the interview talks (`ONBOARDING_TONE_SETTING`), and whether the person has chosen yet. */
-  tone: import("@crossline/core").OnboardingTone;
-  toneChosen: boolean;
-  /** How thorough the interview is (`ONBOARDING_DEPTH_SETTING`): questions a round, which parts run, the time it takes. */
-  depth: import("@crossline/core").OnboardingDepth;
   /** The right column's week and project axis. */
   week: import("../../lib/onboarding-board").WeekSkeleton;
   timeline: import("../../lib/onboarding-board").ProjectTimeline;
@@ -140,10 +158,3 @@ export function composeAnswers(questions: Question[], answers: Record<string, An
   return parts.join("\n");
 }
 
-/**
- * Whether a round's question (written by the model, in either language) asks about a line's long-term goal, so that picking options for it
- * adopts that goal (`adoptGoalsFromRound` in onboarding-workspace.tsx).
- */
-export function asksLongTermGoal(text: string): boolean {
-  return /长期目标|long[- ]term goal/i.test(text); // i18n-ignore: matched against model-written text
-}

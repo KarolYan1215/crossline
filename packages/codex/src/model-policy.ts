@@ -33,6 +33,8 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-onboarding": "top",
   // The interview's second layer (2026-10-19): facts, dates and line attributes from numbered sentences. Careful reading, not synthesis.
   "crossline-onboarding-extract": "mid",
+  // An interview research thread (2026-11-12): web lookups and a short sourced conclusion, like the material researcher.
+  "crossline-onboarding-research": "mid",
   "crossline-milestone-architect": "top",
   "crossline-artifact-planner": "top",
   // Reads drafts critically for what could keep them from being reached; a judgement, not a lookup.

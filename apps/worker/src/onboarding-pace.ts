@@ -1,11 +1,16 @@
 // i18n-exempt: the short ledger handed to the interview model each round (model-facing)
 import {
   AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, ONBOARDING_INSIGHTS, fixedScheduleLines, interviewAbstract, lineAttributes, progressLines, readInsightRatings, readTurnProgress,
-  resolveAvailability, type InterviewFlow, type OnboardingDepth, type StoredLineProfile, type TurnProgress
+  resolveAvailability, type InterviewFlow, type StoredLineProfile, type TurnProgress, cardCandidates, hypothesisLogLines, pointLines, GOAL_CANDIDATES_MIN, CARDS_OFFERED
 } from "@crossline/core";
 import { datedItems, type CrosslineStore } from "@crossline/db";
 import { readProfileModel } from "./onboarding-persist";
 
+/**
+ * The person's ratings of the observations told back to the dialogue: the last four used to drop the earlier corrections out of sight in a
+ * long interview, and replay 8 showed one theme four times, three rated 部分对 with the same correction (2026-11-14).
+ */
+const OBSERVATIONS_SHOWN = 12;
 const SOURCE_LABEL: Record<string, string> = { saved: "本人设定", interview: "访谈提议", stated_hours: "按说过的小时数推算", default: "默认值" };
 
 /**
@@ -17,9 +22,12 @@ export function paceContext(store: CrosslineStore, workspaceId: string, sessionI
   today: string; lines: Array<{ id: string; label: string; goals: string[] }>; recent: string[]; progress: TurnProgress | undefined;
   /** The interview's flow: the order of the parts the progress lines name. */
   flow?: InterviewFlow;
-  /** The tier the person chose: the thorough one has a sixth part. */
-  depth?: OnboardingDepth;
-}): { progress?: string[]; abstract: string[]; observations?: string[]; goalPicker?: string[]; fixedSchedule?: string[] } {
+  /** The points rules: the hypothesis log and the points ledger go with every round. */
+  rules?: boolean;
+  /** The person corrected a card the inferences' lane has not read yet (`correctionUnread`): the cards go, checked against it. */
+  correctionUnread?: boolean;
+}): { progress?: string[]; abstract: string[]; observations?: string[]; goalPicker?: string[]; fixedSchedule?: string[]; hypothesisLog?: string[]; cardFrom?: string[];
+  cardsCheck?: string; points?: string[] } {
   const profiles = (() => { try { return JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") as Record<string, StoredLineProfile>; } catch { return {}; } })();
   const facts = store.listProfileFacts(workspaceId);
   const deadlineOf = (projectId: string) => {
@@ -49,19 +57,27 @@ export function paceContext(store: CrosslineStore, workspaceId: string, sessionI
     recent: input.recent.slice(-5)
   });
   const ratings = Object.entries(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS)))
-    .filter(([key]) => key.startsWith(`${sessionId}#`)).sort((a, b) => a[1].at.localeCompare(b[1].at)).slice(-4)
-    .map(([, rating]) => `观察「${(rating.text ?? "").slice(0, 60)}」：本人说${rating.verdict === "fits" ? "准" : "不准"}`);
-  const progress = progressLines(input.progress, input.flow, input.depth);
+    .filter(([key]) => key.startsWith(`${sessionId}#`)).sort((a, b) => a[1].at.localeCompare(b[1].at)).slice(-OBSERVATIONS_SHOWN)
+    // Whole, not cut at 60 characters: a premise cut off is a premise the next card cannot see was corrected (replay 12).
+    .map(([, rating]) => `观察「${(rating.text ?? "").slice(0, 300)}」：本人说${rating.verdict === "fits" ? "准" : rating.verdict === "partial" ? `部分对，更正为「${(rating.correction ?? "").slice(0, 300)}」` : "不准"}`);
+  const progress = progressLines(input.progress, input.flow);
   // Lines with no long-term goal yet, and whether the picker beside the conversation already offers candidates for one: the dialogue asks
   // what the person wants to become on a line only while it offers none (W-8: asking beside the picker asked the same thing twice).
   const goalPicker = input.lines.filter((line) => !line.goals.length).map((line) => {
     const count = lineAttributes(profiles[line.id], line.label).length;
     // Worded so that echoing it to the person does no harm: 「定语」 was repeated to people word for word (2026-10-31).
-    return count ? `${line.label}：已给出 ${count} 个长期目标的候选词，由本人点选` : `${line.label}：还没有长期目标的候选词`;
+    return count >= GOAL_CANDIDATES_MIN ? `${line.label}：已给出 ${count} 个长期目标的候选词，由本人点选`
+      : count ? `${line.label}：长期目标的候选词还不够（${count} 个），本人还选不了` : `${line.label}：还没有长期目标的候选词`;
   });
   // Each weekly arrangement with its own weekday and time, every round: the abstract has only their number (W-183).
   const fixedSchedule = fixedScheduleLines(weekly);
+  // Under the points rules (2026-11-12): what cards may ask about, and what is settled.
+  const log = input.rules ? hypothesisLogLines(profile.hypotheses ?? []) : [];
+  const points = input.rules ? pointLines(profile.points ?? []).slice(-30) : [];
+  const cardFrom = input.rules ? cardCandidates(profile.hypotheses ?? [], CARDS_OFFERED) : [];
   return { abstract, ...(progress.length ? { progress } : {}), ...(ratings.length ? { observations: ratings } : {}),
+    ...(log.length ? { hypothesisLog: log } : {}), ...(cardFrom.length ? { cardFrom } : {}), ...(points.length ? { points } : {}),
+    ...(cardFrom.length && input.correctionUnread ? { cardsCheck: "假设日志还没按本人最近的更正重看：出卡前对照 observations 里「部分对」「不准」的更正，被更正的前提不再写上卡。" } : {}),
     ...(goalPicker.length ? { goalPicker } : {}), ...(fixedSchedule.length ? { fixedSchedule } : {}) };
 }
 

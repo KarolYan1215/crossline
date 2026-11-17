@@ -66,10 +66,13 @@ export function resolveOnboardingRefs(value: unknown, known: { replies: Record<s
     return cited;
   };
 
-  const slotUpdates = list(turn.slotUpdates).map((update) => {
+  const slotUpdates = list(turn.slotUpdates).flatMap((update) => {
     const cited = span(update.refs, `事实「${String(update.slot ?? "")}」`, update.status === "confirmed");
+    // A fact resting only on card tap lines restates what the app already keeps per item (`profile.instruments`); the website walkthrough
+    // of 2026-11-14 got two of them with the side flipped (「1/5 掌握资源和话语权」 written as 「倾向让更多人受益」), so it is dropped.
+    if (cited.ids.length && cited.ids.every((id) => TAP_LINE.test(index.get(id)?.text.trim() ?? ""))) return [];
     const { refs: _refs, ...rest } = update;
-    return { ...rest, sourceRef: cited.ids.length ? cited.sourceRef : "inference", sourceQuote: cited.quote, sentences: cited.ids };
+    return [{ ...rest, sourceRef: cited.ids.length ? cited.sourceRef : "inference", sourceQuote: cited.quote, sentences: cited.ids }];
   });
   const flywheelCandidates = list(turn.flywheelCandidates).map((candidate) => {
     const cited = span(candidate.refs, "飞轮候选", false);
@@ -116,6 +119,10 @@ export function resolveOnboardingRefs(value: unknown, known: { replies: Record<s
     return [section, { ...Object.fromEntries(SECTION_FIELDS[section].filter((field) => fields[field] !== undefined).map((field) => [field, fields[field]])),
       sentences: cited.ids }];
   })) : undefined;
+  // A point rests on the sentences it cites, each kept whole with its reply or file; a number the run was not shown is left out (the point
+  // with nothing left is not kept, `applyPointChanges`).
+  const pointChanges = list(turn.pointChanges).map(({ refs, ...change }) => ({ ...change,
+    quotes: citedSpan(refs, index, texts).ids.map((id) => ({ ref: index.get(id)!.ref, text: index.get(id)!.text })) }));
   // A card item read off the person's words rests on the sentences that say it; no citation is no reading (the item is left unanswered).
   const itemScores = list(turn.itemScores).flatMap(({ refs, ...item }) => {
     /* i18n-ignore-start */
@@ -124,7 +131,7 @@ export function resolveOnboardingRefs(value: unknown, known: { replies: Record<s
     return cited.ids.length ? [{ ...item, sentences: cited.ids }] : [];
   });
   return { ...turn, slotUpdates, flywheelCandidates, lineProfiles, goalEdits, settings, availability, ...(sections ? { profileSections: sections } : {}),
-    ...(Array.isArray(turn.itemScores) ? { itemScores } : {}),
+    ...(Array.isArray(turn.itemScores) ? { itemScores } : {}), ...(Array.isArray(turn.pointChanges) ? { pointChanges } : {}),
     ...(turn.fileDates && typeof turn.fileDates === "object" ? { fileDates: resolveDateRefs(turn.fileDates, index, texts) } : {}) };
 }
 
@@ -185,7 +192,7 @@ const asDialogue = (value: unknown) => value && typeof value === "object" ? { ..
  * Chat Completions provider in JSON mode), drops keys it had nothing for, and the whole answer used to be refused for it as
  * 「输出结构不符合要求」 — repeatedly, so nothing from the interview's deep stages was recorded (2026-10-19 walkthrough, the developer's model).
  */
-const EXTRACT_LISTS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "lineProfiles", "goalEdits", "settings"] as const;
+const EXTRACT_LISTS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "lineProfiles", "goalEdits", "settings", "hypotheses", "careers", "dimensions", "dropCareers", "pointChanges"] as const;
 // A slot built from a line id that has a hyphen in it (「flywheel_line-x-3_informs」) was refused and the whole answer with it: slots are
 // normalised to their own alphabet instead.
 const slotName = (slot: unknown) => typeof slot === "string" ? slot.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) : slot;

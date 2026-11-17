@@ -5,7 +5,7 @@
  *
  *   pnpm exec tsx scripts/pack-for-server.ts --to-email <address> [--data <dir>] [--workspace <id>] [--out <file.tgz>]
  *
- * Then upload it: scp -i <key> <file.tgz> admin@47.245.88.172:/tmp/crossline-transfer.tgz
+ * Then upload it: scp -i <key> <file.tgz> admin@43.134.0.203:/tmp/crossline-transfer.tgz
  * The server side is `.github/workflows/server.yml` ([migrate] previews, [migrate-apply] writes), which runs scripts/migrate-workspace.ts.
  */
 import { execFileSync } from "node:child_process";
@@ -53,4 +53,4 @@ const systemTar = process.platform === "win32" ? path.join(process.env.SystemRoo
 execFileSync(existsSync(systemTar) ? systemTar : "tar", ["-czf", out, "-C", staging, "."], { stdio: "inherit" });
 rmSync(staging, { recursive: true, force: true });
 console.log(JSON.stringify({ out, megabytes: +(statSync(out).size / 1048576).toFixed(1), workspaceId, toEmail, folders: copied }, null, 1));
-console.log(`next: scp -i <key> "${out}" admin@47.245.88.172:/tmp/crossline-transfer.tgz`);
+console.log(`next: scp -i <key> "${out}" admin@43.134.0.203:/tmp/crossline-transfer.tgz`);

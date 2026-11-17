@@ -4,7 +4,6 @@ import {
   readCardAnswers, readInstrumentAnswers, readScaleAnswers, scaleAnswerLine, settledItems, type InstrumentAnswers, type ItemAnswer
 } from "./profile-instruments";
 import { SCHWARTZ_VALUES } from "./portrait";
-import { DEPTH_PACE } from "./onboarding-depth";
 import { claimPrivacy, claimProblem, readPrivacyChoices, visibleClaims, type ProfileClaim } from "./profile-report";
 
 const at = "2026-10-31T10:00:00.000Z";
@@ -55,14 +54,14 @@ describe("cards", () => {
     expect(cardsSettled(settled)).toEqual({ settled: narrative.size - 1, total: PROFILE_ITEMS.length });
   });
 
-  test("the quick tier asks a short set of whole dimensions before the start, not all 43 items (W-186)", () => {
-    const short = cardBank(DEPTH_PACE.quick.cards);
+  test("the interview asks a short set of whole dimensions before the start, not all 43 items (W-186)", () => {
+    const short = cardBank("short");
     expect(PROFILE_ITEMS).toHaveLength(43);
     expect(short).toHaveLength(14);
-    // Whole dimensions only, so each one the quick tier asks can still be scored.
+    // Whole dimensions only, so each one the short set asks can still be scored.
     for (const item of short) if (item.instrument !== "values")
       expect(short.filter((other) => other.dimension === item.dimension)).toHaveLength(PROFILE_ITEMS.filter((other) => other.instrument === item.instrument && other.dimension === item.dimension).length);
-    expect(cardBank(DEPTH_PACE.standard.cards)).toBe(PROFILE_ITEMS);
+    expect(cardBank("all")).toBe(PROFILE_ITEMS);
     // Its cards and its start item count the short set: once those 14 are answered nothing is left to offer or to hold the start.
     const done = new Set(short.map((item) => item.id));
     expect(cardsSettled(done, "short")).toEqual({ settled: 14, total: 14 });

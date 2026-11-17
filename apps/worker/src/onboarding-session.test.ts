@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { CrosslineStore, writeExtractState } from "@crossline/db";
-import { cardWordsHead, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
-  DEPTH_PACE, type OnboardingProgress, type ProfileCard } from "@crossline/core";
-import { cardsForRound, createOnboardingSessionRunner as createRunner, INSTRUCTIONS, ONBOARDING_SKILL, paceDeepRound, shownOrOpen, stageOrderFor, stagePace, withChecklist } from "./onboarding-session";
-import { INSTRUCTIONS as EXTRACT_INSTRUCTIONS } from "./onboarding-extract";
+import { CrosslineStore, rateInsight, writeExtractState } from "@crossline/db";
+import { cardWordsHead, DISCLOSURE_PLACEHOLDER, LESSON_QUESTION, NEXT_ACCEPTED, ONBOARDING_STAGES, PROFILE_FRAMEWORK, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
+  type OnboardingProgress, type ProfileCard } from "@crossline/core";
+import { cardsForRound, createOnboardingSessionRunner as createRunner, finishInterview, INSTRUCTIONS, ONBOARDING_SKILL, stageGuide, stageOrderFor, withoutEndHint } from "./onboarding-session";
+import { correctedSince, correctionUnread, INSTRUCTIONS as EXTRACT_INSTRUCTIONS } from "./onboarding-extract";
 import { ONBOARDING_EXTRACT_SKILL } from "./onboarding-extract";
 import { fakeRuntime as runtimeWithRoutes } from "./testing/fake-runtime";
 
@@ -20,7 +20,7 @@ const fakeRuntime = (answers: string[], options: { lostThreads?: string[] } = {}
 const dialogue = (prompts: () => string[]) => prompts().filter((prompt) => !prompt.includes(EXTRACT) && !prompt.includes("search_evidence"));
 const extraction = (prompts: () => string[]) => prompts().filter((prompt) => prompt.includes(EXTRACT));
 const createOnboardingSessionRunner = (...args: Parameters<typeof createRunner>) =>
-  createRunner(args[0], args[1], args[2], args[3], { extract: "await", ...(args[4] ?? {}) });
+  createRunner(args[0], args[1], args[2], args[3], { extract: "await", lanes: false, ...(args[4] ?? {}) });
 let store: CrosslineStore;
 let workspaceId: string;
 
@@ -30,11 +30,14 @@ beforeEach(() => {
 });
 afterEach(() => { store.close(); vi.unstubAllEnvs(); });
 
-const turn = (over: object = {}) => JSON.stringify({
+// A test round's `insight` is the dialogue's one card (`insights`, 2026-11-14): an empty one is none. Its question is the same every
+// round, so it is marked a follow-up: the repeat check comes back to the model (onboarding-cards.test.ts), which these tests are not about.
+const turn = ({ insight, ...over }: { insight?: { text: string; [key: string]: unknown } } & Record<string, unknown> = {}) => JSON.stringify({
+  ...(insight ? { insights: insight.text ? [insight] : [] } : {}),
   reply: "收到，我先确认几件事。",
-  questions: [{ id: "q1", text: "项目 A 的图表清单在哪？", kind: "single", allowOther: true, identityId: "research", projectId: "westlake",
+  questions: [{ id: "q1", text: "项目 A 的图表清单在哪？", kind: "single", allowOther: true, identityId: "research", projectId: "westlake", followUp: true,
     options: [{ id: "a", label: "师兄给的文档", detail: "" }, { id: "b", label: "只在聊天记录里", detail: "" }] }],
-  slotUpdates: [], projectsDetected: [], flywheelCandidates: [], coverage: [], nextAction: "ask", ...over
+  slotUpdates: [], projectsDetected: [], flywheelCandidates: [], coverage: [], nextAction: "ask", next: "接着问项目 A 的图表清单。", ...over
 });
 
 const firstAnswer = turn({
@@ -104,6 +107,8 @@ test("the second turn continues the same thread and only carries what is new, wi
   expect(dialogue(prompts)).toHaveLength(2);
   expect(extraction(prompts)).toHaveLength(2);
   expect(threadStarts()).toHaveLength(3);
+  // The dialogue and the extraction both carry the one portrait framework (D0–D9).
+  for (const start of threadStarts()) expect(String(start.developerInstructions)).toContain(PROFILE_FRAMEWORK);
   expect(dialogue(prompts)[1]).not.toContain("identities");
   expect(dialogue(prompts)[1]).toContain("reply-3");
   // The first turn's extraction wrote the deadline; the dialogue hears of it on the next turn.
@@ -156,11 +161,62 @@ test("retrying after a failure does not save the person's message a second time"
   expect(store.listOnboardingMessages(workspaceId, "s").filter((message) => message.role === "user")).toHaveLength(1);
 });
 
-test("a finished interview marks the session complete", async () => {
+test("the main interview never ends itself: a model that is done says so in its reply, the app adds no question, and only the person's finish ends it", async () => {
   const { rpc } = fakeRuntime([turn({ questions: [], nextAction: "ready_for_milestones" })]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
-  expect(await run({ sessionId: "s", text: "都说完了" })).toEqual({ state: "ready", sessionId: "s" });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  expect(await run({ sessionId: "s", text: "都说完了" })).toEqual({ state: "asked", sessionId: "s" });
+  const last = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { nextAction: string; questions: Array<{ id: string; text: string }> };
+  expect(last.nextAction).toBe("ask");
+  // The closing question the app used to add is gone (2026-11-14 audit): the box stays open for whatever the person still wants to say.
+  expect(last.questions).toEqual([]);
+  expect(store.getOnboardingSession(workspaceId, "s")?.state).toBe("active");
+  const { outcome } = finishInterview(store, workspaceId, "C:\\repo", () => rpc, "s", { extract: false });
+  expect(outcome).toEqual({ state: "finished", sessionId: "s" });
   expect(store.getOnboardingSession(workspaceId, "s")?.state).toBe("complete");
+  expect(store.listEvents(workspaceId, { type: "onboarding.finish_requested" })).toHaveLength(1);
+});
+
+test("after 「结束并出报告」 the portrait waits for the extraction only so long: a provider that never answers settles it as late", async () => {
+  const now = new Date().toISOString();
+  store.saveOnboardingSession({ id: "s", ownerId: "user-1", workspaceId, state: "active", coverage: {}, createdAt: now, updatedAt: now });
+  store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text: "都说完了" }, createdAt: now });
+  const silent = { request: () => new Promise(() => {}), onNotification: () => () => {} } as never;
+  const { settled } = finishInterview(store, workspaceId, "C:\\repo", () => silent, "s", { lanes: false, budgetMs: 50 });
+  expect(await settled).toBe("late");
+  expect(store.getOnboardingSession(workspaceId, "s")?.state).toBe("complete");
+});
+
+test("before the start standard stands, the model is told what is still owed, and the app adds no question of its own", async () => {
+  const { rpc, prompts } = fakeRuntime([turn({ questions: [], nextAction: "ready_for_milestones" })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });
+  expect(await run({ sessionId: "s", text: "都说完了" })).toEqual({ state: "asked", sessionId: "s" });
+  const last = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { questions: Array<{ id: string; text: string }> };
+  // The start items' questions the app used to add (2026-11-14 audit) are the model's to ask, from `startStandard` and `openItems`.
+  expect(last.questions).toEqual([]);
+  // The model is told outright that the lower bound does not stand yet, and what it lacks.
+  expect(dialogue(prompts)[0]).toContain('"startStandard":{"met":false,"missing":[');
+});
+
+test("every round's input opens with the progress header, counted from the rounds already in the ledger", async () => {
+  const { rpc, prompts } = fakeRuntime([turn({ stage: "narrative" }), turn({ stage: "narrative" })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  await run({ sessionId: "s", text: "我在读研二" });
+  await run({ sessionId: "s", text: "导师管得松" });
+  const [first, second] = dialogue(prompts);
+  // First in the object, before the context it summarises (docs/onboarding-agent-session.md 「状态头怎么收」).
+  expect(first).toContain('{"standing":["这是第 1 轮；');
+  expect(second).toContain('{"standing":["这是第 2 轮；当前阶段 narrative 连这一轮已经 2 轮。"');
+  expect(second).toContain("开始标准：还没齐，缺 ");
+  expect(store.getOnboardingSession(workspaceId, "s")?.coverage).not.toHaveProperty("startMetRound");
+});
+
+test("before the start standard stands the reply does not point at the end button", () => {
+  const reply = "课表这一段已经按你说的记下。要用的几样都在了，这周先开口找导师的顺序不变。按页面上的「结束并出报告」就会出报告。";
+  expect(withoutEndHint(reply)).toBe("课表这一段已经按你说的记下。要用的几样都在了，这周先开口找导师的顺序不变。");
+  expect(withoutEndHint("访谈问到这里，可以按页面上的「结束并出报告」生成报告。\n\n还缺课表。")).toBe("还缺课表。");
+  expect(withoutEndHint("开始要用的几项齐了。你可以开始使用应用了，访谈这边还可以继续。最后核对一次现状。")).toBe("开始要用的几项齐了。最后核对一次现状。");
+  // A reply that is nothing but the hint stays as it is rather than going blank.
+  expect(withoutEndHint("按「结束并出报告」就会出报告。")).toBe("按「结束并出报告」就会出报告。");
 });
 
 test("with no Codex runtime the turn is a blocker and saves nothing", async () => {
@@ -170,14 +226,15 @@ test("with no Codex runtime the turn is a blocker and saves nothing", async () =
 });
 
 test("a thread the runtime has forgotten is replaced, and the new one is told what was said before", async () => {
-  const { rpc, prompts } = fakeRuntime([turn()], { lostThreads: ["gone-thread"] });
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
+  const { rpc, prompts, threadStarts } = fakeRuntime([turn()], { lostThreads: ["gone-thread"] });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   const now = "2026-10-02T00:00:00.000Z";
   const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
   store.saveOnboardingSession({ id: "s1", ownerId, workspaceId, state: "active", coverage: {}, codexThreadId: "gone-thread", createdAt: now, updatedAt: now });
   store.saveProject({ id: "westlake", ownerId, workspaceId, identityId: "research", name: "西湖合作", status: "active", summary: "", createdAt: now, updatedAt: now });
   store.appendOnboardingMessage({ sessionId: "s1", workspaceId, role: "user", content: { text: "西湖那篇 10/31 前要投出" }, createdAt: now });
-  store.appendOnboardingMessage({ sessionId: "s1", workspaceId, role: "assistant", content: JSON.parse(turn()), createdAt: now });
+  store.appendOnboardingMessage({ sessionId: "s1", workspaceId, role: "assistant", createdAt: now,
+    content: { ...JSON.parse(turn()), insight: { text: "你说投入的两次都是和人一起赶东西。", hypothesisId: "h1" } } });
 
   expect(await run({ sessionId: "s1", text: "图表清单在师兄给的文档里" })).toEqual({ state: "asked", sessionId: "s1" });
 
@@ -188,6 +245,13 @@ test("a thread the runtime has forgotten is replaced, and the new one is told wh
   expect(prompt).toContain("history");
   expect(prompt).toContain("西湖那篇 10/31 前要投出");
   expect(prompt).toContain("reply-1");
+  // P3: the round as the person saw it — the options and the card with the hypothesis it asked — not the question text alone.
+  expect(prompt).toContain("（选项：师兄给的文档 / 只在聊天记录里）");
+  expect(prompt).toContain("【观察卡 h1】你说投入的两次都是和人一起赶东西。");
+  // The new thread gets the card and read tools, and the compaction prompt that keeps what only the thread holds.
+  const start = threadStarts().at(-1)!;
+  expect((start.dynamicTools as Array<{ name: string }>).map((tool) => tool.name)).toEqual(expect.arrayContaining(["ask_question", "read_ledger", "read_file"]));
+  expect(JSON.stringify(start)).toContain("compact_prompt");
   expect(store.listOnboardingMessages(workspaceId, "s1").map((message) => message.role)).toEqual(["user", "assistant", "user", "assistant"]);
 });
 
@@ -209,8 +273,8 @@ test("dates the model read out of a file become one verified batch, and what can
     dates: [dateItem(), dateItem({ id: "d2", title: "编造的考试", date: "2027-11-03", refs: [2] })],
     recurring: [], questions: ["这些材料是哪门课的？"]
   })]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
-  expect((await run({ sessionId: "s1", text: "我添加了文件" })).state).toBe("ready");
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
+  expect((await run({ sessionId: "s1", text: "我添加了文件" })).state).toBe("asked");
   const [batch] = store.listEvents(workspaceId, { type: "dates.extracted" });
   const payload = batch!.payload as { documentIds: string[]; dates: Array<{ id: string; title: string }>; questions: string[]; dropped: Array<{ id: string }> };
   expect(payload.documentIds).toEqual(["doc-1"]);
@@ -227,7 +291,7 @@ test("a turn with no dates writes no batch, and a newer batch retires one nobody
   // Each extraction runs on a fresh thread and may cite only what it is shown: here, the reply of its own turn ([1], [2], [3]).
   const empty = { dates: [], recurring: [], questions: [] };
   const { rpc } = fakeRuntime([withDates(empty), withDates({ ...empty, dates: [dateItem({ refs: [2] })] }), withDates({ ...empty, dates: [dateItem({ refs: [3], title: "ECE 548 期中 2" })] })]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   await run({ sessionId: "s1", text: "没有日期" });
   expect(store.listEvents(workspaceId, { type: "dates.extracted" })).toHaveLength(0);
   await run({ sessionId: "s1", text: "ECE 548 期中 10/27" });
@@ -253,7 +317,7 @@ test("a re-read of the files replaces the unanswered batch; meals outside the st
   const { rpc } = fakeRuntime([withDates({ ...empty, dates: [dateItem()] }),
     turn({ fileDates: { ...empty, recurring: [meal] }, availability: hours, questions: [], nextAction: "ready_for_milestones" }),
     withDates({ ...empty, dates: [dateItem({ title: "ECE 548 期中 1（重读）" })] })]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   await run({ sessionId: "s1", text: "我添加了文件" });
   // The meals are what the hours already leave out: no batch, and the course's date still waits for an answer.
   await run({ sessionId: "s1", text: "上午 9–12 点效率最高，12–14 点午饭" });
@@ -276,8 +340,8 @@ const course = turn({
 
 test("a course's target grade is not asked: the architect proposes one later, so a finished interview stays finished", async () => {
   const { rpc } = fakeRuntime([course]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
-  expect(await run({ sessionId: "s", text: "ECE 555 评分：作业 20%、小测 30%、项目 25%、期末 25%，我想拿高分，期末 2026-12-15" })).toEqual({ state: "ready", sessionId: "s" });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
+  expect(await run({ sessionId: "s", text: "ECE 555 评分：作业 20%、小测 30%、项目 25%、期末 25%，我想拿高分，期末 2026-12-15" })).toEqual({ state: "asked", sessionId: "s" });
   expect(store.listProfileFacts(workspaceId).some((fact) => fact.slot === "target_grade")).toBe(false);
 });
 
@@ -286,34 +350,32 @@ const guessOnly = turn({
   questions: [], nextAction: "ready_for_milestones"
 });
 
-test("the model saying it is done does not make it so: a line resting only on its own guesses turns it back into a question", async () => {
-  const { rpc } = fakeRuntime([guessOnly]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
+// 2026-11-14 audit: the app no longer puts its own questions into a round. They reach the dialogue as `openItems`, and go out as the
+// app wrote them (so a tap settles the fact) when the dialogue names them.
+test("a line resting only on its own guesses reaches the dialogue as the app's own question, which goes out as written once named", async () => {
+  const { rpc, prompts } = fakeRuntime([guessOnly, turn({ questions: [], openItems: ["gap-line-startup"] }), turn()]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc);
   expect(await run({ sessionId: "s", text: "随便聊聊" })).toEqual({ state: "asked", sessionId: "s" });
-  const asked = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { questions: Array<{ id: string }>; nextAction: string };
-  expect(asked.nextAction).toBe("ask");
-  expect(asked.questions.map((question) => question.id)).toContain("gap-line-startup");
+  // The model's 「ready」 adds nothing of the app's own.
+  expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { questions: unknown[] }).questions).toEqual([]);
+  await run({ sessionId: "s", text: "还有吗" });
+  expect(dialogue(prompts)[1]).toContain('"openItems":[{"id":"gap-line-startup"');
+  const asked = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { questions: Array<{ id: string; text: string }> };
+  expect(asked.questions.map((question) => question.id)).toEqual(["gap-line-startup"]);
+  // Declining the line is recorded by the app itself, from the tap.
+  await run({ sessionId: "s", text: `【${asked.questions[0]!.text}】选择：目前没有在做的事` });
+  expect(store.listProfileFacts(workspaceId).find((fact) => fact.slot === "skipped")).toMatchObject({ identityId: "startup", status: "confirmed", sourceRef: "reply-5" });
 });
 
-test("declining the line is recorded by the app itself, and the interview can then finish", async () => {
-  const { rpc } = fakeRuntime([guessOnly, turn({ questions: [], nextAction: "ready_for_milestones" })]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
-  await run({ sessionId: "s", text: "随便聊聊" });
-  const question = (store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { questions: Array<{ id: string; text: string }> }).questions.find((item) => item.id === "gap-line-startup")!;
-  expect(await run({ sessionId: "s", text: `【${question.text}】选择：目前没有在做的事` })).toEqual({ state: "ready", sessionId: "s" });
-  expect(store.listProfileFacts(workspaceId).find((fact) => fact.slot === "skipped")).toMatchObject({ identityId: "startup", status: "confirmed", sourceRef: "reply-3" });
-});
-
-test("with the completion list on, a 「ready」 before the portrait is written and grounded goes back to asking", async () => {
+test("with the completion list on, a 「ready」 goes back to asking, and the checklist's labels never reach the person", async () => {
   const { rpc } = fakeRuntime([turn({ questions: [], nextAction: "ready_for_milestones" })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   expect(await run({ sessionId: "s", text: "都说完了" })).toEqual({ state: "asked", sessionId: "s" });
   expect(store.getOnboardingSession(workspaceId, "s")?.state).toBe("active");
   const last = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string; questions: unknown[] };
-  // What is still owed is asked as questions; the checklist's labels never reach the person.
-  expect(last.reply).toContain("开始之前还想再问几件事");
+  // The checklist's labels never reach the person; what is still owed is the model's to ask (`startStandard`, `openItems`).
   expect(last.reply).not.toMatch(/已收集|硬约束|定语|还缺/);
-  expect(last.questions.length).toBeGreaterThan(0);
+  expect(last.questions).toEqual([]);
 });
 
 const attributes = ["神经形态计算", "器件物理", "严谨", "独立", "持续产出", "被同行认可"]
@@ -331,9 +393,10 @@ test("a line card's turn is that line's own interview: attributes refresh by lin
   expect(await run({ sessionId: "line-research", text: "把目标改成器件物理方向能独立立项的研究者" })).toEqual({ state: "ready", sessionId: "line-research" });
   expect(prompts()[0]).toContain("\"focusLine\":{\"id\":\"research\"");
   const profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles")!) as Record<string, { description: string; attributes?: Array<{ text: string; sourceRef: string }>; goalCandidates?: string[] }>;
-  // The new candidates replace the old ones, but what was split from the adopted goal stays; the other line is untouched.
+  // The new candidates come first and the old ones stay after them (replay 13: a one-word list wiped the rest), with what was split from
+  // the adopted goal last; the other line is untouched.
   expect(profiles.research!.description).toBe("以器件物理为底的神经形态计算研究");
-  expect(profiles.research!.attributes!.map((item) => item.text)).toEqual([...attributes.map((item) => item.text), "类脑芯片方向能带队"]);
+  expect(profiles.research!.attributes!.map((item) => item.text)).toEqual([...attributes.map((item) => item.text), "旧候选", "类脑芯片方向能带队"]);
   expect(profiles.media).toEqual({ description: "自媒体描述", goalCandidates: ["成为有影响力的科普创作者"] });
   // Not applied: recorded for the card to show, in the person's order.
   expect(JSON.parse(store.getSetting(workspaceId, "lines.goalEdits")!)).toMatchObject({ research: { parts: ["器件物理", "能独立立项"], sourceRef: "reply-1" } });
@@ -365,27 +428,29 @@ test("先读材料：首轮把已读出的文件全部带上，清单标出可�
   expect(store.getOnboardingSession(workspaceId, "s")!.coverage).toMatchObject({ flow: "v2" });
 });
 
-test("the profile module's cards: added by the app, three items a round counted in its three questions, taps scored, words left for the extraction", async () => {
+test("the profile module's cards: added by the app beside the model's questions (they take none of its slots), taps scored, words left for the extraction", async () => {
   const texts: Record<string, string> = { q1: "小时候最佩服谁？", q2: "常看哪些账号？", q3: "最喜欢哪个故事？", q4: "为什么工作？", q5: "什么让生活值得？" };
   const free = (id: string) => ({ id, text: texts[id]!, kind: "free", allowOther: true, identityId: "person", projectId: "", options: [] });
-  // The quick tier (the default) asks its short set (W-186): no life-story items, so this starts at the compass part's value tradeoffs.
+  // The one interview there is asks the full card set.
   const { rpc } = fakeRuntime([turn({ stage: "compass", questions: [free("q1"), free("q2"), free("q3")] }),
     turn({ stage: "energy", questions: [free("q4")] }), turn({ stage: "energy", questions: [free("q5")] })]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   await run({ sessionId: "s", text: "先从经历说起吧" });
   const lastCards = () => ((store.listOnboardingMessages(workspaceId, "s").filter((message) => message.role === "assistant").at(-1)!.content) as
     { cards?: ProfileCard[]; questions: Array<{ id: string }> });
   const first = lastCards();
-  expect(first.cards!.map((card) => [card.instrument, card.stage, card.items.length])).toEqual([["values", "compass", 3]]);
-  expect(first.questions.map((question) => question.id)).toEqual(["q1", "q2"]);
+  expect(first.cards!.length).toBeGreaterThan(0);
+  expect(first.questions.map((question) => question.id)).toEqual(["q1", "q2", "q3"]);
   const [tapped] = first.cards!;
   await run({ sessionId: "s", text: tapped!.items.map((item) => scaleAnswerLine(item, 4)).join("\n") });
   const answers = () => readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING));
   expect(tapped!.items.map((item) => answers()[item.id])).toEqual(tapped!.items.map(() => expect.objectContaining({ by: "tapped", score: 4 })));
   // The compass items the first round had no room for come before the energy part's own, three items at most.
+  // The next round's cards are new items, never the ones already tapped, six at most.
   const second = lastCards();
-  expect(second.cards![0]!.stage).toBe("compass");
-  expect(second.cards!.flatMap((card) => card.items).length).toBeLessThanOrEqual(3);
+  const tappedIds = new Set(tapped!.items.map((item) => item.id));
+  expect(second.cards!.flatMap((card) => card.items).some((item) => tappedIds.has(item.id))).toBe(false);
+  expect(second.cards!.flatMap((card) => card.items).length).toBeLessThanOrEqual(6);
   const [worded] = second.cards!;
   await run({ sessionId: "s", text: `${cardWordsHead(worded!)}：看人，熟了才放开` });
   expect(worded!.items.map((item) => answers()[item.id]!.by)).toEqual(worded!.items.map(() => "pending"));
@@ -397,81 +462,46 @@ test("the profile module's cards: added by the app, three items a round counted 
   expect(cardsForRound("compass", later).flatMap((card) => card.items).every((item) => item.stage === "energy")).toBe(true);
   expect(cardsForRound("compass", later)).toHaveLength(1);
 });
-// 2026-10-31 rerun: once only interest cards were left, every fact round kept them out and the start item never closed.
-test("interest cards left alone go with one fact question rather than waiting for a round with none", async () => {
-  const at = "2026-10-31T00:00:00.000Z";
-  // Interest cards are in the full set only (the quick tier's short one has none, W-186).
-  store.setSetting(workspaceId, "onboarding.depth", "standard");
-  store.setSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING, JSON.stringify(Object.fromEntries(PROFILE_ITEMS.filter((item) => item.instrument !== "rest18")
-    .map((item) => [item.id, { itemId: item.id, score: 3, by: "tapped", at }]))));
-  const fact = (id: string) => ({ id, text: `事实题 ${id}`, kind: "free", allowOther: true, identityId: "research", projectId: "", options: [] });
-  const { rpc } = fakeRuntime([turn({ stage: "lines", questions: [fact("f1"), fact("f2"), fact("f3")] })]);
-  await createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { checklist: false })({ sessionId: "s", text: "继续" });
-  const last = store.listOnboardingMessages(workspaceId, "s").filter((message) => message.role === "assistant").at(-1)!.content as
-    { cards?: ProfileCard[]; questions: Array<{ id: string }> };
-  expect(last.cards?.map((card) => card.instrument)).toEqual(["rest18"]);
-  expect(last.questions.map((question) => question.id)).toEqual(["f1"]);
-});
-test("a round the checklist turns back from the end carries the cards still unanswered, not an open question in their place", async () => {
-  const at = "2026-10-31T00:00:00.000Z";
-  store.setSetting(workspaceId, "onboarding.depth", "standard");
-  store.setSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING, JSON.stringify(Object.fromEntries(PROFILE_ITEMS.filter((item) => item.instrument !== "rest18")
-    .map((item) => [item.id, { itemId: item.id, score: 3, by: "tapped", at }]))));
-  const { rpc } = fakeRuntime([turn({ stage: "lines", questions: [], nextAction: "ready_for_milestones" })]);
-  await createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc)({ sessionId: "s", text: "都说完了" });
-  const last = store.listOnboardingMessages(workspaceId, "s").filter((message) => message.role === "assistant").at(-1)!.content as
-    { cards?: ProfileCard[]; questions: Array<{ id: string }>; nextAction: string };
-  expect(last.nextAction).toBe("ask");
-  expect(last.cards?.map((card) => card.instrument)).toEqual(["rest18"]);
-  expect(last.questions.some((question) => question.id.startsWith("open-"))).toBe(false);
-});
-test("a round keeps independent questions together, at most three in any stage", () => {
-  const two = JSON.parse(turn({ stage: "compass", questions: [
-    { id: "q1", text: "工作对你意味着什么？", kind: "free", allowOther: true, identityId: "person", projectId: "", options: [] },
-    { id: "q2", text: "人生的意义？", kind: "free", allowOther: true, identityId: "person", projectId: "", options: [] }] }));
-  expect(paceDeepRound(two, false)).toMatchObject({ deep: true, output: { questions: [{ id: "q1" }, { id: "q2" }] } });
-  const six = { ...two, questions: Array.from({ length: 6 }, (_, index) => ({ ...two.questions[0], id: `q${index + 1}` })) };
-  expect(paceDeepRound(six, false).output.questions.map((question: { id: string }) => question.id)).toEqual(["q1", "q2", "q3"]);
-  // A fact stage is capped the same way (five a round read as a form nobody finished, 2026-10-31); a line's own interview is not.
-  expect(paceDeepRound({ ...six, stage: "lines" }, false)).toMatchObject({ deep: false });
-  expect(paceDeepRound({ ...six, stage: "lines" }, false).output.questions).toHaveLength(3);
-  expect(paceDeepRound(six, true).output.questions).toHaveLength(6);
-  // A deeper tier keeps more of them (onboarding-depth.ts).
-  expect(paceDeepRound(six, false, DEPTH_PACE.thorough.roundQuestions).output.questions).toHaveLength(5);
-});
 
-test("the tier the person chose sets the round's size, how long a part runs and whether the details part comes", async () => {
-  expect(stageOrderFor("v1", DEPTH_PACE.quick)).not.toContain("details");
-  expect(stageOrderFor("v1", DEPTH_PACE.thorough).at(-1)).toBe("details");
-  expect(cardsForRound("compass", new Set(), DEPTH_PACE.standard.cardItems).flatMap((card) => card.items).length)
-    .toBeGreaterThan(cardsForRound("compass", new Set(), DEPTH_PACE.quick.cardItems).flatMap((card) => card.items).length);
-  const rounds = Array.from({ length: 3 }, () => ({ role: "assistant", content: { stage: "compass" } }));
-  expect(stagePace(rounds, { startOpen: false }).moveOn).toBeTruthy();
-  expect(stagePace(rounds, { startOpen: false, after: DEPTH_PACE.thorough.moveOnAfter }).moveOn).toBeUndefined();
-  // The open tier never tells a part to move on, however long it runs.
-  const long = Array.from({ length: 40 }, () => ({ role: "assistant", content: { stage: "compass" } }));
-  expect(stagePace(long, { startOpen: false, after: DEPTH_PACE.open.moveOnAfter }).moveOn).toBeUndefined();
-  expect(stageOrderFor("v1", DEPTH_PACE.open).at(-1)).toBe("details");
-  store.setSetting(workspaceId, "onboarding.depth", "thorough");
+test("a person who says they want to start gets no rating card that round, and the header tells the dialogue (replay 16)", async () => {
+  const free = (id: string) => ({ id, text: `题 ${id}`, kind: "free", allowOther: true, identityId: "person", projectId: "", options: [] });
+  const { rpc, prompts } = fakeRuntime([turn({ stage: "compass", questions: [free("q1")] }), turn({ stage: "compass", questions: [free("q2")] })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
+  const lastCards = () => ((store.listOnboardingMessages(workspaceId, "s").filter((message) => message.role === "assistant").at(-1)!.content) as { cards?: ProfileCard[] }).cards ?? [];
+  await run({ sessionId: "s", text: "先从经历说起吧" });
+  expect(lastCards().length).toBeGreaterThan(0);
+  await run({ sessionId: "s", text: "差不多了吧，能直接排一周吗" });
+  expect(lastCards()).toEqual([]);
+  expect(dialogue(prompts).at(-1)).toContain("本人这一轮说想先开始用");
+  // The next round without it has them again.
+  await run({ sessionId: "s", text: "周末一般在家。" });
+  expect(lastCards().length).toBeGreaterThan(0);
+  expect(dialogue(prompts).at(-1)).not.toContain("本人这一轮说想先开始用");
+});
+test("there are no tiers: a stored choice is never read, no tier, tone or stage count is sent, and there is no per-project details part", async () => {
+  expect(stageOrderFor("v1")).not.toContain("details");
+  store.setSetting(workspaceId, "onboarding.depth", "quick");
+  store.setSetting(workspaceId, "onboarding.tone", "warm");
   const { rpc, prompts } = fakeRuntime([firstAnswer]);
-  await createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc)({ sessionId: "s1", text: "开始" });
-  expect(dialogue(prompts)[0]).toContain('"depth":"thorough"');
-  expect(dialogue(prompts)[0]).toMatch(/"stageOrder":\[[^\]]*"details"\]/);
+  await createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc)({ sessionId: "s1", text: "开始" });
+  for (const field of ['"depth"', '"tone"', '"stageRounds"', '"moveOn"']) expect(dialogue(prompts)[0]).not.toContain(field);
+  expect(dialogue(prompts)[0]).not.toContain('"details"]');
 });
-
-test("the tone the person chose goes with the first turn and every later one", async () => {
-  // An account that chose the retired 「直接犀利」 is spoken to as 冷静客观.
-  store.setSetting(workspaceId, "onboarding.tone", "direct");
+test("one voice: whatever tone an account stored, no turn carries one (the Skill has the only voice)", async () => {
+  // Decision 10 of the 2026-11-12 redesign: 「直接犀利」 is built in; the 2026-10-18 choices (neutral, warm) are never read (P0, 2026-11-14).
+  store.setSetting(workspaceId, "onboarding.tone", "warm");
   const { rpc, prompts } = fakeRuntime([firstAnswer, turn()]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   await run({ sessionId: "s1", text: "开始" });
-  store.setSetting(workspaceId, "onboarding.tone", "warm");
+  store.setSetting(workspaceId, "onboarding.tone", "neutral");
   await run({ sessionId: "s1", text: "继续" });
-  expect(dialogue(prompts)[0]).toContain('"tone":"neutral"');
-  expect(dialogue(prompts).slice(1).some((prompt) => prompt.includes('"tone":"warm"'))).toBe(true);
+  expect(dialogue(prompts)).toHaveLength(2);
+  expect(dialogue(prompts).some((prompt) => prompt.includes('"tone"'))).toBe(false);
 });
 
-test("a round keeps from the person what is not theirs to answer, writes the calendar's recurrence as an assumption, and reads a goal question as multiple choice", async () => {
+// 2026-11-14 audit: the screen read 「你在哪里最容易进入专注状态？」 as a question about a place and 「朋友会用哪些词形容你？」 as a goal
+// question, and dropped both. What can be inferred is the Skill's rule; nothing is taken out or assumed behind the person's back.
+test("a round's questions reach the person as the model wrote them: none screened out, no assumption written for them, the kind its own", async () => {
   const options = (...labels: string[]) => labels.map((label, index) => ({ id: `o${index}`, label, detail: "" }));
   const { rpc } = fakeRuntime([turn({ questions: [
     { id: "q-goal", text: "西湖合作这学期最重要的目标？", kind: "single", allowOther: true, identityId: "research", projectId: "", options: options("投出论文", "跑通片上训练") },
@@ -480,9 +510,9 @@ test("a round keeps from the person what is not theirs to answer, writes the cal
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc);
   await run({ sessionId: "s1", text: "西湖那篇 10/31 前要投出，数据下周到。" });
   const stored = store.listOnboardingMessages(workspaceId, "s1").at(-1)!.content as { questions: Array<{ id: string; kind: string }> };
-  expect(stored.questions.filter((question) => question.id.startsWith("q-")).map((question) => [question.id, question.kind])).toEqual([["q-goal", "multi"]]);
-  expect(store.listProfileFacts(workspaceId).find((fact) => fact.slot.startsWith("assumed_")))
-    .toMatchObject({ status: "inferred", sourceRef: "inference", value: expect.stringMatching(/^假设：日历中的两项活动/) });
+  expect(stored.questions.filter((question) => question.id.startsWith("q-")).map((question) => [question.id, question.kind]))
+    .toEqual([["q-goal", "single"], ["q-room", "free"], ["q-cal", "single"]]);
+  expect(store.listProfileFacts(workspaceId).some((fact) => fact.slot.startsWith("assumed_"))).toBe(false);
 });
 
 test("a 「符合」 for the portrait holds for the portrait the same turn rewrites, so it is not asked again next round", async () => {
@@ -508,37 +538,42 @@ test("a 「符合」 for the portrait holds for the portrait the same turn rewri
   expect(portraitStillConfirmed(confirmed.fingerprint, rewritten)).toBe(true);
 });
 
-test("the question ledger: a round's questions are numbered, an answer is recorded with its sentences, and asking it again is dropped", async () => {
+test("the question ledger: a round's questions are numbered, an answer is recorded with its sentences, and asking it again comes back to the model", async () => {
   const ask = (repeats = 0) => ({ id: "q1", text: "西湖合作的图表清单由谁提供？", kind: "single", allowOther: true, identityId: "research", projectId: "",
     options: [{ id: "a", label: "师兄", detail: "" }, { id: "b", label: "导师", detail: "" }], repeats });
   const { rpc, prompts } = fakeRuntime([turn({ questions: [ask()] }), turn({ questions: [], nextAction: "ready_for_milestones" }), turn({ questions: [{ ...ask(), id: "q9" }] })]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   await run({ sessionId: "s1", text: "西湖那篇 10/31 前要投出，数据下周到。" });
   const asked = store.questionByKey(workspaceId, "iq:s1:2:q1")!;
   expect(asked).toMatchObject({ status: "open", text: "西湖合作的图表清单由谁提供？" });
   await run({ sessionId: "s1", text: "【西湖合作的图表清单由谁提供？】选择：师兄" });
   expect(store.questionByKey(workspaceId, "iq:s1:2:q1")).toMatchObject({ status: "answered", answer: "选择：师兄" });
   expect(store.questionByKey(workspaceId, "iq:s1:2:q1")!.answerSentences.length).toBeGreaterThan(0);
-  // The next prompt shows the ledger with that answer; a round asking it again in the same words loses that question.
+  // The next prompt shows the ledger with that answer. A round asking it again in the same words is sent back with the answer the person
+  // gave; a model that keeps it without saying it is a follow-up has it left out once the repairs run out, and is told so next round.
   await run({ sessionId: "s1", text: "继续" });
-  expect(prompts()[2]).toContain(`#${asked.id} [已答] 西湖合作的图表清单由谁提供？`);
+  expect(dialogue(prompts).some((prompt) => prompt.includes(`#${asked.id} [已答] 西湖合作的图表清单由谁提供？`))).toBe(true);
+  expect(dialogue(prompts).some((prompt) => prompt.includes(`#${asked.id}「西湖合作的图表清单由谁提供？」像是同一个问题，本人答过：「选择：师兄」`))).toBe(true);
   const last = store.listOnboardingMessages(workspaceId, "s1").at(-1)!.content as { questions: Array<{ id: string }> };
   expect(last.questions.map((question) => question.id)).not.toContain("q9");
-  expect(store.listEvents(workspaceId, { type: "onboarding.questions_repeated" })[0]?.payload).toMatchObject({ dropped: [{ repeats: asked.id, why: "similar" }] });
+  expect(store.listEvents(workspaceId, { type: "onboarding.round_edited" }).at(-1)?.payload).toMatchObject({ removed: [{ why: expect.stringContaining("followUp") }] });
 });
 
-test("an app question the model asks in its own words, naming its number, is not added beside it", async () => {
-  const { rpc } = fakeRuntime([guessOnly, turn({ questions: [] })]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
+test("an app question the model asks in its own words, naming its number, comes back: it goes out by id so its tap settles the fact", async () => {
+  const { rpc } = fakeRuntime([guessOnly, guessOnly]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   await run({ sessionId: "s", text: "随便聊聊" });
+  await run({ sessionId: "s", text: "还有吗" });
   const gap = store.questionByKey(workspaceId, "gap:gap-line-startup")!;
-  expect(gap.status).toBe("open");
+  expect(gap.status).toBe("pending");
   const own = { id: "q-startup", text: "创业这条线你现在具体在做什么？", kind: "free", allowOther: true, identityId: "startup", projectId: "", options: [], repeats: gap.id };
   const { rpc: rpc2 } = fakeRuntime([turn({ questions: [own], nextAction: "ask" })]);
   // A second runner on the same ledger, so the second answer is the model's own question.
-  await createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc2, { checklist: false })({ sessionId: "s2", text: "继续" });
+  await createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc2)({ sessionId: "s2", text: "继续" });
   const round = store.listOnboardingMessages(workspaceId, "s2").at(-1)!.content as { questions: Array<{ id: string }> };
-  expect(round.questions.map((question) => question.id)).toEqual(["q-startup"]);
+  expect(round.questions).toEqual([]);
+  expect(store.listEvents(workspaceId, { type: "onboarding.round_edited" }).at(-1)?.payload)
+    .toMatchObject({ removed: [{ why: expect.stringContaining("把「gap-line-startup」放进 openItems") }] });
 });
 
 test("a file read again since it was shown is shown to the dialogue again and extracted again with its new numbers", async () => {
@@ -546,7 +581,7 @@ test("a file read again since it was shown is shown to the dialogue again and ex
     extractedText: "Week-8: 27th Oct.", extractionStatus: "done", createdAt: "2026-10-02T00:00:00.000Z" });
   const done = turn({ questions: [], nextAction: "ready_for_milestones" });
   const { rpc, prompts } = fakeRuntime([done, done, done]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   await run({ sessionId: "s", text: "我上传了文件" });
   await run({ sessionId: "s", text: "继续" });
   expect(dialogue(prompts)[1]).not.toContain("Plan.txt");
@@ -564,10 +599,10 @@ test("a re-read still accepts the numbers of files an earlier turn of the thread
   const done = turn({ questions: [], nextAction: "ready_for_milestones" });
   const cite = (id: number) => turn({ questions: [], nextAction: "ready_for_milestones", slotUpdates: [{ identityId: "research", projectId: "", slot: "midterm", value: "10/27", status: "confirmed", refs: [id] }] });
   const { rpc } = fakeRuntime([done, cite(2)]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   await run({ sessionId: "s", text: "我上传了文件" });
   expect(store.sentencesOf(workspaceId, "document", "d1")[0]!.id).toBe(2);
-  expect((await run({ sessionId: "s", text: "请重新读一遍", reread: true })).state).toBe("ready");
+  expect((await run({ sessionId: "s", text: "请重新读一遍", reread: true })).state).toBe("asked");
   expect(store.listProfileFacts(workspaceId).find((fact) => fact.slot === "midterm")).toMatchObject({ sourceRef: "src-1", sourceSentences: [2] });
 });
 
@@ -576,30 +611,32 @@ test("a compacted conversation is not a forbidden tool; a round that stops says 
   const compacting = sharedRuntime([turn(), turn()], ONBOARDING_SKILL, { script: async ({ emit, threadId, turnId }) => {
     emit({ method: "item/completed", params: { threadId, turnId, item: { type: "contextCompaction", id: "c1" } } });
   } });
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => compacting.rpc, { checklist: false, extract: "off" });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => compacting.rpc, { extract: "off" });
   expect(await run({ sessionId: "s", text: "我在读研。" })).toMatchObject({ state: "asked" });
 
   const acting = sharedRuntime([turn(), turn(), turn()], ONBOARDING_SKILL, { script: async ({ emit, threadId, turnId }) => {
     emit({ method: "item/completed", params: { threadId, turnId, item: { type: "commandExecution", id: "x1" } } });
   } });
-  const refused = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => acting.rpc, { checklist: false, extract: "off" });
+  const refused = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => acting.rpc, { extract: "off" });
   const outcome = await refused({ sessionId: "s2", text: "第二段对话。" });
   expect(outcome).toMatchObject({ state: "blocked", code: "SKILL_TOOL_FORBIDDEN", detail: "item:commandExecution" });
   expect(readOnboardingFailure(store.getSetting(workspaceId, `${ONBOARDING_LAST_FAILURE}s2`))).toMatchObject({ code: "SKILL_TOOL_FORBIDDEN" });
   // The retry starts: the old reason goes, whatever the retry then does.
-  await createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => sharedRuntime([turn(), turn()], ONBOARDING_SKILL).rpc, { checklist: false, extract: "off" })({ sessionId: "s2", text: "" });
+  await createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => sharedRuntime([turn(), turn()], ONBOARDING_SKILL).rpc, { extract: "off" })({ sessionId: "s2", text: "" });
   expect(store.getSetting(workspaceId, `${ONBOARDING_LAST_FAILURE}s2`)).toBeUndefined();
 });
 
 test("the progress record goes back to the model next round, and an observation is kept only when its quotes are the person's", async () => {
   const progress = { part: "energy", covered: ["心流时刻"], open: ["耗能的事"], partDone: false, next: "问什么事做完很累" };
   const insight = (quote: string) => ({ text: "你说投入的两次都是和人一起赶东西；底座主线是一个人做的研究。",
-    refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-3", quote }] });
-  const { rpc, prompts } = fakeRuntime([turn({ stage: "energy", progress, insight: { text: "", refs: [] } }),
+    refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-5", quote }], falsifier: "如果独自做研究时也常投入到忘了时间" });
+  // A card joins what was said at different times: the round after a first one cites the reply before the latest two (2026-11-15).
+  const { rpc, prompts } = fakeRuntime([turn({ stage: "energy", progress, insight: { text: "", refs: [] } }), turn({ stage: "energy", progress }),
     turn({ stage: "energy", progress: { ...progress, covered: ["心流时刻", "耗能的事"], open: [] }, insight: insight("一个人做研究") }),
     turn({ stage: "energy", progress, insight: insight("一个人做实验") })]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false, extract: "off" });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
   await run({ sessionId: "s", text: "最投入的是和同学一起赶比赛的时候。" });
+  await run({ sessionId: "s", text: "周末一般在家。" });
   await run({ sessionId: "s", text: "底座是我一个人做研究。" });
   expect(dialogue(prompts)[1]).toContain("上轮判断：第 3/6 部分「能量」未完成");
   expect(dialogue(prompts)[1]).toContain("abstract");
@@ -612,100 +649,339 @@ test("the progress record goes back to the model next round, and an observation 
   expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { insight?: unknown }).insight).toBeUndefined();
 });
 
-test("one observation a part: a second one in the same part is left out, the next part may have its own", async () => {
+test("observations come as often as there is evidence, never the same one twice", async () => {
   const insight = { text: "你说投入的两次都是和人一起赶东西；底座主线是一个人做的研究。",
-    refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-3", quote: "一个人做研究" }] };
-  const { rpc } = fakeRuntime([turn({ stage: "energy", insight: { text: "", refs: [] } }), turn({ stage: "energy", insight }),
+    refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-5", quote: "一个人做研究" }], falsifier: "如果独自做研究时也常投入到忘了时间" };
+  const { rpc } = fakeRuntime([turn({ stage: "energy", insight: { text: "", refs: [] } }), turn({ stage: "energy" }), turn({ stage: "energy", insight }),
     turn({ stage: "energy", insight }), turn({ stage: "compass", insight })]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { checklist: false, extract: "off" });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });
   const kept = async (text: string) => {
     await run({ sessionId: "s", text });
     return Boolean((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { insight?: unknown }).insight);
   };
   expect(await kept("最投入的是和同学一起赶比赛的时候。")).toBe(false);
+  expect(await kept("周末一般在家。")).toBe(false);
   expect(await kept("底座是我一个人做研究。")).toBe(true);
+  // The same words again are left out, in any part.
   expect(await kept("还有别的吗")).toBe(false);
-  expect(await kept("看重的是把事做完。")).toBe(true);
+  expect(await kept("看重的是把事做完。")).toBe(false);
 });
 
-test("the round that ends the interview marks it finishing, and the synthesis left to write does not turn the end into a question", async () => {
-  const { readFinishing } = await import("@crossline/db");
-  const { rpc } = fakeRuntime([turn({ stage: "energy", questions: [], nextAction: "ready_for_milestones" })]);
-  // The checklist is off for this runner's own items, so what is checked is that a missing synthesis alone never asks the person.
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off", checklist: false });
-  expect(await run({ sessionId: "s", text: "能量部分都答完了" })).toEqual({ state: "ready", sessionId: "s" });
-  // `off` leaves the extraction alone: nothing is marked for a run that will never come.
-  expect(readFinishing(store, workspaceId, "s")).toBeUndefined();
+test("a card's hypothesis is marked asked when it is shown, rated or not; one picked from the log keeps its id, a new one never takes an id on record", async () => {
+  const refs = [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-5", quote: "一个人做研究" }];
+  const fromLog = { text: "你说投入的两次都是和人一起赶东西。", refs, falsifier: "如果独自时也常投入", hypothesisId: "h1" };
+  const fresh = { text: "你说底座主线是一个人做的研究。", refs, falsifier: "如果独自做研究时也常投入" };
+  const { rpc } = fakeRuntime([turn({ stage: "energy", insight: { text: "", refs: [] } }), turn({ stage: "energy" }), turn({ stage: "energy", insight: fromLog }),
+    turn({ stage: "energy", insight: fresh })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });
+  await run({ sessionId: "s", text: "最投入的是和同学一起赶比赛的时候。" });
+  await run({ sessionId: "s", text: "周末一般在家。" });
+  store.setSetting(workspaceId, "profile.model", JSON.stringify({ hypotheses: [{ id: "h1", dimension: "D2", statement: "和人一起时投入",
+    basis: [], falsifier: "", alternative: "", status: "open" }, { id: "c7", dimension: "D2", statement: "旧卡", basis: [], falsifier: "", alternative: "", status: "open" }] }));
+  await run({ sessionId: "s", text: "底座是我一个人做研究。" });
+  const shown = store.listOnboardingMessages(workspaceId, "s").at(-1)!;
+  const log = () => (JSON.parse(store.getSetting(workspaceId, "profile.model")!) as { hypotheses: Array<{ id: string; cardKey?: string }> }).hypotheses;
+  expect(log().find((item) => item.id === "h1")?.cardKey).toBe(`s#${shown.seq}`);
+  await run({ sessionId: "s", text: "还有别的吗" });
+  const card = (store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { insight?: { hypothesisId?: string } }).insight;
+  expect(card?.hypothesisId).toBe("c7-2");
+  expect(log().find((item) => item.id === "c7-2")?.cardKey).toBe(`s#${store.listOnboardingMessages(workspaceId, "s").at(-1)!.seq}`);
+  expect(log().find((item) => item.id === "c7")?.cardKey).toBeUndefined();
+});
+
+test("cards ready together come in one round: each is kept, keyed and rated on its own, and a correction holds the next cards back", async () => {
+  const refs = [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-5", quote: "一个人做研究" }];
+  const card = (id: string, text: string) => ({ text, refs, falsifier: "如果独自时也常投入", hypothesisId: id, dimension: "D2" });
+  const { rpc } = fakeRuntime([turn({ stage: "energy", insight: { text: "", refs: [] } }), turn({ stage: "energy" }),
+    turn({ stage: "energy", insights: [card("h1", "你说投入的两次都是和人一起赶东西。"), card("h2", "你说底座主线是一个人做的研究。"),
+      card("h3", "你说投入的两次都是和人一起赶东西。")] })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });
+  await run({ sessionId: "s", text: "最投入的是和同学一起赶比赛的时候。" });
+  await run({ sessionId: "s", text: "周末一般在家。" });
+  const hypothesis = (id: string) => ({ id, dimension: "D2", statement: id, basis: [], falsifier: "", alternative: "", status: "open" });
+  store.setSetting(workspaceId, "profile.model", JSON.stringify({ hypotheses: [hypothesis("h1"), hypothesis("h2"), hypothesis("h3")] }));
+  await run({ sessionId: "s", text: "底座是我一个人做研究。" });
+  const shown = store.listOnboardingMessages(workspaceId, "s").at(-1)!;
+  const content = shown.content as { insight?: { text: string }; moreInsights?: Array<{ text: string }> };
+  // The third says what the first said and is left out.
+  expect([content.insight?.text, ...(content.moreInsights ?? []).map((item) => item.text)])
+    .toEqual(["你说投入的两次都是和人一起赶东西。", "你说底座主线是一个人做的研究。"]);
+  const log = () => (JSON.parse(store.getSetting(workspaceId, "profile.model")!) as { hypotheses: Array<{ id: string; cardKey?: string; rated?: string }> }).hypotheses;
+  expect(log().map((item) => item.cardKey)).toEqual([`s#${shown.seq}`, `s#${shown.seq}.1`, undefined]);
+  // The second card is rated under its own key; a 部分对 newer than the inferences' last read goes beside the next cards (`cardsCheck`).
+  expect(correctionUnread(store, workspaceId, "s")).toBe(false);
+  expect(rateInsight(store, workspaceId, { sessionId: "s", seq: shown.seq, index: 1, verdict: "partial", correction: "是一个人做，但常和导师讨论" }))
+    .toMatchObject({ ok: true, hypothesisId: "h2" });
+  expect(log().find((item) => item.id === "h2")?.rated).toBe("partial");
+  expect(rateInsight(store, workspaceId, { sessionId: "s", seq: shown.seq, index: 2, verdict: "fits" })).toEqual({ ok: false, code: "INSIGHT_NOT_FOUND" });
+  expect(correctionUnread(store, workspaceId, "s")).toBe(true);
+  expect(correctedSince(store, workspaceId, "s", "2999-01-01T00:00:00Z")).toBe(false);
+  // Never held back any more (replay 14: a nine-minute lane held the cards for ten rounds; 2026-11-14 audit): the correction stays
+  // beside the cards until the lane has read it, a later round included.
+  store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "assistant", content: { reply: "next" }, createdAt: "2999-01-01T00:00:00Z" });
+  expect(correctionUnread(store, workspaceId, "s")).toBe(true);
+});
+
+test("an uncertain hypothesis the log offers on one reply may be carded citing that one; any other card still needs two", async () => {
+  // Replay 13 (2026-11-14): with only open hypotheses on two replies offered, nine rounds had no card. The extraction's uncertain ones fill in.
+  const one = [{ replyId: "reply-3", quote: "一个人做研究" }];
+  // The one reply is older than the latest two: a card does not rest on what was just said alone (2026-11-15).
+  const { rpc } = fakeRuntime([turn({ stage: "energy", insight: { text: "", refs: [] } }), turn({ stage: "energy" }), turn({ stage: "energy" }),
+    turn({ stage: "energy", insights: [{ text: "你说「一个人做研究」，我猜是你更喜欢自己定节奏；也可能只是那学期课多。", refs: one, falsifier: "如果课少时也常约人一起做", hypothesisId: "h7", dimension: "D3" },
+      { text: "你说一个人做研究时最慢。", refs: one, falsifier: "如果独自时也很快", hypothesisId: "h8", dimension: "D1" }] })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  await run({ sessionId: "s", text: "最投入的是和同学一起赶比赛的时候。" });
+  const basis = [{ kind: "quote", text: "一个人做研究", ref: "reply-3" }];
+  store.setSetting(workspaceId, "profile.model", JSON.stringify({ hypotheses: [
+    { id: "h7", dimension: "D3", statement: "更喜欢自己定节奏", basis, falsifier: "", alternative: "只是那学期课多", status: "supported" },
+    { id: "h8", dimension: "D1", statement: "独处时慢", basis, falsifier: "", alternative: "", status: "open" }] }));
+  await run({ sessionId: "s", text: "底座是我一个人做研究。" });
+  await run({ sessionId: "s", text: "周末一般在家。" });
+  await run({ sessionId: "s", text: "还有别的吗" });
+  const content = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { insight?: { text: string; hypothesisId?: string }; moreInsights?: unknown[] };
+  expect(content.insight).toMatchObject({ hypothesisId: "h7" });
+  expect(content.moreInsights ?? []).toEqual([]);
+});
+
+test("no observation card beside the safety check, and none built on the disclosure or the answer to the check", async () => {
+  const card = (refs: Array<{ replyId: string; quote: string }>) => ({ text: "你说投入的时候身边都有人。", refs, falsifier: "如果独自时也常投入" });
+  const { rpc } = fakeRuntime([turn({ stage: "narrative" }),
+    turn({ stage: "narrative", reply: "谢谢你愿意说出来。全国心理援助热线 12356。", insight: card([{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-3", quote: "没人可说" }]) }),
+    turn({ stage: "narrative", insight: card([{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-5", quote: "现在没有了" }]) }),
+    turn({ stage: "energy", insight: card([{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-7", quote: "一个人做研究" }]) })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  const shown = async (text: string) => {
+    await run({ sessionId: "s", text });
+    return (store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { insight?: unknown }).insight;
+  };
+  await shown("我最投入的是和同学一起赶比赛的时候。");
+  expect(await shown("大三有一段没人可说，有过不想活的念头。")).toBeUndefined();
+  expect(await shown("现在没有了。")).toBeUndefined();
+  expect(await shown("一个人做研究时最慢。")).toMatchObject({ text: "你说投入的时候身边都有人。" });
+});
+
+test("a reply naming self-harm is sent back once when the round is not the safety reply; the model's `safety` mark keeps cards away (2026-11-14 audit)", async () => {
+  // The floor reads the person's words (`mentionsSelfHarm`); the model decides whether they are the person's own (`safetyRound`).
+  const card = { text: "你说投入的时候身边都有人。", falsifier: "如果独自时也常投入",
+    refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-3", quote: "写综述" }] };
+  const { rpc, prompts } = fakeRuntime([turn({ stage: "narrative" }),
+    turn({ stage: "narrative", reply: "综述的题目很少见。" }), turn({ stage: "narrative", reply: "综述的题目很少见。", safety: false }),
+    turn({ stage: "narrative", reply: "谢谢你愿意说出来。现在还有这样的念头吗？", safety: true, insight: card })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });
+  const last = async (text: string) => {
+    await run({ sessionId: "s", text });
+    return store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string; safety?: boolean; insight?: unknown };
+  };
+  await last("我最投入的是和同学一起赶比赛的时候。");
+  // A research topic: the model answers it as it was, and its second answer stands.
+  expect(await last("我在写综述，题目是大学生自杀预防。")).toMatchObject({ reply: "综述的题目很少见。" });
+  expect(dialogue(prompts).filter((prompt) => prompt.includes("自伤或不想活的字眼"))).toHaveLength(1);
+  // Marked by the model without the hotline numbers: still the safety round, so no card beside it.
+  const safe = await last("我写综述的时候，自己也有过不想活的念头。");
+  expect(safe.safety).toBe(true);
+  expect(safe.insight).toBeUndefined();
+});
+
+test("a disclosure's words leave the dialogue's thread once answered, a card retelling it goes back, and the lesson is asked once by the app (2026-11-15)", async () => {
+  const good = { text: "你最投入的时候身边都有人，一个人做研究推得最慢。", falsifier: "如果独自时也常投入",
+    refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-7", quote: "一个人做研究" }] };
+  // Replay 15: the card retold the disclosure in its own words; here it uses the disclosure's 「没人可说」.
+  const echo = { ...good, text: "那时没人可说，你最投入的时候身边都有人。" };
+  const { rpc, prompts, threadStarts } = fakeRuntime([turn({ stage: "narrative" }),
+    turn({ stage: "narrative", reply: "谢谢你愿意说出来。全国心理援助热线 12356。现在还有这样的念头吗？", safety: true }),
+    turn({ stage: "narrative" }),
+    turn({ stage: "energy", insight: echo }), turn({ stage: "energy", insight: good }),
+    turn({ stage: "energy", askLesson: true }),
+    turn({ stage: "energy" })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  const last = async (text: string) => {
+    await run({ sessionId: "s", text });
+    return store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { insight?: { text: string }; questions: Array<{ id: string }> };
+  };
+  await last("我最投入的是和同学一起赶比赛的时候。");
+  await last("大二有一段压力很大，自残过，没人可说。");
+  expect(threadStarts()).toHaveLength(1);
+  // The answer to the safety check: the thread is rebuilt with the disclosure's words replaced.
+  await last("现在没有了。");
+  expect(threadStarts()).toHaveLength(2);
+  const rebuilt = dialogue(prompts).at(-1)!;
+  expect(rebuilt).toContain(DISCLOSURE_PLACEHOLDER);
+  expect(rebuilt).not.toContain("自残过");
+  expect(rebuilt).toContain("本人在 reply-3 谈到过一段艰难时期");
+  // The card that uses the disclosure's words goes back once; the one that does not is shown.
+  expect((await last("一个人做研究时最慢。")).insight).toMatchObject({ text: good.text });
+  expect(dialogue(prompts).filter((prompt) => prompt.includes("那段经历不作观察卡的材料"))).toHaveLength(1);
+  expect(dialogue(prompts).some((prompt) => prompt.includes("自残过") || prompt.includes("现在没有了"))).toBe(true);
+  expect(dialogue(prompts).at(-1)).not.toContain("自残过");
+  // The model asks for the lesson question; the app puts it as written, and reads the answer next round.
+  expect((await last("周末一般在家。")).questions.map((question) => question.id)).toContain(LESSON_QUESTION.id);
+  await last(`【${LESSON_QUESTION.text}】选择：可以聊聊`);
+  expect(dialogue(prompts).at(-1)).toContain("本人愿意谈那段时期");
+  expect(store.getOnboardingSession(workspaceId, "s")!.coverage).toMatchObject({ lesson: "yes", redacted: ["reply-3", "reply-5"] });
+});
+
+test("the extraction never reads a disclosure's words: the reply goes to it as the placeholder, unnumbered (2026-11-15)", async () => {
+  const safety = turn({ stage: "narrative", reply: "谢谢你愿意说出来。全国心理援助热线 12356。", safety: true });
+  const { rpc, prompts } = fakeRuntime([safety, safety]);
+  await createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc)({ sessionId: "s", text: "大二自残过，没人可说。" });
+  expect(extraction(prompts).length).toBeGreaterThan(0);
+  expect(extraction(prompts).some((prompt) => prompt.includes("自残过"))).toBe(false);
+  expect(extraction(prompts).some((prompt) => prompt.includes(DISCLOSURE_PLACEHOLDER))).toBe(true);
+});
+
+test("the dialogue reads the scale as readings, never taps, and a reply quoting scores goes back (2026-11-15)", async () => {
+  const { rpc, prompts } = fakeRuntime([turn({ stage: "energy", reply: "你尽责性 5/5，很有条理。" }), turn({ stage: "energy", reply: "你做事很有条理。" })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  await run({ sessionId: "s", text: "【我做事有条理】点选：5/5（非常符合）\n周末一般在家。" });
+  expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string }).reply).toBe("你做事很有条理。");
+  expect(dialogue(prompts)[0]).toContain("【我做事有条理】已点选（读数见 scaleReadings）");
+  expect(dialogue(prompts)[0]).not.toContain("点选：5/5");
+  expect(dialogue(prompts).filter((prompt) => prompt.includes("报了量表的分数"))).toHaveLength(1);
+});
+
+test("a reply saying what the card beside it says goes back once (2026-11-15)", async () => {
+  const insight = { text: "你说投入的两次都是和人一起赶东西，底座却是一个人做的研究。", falsifier: "如果独自做研究时也常投入",
+    refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-5", quote: "一个人做研究" }] };
+  const { rpc, prompts } = fakeRuntime([turn({ stage: "energy" }), turn({ stage: "energy" }),
+    turn({ stage: "energy", reply: "投入的两次都是和人一起赶东西，底座却是一个人做的，这很明显。", insight }), turn({ stage: "energy", reply: "周末呢？", insight })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  await run({ sessionId: "s", text: "最投入的是和同学一起赶比赛的时候。" });
+  await run({ sessionId: "s", text: "周末一般在家。" });
+  await run({ sessionId: "s", text: "底座是我一个人做研究。" });
+  const content = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string; insight?: { text: string } };
+  expect(content).toMatchObject({ reply: "周末呢？", insight: { text: insight.text } });
+  expect(dialogue(prompts).filter((prompt) => prompt.includes("reply 和观察卡说了同一段话"))).toHaveLength(1);
+});
+
+test("a round that asks proposes its next step, and the next round is told whether the person took it (2026-11-15)", async () => {
+  const { rpc, prompts } = fakeRuntime([turn({ next: "" }), turn({ next: "聊聊创业线现在的项目" }), turn(), turn()]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  await run({ sessionId: "s", text: "周末一般在家。" });
+  expect(dialogue(prompts).filter((prompt) => prompt.includes("next 是空的"))).toHaveLength(1);
+  expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { next?: string }).next).toBe("聊聊创业线现在的项目");
+  await run({ sessionId: "s", text: `【项目 A 的图表清单在哪？】选择：师兄给的文档\n${NEXT_ACCEPTED}` });
+  expect(dialogue(prompts).at(-1)).toContain("上轮提议的下一步「聊聊创业线现在的项目」：本人按了「好，往下」。");
+  await run({ sessionId: "s", text: "先说一下周末的事。" });
+  expect(dialogue(prompts).at(-1)).toContain("本人没按，写了自己的话。");
+});
+
+test("each stage's checklist goes with the round that starts in it, once per thread (2026-11-15)", async () => {
+  const { rpc, prompts } = fakeRuntime([turn({ stage: "narrative" }), turn({ stage: "compass" }), turn({ stage: "compass" })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  await run({ sessionId: "s", text: "最投入的是和同学一起赶比赛的时候。" });
+  await run({ sessionId: "s", text: "周末一般在家。" });
+  await run({ sessionId: "s", text: "底座是我一个人做研究。" });
+  expect(dialogue(prompts)[0]).toContain("本阶段：narrative 经历与转折");
+  expect(dialogue(prompts)[1]).not.toContain("stageGuide");
+  expect(dialogue(prompts)[2]).toContain("本阶段：compass 指南针");
+});
+
+test("the Skill's core keeps at most fifteen rules, and every stage has a checklist of at most ten (2026-11-15)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const core = readFileSync(new URL("../../../skills/marketplace/plugins/crossline/skills/crossline-onboarding/SKILL.md", import.meta.url), "utf8");
+  const rules = (text: string) => text.match(/^\d+\. \*\*/gmu)?.length ?? 0;
+  expect(rules(core.split("## 核心规则")[1]!.split("\n## ")[0]!)).toBeLessThanOrEqual(15);
+  for (const stage of ONBOARDING_STAGES) {
+    const guide = stageGuide(stage);
+    expect(guide, stage).toContain(`本阶段：${stage}`);
+    expect(rules(guide!), stage).toBeGreaterThan(0);
+    expect(rules(guide!), stage).toBeLessThanOrEqual(10);
+  }
+  expect(stageGuide("../SKILL")).toBeUndefined();
+});
+
+test("as the person reads a round: the safety reply ends at its help lines; the rest of the reply and the questions are the model's own", async () => {
+  const help = "全国心理援助热线 12356；身处危险时打 120 或 110，或去最近的医院急诊。";
+  const card = { text: "你最投入的两次都是有人一起、每天有反馈的事，一个人做的研究推得最慢。", falsifier: "如果独自时也常投入",
+    refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-7", quote: "一个人做研究" }] };
+  const { rpc } = fakeRuntime([turn({ stage: "narrative", questions: [{ id: "q1", text: "讲一件到目前为止最有成就感的事？", kind: "free", allowOther: true, identityId: "", projectId: "", options: [] }] }),
+    turn({ stage: "narrative", reply: `谢谢你愿意说出来。${help}回到前面：你敬佩的人和那段时间正好相对。` }), turn({ stage: "energy" }),
+    turn({ stage: "energy", reply: "记下了。你最投入的两次都是有人一起、每天有反馈的事，一个人的研究推得最慢。周末先排整块时间。", insight: card,
+      questions: [{ id: "q1", text: "近一年最骄傲的一件事是什么？", kind: "free", allowOther: true, identityId: "", projectId: "", options: [] }] })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  const last = async (text: string) => {
+    await run({ sessionId: "s", text });
+    return store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string; insight?: { text: string }; questions: Array<{ text: string }> };
+  };
+  await last("我最有成就感的是和同学一起赶比赛的时候。");
+  expect((await last("有过一段情绪很低的时候，现在没有了。")).reply).toBe(`谢谢你愿意说出来。${help}`);
+  await last("现在没有了，继续吧。");
+  const round = await last("一个人做研究时最慢。");
+  expect(round.insight?.text).toBe(card.text);
+  // Not cut or prefixed by the app any more (2026-11-14 audit): saying the card twice or asking for the best story again is the Skill's
+  // to avoid, measured in the replay evaluation.
+  expect(round.reply).toBe("记下了。你最投入的两次都是有人一起、每天有反馈的事，一个人的研究推得最慢。周末先排整块时间。");
+  expect(round.questions[0]!.text).toBe("近一年最骄傲的一件事是什么？");
+});
+
+test("a reply that sets a date nobody gave is sent back once; the rewrite leaves the day to the person", async () => {
+  // A day ten days ahead: a fixed 11 月 17 日 stopped being invented on that day (it was today, 2026-11-17).
+  const ahead = new Date(Date.now() + 10 * 86_400_000);
+  const { rpc, prompts } = fakeRuntime([turn({ reply: `试做定在 ${ahead.getMonth() + 1} 月 ${ahead.getDate()} 日：约两位从业者聊一次。` }), turn({ reply: "试做是约两位从业者聊一次，哪天由你定。" })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });
+  await run({ sessionId: "s", text: "【未来两周先做哪一件？】选择：约两位从业者聊一次" });
+  expect(dialogue(prompts).some((prompt) => prompt.includes("可本人没说过这个日期"))).toBe(true);
+  expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string }).reply).toBe("试做是约两位从业者聊一次，哪天由你定。");
+});
+
+test("a line with fewer than three goal candidates is told it has not enough, and the round does not ask for a goal yet", async () => {
+  store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ media: { description: "小红书科普", attributes: [{ text: "有趣", kind: "ability", sourceRef: "reply-0" }] } }));
+  const { rpc, prompts } = fakeRuntime([turn()]);
+  await createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" })({ sessionId: "s", text: "开始吧" });
+  expect(dialogue(prompts)[0]).toMatch(/：长期目标的候选词还不够（1 个）/);
+  const asked = (store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { questions: Array<{ id: string }> }).questions;
+  expect(asked.some((question) => question.id.startsWith("gap-goal-"))).toBe(false);
+});
+
+test("a reply listing a finished research thread's figures is sent back once; the rewrite keeps one conclusion", async () => {
+  store.setSetting(workspaceId, "onboarding.research:s", JSON.stringify([{ id: "r1", question: "寒假实习何时截止？", why: "", dimension: "D0", status: "done",
+    conclusion: "事务所寒假实习网申多在 7 月底到 10 月，安永 10 月 16 日截止；银行分行多在 12 月底到 1 月初截止。", messages: [] }]));
+  const { rpc, prompts } = fakeRuntime([
+    turn({ reply: "查到了：事务所网申在 7 月到 10 月，安永 10 月 16 日已截止；银行分行 12 月底截止。" }),
+    turn({ reply: "事务所的寒假批次已经过了，银行分行还在窗口内，先投它。" })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  await run({ sessionId: "s", text: "想找寒假实习。" });
+  expect(dialogue(prompts).some((prompt) => prompt.includes("reply 逐条列了调研线程的细节"))).toBe(true);
+  expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string }).reply).toBe("事务所的寒假批次已经过了，银行分行还在窗口内，先投它。");
 });
 
 test("the dialogue is told which lines still have no goal candidates, so it asks what the person wants to become only there", async () => {
   store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ media: { description: "小红书科普",
-    attributes: [{ text: "有趣", kind: "ability", sourceRef: "reply-0" }, { text: "值得信赖", kind: "state", sourceRef: "reply-0" }] } }));
+    attributes: [{ text: "有趣", kind: "ability", sourceRef: "reply-0" }, { text: "值得信赖", kind: "state", sourceRef: "reply-0" }, { text: "高产", kind: "state", sourceRef: "reply-0" }] } }));
   const { rpc, prompts } = fakeRuntime([turn()]);
   await createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" })({ sessionId: "s", text: "开始吧" });
   const first = dialogue(prompts)[0]!;
   expect(first).toContain("goalPicker");
-  expect(first).toMatch(/：已给出 2 个长期目标的候选词/);
+  expect(first).toMatch(/：已给出 3 个长期目标的候选词/);
   expect(first).toMatch(/：还没有长期目标的候选词/);
 });
 
-test("a line's goal is chosen inside the conversation: its candidates come as a question, and the taps adopt the goal", async () => {
+test("a line's goal is chosen inside the conversation: its candidates go out as the app's question once the dialogue names it, and the taps adopt the goal", async () => {
   store.setSetting(workspaceId, "lines.v1", JSON.stringify([{ id: "media", label: "创作者", color: "media", goal: "", createdAt: "2026-10-30T00:00:00.000Z" }]));
   store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ media: { description: "小红书科普",
-    attributes: [{ text: "有趣", kind: "ability", sourceRef: "reply-0" }, { text: "值得信赖", kind: "state", sourceRef: "reply-0" }] } }));
+    attributes: [{ text: "有趣", kind: "ability", sourceRef: "reply-0" }, { text: "值得信赖", kind: "state", sourceRef: "reply-0" }, { text: "高产", kind: "state", sourceRef: "reply-0" }] } }));
   const round = turn({ stage: "lines", questions: [{ id: "q1", text: "每周大概花几小时做内容？", kind: "single", allowOther: true, identityId: "media",
-    projectId: "", options: [{ id: "a", label: "5 小时以内", detail: "" }, { id: "b", label: "5 小时以上", detail: "" }] }] });
+    projectId: "", options: [{ id: "a", label: "5 小时以内", detail: "" }, { id: "b", label: "5 小时以上", detail: "" }] }], openItems: ["gap-goal-media"] });
   const { rpc } = fakeRuntime([round, round]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
   await run({ sessionId: "s", text: "开始吧" });
   const asked = (store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { questions: Array<{ id: string; text: string; options: Array<{ label: string }> }> })
     .questions.find((question) => question.id === "gap-goal-media");
-  expect(asked?.options.map((option) => option.label)).toEqual(["有趣", "值得信赖"]);
+  expect(asked?.options.map((option) => option.label)).toEqual(["有趣", "值得信赖", "高产"]);
   await run({ sessionId: "s", text: `【${asked!.text}】选择：有趣；值得信赖` });
   const lines = JSON.parse(store.getSetting(workspaceId, "lines.v1")!) as Array<{ id: string; goalParts?: string[] }>;
   expect(lines.find((line) => line.id === "media")?.goalParts).toEqual(["有趣", "值得信赖"]);
   expect(store.listEvents(workspaceId, { type: "line.updated" }).at(-1)?.payload).toMatchObject({ via: "interview" });
 });
 
-test("once the start items stand, a front-stage round with nothing left to ask ends the interview instead of asking forever", async () => {
-  const at = "2026-10-30T00:00:00.000Z";
-  store.setSetting(workspaceId, "lines.v1", JSON.stringify([{ id: "media", label: "创作者", color: "media", goal: "成为有趣的创作者", goals: ["成为有趣的创作者"], createdAt: at }]));
-  store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ media: { description: "小红书科普", attributes: [{ text: "有趣", kind: "ability", sourceRef: "reply-0" }] } }));
-  store.setSetting(workspaceId, "schedule.availability.proposed", JSON.stringify([{ weekday: 1, start: "09:00", end: "12:00" }]));
-  store.saveProject({ id: "notes", ownerId: "o", workspaceId, identityId: "media", name: "秋季笔记系列", status: "active", summary: "", createdAt: at, updatedAt: at });
-  store.upsertProfileFact({ workspaceId, identityId: "media", projectId: "notes", slot: "no_deadline", value: "没有截止", status: "confirmed", sourceRef: "reply-0", sourceQuote: "", updatedAt: at });
-  // An interview that had rounds before the profile module: no cards stand between it and the end.
-  store.saveOnboardingSession({ id: "s", ownerId: "o", workspaceId, state: "active", coverage: { flow: "v1" }, createdAt: at, updatedAt: at });
-  // The model's one question is about a place only, which the screen drops: the round is left with nothing to ask.
-  const { rpc } = fakeRuntime([turn({ stage: "lines", reply: "可以开始使用了。", questions: [{ id: "q1", text: "笔记一般在哪拍？", kind: "single",
-    allowOther: true, identityId: "media", projectId: "", options: [{ id: "a", label: "家里", detail: "" }, { id: "b", label: "户外", detail: "" }] }] })]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
-  expect(await run({ sessionId: "s", text: "差不多就这些" })).toEqual({ state: "ready", sessionId: "s" });
-});
-
-test("a quick interview whose rounds are used up ends once the start items stand, whatever the model still asks (W-236)", async () => {
-  const at = "2026-10-30T00:00:00.000Z";
-  store.setSetting(workspaceId, "lines.v1", JSON.stringify([{ id: "media", label: "创作者", color: "media", goal: "成为有趣的创作者", goals: ["成为有趣的创作者"], createdAt: at }]));
-  store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ media: { description: "小红书科普", attributes: [{ text: "有趣", kind: "ability", sourceRef: "reply-0" }] } }));
-  store.setSetting(workspaceId, "schedule.availability.proposed", JSON.stringify([{ weekday: 1, start: "09:00", end: "12:00" }]));
-  store.saveProject({ id: "notes", ownerId: "o", workspaceId, identityId: "media", name: "秋季笔记系列", status: "active", summary: "", createdAt: at, updatedAt: at });
-  store.upsertProfileFact({ workspaceId, identityId: "media", projectId: "notes", slot: "no_deadline", value: "没有截止", status: "confirmed", sourceRef: "reply-0", sourceQuote: "", updatedAt: at });
-  store.saveOnboardingSession({ id: "s", ownerId: "o", workspaceId, state: "active", coverage: { flow: "v1" }, createdAt: at, updatedAt: at });
-  // Twenty-four rounds already, the last ones going back to the compass part.
-  for (let round = 0; round < 24; round += 1) {
-    store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text: `回答 ${round}` }, createdAt: at });
-    store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "assistant", content: { reply: "好。", questions: [], stage: "compass", nextAction: "ask" }, createdAt: at });
+test("the portrait framework has one copy: no Skill keeps its own table or points at another Skill's", async () => {
+  const { readFileSync } = await import("node:fs");
+  const skill = (name: string) => readFileSync(new URL(`../../../skills/marketplace/plugins/crossline/skills/${name}/SKILL.md`, import.meta.url), "utf8");
+  for (const name of ["crossline-onboarding", "crossline-onboarding-extract", "crossline-onboarding-research", "crossline-portrait-writer"]) {
+    expect(skill(name)).not.toContain("| D0 背景与约束 |");
+    expect(skill(name)).not.toMatch(/见访谈 Skill[^。]*画像框架/u);
   }
-  const { rpc } = fakeRuntime([turn({ stage: "compass", reply: "你更看重自主。接下来了解研究在你生活中的意义。", questions: [{ id: "q-why", text: "哪段经历让你开始在意自主？", kind: "free",
-    allowOther: true, identityId: "person", projectId: "", options: [] }] })]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
-  expect(await run({ sessionId: "s", text: "自主更重要" })).toEqual({ state: "ready", sessionId: "s" });
-  const last = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string; questions: unknown[]; nextAction: string };
-  expect(last).toMatchObject({ nextAction: "ready_for_milestones", questions: [] });
-  expect(last.reply).toContain("轮数已用完");
-  // The model's announcement of the next part goes: no part comes (W-241).
-  expect(last.reply).toContain("你更看重自主。");
-  expect(last.reply).not.toContain("接下来");
+  expect(PROFILE_FRAMEWORK).toContain("| D9 维持循环 |");
 });
 
 test("the runners carry only the scenario: the Skill holds the rules, and the language comes from the shared style", () => {
@@ -715,19 +991,23 @@ test("the runners carry only the scenario: the Skill holds the rules, and the la
   }
 });
 
-test("a question the app took out of a round is named to the model next round, and recorded for debugging", async () => {
-  const { rpc, prompts } = fakeRuntime([turn({ questions: [
+test("a question still failing its check after the repairs is left out, named to the model next round, and recorded for debugging", async () => {
+  const kept = turn({ questions: [
     { id: "q-room", text: "组会在哪个房间？", kind: "free", allowOther: true, identityId: "research", projectId: "", options: [] },
     { id: "q1", text: "项目 A 的图表清单在哪？", kind: "single", allowOther: true, identityId: "research", projectId: "",
-      options: [{ id: "a", label: "师兄给的文档", detail: "" }] }] }), turn()]);
+      options: [{ id: "a", label: "师兄给的文档", detail: "" }, { id: "b", label: "师兄给的文档。", detail: "" }] }] });
+  // The first answer and both repairs keep the repeated option.
+  const { rpc, prompts } = fakeRuntime([kept, kept, kept, turn()]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   await run({ sessionId: "s1", text: "西湖那篇 10/31 前要投出，数据下周到。" });
   const [edited] = store.listEvents(workspaceId, { type: "onboarding.round_edited" });
-  expect(edited?.payload).toMatchObject({ removed: [{ text: "组会在哪个房间？", why: expect.any(String) }] });
+  expect(edited?.payload).toMatchObject({ removed: [{ why: expect.stringContaining("「师兄给的文档。」重复") }] });
+  // The room question is the model's to judge (the screen that took it out is gone): it reached the person.
+  expect((store.listOnboardingMessages(workspaceId, "s1").at(-1)!.content as { questions: Array<{ id: string }> }).questions.map((question) => question.id)).toEqual(["q-room"]);
   await run({ sessionId: "s1", text: "图表清单在师兄给的文档里" });
-  const second = dialogue(prompts)[1]!;
+  const second = dialogue(prompts).at(-1)!;
   expect(second).toContain("lastRound");
-  expect(second).toContain("组会在哪个房间？");
+  expect(second).toContain("项目 A 的图表清单在哪");
 });
 
 test("replies the extraction has not recorded yet are named to the dialogue, so it does not take the abstract as complete", async () => {
@@ -755,26 +1035,13 @@ test("what the extraction could not record is named to the next round with why, 
   expect(second).not.toContain("午饭 —");
 });
 
-test("a round the page would list as empty gets the stage's open question; a checklist ask carries its line", () => {
-  const base = { reply: "记下了。", nextAction: "ready_for_milestones" as const, stage: "lines", coverage: [], questions: [] } as unknown as Parameters<typeof withChecklist>[0];
-  const turned = withChecklist(base, [{ id: "line_desc:line-a", label: "", detail: "", owner: "interview", ask: "在「设计」这条线上，三五年后你希望成为什么样的人？" }]);
-  expect(turned.nextAction).toBe("ask");
-  expect(turned.questions[0]?.identityId).toBe("line-a");
-  const screen = { projects: [], meetings: [], goalPickerLines: ["line-a"] };
-  const shown = shownOrOpen(turned, screen);
-  expect(shown.questions).toHaveLength(1);
-  expect(shown.questions[0]?.text).not.toContain("三五年后");
-  // A line without a picker keeps its own question.
-  expect(shownOrOpen(turned, { ...screen, goalPickerLines: ["line-b"] }).questions[0]?.text).toContain("三五年后");
-});
-
 test("every weekly arrangement reaches the dialogue each round as its own weekday and time, not as a count (W-183)", async () => {
   const meeting = (id: string, weekday: number, startTime: string, endTime: string) =>
     ({ id, title: "ECE 548", project: "", kind: "class", weekdays: [weekday], startTime, endTime, from: "2026-09-01", to: "2099-12-31", sourceRef: "reply-1" });
   store.appendEvent({ ownerId: "o", workspaceId, idempotencyKey: "dates:extracted:b1", type: "dates.extracted", entityId: "b1",
     payload: { dates: [], recurring: [meeting("w-1", 4, "09:00", "11:30"), meeting("w-2", 2, "14:00", "16:30")] } });
   const { rpc, prompts } = fakeRuntime([turn(), turn()]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false, extract: "off" });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
   await run({ sessionId: "s", text: "周二 14:00–16:30 和周四 09:00–11:30 上课。" });
   await run({ sessionId: "s", text: "继续" });
   for (const prompt of dialogue(prompts)) {
@@ -784,7 +1051,7 @@ test("every weekly arrangement reaches the dialogue each round as its own weekda
   }
 });
 
-test("the cards' start item counts the tier's set: the quick tier's 14 items hold the start, the standard tier's 43 (W-186)", async () => {
+test("the cards' start item counts the short set whatever tier an account once chose: the start standard is unchanged by the tiers' removal (W-186)", async () => {
   const { interviewChecklistFor } = await import("@crossline/db");
   const { cardBank } = await import("@crossline/core");
   const at = "2026-11-03T00:00:00.000Z";
@@ -793,24 +1060,57 @@ test("the cards' start item counts the tier's set: the quick tier's 14 items hol
   const cardsItem = () => interviewChecklistFor(store, workspaceId, [], { unfiledFiles: 0 }).find((item) => item.id === "profile_cards");
   expect(cardsItem()).toMatchObject({ done: true });
   store.setSetting(workspaceId, "onboarding.depth", "standard");
-  expect(cardsItem()).toMatchObject({ done: false, detail: "还有 29 题未答" });
+  expect(cardsItem()).toMatchObject({ done: true });
 });
 
-test("the stage's open question is not asked again once answered: the next part's open question takes its place (W-184)", async () => {
-  const at = "2026-10-30T00:00:00.000Z";
-  // The profile module's compass part, as in the walkthrough, with every card already answered: the app's own fact questions wait.
-  store.saveOnboardingSession({ id: "s", ownerId: "o", workspaceId, state: "active", coverage: { flow: "v2" }, createdAt: at, updatedAt: at });
-  store.setSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING, JSON.stringify(Object.fromEntries(PROFILE_ITEMS.map((item) => [item.id, { itemId: item.id, by: "skipped", at }]))));
-  // Twice running, the model's only question in the compass part is not the person's to answer (a room): the app adds its open question.
-  const empty = turn({ stage: "compass", questions: [{ id: "q-room", text: "组会在哪个房间？", kind: "free", allowOther: true, identityId: "research", projectId: "", options: [] }] });
-  const { rpc } = fakeRuntime([empty, empty]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false, extract: "off" });
-  const shown = () => (store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { questions: Array<{ id: string; text: string }> }).questions;
-  await run({ sessionId: "s", text: "继续" });
-  const [asked] = shown();
-  expect(asked).toMatchObject({ id: "open-compass", text: "做这些事，你最终想得到什么？" });
-  await run({ sessionId: "s", text: `【${asked!.text}】补充：想要能自己安排时间的自由` });
-  expect(store.questionByKey(workspaceId, "iq:s:2:open-compass")).toMatchObject({ status: "answered" });
-  expect(shown().map((question) => question.text)).not.toContain(asked!.text);
-  expect(shown().map((question) => question.id)).toEqual(["open-energy"]);
+
+// P2b-3b (docs/onboarding-agent-session.md D1): on a route that calls functions the dialogue hands its questions in through the card
+// tools; each is checked as it comes, and a failing one is answered as a tool error in the same turn, before the round is written.
+test("the card tools: a question handed in is checked on the spot, a failing one comes back as the tool's answer, and the kept ones make the round", async () => {
+  const answers: Array<Record<string, unknown>> = [];
+  const bad = { id: "q-when", text: "哪段时间最空？", kind: "single", allowOther: true, identityId: "research", projectId: "",
+    options: [{ id: "a", label: "周末", detail: "" }, { id: "a", label: "晚上", detail: "" }] };
+  const good = { ...bad, options: [{ id: "a", label: "周末", detail: "" }, { id: "b", label: "晚上", detail: "" }] };
+  const dialogueThreads = () => runtime.threadStarts().flatMap((params, index) =>
+    (params.dynamicTools as Array<{ name: string }> | undefined)?.some((tool) => tool.name === "ask_question") ? [`thread-${index + 1}`] : []);
+  const runtime = runtimeWithRoutes([turn({ questions: [] }), turn({ questions: [] })], [ONBOARDING_SKILL, ONBOARDING_EXTRACT_SKILL], {
+    routes: [{ match: EXTRACT, answers: [turn()] }],
+    script: async ({ threadId, ask }) => {
+      if (!dialogueThreads().includes(threadId)) return;
+      for (const question of [bad, good]) answers.push(await ask("item/tool/call", { callId: `c${answers.length}`, tool: "ask_question", arguments: question }));
+    } });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => runtime.rpc);
+  await run({ sessionId: "s1", text: "西湖那篇 10/31 前要投出，数据下周到。" });
+  // The tools are declared at the thread's start, and the session remembers it, so the follow-up turns answer them too.
+  expect(dialogueThreads()).toHaveLength(1);
+  expect(store.getOnboardingSession(workspaceId, "s1")!.coverage).toMatchObject({ cardTools: "tools" });
+  const text = (answer: Record<string, unknown>) => ((answer.contentItems as Array<{ text: string }>)[0]!.text);
+  expect(answers[0]).toMatchObject({ success: false });
+  expect(text(answers[0]!)).toContain("选项 id 有重复");
+  expect(answers[1]).toMatchObject({ success: true });
+  expect(text(answers[1]!)).toContain("收下");
+  // The final answer's `questions` was []: the round is what the tool kept.
+  const round = store.listOnboardingMessages(workspaceId, "s1").at(-1)!.content as { questions: Array<{ id: string }> };
+  expect(round.questions.map((question) => question.id)).toEqual(["q-when"]);
+  // The next turn: the same question again is checked against the ledger, which now holds it unanswered — asked once, so it goes out.
+  await run({ sessionId: "s1", text: "周末吧" });
+  expect(answers[3]).toMatchObject({ success: true });
+});
+
+// C7 (docs/onboarding-agent-session.md): a rebuilt thread was sent every file, those past the reading budget with empty text, and all of
+// them were marked shown, so the model never read the last ones.
+test("a rebuilt thread is sent the files within the reading budget; the rest are not marked shown", async () => {
+  const { rpc } = fakeRuntime([turn()], { lostThreads: ["gone-thread"] });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc);
+  const now = "2026-10-02T00:00:00.000Z";
+  const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
+  store.saveOnboardingSession({ id: "s1", ownerId, workspaceId, state: "active", coverage: {}, codexThreadId: "gone-thread", createdAt: now, updatedAt: now });
+  for (let index = 1; index <= 6; index += 1) store.saveSourceDocument({ id: `doc-${index}`, ownerId, workspaceId, kind: "text", fileName: `File ${index}.txt`,
+    mediaType: "text/plain", sha256: String(index), uri: `file:///${index}`, extractedText: "字".repeat(14_000), extractionStatus: "done", createdAt: now });
+  store.appendOnboardingMessage({ sessionId: "s1", workspaceId, role: "user", content: { text: "文件都传了" }, createdAt: now });
+  store.appendOnboardingMessage({ sessionId: "s1", workspaceId, role: "assistant", content: JSON.parse(turn()), createdAt: now });
+  await run({ sessionId: "s1", text: "看看文件" });
+  const announced = (store.getOnboardingSession(workspaceId, "s1")!.coverage as { announcedSources?: string[] }).announcedSources ?? [];
+  expect(announced.length).toBeGreaterThan(0);
+  expect(announced.length).toBeLessThan(6);
 });

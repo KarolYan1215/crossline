@@ -2,7 +2,6 @@ import { courseCodeOf } from "./task-title";
 import { METHOD_SLOT } from "./drill-forms";
 import type { ProfileModel } from "./onboarding-turn-schema";
 import { joinList, tFor, type Locale } from "./i18n";
-import { depthPace, type OnboardingDepth } from "./onboarding-depth";
 
 /**
  * When the interview is finished, as a list anyone can tick (decided 2026-10-08). It used to be the model's own call — 「material rich
@@ -37,8 +36,7 @@ export type ChecklistItem = {
   /**
    * Not the interview's to hold up (2026-10-19, the owner's decision): a project's goal, evidence, grading and class times are worked out
    * from the files and the conversation, and what is still missing is asked later — when its task is planned, or on 待决事项 — instead of
-   * in a details stage at the end of the interview. Shown, never counted against finishing. The `standard` and `thorough` tiers ask them
-   * in the interview again (`DepthPace.projects`, 2026-10-31).
+   * in a details stage at the end of the interview. Shown, never counted against finishing.
    */
   deferred?: true;
 };
@@ -62,8 +60,6 @@ export type ChecklistInput = {
    * an interview that started on the earlier flow, which has no cards.
    */
   profileCards?: { settled: number; total: number } | undefined;
-  /** How thorough the interview is (`ONBOARDING_DEPTH_SETTING`): whether a project's details are asked now or when its task is planned. */
-  depth?: OnboardingDepth | undefined;
   /** The portrait's sections (`situation`, `compass`, `energy`) the extraction wrote from at least one numbered sentence. */
   groundedSections?: string[] | undefined;
   /** The language of each item's label and detail (default Chinese). */
@@ -115,9 +111,20 @@ const MEETING_SLOTS = /^(meeting|class)_?(times?|schedule)$|^no_meetings$|^fixed
  */
 const SCHEDULE_SLOT = /schedule|routine|meeting|class|shift|timetable/i;
 const WEEKDAY = /周[一二三四五六日天末]|星期|礼拜|工作日|每天|每晚|每早|weekday|weekend|daily|monday|tuesday|wednesday|thursday|friday|saturday|sunday/i;
-const CLOCK = /\d{1,2}\s*[:：点]|[上下]午|早上|晚上|凌晨|\b\d{1,2}\s?(am|pm)\b/i;
-const statesSchedule = (fact: { slot: string; value?: string }) =>
-  SCHEDULE_SLOT.test(fact.slot) ? Boolean(fact.value?.trim()) : WEEKDAY.test(fact.value ?? "") && CLOCK.test(fact.value ?? "");
+// 「早八点到晚九点」 in Chinese numerals is a time too (2026-11-12 replay: a student's class hours said so stayed 「not collected」, and the
+// interview asked for her fixed schedule again sixteen rounds after she gave it).
+const CLOCK = /\d{1,2}\s*[:：点]|[零一二两三四五六七八九十]{1,3}\s*点|[上下]午|早上|晚上|凌晨|\b\d{1,2}\s?(am|pm)\b/i;
+/** A schedule the person could only give as a range or said they cannot pin down: recorded as the range, it settles the item (the Skill). */
+const VAGUE_SCHEDULE = /不固定|没有固定|没固定|记不清|说不准|随机|看情况|看课表|no fixed|not sure|varies/i;
+/**
+ * A schedule slot holds a schedule only when its value says when: a day, a time, or that it cannot be pinned down. Replay 11 (2026-11-14)
+ * read the opening card's 「有固定日程的主线：学生」 into `fixed_schedule` with no day or time in it, and the start standard stood at
+ * round 8 while her timetable was asked only in round 12.
+ */
+const statesSchedule = (fact: { slot: string; value?: string }) => {
+  const value = fact.value ?? "";
+  return SCHEDULE_SLOT.test(fact.slot) ? WEEKDAY.test(value) || CLOCK.test(value) || VAGUE_SCHEDULE.test(value) : WEEKDAY.test(value) && CLOCK.test(value);
+};
 /** What a line is about, said by the person: enough to stand for its description while the extraction has not written one. */
 const DESCRIBES_LINE = /^(description|what)$/;
 /** A part of a course (its project, an exam): graded and timed through the course itself, not on its own. */
@@ -175,7 +182,10 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
     // A fixed weekly arrangement of this line: from its own projects, or — said in a reply under no project — when it is the only hard line.
     const fixed = input.dates.filter((entry) => entry.recurring && (projectLine(entry.project) === line.id || (!projectLine(entry.project) && hardLines.length === 1)));
     const lineProjects = new Set(input.projects.filter((project) => project.identityId === line.id).map((project) => project.id));
-    const stated = input.facts.some((fact) => (fact.identityId === line.id || lineProjects.has(fact.projectId)) && confirmedFact(fact) && statesSchedule(fact));
+    // A schedule filed under the person counts for the only hard line, as a recurring date does (2026-11-12 replay 3: her class hours were
+    // `person`/`fixed_schedule_class`, the item stayed open for 32 rounds and she was asked for her timetable a second time).
+    const stated = input.facts.some((fact) => (fact.identityId === line.id || lineProjects.has(fact.projectId) || (fact.identityId === "person" && hardLines.length === 1))
+      && confirmedFact(fact) && statesSchedule(fact));
     // A start item: an assumed schedule does not count (dates still waiting in a batch do — the person supplied the file that has them).
     const done = fixed.length > 0 || stated;
     items.push({ id: `hard_schedule:${line.id}`, group: "日程", label: t("「{{line}}」的每周固定安排已收集", { line: line.label }), done,
@@ -208,13 +218,12 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
         : t("「{{line}}」这条线眼下在做的一件事是什么？大概什么时候要完成，没有截止也可以说。", { line: line.label }) });
   }
 
-  const projectDepth = depthPace(input.depth).projects;
   for (const project of input.projects.filter((item) => !isDefaultProject(item.id))) {
     const own = input.facts.filter((fact) => fact.projectId === project.id && settledFact(fact));
     const dated = input.dates.some((entry) => entry.project === project.id || entry.project === project.name);
     const course = (Boolean(courseCodeOf(project.name) ?? courseCodeOf(project.id)) && !COURSE_PART.test(project.name)) || own.some((fact) => fact.slot === "grading");
     const missing = PROJECT_SLOTS.filter(([slot, label]) => !(own.some((fact) => slot.test(fact.slot)) || (label === "截止日期" && dated))).map(([, label]) => label);
-    // A course's grading and class times: deferred unless the interview is the thorough one (`thorough` asks them here).
+    // A course's grading and class times: deferred, asked when its task is planned.
     const courseMissing: string[] = [];
     if (course && !own.some((fact) => fact.slot === "grading")) courseMissing.push("评分占比");
     // A course meets: its weekly class times are the frame of the person's week (a course whose meetings nobody asked about left a hole).
@@ -224,10 +233,10 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
     const projectAsk = t("「{{project}}」要做成什么样，做到哪一步了？", { project: project.name });
     items.push({ id: `project:${project.id}`, group: "项目", label: t("「{{project}}」目标、截止与进展证据", { project: project.name }),
       done: !missing.length, detail: missing.length ? t("缺：{{items}}", { items: list(missing) }) : "", owner: "interview",
-      ...(projectDepth === "deferred" ? { deferred: true as const } : {}), ...(missing.length ? { ask: projectAsk } : {}) });
+      deferred: true as const, ...(missing.length ? { ask: projectAsk } : {}) });
     if (course) items.push({ id: `project_course:${project.id}`, group: "项目", label: t("「{{project}}」评分占比与上课时间", { project: project.name }),
       done: !courseMissing.length, detail: courseMissing.length ? t("缺：{{items}}", { items: list(courseMissing) }) : "", owner: "interview",
-      ...(projectDepth === "all" ? {} : { deferred: true as const }),
+      deferred: true as const,
       // One question asks one thing: the grading first, the class times once it is known.
       ...(courseMissing.length ? { ask: courseMissing[0] === "评分占比" ? t("「{{project}}」的成绩是怎么算的？各部分各占多少？", { project: project.name })
         : t("「{{project}}」每周什么时候上课？", { project: project.name }) } : {}) });

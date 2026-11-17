@@ -5,7 +5,6 @@ import { autoApproveEligible } from "./auto-approval";
 import { statedConstraints } from "./diligence";
 import { extractText } from "./extract";
 import { notifyPass, planNotifications, type NotifyInput } from "./notify";
-import { withChecklist } from "./onboarding-session";
 import { safeGet } from "./safe-fetch";
 import { isCheckNeeded, isLoginNeeded } from "./site-reader";
 
@@ -68,15 +67,6 @@ test("a page that refuses to open says so in the reader's language, and gives it
   const deps = { fetchImpl: (async () => new Response("no", { status: 403 })) as typeof fetch, isPublicHost: async () => true };
   expect(await safeGet("https://example.edu/x", deps, { maxBytes: 1000 })).toEqual({ ok: false, reason: "返回 403", status: 403 });
   expect(await safeGet("https://example.edu/x", deps, { maxBytes: 1000, locale: "en" })).toEqual({ ok: false, reason: "returned 403", status: 403 });
-});
-
-test("the interview's own closing line follows the interview's language", () => {
-  const turn = { nextAction: "ready_for_milestones", reply: "OK.", questions: [] } as unknown as Parameters<typeof withChecklist>[0];
-  const open = [{ label: "Weekly hours", detail: "", owner: "interview" as const, ask: "Which hours of the week are yours?" }];
-  expect(withChecklist(turn, open).reply).toBe("OK.\n\n开始之前还想再问几件事。");
-  const english = withChecklist(turn, open, "en");
-  expect(english.reply).toBe("OK.\n\nA few more things before we start.");
-  expect(english.questions[0]!.text).toBe("Which hours of the week are yours?");
 });
 
 test("what the run reports back is recognised in either language (heuristics read what the model wrote)", () => {

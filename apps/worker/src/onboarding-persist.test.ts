@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { DATES_UNRECORDED_EVENT, persistFileDates } from "./onboarding-persist";
+import { DATES_UNRECORDED_EVENT, persistFileDates, personTimeZone } from "./onboarding-persist";
 import { identityLines } from "./lines";
 
 let store: CrosslineStore;
@@ -32,4 +32,16 @@ test("a habit filed under any line is kept outside the stated hours; a meal is l
   const batch = store.listEvents(workspaceId, { type: "dates.extracted" })[0]!.payload as { recurring: Array<{ title: string }>; dropped: Array<{ code: string }> };
   expect(batch.recurring.map((item) => item.title)).toEqual(["跑步"]);
   expect(batch.dropped).toEqual([expect.objectContaining({ title: "午饭", code: "OFF_HOURS" })]);
+});
+
+test("with no device zone on record the person's zone is the server's configured one, as on the web; the device's wins once synced", () => {
+  const before = process.env.CROSSLINE_TIME_ZONE;
+  try {
+    process.env.CROSSLINE_TIME_ZONE = "Asia/Shanghai";
+    expect(personTimeZone(store, workspaceId)).toBe("Asia/Shanghai");
+    store.setSetting(workspaceId, "schedule.preferences", JSON.stringify({ timeZone: "Europe/Berlin", mode: "buffered", importance: {} }));
+    expect(personTimeZone(store, workspaceId)).toBe("Europe/Berlin");
+  } finally {
+    if (before === undefined) delete process.env.CROSSLINE_TIME_ZONE; else process.env.CROSSLINE_TIME_ZONE = before;
+  }
 });

@@ -1,4 +1,4 @@
-import { cardsSettled, depthPace, flowOf, PROFILE_SECTIONS_SETTING, ONBOARDING_DEPTH_SETTING, readDepth, PROFILE_INSTRUMENTS_SETTING, readInstrumentAnswers, settledItems, ATTENTION_SETTING, START_CONFIRMED_SETTING, START_CONFIRM_SINCE, interviewChecklist, lineAttributes, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, portraitConfirmedByInsights, readInsightRatings, ONBOARDING_INSIGHTS, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile, type Locale } from "@crossline/core";
+import { cardsSettled, flowOf, PROFILE_SECTIONS_SETTING, PROFILE_INSTRUMENTS_SETTING, readInstrumentAnswers, settledItems, ATTENTION_SETTING, START_CONFIRMED_SETTING, START_CONFIRM_SINCE, interviewChecklist, lineAttributes, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, portraitConfirmedByInsights, readInsightRatings, ONBOARDING_INSIGHTS, type ChecklistItem, type ProfileGap, type ProfileModel, type StoredLineProfile, type Locale } from "@crossline/core";
 import { interviewLocale, readLocale } from "./locale";
 import { unfiledFilesIn } from "./file-belonging";
 import { latestFileDates } from "./index";
@@ -47,12 +47,13 @@ export function interviewChecklistFor(store: CrosslineStore, workspaceId: string
   // The main interview (a line's own interview is `line-…`) on the profile-first flow has cards to answer before the app opens.
   const main = store.listOnboardingSessions(workspaceId).filter((session) => !session.id.startsWith("line-"))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-  // The cards exist in Chinese only so far, so an English interview is never held for them. The tier's set is what holds the start: the
-  // quick tier's short one (W-186).
+  // The cards exist in Chinese only so far, so an English interview is never held for them. The short set holds the start (W-186): the
+  // tiers are gone (2026-11-12) and the interview offers every card, but the start standard is what it was for every account that never
+  // chose a tier, so the other pages open no later than before.
   const profileCards = main && flowOf(main.coverage) === "v2"
     && (extras.locale ?? interviewLocale(store, workspaceId) ?? readLocale(store, workspaceId)) !== "en"
     ? cardsSettled(settledItems(readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING))),
-      depthPace(readDepth(store.getSetting(workspaceId, ONBOARDING_DEPTH_SETTING))).cards) : undefined;
+      "short") : undefined;
   return interviewChecklist({
     lines,
     descriptions: Object.fromEntries(Object.entries(profiles).map(([id, value]) => [id, { description: value.description ?? "", candidates: (value.attributes ?? []).length || (value.goalCandidates ?? []).length }])),
@@ -67,8 +68,6 @@ export function interviewChecklistFor(store: CrosslineStore, workspaceId: string
     // A portrait part whose section the extraction wrote from numbered sentences rests on the person's words, whatever the facts' slots.
     groundedSections: Object.entries(json<Record<string, { sentences?: unknown[] }>>(PROFILE_SECTIONS_SETTING, {}))
       .filter(([, record]) => Array.isArray(record?.sentences) && record.sentences.length > 0).map(([name]) => name),
-    // The person's tier decides whether a project's details are asked in the interview or when its task is planned.
-    depth: readDepth(store.getSetting(workspaceId, ONBOARDING_DEPTH_SETTING)),
     portraitConfirmed: portraitStillConfirmed(confirmed?.fingerprint, profile) || portraitConfirmedByInsights(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS))),
     // Labels in the interview's language (docs/i18n.md): the list is about the interview.
     locale: extras.locale ?? interviewLocale(store, workspaceId) ?? readLocale(store, workspaceId)
@@ -133,20 +132,6 @@ export function calendarRecurringTitles(store: CrosslineStore, workspaceId: stri
     days.set(key, entry);
   }
   return [...days.values()].filter((entry) => entry.days.size >= 2).map((entry) => entry.title);
-}
-
-/** What the app needs to keep from the person the interview's questions that are not theirs to answer (`screenQuestions`). */
-export function questionScreenFor(store: CrosslineStore, workspaceId: string): QuestionScreenInput {
-  const meetingFacts = store.listProfileFacts(workspaceId).filter((fact) => fact.projectId && /^(meeting|class)_?times?$|^no_meetings$/.test(fact.slot)
-    && fact.status === "confirmed").map((fact) => fact.projectId);
-  let profiles: Record<string, StoredLineProfile> = {};
-  try { profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") as Record<string, StoredLineProfile>; } catch { /* none */ }
-  return {
-    projects: store.listProjects(workspaceId).map(({ id, name }) => ({ id, name })),
-    meetings: [...new Set([...meetingProjects(store, workspaceId), ...meetingFacts])],
-    calendarRecurring: calendarRecurringTitles(store, workspaceId),
-    goalPickerLines: Object.entries(profiles).filter(([, profile]) => lineAttributes(profile, "").length > 0).map(([id]) => id)
-  };
 }
 
 /**

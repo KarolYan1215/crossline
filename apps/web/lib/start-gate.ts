@@ -24,7 +24,7 @@ export function startReadiness(ctx: AccessContext): { ready: boolean; standard: 
 }
 
 /**
- * Every page but the interview, settings, sign-in and the offline fallback calls this after `requireSessionContext()`: until the start
+ * Every page but the interview, the portrait (the interview links to it), settings, sign-in and the offline fallback calls this after `requireSessionContext()`: until the start
  * standard stands and the person confirmed it, it leads back to the interview, which says what is still missing. No account is exempt — one with work on its board
  * is held too, so the first schedule anyone sees rests on what they said. API routes are not gated (the worker, local tools and offline
  * replay depend on them; a person who is not ready has no page to reach them from).

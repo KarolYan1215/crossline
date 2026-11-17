@@ -1,6 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { answeredGapFacts, answeredGoalQuestions, gapCoveredBy, isCourse, mergeFacts, profileGaps, screenAssumption, screenedNote, screenQuestions, undatedKey, type ProfileGapInput } from "./profile-gaps";
-import { questionKind } from "./onboarding-turn-schema";
+import { answeredGapFacts, isCourse, profileGaps, undatedKey, type ProfileGapInput } from "./profile-gaps";
 
 const identities = [{ id: "research", label: "科研" }, { id: "startup", label: "创业" }];
 const base: ProfileGapInput = {
@@ -58,16 +57,11 @@ describe("answers to the app's own questions become facts without the model", ()
   test("「有，我来写」 alone is not a fact, but what they then write is; 「知道日期」 without the date is not an answer", () => {
     const doing = `【${text("LINE_UNCONFIRMED")}】选择：有，我来写下具体在做什么`;
     expect(answeredGapFacts(doing, gaps)).toEqual([]);
-    expect(answeredGapFacts(`${doing}。补充：Crossline 内测`, gaps)).toMatchObject([{ slot: "what", value: "Crossline 内测" }]);
+    // What they type about the line is the extraction's to read: 「说不好」 was once written as the line's description (2026-11-14 audit).
+    expect(answeredGapFacts(`${doing}。补充：Crossline 内测`, gaps)).toEqual([]);
     expect(answeredGapFacts(`【${text("DATE_UNDATED")}】选择：知道具体日期，我来写`, gaps)).toEqual([]);
     expect(answeredGapFacts(`【${text("DATE_UNDATED")}】选择：知道具体日期，我来写。补充：12/11`, gaps)).toMatchObject([{ value: expect.stringContaining("12/11") }]);
   });
-});
-
-test("merging never lets a guess replace a confirmed fact", () => {
-  const fact = (status: string, value: string) => ({ identityId: "a", projectId: "p", slot: "goal", status, value });
-  expect(mergeFacts([fact("confirmed", "我说的")], [fact("inferred", "它猜的")])[0]?.value).toBe("我说的");
-  expect(mergeFacts([fact("inferred", "旧猜测")], [fact("confirmed", "新确认")])[0]?.value).toBe("新确认");
 });
 
 test("a course is recognised by its grade breakdown, or by quizzes and homework dated in its files; a lone exam is not enough", () => {
@@ -121,38 +115,15 @@ test("一个非默认项目没有截止时，问「有截止日期吗」，答�
   expect(gap).toMatchObject({ projectId: "xhs", blocking: true });
   expect(answeredGapFacts(`【${gap.question.text}】选择：没有截止`, gaps)).toEqual([expect.objectContaining({ slot: "no_deadline", value: "没有截止" })]);
   expect(answeredGapFacts(`【${gap.question.text}】选择：我来写日期。补充：2026-12-15`, gaps)).toEqual([expect.objectContaining({ slot: "deadline", value: "2026-12-15" })]);
-});
-
-// Found in the sponsor models' sample interviews (2026-10-18): every candidate asked a project's deadline in its own words, and the app's
-// 「「X」有截止日期吗？」 was added on top — the model had said 期限 or 目标时间, or filed the question under the line only.
-test("the app's deadline question is not added when the model already asked that deadline in its own words", () => {
-  const gaps = profileGaps({ identities: [{ id: "startup", label: "创业" }, { id: "media", label: "自媒体" }, { id: "research", label: "科研" }],
-    projects: [{ id: "tool", identityId: "startup", name: "研究生排期小工具" }, { id: "xhs", identityId: "media", name: "小红书科研日常" },
-      { id: "paper", identityId: "research", name: "忆阻器阵列仿真会议论文" }, { id: "review", identityId: "research", name: "综述写作" }],
-    facts: [] }).filter((gap) => gap.code === "PROJECT_DEADLINE");
-  const ask = (identityId: string, projectId: string, text: string) => ({ identityId, projectId, text });
-  const gap = (projectId: string) => gaps.find((item) => item.projectId === projectId)!;
-  // Words other than 截止, under the line only.
-  expect(gapCoveredBy(gap("tool"), [ask("startup", "", "创业这条线，有没有给自己定过期限？")], gaps)).toBe(true);
-  expect(gapCoveredBy(gap("xhs"), [ask("media", "", "小红书做到 1 万粉丝有目标时间吗？")], gaps)).toBe(true);
-  // Naming the project under another id.
-  expect(gapCoveredBy(gap("tool"), [ask("startup", "paiqi", "排期小工具项目有无截止或目标时间点？")], gaps)).toBe(true);
-  expect(gapCoveredBy(gap("paper"), [ask("research", "", "会议论文的精确投稿日期是哪一天？")], gaps)).toBe(true);
-  // A line with two projects: a deadline question naming neither covers neither; another line's question never covers.
-  expect(gapCoveredBy(gap("review"), [ask("research", "", "科研这条线未来半年有哪些必须优先的截止？")], gaps)).toBe(false);
-  expect(gapCoveredBy(gap("tool"), [ask("media", "", "小红书有目标时间吗？")], gaps)).toBe(false);
-  // Not about a deadline.
-  expect(gapCoveredBy(gap("tool"), [ask("startup", "tool", "研究生排期小工具现在做到哪一步了？")], gaps)).toBe(false);
-});
-
-test("a round stored with both questions shows the model's and drops the app's duplicate", () => {
-  const question = (id: string, identityId: string, projectId: string, text: string) => ({ id, text, kind: "single", identityId, projectId, options: [] });
-  const round = [question("q1", "media", "", "小红书 1 万粉丝的目标有时间线吗？"), question("gap-deadline-xhs", "media", "xhs", "「小红书科研日常」有截止日期吗？"),
-    question("gap-deadline-tool", "startup", "tool", "「研究生排期小工具」有截止日期吗？")];
-  const screen = screenQuestions(round, { projects: [], meetings: [] });
-  expect(screen.keep.map((item) => item.id)).toEqual(["q1", "gap-deadline-tool"]);
-  expect(screen.screened).toEqual([expect.objectContaining({ reason: "duplicate" })]);
-  expect(screen.screened.map(screenAssumption).filter(Boolean)).toEqual([]);
+  expect(answeredGapFacts(`【${gap.question.text}】选择：我来写日期。补充：12 月中`, gaps)).toEqual([expect.objectContaining({ slot: "deadline", value: "12 月中" })]);
+  // Words that say no day are not a deadline: 「还不知道」 closed the start item as a confirmed deadline (2026-11-14 audit). They stay in
+  // the reply for the extraction to read.
+  expect(answeredGapFacts(`【${gap.question.text}】选择：我来写日期。补充：还不知道`, gaps)).toEqual([]);
+  expect(answeredGapFacts(`【${gap.question.text}】选择：我来写日期。补充：看导师安排`, gaps)).toEqual([]);
+  // A picked 「没有截止」 stands with words under it (replay 16 asked the same project three rounds running); a day typed under it wins.
+  expect(answeredGapFacts(`【${gap.question.text}】选择：没有截止。补充：各家招聘自己定时间，我这边没设过日期。`, gaps))
+    .toEqual([expect.objectContaining({ slot: "no_deadline", value: "没有截止" })]);
+  expect(answeredGapFacts(`【${gap.question.text}】选择：没有截止。补充：其实 12 月中要交`, gaps)).toEqual([expect.objectContaining({ slot: "deadline" })]);
 });
 
 // Found walking the app as an invitee (2026-10-15): the interview asked when 「RBT 610 期末项目」 meets, and for 「大致日期」 of a weekly
@@ -198,64 +169,19 @@ test("a course the calendar repeats every week is not asked when it meets, and t
   expect(profileGaps({ ...input, calendarRecurring: ["ECE548 Lecture"] }).some((gap) => gap.code === "COURSE_MEETINGS")).toBe(false);
 });
 
-test("questions that are not the person's to answer are kept from them; a calendar's recurrence becomes an assumption", () => {
-  const ask = (id: string, text: string, projectId = "") => ({ id, text, kind: "single", identityId: "research", projectId, options: [] });
-  const round = [
-    ask("q-ece548-location", "ECE 548 每周上课地点？", "ece548"),
-    ask("q-ece548-schedule", "ECE 548 每周固定上课的星期、起止时间和地点？", "ece548"),
-    ask("q-calendar-events", "日历中的两项活动，哪些属于持续安排？"),
-    ask("q-one-on-one", "你每周二的导师 1V1 通常几点结束？"),
-    ask("q-ece555-class", "ECE 555 每周几上课？"),
-    ask("gap-meetings-ece548", "「ECE 548」每周什么时候上课？", "ece548")];
-  const screen = screenQuestions(round, { projects: [{ id: "ece548", name: "ECE 548" }, { id: "ece555", name: "ECE 555" }], meetings: ["ece548"] });
-  expect(screen.keep.map((question) => question.id)).toEqual(["q-one-on-one", "q-ece555-class", "gap-meetings-ece548"]);
-  expect(screen.screened.map((item) => [item.question.id, item.reason])).toEqual([
-    ["q-ece548-location", "location"], ["q-ece548-schedule", "known_schedule"], ["q-calendar-events", "calendar_inferable"]]);
-  // The calendar decides class times too.
-  expect(screenQuestions([round[4]!], { projects: [{ id: "ece555", name: "ECE 555" }], meetings: [], calendarRecurring: ["ECE 555 Lecture"] }).keep).toEqual([]);
-  expect(screen.screened.map(screenAssumption).filter(Boolean)).toEqual([expect.objectContaining({ identityId: "research",
-    slot: expect.stringMatching(/^assumed_/), value: expect.stringMatching(/^假设：日历中的两项活动/) })]);
-  expect(screenedNote(screen.screened)).toContain("「ECE 548 每周上课地点？」（只问地点，地点不影响排程）");
-  expect(screenedNote([])).toBe("");
-});
-
-test("a question that asks for several things takes several answers; one with exclusive options stays single", () => {
-  expect(questionKind({ kind: "single", text: "ECE 548 本学期最重要的目标？" })).toBe("multi");
-  expect(questionKind({ kind: "single", text: "哪些结果可以证明 ECE 548 正在取得进展？" })).toBe("multi");
-  expect(questionKind({ kind: "single", text: "ECE 548 的目标成绩？" })).toBe("single");
-  expect(questionKind({ kind: "single", text: "「ECE 548」有截止日期吗？" })).toBe("single");
-  expect(questionKind({ kind: "free", text: "还有哪些？" })).toBe("free");
-  // Every question the app builds itself has options that exclude each other.
-  const all = profileGaps({ ...base, projects: [...base.projects, { id: "x", identityId: "startup", name: "X" }],
-    undated: [{ project: "ece555", kind: "exam", title: "期末" }], unfiled: [{ id: "d", fileName: "a.pdf" }], portrait: { written: true, confirmed: false } });
-  expect(all.length).toBeGreaterThan(4);
-  expect(all.every((gap) => gap.question.kind === "single" && questionKind(gap.question) === "single")).toBe(true);
-});
-
 test("a step question the task's own files answer is recognised; one only the person knows is not", async () => {
   const { readableFromMaterial } = await import("./profile-gaps");
   for (const text of ["作业 3 题面及题目数？", "作业提交方式？", "协作与 AI 使用规则？", "评分标准是什么？", "报告的字数要求？"]) expect(readableFromMaterial(text)).toBe(true);
   for (const text of ["当前完成状态？", "当前 A− 安全分数线？", "哪几讲已经掌握？"]) expect(readableFromMaterial(text)).toBe(false);
 });
 
-// W-8: the left column offers a line's goal as attributes to pick, and the round asked 「希望长期保持哪些特质」 again.
-test("a round question asking a line's long-term goal is screened once the left column offers that line's candidates", () => {
-  const q = (id: string, text: string, identityId = "") => ({ id, text, projectId: "", identityId });
-  const round = [q("q1", "希望长期保持哪些特质？", "startup"), q("q2", "想成为什么样的研究者？", "research"), q("q3", "长期目标是什么？"),
-    q("q4", "这周最卡的是哪件事？", "startup")];
-  const screen = screenQuestions(round, { projects: [], meetings: [], goalPickerLines: ["startup"] });
-  expect(screen.screened.map((item) => [item.question.id, item.reason])).toEqual([["q1", "goal_picker"], ["q3", "goal_picker"]]);
-  expect(screen.keep.map((item) => item.id)).toEqual(["q2", "q4"]);
-  // No candidates yet: the question is how the interview learns the goal, so it stays.
-  expect(screenQuestions(round, { projects: [], meetings: [] }).keep).toHaveLength(4);
-});
-
 test("a line with no goal chosen gets its candidates as a question of the round, and the taps choose it", () => {
-  const gaps = profileGaps({ ...base, goalPickers: [{ lineId: "research", candidates: ["严谨", "器件物理", "严谨", " "] }, { lineId: "startup", candidates: [] }] });
+  const gaps = profileGaps({ ...base, goalPickers: [{ lineId: "research", candidates: ["严谨", "器件物理", "严谨", " ", "独立"] }, { lineId: "startup", candidates: ["稳"] }] });
   const goal = gaps.filter((gap) => gap.code === "LINE_GOAL");
   expect(goal.map((gap) => gap.identityId)).toEqual(["research"]);
   expect(goal[0]).toMatchObject({ blocking: true, question: { id: "gap-goal-research", kind: "multi", allowOther: true } });
-  expect(goal[0]!.question.options.map((option) => option.label)).toEqual(["严谨", "器件物理"]);
+  // Fewer than three candidates (startup's one) is not a choice yet: the dialogue asks for the words first.
+  expect(goal[0]!.question.options.map((option) => option.label)).toEqual(["严谨", "器件物理", "独立"]);
   expect(goal[0]!.question.text).toContain("长期目标");
   const reply = `【${goal[0]!.question.text}】选择：器件物理；严谨。补充：能独立立项`;
   expect(answeredGapFacts(reply, gaps)).toEqual([expect.objectContaining({ slot: "", goal: { lineId: "research", parts: ["严谨", "器件物理", "能独立立项"] } })]);
@@ -272,17 +198,3 @@ test("a project whose deadline is asked gets no second question about the same d
   expect(profileGaps({ ...base, projects, undated, facts }).filter((gap) => gap.projectId === "apply").map((gap) => gap.code)).toEqual(["DATE_UNDATED"]);
 });
 
-test("a long-term goal picked on the interview's own question is the person's choice, a sentence of their own is not a trait", () => {
-  const question = { text: "三五年后，你希望自己是个什么样的管钱的人？可以用你自己的说法。", identityId: "line-fund",
-    options: [{ id: "a", label: "稳当", detail: "" }, { id: "b", label: "看长期", detail: "" }, { id: "c", label: "收益高", detail: "" }] };
-  const reply = `【${question.text}】选择：稳当；看长期。补充：不图快，钱是自己的，看几年的事。\n其他`;
-  expect(answeredGoalQuestions(reply, [question])).toEqual([{ lineId: "line-fund", parts: ["稳当", "看长期"] }]);
-  expect(answeredGoalQuestions(`【${question.text}】补充：心里有数`, [question])).toEqual([{ lineId: "line-fund", parts: ["心里有数"] }]);
-  expect(answeredGoalQuestions(reply, [{ ...question, text: "基金这条线眼下在做什么？" }])).toEqual([]);
-  expect(answeredGoalQuestions(reply, [{ ...question, identityId: "person" }])).toEqual([]);
-  // 2026-11-01 run 10: the goal asked with the line's object between 是 and 什么样, then asked again on the picker.
-  const cat = { ...question, identityId: "line-cat", text: "几年下来，你希望自己是馒头的什么样的铲屎官？别人会用哪些词形容你？",
-    options: [{ id: "a", label: "细心", detail: "" }, { id: "b", label: "有耐心", detail: "" }] };
-  expect(answeredGoalQuestions(`【${cat.text}】选择：细心；有耐心。补充：希望它别觉得我老不在家。`, [cat])).toEqual([{ lineId: "line-cat", parts: ["细心", "有耐心"] }]);
-  expect(answeredGoalQuestions(reply, [{ ...question, text: "铲屎官这条线对你来说主要是件什么事？" }])).toEqual([]);
-});

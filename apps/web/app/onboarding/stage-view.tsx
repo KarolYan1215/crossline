@@ -2,10 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { Check, Circle } from "lucide-react";
-import { depthPace, interviewParts, SCHWARTZ_VALUES, type InterviewFlow, type OnboardingDepth } from "@crossline/core";
+import { interviewParts, pointsRules, SCHWARTZ_VALUES, type InterviewFlow } from "@crossline/core";
 import { ValuesRadar } from "../portrait/portrait-charts";
 import { FlywheelPreview, type Link } from "./flywheel-preview";
 import { StartConfirm } from "./start-confirm";
+import { DivergenceView } from "./divergence-view";
+import { LifelineView, LoopView, ScaleReadings } from "./story-views";
+import type { DimensionId } from "./interview-contract";
 import type { OnboardingState } from "./onboarding-types";
 import type { ProjectTimeline, WeekSkeleton } from "../../lib/onboarding-board";
 import type { SkeletonBlock } from "@crossline/core";
@@ -14,22 +17,25 @@ import { useLocale, useT } from "../locale-context";
 
 /**
  * The interview's right column (docs/onboarding-v3.md, decided 2026-10-14): what the answers are building, one picture per stage — the
- * lines, the week, the compass, energy, the projects on a time axis, and at the end the whole structure drawn from the person's own
+ * lines, the week, the portrait's map, the projects on a time axis, and at the end the whole structure drawn from the person's own
  * content. The current stage's picture is shown; earlier ones stay one click away. Above it, the start standard as a ring and the time
- * left, so the person always knows how far they are.
+ * left, so the person always knows how far they are. The compass and energy pictures are now details of the map's dimensions (decision 25).
  */
-export type StageKey = "lines" | "week" | "compass" | "energy" | "projects" | "structure";
+export type StageKey = "lines" | "week" | "map" | "projects" | "structure";
 const VIEWS: Array<{ key: StageKey; label: string }> = [
-  { key: "lines", label: "主线" }, { key: "week", label: "一周" }, { key: "compass", label: "指南针" },
-  { key: "energy", label: "能量" }, { key: "projects", label: "项目" }, { key: "structure", label: "全貌" }
+  { key: "lines", label: "主线" }, { key: "week", label: "一周" }, { key: "map", label: "画像图" },
+  { key: "projects", label: "项目" }, { key: "structure", label: "全貌" }
 ];
 /** Which picture each interview stage builds. */
 export function viewForStage(stage: string, complete: boolean, ready = false): StageKey {
   if (complete) return "structure";
   // Once the start standard stands the week's draft is the payoff: it comes forward until the deep parts begin.
   if (ready && (stage === "orientation" || stage === "lines")) return "week";
-  // The life story has no picture of its own: the lines the opening card named stay in view.
-  return ({ narrative: "lines", orientation: "lines", lines: "lines", situation: "week", compass: "compass", energy: "energy", details: "projects" } as Record<string, StageKey>)[stage] ?? "lines";
+  return ({ narrative: "map", orientation: "lines", lines: "lines", situation: "week", compass: "map", energy: "map", details: "projects" } as Record<string, StageKey>)[stage] ?? "lines";
+}
+/** The dimension the map opens on in a stage that is about one (decision 15: the life story D8, the compass D4, energy D1). */
+export function dimensionForStage(stage: string): DimensionId | undefined {
+  return ({ narrative: "D8", compass: "D4", energy: "D1" } as Record<string, DimensionId>)[stage];
 }
 
 /** The profile module's parts in flow v2 (narrative, compass, energy, situation). */
@@ -37,19 +43,17 @@ const MODULE_PARTS = 4;
 
 /** Rough minutes to the start standard and to the end, from what is still open: honest enough to plan a sitting, never a promise. */
 export function minutesLeft(state: Pick<OnboardingState, "readyToStart" | "startMissing">, stage: string, flow: InterviewFlow = "v1",
-  depth?: OnboardingDepth, reached = 0): { label: string; minutes: number } {
-  const order: string[] = interviewParts(flow, depth);
+  reached = 0): { label: string; minutes: number } {
+  const order: string[] = interviewParts(flow);
   // Counted from the furthest part reached: going back to an earlier part for one question does not add its parts' time again (W-235).
   const here = Math.max(order.indexOf(stage), reached - 1);
-  // The rates below are the quick tier's (about 50 minutes in all); a deeper tier asks more of every part, so each estimate scales with it.
-  const scale = depthPace(depth).minutes / depthPace("quick").minutes;
   // A start item is per line and most are settled by one answer, several to a round: about 2.5 minutes each, never more than half an hour.
   const facts = Math.min(30, Math.ceil(state.startMissing.filter((item) => item.id !== "profile_cards").length * 2.5));
   // The profile module (flow v2) comes before the start: about ten minutes a part still ahead of it.
   const module = flow === "v2" ? Math.max(0, MODULE_PARTS - Math.max(0, here)) * 10 : 0;
-  if (!state.readyToStart) return { label: "开始使用前约", minutes: Math.max(3, Math.round((module + facts) * scale)) };
+  if (!state.readyToStart) return { label: "开始使用前约", minutes: Math.max(3, module + facts) };
   const left = Math.max(1, order.length - Math.max(0, here));
-  return { label: "画像访谈还剩约", minutes: Math.round(left * 5 * scale) };
+  return { label: "画像访谈还剩约", minutes: left * 5 };
 }
 
 /** Codes that mean no model can run for this account yet: the conversation already says so in the same words, under the reply. */
@@ -76,7 +80,7 @@ export function StageView({ state, stage, complete, onChanged }: {
   useEffect(() => setShown(current), [current]);
   const reached = VIEWS.findIndex((view) => view.key === current);
   const total = state.startTotal;
-  const left = minutesLeft(state, stage, state.flow, state.depth, state.progress?.reached);
+  const left = minutesLeft(state, stage, state.flow, state.progress?.reached);
   // A long-term goal is adopted in the left column, not answered in the conversation: its missing item links there (W-8).
   const missing = state.startMissing.map((item) => ({ label: item.label, href: item.id.startsWith("line_goal:") ? "#ob-goals" : "" }));
   const progress = state.progress;
@@ -91,6 +95,10 @@ export function StageView({ state, stage, complete, onChanged }: {
   }).filter((group) => group.items.length > 0);
   // A state read before the items were sent lists what is missing as before.
   const loose = state.startItems ? [] : missing;
+  // Under the points rules (2026-11-12) the map lists the points, and a stage's view appears once that stage is over, written once.
+  const rules = pointsRules(state.session?.coverage);
+  const viewOnce = (section: string, view: React.ReactNode) => !rules || state.sectionsFinal?.includes(section) ? view
+    : <p className="ob-muted">{t("这一部分结束后，在这里写一次当前看法。")}</p>;
   return <aside className="ob-stage" aria-label={t("正在成形")}>
     {/* The start standard only (2026-10-28): the old ring read 100% beside the time the rest of the interview still takes. */}
     <section className="ob-start" aria-label={t("开始使用的进度")}>
@@ -122,9 +130,7 @@ export function StageView({ state, stage, complete, onChanged }: {
         : progress.of
         ? t("第 {{index}}/{{total}} 部分 · {{label}} · 已谈清 {{clear}}/{{of}}", { index: progress.index, total: progress.total, label: t(progress.label), clear: progress.clear, of: progress.of })
         : t("第 {{index}}/{{total}} 部分 · {{label}}", { index: progress.index, total: progress.total, label: t(progress.label) })}</small>}
-      {!complete && progress?.next && <small>{t("接下来：")}<span className="gen">{progress.next}</span></small>}
-      {state.readyToStart && !complete && <small>{depthPace(state.depth).unlimited ? t("不限时，随时可以按「开始使用」结束访谈")
-        : t("{{label}} {{minutes}} 分钟", { label: t(left.label), minutes: left.minutes })}</small>}
+      {state.readyToStart && !complete && <small>{t("不限时，随时可以按「结束并出报告」结束访谈")}</small>}
       {state.portraitState?.written
         ? state.portraitState.confirmed ? <a href="/portrait">{t("画像已确认符合本人 · 查看画像 →")}</a>
           : <a href="/portrait#pt-s-type">{t("画像已写好，去画像页确认是否符合 →")}</a>
@@ -134,7 +140,8 @@ export function StageView({ state, stage, complete, onChanged }: {
     <nav className="ob-stage-tabs" aria-label={t("各阶段的图")}>
       {VIEWS.map((view, index) => <button key={view.key} type="button" aria-current={shown === view.key || undefined}
         // The week is there from the start once a calendar or a file has put something in it.
-        disabled={index > reached && !(view.key === "week" && (state.week.calendar.length > 0 || state.week.fixed.length > 0))}
+        // The map is there from the start: its dimensions fill in as the interview goes.
+        disabled={index > reached && view.key !== "map" && !(view.key === "week" && (state.week.calendar.length > 0 || state.week.fixed.length > 0))}
         onClick={() => setShown(view.key)}>{t(view.label, { context: "view" })}</button>)}
     </nav>
     <div className="ob-stage-body">
@@ -142,14 +149,27 @@ export function StageView({ state, stage, complete, onChanged }: {
       {(shown === "lines" || shown === "week") && stage !== "orientation" && state.capacity && <CapacityNote capacity={state.capacity} />}
       {shown === "lines" && <LinesView state={state} onChanged={onChanged} />}
       {shown === "week" && <WeekView week={state.week} draft={state.skeleton ?? []} lines={state.lines} />}
-      {shown === "compass" && <CompassView profile={state.profile} />}
-      {shown === "energy" && <EnergyView profile={state.profile} />}
+      {shown === "map" && <DivergenceView hypotheses={state.profile?.hypotheses} dimensions={state.profile?.dimensions} insights={insightsOf(state)}
+        ratings={state.insightRatings} initial={dimensionForStage(stage)} {...(rules ? { points: state.profile?.points ?? [] } : {})}
+        detail={(dimension) => dimension === "D4" ? viewOnce("compass", <CompassView profile={state.profile} />)
+          : dimension === "D1" || dimension === "D7" ? viewOnce("energy", <EnergyView profile={state.profile} />) : dimension === "D5" ? <LinesView state={state} onChanged={onChanged} />
+          : dimension === "D8" ? <LifelineView theme={state.profile?.careerTheme} turns={state.profile?.turningPoints} next={state.profile?.futureScript} />
+          : dimension === "D9" ? <LoopView hypotheses={state.profile?.hypotheses} /> : null} />}
+      {shown === "map" && <ScaleReadings readings={state.scaleReadings} />}
       {shown === "projects" && <ProjectsView timeline={state.timeline} lines={state.lines} />}
       {shown === "structure" && <StructureView state={state} />}
     </div>
     </section>
   </aside>;
 }
+
+/** The observation cards of the conversation, by round, for the map's 「准」 list. */
+const insightsOf = (state: OnboardingState) => state.messages.flatMap((message) => {
+  if (message.role !== "assistant") return [];
+  const content = message.content as { insight?: { text?: string }; moreInsights?: Array<{ text?: string }> } | null;
+  // A round's later cards are rated under `<seq>.<n>` (2026-11-14).
+  return [content?.insight, ...(content?.moreInsights ?? [])].flatMap((card, index) => card?.text ? [{ seq: index ? `${message.seq}.${index}` : message.seq, text: card.text }] : []);
+});
 
 /** The five kinds of start item (`interviewChecklist`, `start: true`), by the prefix of their ids. */
 const START_GROUPS = [
@@ -246,9 +266,11 @@ export function WeekView({ week, draft = [], lines = [] }: { week: WeekSkeleton;
 function CompassView({ profile }: { profile: OnboardingState["profile"] }) {
   const t = useT();
   const scored = new Map((profile?.values ?? []).map((item) => [item.value, item.score]));
-  const values = SCHWARTZ_VALUES.map((value) => ({ name: value.name, score: scored.get(value.name) ?? 0, evidence: t(value.means) }));
+  // A value not talked about yet has no score: drawn at 0 it read as a value the person rejects (decision 21). No population mean is drawn
+  // beside it (decision 22): the scores are the model's reading, not a scale's measurement, and the chart says so.
+  const values = SCHWARTZ_VALUES.map((value) => ({ name: value.name, score: scored.get(value.name) ?? null, evidence: t(value.means) }));
   return <div className="ob-view">
-    {scored.size >= 3 ? <ValuesRadar values={values} size={300} /> : <p className="ob-placeholder">{t("谈到为什么工作、什么让人生值得之后，这里画出十种价值取向的轮廓。")}</p>}
+    {scored.size >= 3 ? <ValuesRadar values={values} size={300} note={t("推断，非测量")} /> : <p className="ob-placeholder">{t("谈到为什么工作、什么让人生值得之后，这里画出十种价值取向的轮廓。")}</p>}
     <dl className="ob-compass">
       {profile?.workView && <div><dt>{t("工作观")}</dt><dd className="gen">{profile.workView}</dd></div>}
       {profile?.lifeView && <div><dt>{t("人生观")}</dt><dd className="gen">{profile.lifeView}</dd></div>}

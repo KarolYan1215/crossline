@@ -30,6 +30,8 @@
 | [assess-redesign.md](assess-redesign.md) | 公开速测重设计提案（2026-10-17，待拍板）：四条对立轴的问题、调研来源、方案 A/B/C 对比、推荐方案 B（八个倾向单极测量、双极呈现）的新题草稿与迁移清单 |
 | [local-installer.md](local-installer.md) | 本机安装版（给内测者，不 clone 代码、用自己的 ChatGPT 额度）：目录结构、启动器与托盘、Codex 登录、使用记录回传与诊断快照、更新、已知限制与工作包 |
 | [walkthrough-ledger.md](walkthrough-ledger.md) | 内测走查账本：以内测用户身份走查线上站点时已走过哪些路径、还有哪些没走、每次的发现与修复状态（走查前先读，只走没走过或改过的） |
+| [onboarding-agent-session.md](onboarding-agent-session.md) | 访谈重构设计（2026-11-14，D1–D7 已拍板，P0 起分步实施）：现有机制逐项盘点与去向、竞品与 harness 调研、一个项目会话 + 工具出卡 + worker 编排的子代理、共享账本与状态头、规则登记表、分步迁移与待决定的取舍 |
+| [onboarding-validation-audit.md](onboarding-validation-audit.md) | 访谈的代码校验逐条核验（2026-11-14）：用户视角下的误判、每条留／回／交模型／删的判定、之后每一步的验收规矩 |
 | [onboarding-v3.md](onboarding-v3.md) | 登录页与访谈页 v3：安装版走查的审查发现，三栏访谈、引导开场、语气选择、混合节奏、iCal 订阅与授权文件夹，各阶段进展（2026-10-14） |
 | [profile-and-agent-kit.md](profile-and-agent-kit.md) | 用户画像模块与 agent 工具包（设计，2026-10-31，待审）：调研后的采用与不采用、对话卡片与文字折算、报告结构与结论条目、隐私三级、下载包、远程 MCP 与外部 agent 写入的三档门槛、公开仓库与分期 |
 | [voice-input.md](voice-input.md) | 所有文字框的语音输入：浏览器识别优先、SenseVoice 兜底（托管走转写容器，本机按需下载）、先原文后纠错、个人用词、设置与隐私边界，调研与本人的决定（2026-11-02） |
@@ -70,7 +72,7 @@
 | [archive/codex-test-plan.md](archive/codex-test-plan.md) | 交给 Codex 自动跑的测试方案，含证伪设计赌注的红队层 |
 | [archive/codex-browser-drill.md](archive/codex-browser-drill.md) | 两项浏览器实测脚本 |
 | [archive/ux-review-2026-10-01.md](archive/ux-review-2026-10-01.md) | 2026-10-01 的用户视角测评 |
-- [onboarding-prompts.md](onboarding-prompts.md)：访谈对话层、整理层与画像报告的 prompt 结构、目的、实际上下文，对照本人真实访谈找出的问题与 2026-10-20 的修改。
+| [archive/onboarding-prompts.md](archive/onboarding-prompts.md) | 2026-10-20 的访谈三段提示词审查（已被 onboarding-agent-session.md 取代） |
 - [ledger-sync.md](ledger-sync.md)：本机与服务器账本的整本同步（2026-10-22 起停用，只用于一次性搬迁）。
 - [device-mode.md](device-mode.md)：托管站是唯一主账本，本机作为设备只发本机读到的屏幕活动、文件夹与录音转写。
 - [compute-node.md](compute-node.md)：算力节点（2026-10-23，P0 连接与 P1 本人账号的远程运行时已实现，其余为设计）：本人电脑作为算力节点，经一条出站连接替托管站跑 Codex 运行时、浏览器与转写；账本仍只在托管站，节点不在时回落到服务器；只给本人（A）或经各账号同意也给其他账号（B）。「发布」一节是公开发布安装包的命令。

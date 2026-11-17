@@ -30,6 +30,15 @@ test("quotes may spell the day many ways", () => {
   expect(quoteSupportsDate("2026-12-07", "12/7 Final Exam")).toBe(true);
 });
 
+test("the end of a month names its last day", () => {
+  expect(quoteSupportsDate("2026-11-30", "11 月底前投出 5 到 15 份")).toBe(true);
+  expect(quoteSupportsDate("2026-02-28", "2月末交")).toBe(true);
+  expect(quoteSupportsDate("2026-12-31", "年底前定下来")).toBe(true);
+  expect(quoteSupportsDate("2026-11-30", "by the end of November")).toBe(true);
+  expect(quoteSupportsDate("2026-11-29", "11 月底前投出")).toBe(false);
+  expect(quoteSupportsDate("2026-01-31", "11 月底前投出")).toBe(false);
+});
+
 test("a quote that names a different day does not support the date", () => {
   expect(quoteSupportsDate("2026-10-27", "10/2 DC Inverter")).toBe(false);
   expect(quoteSupportsDate("2026-10-27", "Week-8: 28th Oct.")).toBe(false);

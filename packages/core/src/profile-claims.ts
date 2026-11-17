@@ -105,6 +105,12 @@ export function instrumentClaims(answers: InstrumentAnswers, at: string): Profil
   return out;
 }
 
+/** The cards' readings for the person's own page (2026-11-15): per scored dimension its label and level in words, never the number. */
+export function instrumentLevels(answers: InstrumentAnswers): Array<{ label: string; level: string }> {
+  return (["mini_ipip", "rest18", "swls", "values"] as const).flatMap((instrument) =>
+    scored(answers, instrument).map((score) => ({ label: score.label, level: levelOf(score.score) })));
+}
+
 /** What the writer is told about the cards: levels in words, never a number, so its own claims say how a tendency shows in a day. */
 export function instrumentReadings(answers: InstrumentAnswers): string[] {
   return (["mini_ipip", "rest18", "swls", "values"] as const).flatMap((instrument) =>

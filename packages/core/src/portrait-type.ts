@@ -91,8 +91,14 @@ export function typeSummaryProblem(summary: string): string | null {
   if (!text) return null;
   if (!text.startsWith("你") && !/^you\b/i.test(text)) return "type.summary 须以「你」开头，直接对本人说";
   const en = tFor("en");
-  const named = Object.entries(TYPE_TABLE).flatMap(([code, type]) => [code, type.name]).find((word) => text.includes(word))
-    ?? Object.values(TYPE_TABLE).map((type) => en(type.name)).find((word) => word !== "" && new RegExp(`\\b${word}\\b`, "i").test(text) && /[A-Za-z]/.test(word))
+  // A name is refused only as a label for the person (「你是军师」「军师型」, "you are a Strategist"): 「大学生」「甲方」「军师」 are also plain
+  // words, and refusing them anywhere cost two full portrait rewrites (2026-11-14 audit). Codes are never plain words.
+  const escape = (word: string) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const labels = (word: string) => new RegExp(`(你|您)(就|也|还|更)?(是|算|属于)(一个|一位|个|位|典型的?)?${escape(word)}|${escape(word)}(型|类型|人格)`, "u").test(text);
+  const labelsEn = (word: string) => new RegExp(`\\byou(?:'re| are)(?: an?| the)? ${escape(word)}\\b|\\b${escape(word)} type\\b`, "i").test(text);
+  const named = Object.keys(TYPE_TABLE).find((code) => new RegExp(`\\b${code}\\b`).test(text))
+    ?? Object.values(TYPE_TABLE).map((type) => type.name).find(labels)
+    ?? Object.values(TYPE_TABLE).map((type) => en(type.name)).find((word) => word !== "" && /[A-Za-z]/.test(word) && labelsEn(word))
     ?? (/人格|MBTI|[EI][NS][TF][JP]|personality type/i.test(text) ? "外部人格类型" : undefined);
   return named ? `type.summary 不要写类型名或代码（含「${named}」）；结尾的「你是 …」由页面补上` : null;
 }

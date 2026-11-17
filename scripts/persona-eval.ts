@@ -26,19 +26,24 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { configureModelGate, runCodexSkill, setProviderResolver, setUsageSink, startCodexAppServer, startCodexSupervisor, startModelGateway,
-  threadProvider, withUsageWorkspace, type ProviderRouting, type SkillUsage } from "../packages/codex/src/index";
+  installUndiciAssertionGuard, threadProvider, withUsageWorkspace, type ProviderRouting, type SkillUsage } from "../packages/codex/src/index";
 import {
-  ONBOARDING_INSIGHTS, ONBOARDING_TONE_SETTING, PROFILE_CLAIMS_SETTING, PROFILE_INSTRUMENTS_SETTING, THIRD_PARTY_CAPABILITIES, cardWordsHead,
-  composeGoal, instrumentClaims, instrumentReadings, interviewComplete, parseSponsorModels, readInsightRatings, readInstrumentAnswers, readyToStart,
-  scaleAnswerLine, screenQuestions, sponsorSpend, type AccessContext, type OnboardingTone, type ProfileCard, type StoredLineProfile
+  ONBOARDING_INSIGHTS, PROFILE_CLAIMS_SETTING, PROFILE_INSTRUMENTS_SETTING, THIRD_PARTY_CAPABILITIES, cardWordsHead,
+  NEXT_ACCEPTED, composeGoal, instrumentClaims, interviewCompleteness, instrumentReadings, interviewComplete, parseSponsorModels, readInsightRatings, readInstrumentAnswers, readyToStart,
+  scaleAnswerLine, sponsorSpend, type AccessContext, type ProfileCard, type StoredLineProfile
 } from "../packages/core/src/index";
-import { CrosslineStore, interviewChecklistFor, questionScreenFor } from "../packages/db/src/index";
+import { CrosslineStore, interviewChecklistFor, rateInsight } from "../packages/db/src/index";
 import { composeAnswers, type Question } from "../apps/web/app/onboarding/onboarding-types";
 import { openingReply } from "../apps/web/app/onboarding/opening-card";
+import { shouldRemindFull, shouldRemindStart } from "../apps/web/app/onboarding/finish-button";
+import { interviewMetrics } from "../apps/worker/src/interview-metrics";
 import { identityLines } from "../apps/worker/src/lines";
 import { createOnboardingExtractor, extractionSettled, requestExtraction } from "../apps/worker/src/onboarding-extract";
 import { readSectionRecords } from "../apps/worker/src/onboarding-persist";
-import { createOnboardingSessionRunner } from "../apps/worker/src/onboarding-session";
+import { createOnboardingSessionRunner, finishInterview } from "../apps/worker/src/onboarding-session";
+import { readResearch, researchRunnerFor } from "../apps/worker/src/onboarding-research";
+import { createWebTools } from "../apps/worker/src/web-tools";
+import { webSearchFromEnv } from "../packages/connectors/src/index";
 import { createPortraitWriter } from "../apps/worker/src/portrait-writer";
 import { sponsorFromEnv, SPONSOR_PROVIDER_ID } from "../apps/worker/src/sponsor";
 
@@ -47,7 +52,9 @@ register("data:text/javascript,export async function resolve(s,c,n){if(s==='serv
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const args = process.argv.slice(2);
-const arg = (name: string): string | undefined => { const at = args.indexOf(`--${name}`); return at >= 0 ? args[at + 1] : undefined; };
+// The last occurrence wins: the server workflow's `persona` action puts its own `--set` first, and the dispatch's args (e.g.
+// `--set /persona/sets/<name>`) must be able to replace it.
+const arg = (name: string): string | undefined => { const at = args.lastIndexOf(`--${name}`); return at >= 0 ? args[at + 1] : undefined; };
 const setDir = arg("set"), outRoot = arg("out");
 if (!setDir || !outRoot) { console.error("usage: persona-eval.ts --set <dir> --out <dir> [--only a,b] [--turns 26] [--model <id>] [--player-model <id>]"); process.exit(2); }
 const sponsor = sponsorFromEnv();
@@ -58,7 +65,7 @@ const playerModel = arg("player-model") ?? model;
 for (const item of [model, playerModel]) if (!priced.some((listed) => listed.model === item)) { console.error(`${item} is not in CROSSLINE_SPONSOR_MODELS`); process.exit(2); }
 const turnLimit = Number(arg("turns")) || 26;
 
-type Opening = { life: string; tone: OnboardingTone; lines: string[]; base: string; fixed: string[] };
+type Opening = { life: string; tone?: string; lines: string[]; base: string; fixed: string[] };
 const openings = JSON.parse(readFileSync(path.join(setDir, "openings.json"), "utf8")) as Record<string, Opening>;
 const only = (arg("only") ?? "").split(",").map((item) => item.trim()).filter(Boolean);
 const names = Object.keys(openings).filter((name) => !only.length || only.includes(name));
@@ -70,9 +77,14 @@ const scratch = mkdtempSync(path.join(tmpdir(), "crossline-persona-"));
 // Skills and the line library are written beside the Codex home: a throwaway state directory, never the server's.
 process.env.CROSSLINE_STATE_DIR = path.join(scratch, "state");
 process.env.CROSSLINE_DATA_DIR = path.join(scratch, "data");
+// Every model answer, rejected ones included, kept beside the transcripts (made-up people only): replay 16's three portrait answers
+// that never parsed were lost, and with them what broke them (2026-11-17).
+process.env.CROSSLINE_RECORD_DIR ??= path.join(out, "answers");
 
 // ---- usage, the gateway and the routing: what the worker gives an invited account, the model pinned ----
-const SKILLS = ["crossline-onboarding", "crossline-onboarding-extract", "crossline-portrait-writer", "crossline-eval-persona"];
+const SKILLS = ["crossline-onboarding", "crossline-onboarding-extract", "crossline-onboarding-research", "crossline-portrait-writer", "crossline-eval-persona"];
+// The interview's runs get the web as an invited account's do (2026-11-12): Crossline's own search through the configured search API.
+const search = webSearchFromEnv();
 const keyOf = (name: string, role: "interview" | "player") => `persona-eval:${name}:${role}`;
 const usageByKey = new Map<string, SkillUsage[]>();
 setUsageSink((usage) => { if (usage.workspaceId) usageByKey.set(usage.workspaceId, [...(usageByKey.get(usage.workspaceId) ?? []), usage]); });
@@ -84,7 +96,8 @@ const routing = (key: string, pinned: string): ProviderRouting => {
   const contextK = sponsor.models.find((item) => item.model === pinned)?.contextK;
   return { provider: { id: SPONSOR_PROVIDER_ID, kind: "chat", label: "开发者提供的模型", baseUrl: sponsor.baseUrl, model: pinned, responseFormat: "json_object",
     keyLast4: null, updatedAt: "1970-01-01T00:00:00.000Z", ...(contextK ? { contextK } : {}) },
-    gatewayUrl: gateway.urlFor(key, SPONSOR_PROVIDER_ID), admitted: new Set(SKILLS), codexSignedIn: false, capabilities: { ...THIRD_PARTY_CAPABILITIES, webSearch: false } };
+    gatewayUrl: gateway.urlFor(key, SPONSOR_PROVIDER_ID), admitted: new Set(SKILLS), codexSignedIn: false, capabilities: { ...THIRD_PARTY_CAPABILITIES, webSearch: Boolean(search) },
+    functionCalls: true, ...(search && !key.endsWith(":player") ? { webTools: createWebTools(search) } : {}) };
 };
 setProviderResolver((key) => key?.startsWith("persona-eval:") ? routing(key, key.endsWith(":player") ? playerModel : model) : undefined);
 const supervisor = await startCodexSupervisor({ port: Number(process.env.CROSSLINE_CODEX_SUPERVISOR_PORT ?? 3392),
@@ -100,7 +113,9 @@ function cost(key: string) {
     reasoning: sum.reasoning + row.reasoningOutputTokens }), { input: 0, cached: 0, output: 0, reasoning: 0 });
   const bySkill: Record<string, { runs: number; repairs: number; seconds: number; output: number; reasoning: number }> = {};
   for (const row of usage) {
-    const entry = bySkill[row.skillName.replace(/^crossline:/, "")] ??= { runs: 0, repairs: 0, seconds: 0, output: 0, reasoning: 0 };
+    // The extraction's lanes apart (`interview:<lane>`), so the replay shows which one spends the output.
+    const name = row.skillName.replace(/^crossline:/, "") + (row.purpose?.startsWith("interview:") ? `:${row.purpose.slice("interview:".length)}` : "");
+    const entry = bySkill[name] ??= { runs: 0, repairs: 0, seconds: 0, output: 0, reasoning: 0 };
     entry.runs += 1; entry.repairs += row.repairs; entry.seconds += Math.round(row.durationMs / 1000);
     entry.output += row.outputTokens; entry.reasoning += row.reasoningOutputTokens;
   }
@@ -109,7 +124,7 @@ function cost(key: string) {
 }
 
 // ---- the player ----
-const PLAYER_SCHEMA = { type: "object", additionalProperties: false, required: ["answers", "freeText", "upload", "cardTaps", "cardWords", "insight"], properties: {
+const PLAYER_SCHEMA = { type: "object", additionalProperties: false, required: ["answers", "freeText", "upload", "cardTaps", "cardWords", "insights", "goOn", "finish"], properties: {
   answers: { type: "array", maxItems: 16, items: { type: "object", additionalProperties: false, required: ["questionId", "picked", "other"], properties: {
     questionId: { type: "string", minLength: 1, maxLength: 120 }, picked: { type: "array", maxItems: 6, items: { type: "string", minLength: 1, maxLength: 200 } },
     other: { type: "string", minLength: 0, maxLength: 600 } } } },
@@ -118,9 +133,14 @@ const PLAYER_SCHEMA = { type: "object", additionalProperties: false, required: [
     itemId: { type: "string", minLength: 1, maxLength: 80 }, score: { type: "integer", minimum: 0, maximum: 5 } } } },
   cardWords: { type: "array", maxItems: 8, items: { type: "object", additionalProperties: false, required: ["cardId", "words"], properties: {
     cardId: { type: "string", minLength: 1, maxLength: 80 }, words: { type: "string", minLength: 0, maxLength: 400 } } } },
-  insight: { type: "string", enum: ["fits", "off", ""] } } };
+  // One rating per observation card the round showed (2026-11-14: cards ready together come in one round), `index` its place in `insights`.
+  insights: { type: "array", maxItems: 3, items: { type: "object", additionalProperties: false, required: ["index", "verdict", "correction"], properties: {
+    index: { type: "integer", minimum: 0, maximum: 2 }, verdict: { type: "string", enum: ["fits", "off", "partial", ""] }, correction: { type: "string", maxLength: 300 } } } },
+  // The page's two buttons (2026-11-15): 「好，往下」 under the dialogue's proposed next step, and 「结束并出报告」 once the start standard stands.
+  goOn: { type: "boolean" }, finish: { type: "boolean" } } };
 type Played = { answers: Array<{ questionId: string; picked: string[]; other: string }>; freeText: string; upload: string[];
-  cardTaps: Array<{ itemId: string; score: number }>; cardWords: Array<{ cardId: string; words: string }>; insight: "fits" | "off" | "" };
+  cardTaps: Array<{ itemId: string; score: number }>; cardWords: Array<{ cardId: string; words: string }>;
+  insights: Array<{ index: number; verdict: "fits" | "off" | "partial" | ""; correction: string }>; goOn: boolean; finish: boolean };
 
 /** The cards' part of the reply, as the screen sends it (`cardReplyLines` in profile-cards.tsx, which the worker reads back without a model). */
 function cardLines(cards: readonly ProfileCard[], taps: Record<string, number>, words: Record<string, string>): string[] {
@@ -151,7 +171,6 @@ async function runPerson(name: string, opening: Opening) {
   const log = (event: Record<string, unknown>) => console.info(JSON.stringify({ person: name, ...event }));
 
   // The opening card: tone and lines are written at once, the base first, then sent as the first reply.
-  store.setSetting(workspaceId, ONBOARDING_TONE_SETTING, opening.tone);
   const ordered = [opening.base, ...opening.lines.filter((label) => label !== opening.base)];
   const set = withStore(() => lib.setupLines(ctx, ordered.map((label) => ({ label, ranked: label === opening.base, hard: opening.fixed.includes(label) }))));
   if (!set.ok) throw new Error(`${name}: setupLines refused: ${set.code}`);
@@ -160,10 +179,12 @@ async function runPerson(name: string, opening: Opening) {
   const transcript: string[] = [`# ${name} · ${stamp}`, "", `开场卡：语气 ${opening.tone}；主线 ${opening.lines.join("、")}；底座 ${opening.base}；固定日程 ${opening.fixed.join("、") || "无"}`, ""];
   const earlier: Array<{ interviewer: string; me: string }> = [];
   const rounds: Array<Record<string, unknown>> = [];
-  let text = openingReply({ tone: opening.tone, edition: "full", lines: ordered, domains: {}, base: opening.base, fixed: opening.fixed }, false);
+  let text = openingReply({ edition: "full", lines: ordered, domains: {}, base: opening.base, fixed: opening.fixed }, false);
   let turns = 0, state = "", goalsAdopted = 0;
   const started = Date.now();
   let readyAt: number | undefined;
+  // The page's reminders beside 「结束并出报告」, each said once a session (`shouldRemindStart`, `shouldRemindFull`).
+  let startReminded = false, fullReminded = false;
 
   /** A person adopting a long-term goal from the chips (「采用」): the first two attributes, or the one there is, for a line with none. */
   const adoptGoals = () => {
@@ -195,14 +216,13 @@ async function runPerson(name: string, opening: Opening) {
       state = outcome.state;
       if (outcome.state === "blocked") { transcript.push(`### 第 ${turns} 轮：中断 ${outcome.code} ${outcome.message}`); log({ turn: turns, blocked: outcome.code }); break; }
       const last = store.listOnboardingMessages(workspaceId, "eval").at(-1)!;
-      const turn = last.content as { reply: string; questions: Question[]; cards?: ProfileCard[]; insight?: { text?: string }; stage?: string; nextAction: string };
-      // What the screen shows of the round (the state route): questions another place owns or the ledger already answers are left out,
-      // and the app's own questions not in the round join it.
+      const turn = last.content as { reply: string; questions: Question[]; cards?: ProfileCard[]; insight?: { text?: string }; moreInsights?: Array<{ text?: string }>;
+        stage?: string; nextAction: string; next?: string };
+      const shownCards = [turn.insight, ...(turn.moreInsights ?? [])].map((card) => card?.text ?? "").filter(Boolean);
+      // What the screen shows of the round (the state route): the round as the model wrote it, and the app's own questions not in it.
       const shown = withStore(() => {
         lib.adoptPendingDates(ctx);
-        const moved = lib.questionsOwnedElsewhere(ctx, turn.questions);
-        for (const item of screenQuestions(turn.questions, questionScreenFor(store, workspaceId)).screened) moved.add(item.question.id);
-        const round = turn.questions.filter((question) => !moved.has(question.id));
+        const round = turn.questions;
         const inRound = new Set(turn.questions.map((question) => question.id));
         const status = lib.interviewStatus(ctx);
         return { round, extra: (status.questions as Question[]).filter((question) => !inRound.has(question.id)) };
@@ -216,18 +236,46 @@ async function runPerson(name: string, opening: Opening) {
       transcript.push(`### 第 ${turns} 轮（${turn.stage ?? ""}）`, "", turn.reply, "",
         ...batch.map((question, index) => `${index + 1}. ${question.text}${question.options.length ? `\n   选项：${question.options.map((option) => option.label).join(" / ")}` : ""}`),
         ...(cards.length ? ["", `卡片：${cards.map((card) => `${card.title}（${card.items.length} 题）`).join("、")}`] : []),
-        ...(turn.insight?.text ? ["", `洞察：${turn.insight.text}`] : []), "");
+        ...shownCards.flatMap((card, index) => ["", `洞察${shownCards.length > 1 ? ` ${index + 1}` : ""}：${card}`]),
+        ...(turn.next?.trim() ? ["", `下一步：${turn.next}（按钮「好，往下」）`] : []), "");
       rounds.push({ turn: turns, stage: turn.stage, questions: batch.length, held: shown.extra.length, cards: cards.reduce((sum, card) => sum + card.items.length, 0),
-        insight: Boolean(turn.insight?.text), next: turn.nextAction, modelSeconds: Math.round((Date.now() - turnStarted) / 1000),
+        insight: shownCards.length, next: turn.nextAction, proposed: turn.next ?? "", modelSeconds: Math.round((Date.now() - turnStarted) / 1000),
         startOpen: items.filter((item) => item.start && !item.done).map((item) => item.id),
         open: items.filter((item) => !item.done && !item.deferred && item.owner === "interview").map((item) => item.id) });
       log({ turn: turns, stage: turn.stage, questions: batch.length, cards: cards.length, next: turn.nextAction, ready: Boolean(readyAt) });
+      // Written after every round, not only at the end: a run the process dies in (2026-11-15, at round 10) still leaves its rounds.
+      writeFileSync(path.join(dir, "transcript.md"), transcript.join("\n"), "utf8");
+      writeFileSync(path.join(dir, "progress.json"), JSON.stringify({ turns, readyAtRound: readyAt ?? null, rounds,
+        metrics: interviewMetrics(store, workspaceId, "eval"), cost: { interview: cost(interviewKey), player: cost(playerKey) } }, null, 2), "utf8");
       if (outcome.state === "ready") break;
+      // The research threads' questions to the person, answered by the player in the side card (never in the main conversation).
+      const research = researchRunnerFor(store, workspaceId, repoRoot, () => client);
+      for (const thread of readResearch(store, workspaceId, "eval").filter((item) => item.status === "asking" && item.ask)) {
+        const sideContext = { version: "crossline.eval-persona.v2", persona: life, reply: `（侧栏调研卡：${thread.question}）`, questions: [{ id: "side", text: thread.ask!, kind: "free", options: [] }],
+          files: [], cards: [], insights: [], earlier: earlier.slice(-3) };
+        const side = await withUsageWorkspace(playerKey, () => runCodexSkill<Played>(client, sideContext, { skillName: "crossline:crossline-eval-persona", cwd: repoRoot,
+          provider: threadProvider(routing(playerKey, playerModel), playerModel, "crossline-eval-persona"),
+          developerInstructions: "Play the person as the Skill describes. Return raw JSON only.", outputSchema: PLAYER_SCHEMA, prepareInput: () => sideContext,
+          validateOutput: (output) => output as Played, onAudit: () => {}, timeoutMs: 30 * 60_000 }));
+        const said = side.ok ? [side.output.answers[0]?.other, side.output.freeText].filter(Boolean).join(" ") : "";
+        if (said) { research.answer("eval", thread.id, said); transcript.push(`**侧栏调研卡**：${thread.question}`, "", `问：${thread.ask}`, "", `答：${said}`, ""); }
+      }
+      // The end is the person's (2026-11-15): the page offers 「结束并出报告」 once the start standard stands and says so once, then once more
+      // when the completeness is full; the player decides whether to press it, as a person reading the page would.
+      const completeness = interviewCompleteness({ lowerBound: Boolean(readyAt), stagesSeen: rounds.map((round) => String(round.stage ?? "")),
+        ...json<{ dimensions?: []; hypotheses?: []; careers?: [] }>("profile.model", {}) });
+      log({ turn: turns, completeness: completeness.score, full: completeness.full });
+      const reminder = shouldRemindFull(completeness.full, fullReminded) ? "访谈已经很完整，可以结束出报告；也可以继续聊"
+        : shouldRemindStart(Boolean(readyAt), completeness.full, startReminded) ? "开始使用需要的已经齐了，现在就可以结束出报告；接着聊，报告会更准" : "";
+      if (completeness.full) fullReminded = true;
+      if (readyAt) startReminded = true;
+      if (reminder) transcript.push(`**页面提示**：${reminder}`, "");
 
       const context = { version: "crossline.eval-persona.v2", persona: life, reply: turn.reply,
         questions: batch.map(({ id, text: body, kind, options }) => ({ id, text: body, kind, options: options.map((option) => ({ label: option.label })) })),
         files: [], cards: cards.map((card) => ({ id: card.id, title: card.title, items: card.items.map((item) => ({ id: item.id, text: item.text, anchors: item.anchors })) })),
-        insight: turn.insight?.text ?? "", earlier: earlier.slice(-3) };
+        insights: shownCards, earlier: earlier.slice(-3), next: turn.next?.trim() ?? "",
+        finish: { offered: Boolean(readyAt), percent: Math.round(completeness.score * 100), reminder } };
       const play = () => withUsageWorkspace(playerKey, () => runCodexSkill<Played>(client, context, { skillName: "crossline:crossline-eval-persona", cwd: repoRoot,
         // A test-only Skill is never routed to a provider by the rules, so the player names its thread's provider itself.
         provider: threadProvider(routing(playerKey, playerModel), playerModel, "crossline-eval-persona"),
@@ -237,6 +285,9 @@ async function runPerson(name: string, opening: Opening) {
       for (let attempt = 1; attempt <= 4 && !played.ok && rateLimited(played.blocker.message); attempt += 1) { await wait(attempt * 60_000); played = await play(); }
       if (!played.ok) { transcript.push(`模拟用户未能作答：${played.blocker.code} ${played.blocker.message}`); log({ turn: turns, playerBlocked: played.blocker.code }); break; }
       const answer = played.output;
+      if (readyAt && answer.finish) { transcript.push(`**本人按「结束并出报告」**（完善度 ${Math.round(completeness.score * 100)}%）`, ""); log({ turn: turns, finished: true }); break; }
+      const goOn = Boolean(answer.goOn && turn.next?.trim());
+      rounds[rounds.length - 1]!.goOn = goOn;
       const answers = Object.fromEntries((answer.answers ?? []).map((item) => {
         const question = batch.find((candidate) => candidate.id === item.questionId);
         const picked = (question?.options ?? []).filter((option) => (item.picked ?? []).includes(option.label)).map((option) => option.id);
@@ -245,28 +296,44 @@ async function runPerson(name: string, opening: Opening) {
       const itemIds = new Set(cards.flatMap((card) => card.items.map((item) => item.id)));
       const taps = Object.fromEntries((answer.cardTaps ?? []).filter((tap) => itemIds.has(tap.itemId) && tap.score >= 1 && tap.score <= 5).map((tap) => [tap.itemId, tap.score]));
       const words = Object.fromEntries((answer.cardWords ?? []).filter((said) => cards.some((card) => card.id === said.cardId) && said.words.trim()).map((said) => [said.cardId, said.words]));
-      if (answer.insight && turn.insight?.text) {
-        const ratings = readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS));
-        ratings[`eval#${last.seq}`] = { verdict: answer.insight, stage: turn.stage ?? "", at: new Date().toISOString(), text: turn.insight.text.slice(0, 300) };
-        store.setSetting(workspaceId, ONBOARDING_INSIGHTS, JSON.stringify(ratings));
-      }
-      text = [composeAnswers(batch, answers, answer.freeText), ...cardLines(cards, taps, words)].filter((part) => part.trim()).join("\n") || "不确定。";
+      // Rated as the card's route rates (`rateInsight`): under the points rules 准 puts the hypothesis in the ledger, 部分对 the correction.
+      // Each card answered in a row, as the screen shows them one under another.
+      const rated = (answer.insights ?? []).filter((item, at, all) => item.verdict && item.index < shownCards.length && all.findIndex((other) => other.index === item.index) === at);
+      for (const item of rated) rateInsight(store, workspaceId, { sessionId: "eval", seq: last.seq, index: item.index,
+        verdict: item.verdict === "partial" && !item.correction.trim() ? "off" : item.verdict as "fits" | "off" | "partial", ...(item.correction.trim() ? { correction: item.correction } : {}) });
+      // 「好，往下」 sends the answers with its line under them, as the page's button does (`NEXT_ACCEPTED`, read back by `nextTaken`).
+      text = [composeAnswers(batch, answers, answer.freeText), ...cardLines(cards, taps, words), ...(goOn ? [NEXT_ACCEPTED] : [])]
+        .filter((part) => part.trim()).join("\n") || "不确定。";
       earlier.push({ interviewer: turn.reply.slice(0, 600), me: text.slice(0, 600) });
-      transcript.push("**回答**", "", text, ...(answer.insight ? ["", `（洞察：${answer.insight === "fits" ? "准" : "不准"}）`] : []), "");
+      transcript.push("**回答**", "", text, ...rated.map((item) => `（洞察${shownCards.length > 1 ? ` ${item.index + 1}` : ""}：${item.verdict === "fits" ? "准" : item.verdict === "partial" ? `部分对：${item.correction}` : "不准"}）`), "");
     }
     // The interview said it is done (or ran out of rounds): the extraction's finishing runs write the synthesis, as the worker's tick asks
     // for them in the app; then the portrait writer, as the worker runs it once the interview is complete.
     const extractor = createOnboardingExtractor(store, workspaceId, repoRoot, () => client);
-    await withUsageWorkspace(interviewKey, async () => {
-      await extractionSettled(workspaceId);
-      for (let run = 0; run < 3 && !json<{ portrait?: string }>("profile.model", {}).portrait; run += 1)
-        await requestExtraction(workspaceId, (preferred) => extractor.runOnce(preferred), "eval");
+    // As the app does it: the portrait is written once the finishing runs are done or `FINISH_BUDGET_MS` has passed, and the minutes from
+    // the press to the report are what the person waits.
+    const pressed = Date.now();
+    const finish = await withUsageWorkspace(interviewKey, async () => {
+      // Research threads still running finish first (at most 30 minutes): their conclusions are part of what the portrait reads.
+      for (let waited = 0; waited < 30 && readResearch(store, workspaceId, "eval").some((item) => item.status === "running"); waited += 1) await wait(60_000);
+      const finishing = finishInterview(store, workspaceId, repoRoot, () => client, "eval");
+      return { how: await finishing.settled, complete: finishing.complete };
     });
     // Chips the finishing runs wrote are adopted too: the person can tap them on the left column at any time.
     goalsAdopted += adoptGoals();
     const written = await withUsageWorkspace(interviewKey, () => createPortraitWriter(store, workspaceId, repoRoot, () => client)());
-    log({ portrait: written.state, ...(written.state === "blocked" ? { code: written.code } : {}) });
-    transcript.push(`画像：${written.state}${written.state === "blocked" ? ` ${written.code} ${written.message}` : ""}`);
+    const waitedMinutes = Math.round((Date.now() - pressed) / 60_000);
+    log({ portrait: written.state, finish: finish.how, waitedMinutes, ...(written.state === "blocked" ? { code: written.code } : {}) });
+    transcript.push(`画像：${written.state}${written.state === "blocked" ? ` ${written.code} ${written.message}` : ""}（按下后 ${waitedMinutes} 分钟${finish.how === "late" ? "，整理未跑完" : ""}）`);
+    // The rest of the record, for the files below: the finishing runs, and the synthesis if they left none.
+    await withUsageWorkspace(interviewKey, async () => {
+      await finish.complete;
+      await extractionSettled(workspaceId);
+      for (let run = 0; run < 3 && !json<{ portrait?: string }>("profile.model", {}).portrait; run += 1)
+        await requestExtraction(workspaceId, (preferred) => extractor.runOnce(preferred), "eval");
+    });
+    writeFileSync(path.join(dir, "research.json"), JSON.stringify(readResearch(store, workspaceId, "eval"), null, 2));
+    writeFileSync(path.join(dir, "profile-model.json"), JSON.stringify(json("profile.model", {}), null, 2));
   } catch (error) {
     transcript.push(`异常：${error instanceof Error ? error.message : String(error)}`);
     log({ error: error instanceof Error ? error.message.slice(0, 300) : "unknown" });
@@ -277,6 +344,8 @@ async function runPerson(name: string, opening: Opening) {
     const result = {
       name, opening, model, playerModel, state, turns, minutes: Math.round((Date.now() - started) / 60_000), readyAtRound: readyAt ?? null,
       complete: interviewComplete(checklist), goalsAdopted, rounds,
+      // P5 (docs/onboarding-agent-session.md §5): what the refactor is judged by against earlier replays.
+      metrics: interviewMetrics(store, workspaceId, "eval"),
       lines, lineProfiles: json("lines.profiles", {}), profile: json("profile.model", {}), sections: readSectionRecords(store, workspaceId),
       portrait: json<{ report?: unknown }>("portrait.report", {}).report ?? null,
       claims: { cards: instrumentClaims(answers, new Date().toISOString()), written: json<{ claims?: unknown[] }>(PROFILE_CLAIMS_SETTING, {}).claims ?? [] },
@@ -293,9 +362,14 @@ async function runPerson(name: string, opening: Opening) {
     writeFileSync(path.join(dir, "result.json"), JSON.stringify(result, null, 2), "utf8");
     writeFileSync(path.join(dir, "transcript.md"), transcript.join("\n"), "utf8");
     store.close();
-    return { name, state, turns, readyAtRound: readyAt ?? null, complete: result.complete, portrait: Boolean(result.portrait), cost: result.cost };
+    return { name, state, turns, readyAtRound: readyAt ?? null, complete: result.complete, portrait: Boolean(result.portrait), metrics: result.metrics, cost: result.cost };
   }
 }
+
+// undici's HTTP parser asserts from a socket's `end` event when a provider closes TLS mid-response (2026-11-15, Node 22.23): thrown
+// outside any request's promise, it ended the whole walkthrough. That one is logged and the run goes on — the request it belonged to
+// fails or times out and the runner's own retry takes it; anything else still ends the process (packages/codex/src/undici-guard.ts).
+installUndiciAssertionGuard();
 
 console.info(JSON.stringify({ step: "start", people: names, model, playerModel, out }));
 // One person's failure must not take the others' results with it.

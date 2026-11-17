@@ -46,14 +46,25 @@ test("the report is saved with its schema version, and the model is given what t
   expect(runtime.prompts()[0]).toContain("\"sufficient\":false");
 });
 
-test("an answer whose values stay incomplete after the repairs is kept; an unknown line is still refused", async () => {
+test("an answer whose values stay incomplete after the repairs is kept; an unknown line is left out, not the whole report", async () => {
   const nine = report({ compass: { ...report().compass, values: report().compass.values!.slice(0, 9) } });
   const runtime = fakeRuntime([JSON.stringify(nine), JSON.stringify(nine), JSON.stringify(nine)], PORTRAIT_WRITER);
   expect(await createPortraitWriter(store, workspaceId, "C:\\repo", () => runtime.rpc)()).toMatchObject({ state: "written" });
   expect(saved().report.compass.values).toHaveLength(9);
   const ghost = report({ lines: { allocation: "", items: [{ lineId: "ghost", description: "", goals: [], feeds: [] }] } });
-  const refused = fakeRuntime([JSON.stringify(ghost), JSON.stringify(ghost), JSON.stringify(ghost)], PORTRAIT_WRITER);
-  expect(await createPortraitWriter(store, workspaceId, "C:\\repo", () => refused.rpc)()).toMatchObject({ state: "blocked" });
+  const ghostly = fakeRuntime([JSON.stringify(ghost)], PORTRAIT_WRITER);
+  expect(await createPortraitWriter(store, workspaceId, "C:\\repo", () => ghostly.rpc)()).toMatchObject({ state: "written" });
+  expect(saved().report.lines.items).toEqual([]);
+});
+
+test("three answers that never parse in one run are written again once in a fresh thread; a second failure stays blocked", async () => {
+  const broken = `${JSON.stringify(report()).slice(0, 300)}"`;
+  const runtime = fakeRuntime([broken, broken, broken, JSON.stringify(report())], PORTRAIT_WRITER);
+  expect(await createPortraitWriter(store, workspaceId, "C:\repo", () => runtime.rpc)()).toEqual({ state: "written", version: 1 });
+  expect(runtime.threadStarts()).toHaveLength(2);
+  const never = fakeRuntime([broken], PORTRAIT_WRITER);
+  expect(await createPortraitWriter(store, workspaceId, "C:\repo", () => never.rpc)()).toMatchObject({ state: "blocked", code: "SKILL_SCHEMA_INVALID" });
+  expect(never.threadStarts()).toHaveLength(2);
 });
 
 const NOW = new Date("2026-10-12T12:00:00.000Z");

@@ -82,6 +82,29 @@ test("可开始标准不认「假设：」：硬约束日程与截止只认本�
   expect(readyToStart(interviewChecklist(assumed))).toBe(false);
 });
 
+test("本人用汉字说的钟点也算固定日程（「早八点到晚九点」）", () => {
+  const said = { ...full, dates: full.dates.filter((entry) => !entry.recurring),
+    facts: [...full.facts, { identityId: "research", projectId: "", slot: "weekly_hours", status: "confirmed", sourceRef: "reply-7", value: "周一到周五按课表走，课在早八点到晚九点之间随机分布，周二没课" }] };
+  expect(interviewChecklist(said).find((item) => item.id === "hard_schedule:research")?.done).toBe(true);
+});
+
+test("固定日程的槽位里没有哪天、几点，也没说定不下来，不算收集到（第十一次回放：开场卡的「有固定日程」被记成了日程）", () => {
+  const undated = { ...full, dates: full.dates.filter((entry) => !entry.recurring) };
+  const fact = (value: string) => ({ identityId: "research", projectId: "", slot: "fixed_schedule", status: "confirmed" as const, sourceRef: "reply-1", value });
+  const done = (value: string) => interviewChecklist({ ...undated, facts: [...undated.facts, fact(value)] }).find((item) => item.id === "hard_schedule:research")?.done;
+  expect(done("有固定日程")).toBe(false);
+  expect(done("工作日白天上课")).toBe(true);
+  expect(done("课表记不清，之后补")).toBe(true);
+});
+
+test("记在本人名下的课表算唯一那条硬线的固定日程；两条硬线时不替任何一条作数", () => {
+  const undated = { ...full, dates: full.dates.filter((entry) => !entry.recurring) };
+  const classes = { identityId: "person", projectId: "", slot: "fixed_schedule_class", status: "confirmed" as const, sourceRef: "reply-13", value: "周一到周五按课表上课，早八点到晚九点之间，周二没课" };
+  expect(interviewChecklist({ ...undated, facts: [...undated.facts, classes] }).find((item) => item.id === "hard_schedule:research")?.done).toBe(true);
+  const two = { ...undated, facts: [...undated.facts, classes], lines: [...undated.lines, { id: "venture", label: "创业者", hard: true, goals: ["x"] }] };
+  expect(interviewChecklist(two).find((item) => item.id === "hard_schedule:research")?.done).toBe(false);
+});
+
 test("每条主线至少一个当前项目且知道截止；「没有截止」也算", () => {
   const undated = { ...full, dates: full.dates.filter((entry) => entry.recurring) };
   expect(interviewChecklist(undated).find((item) => item.id === "line_project:research")).toMatchObject({ done: false, owner: "interview" });
@@ -134,17 +157,12 @@ test("project items read slots by meaning, and a course's part needs no grading 
   expect(withSchedule.filter((item) => item.id.startsWith("project:")).map((item) => [item.id, item.done])).toEqual([["project:ece555", true], ["project:ece555-final", true]]);
 });
 
-// 2026-10-31: the person picks how thorough the interview is; a project's details are asked in it only in the deeper tiers.
-test("the tier decides which project items the interview asks and which wait for planning", () => {
+// 2026-11-12: the tiers are gone; a project's details wait for its planning.
+test("a project's details wait for planning", () => {
   const sparse = { ...full, facts: full.facts.filter((fact) => fact.projectId !== "ece555"), dates: [] };
-  const deferredOf = (depth: ChecklistInput["depth"]) => Object.fromEntries(interviewChecklist({ ...sparse, depth })
-    .filter((item) => item.id.endsWith(":ece555") && item.id.startsWith("project")).map((item) => [item.id, Boolean(item.deferred)]));
-  expect(deferredOf(undefined)).toEqual({ "project:ece555": true, "project_course:ece555": true });
-  expect(deferredOf("quick")).toEqual({ "project:ece555": true, "project_course:ece555": true });
-  expect(deferredOf("standard")).toEqual({ "project:ece555": false, "project_course:ece555": true });
-  expect(deferredOf("thorough")).toEqual({ "project:ece555": false, "project_course:ece555": false });
-  const course = interviewChecklist({ ...sparse, depth: "thorough" }).find((item) => item.id === "project_course:ece555")!;
-  expect(course.ask).toBe("「ECE 555」的成绩是怎么算的？各部分各占多少？");
+  expect(Object.fromEntries(interviewChecklist(sparse)
+    .filter((item) => item.id.endsWith(":ece555") && item.id.startsWith("project")).map((item) => [item.id, Boolean(item.deferred)])))
+    .toEqual({ "project:ece555": true, "project_course:ece555": true });
 });
 
 test("the portrait's parts are read by meaning: the slot names the extraction writes for risks, priorities and motives count", () => {

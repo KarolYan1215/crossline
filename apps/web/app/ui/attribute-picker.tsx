@@ -2,7 +2,7 @@
 
 import { useState, type DragEvent } from "react";
 import {
-  ATTRIBUTE_KIND_LABEL, cleanAttribute, composeGoal, duplicateAttributes, guessKind, insertByKind, orderAttributes, type AttributeKind
+  ATTRIBUTE_KIND_LABEL, cleanAttribute, composeGoal, guessKind, insertByKind, orderAttributes, sameAttributes, type AttributeKind
 } from "@crossline/core";
 import "./attribute-picker.css";
 import { useLocale, useT } from "../locale-context";
@@ -49,7 +49,7 @@ export function AttributePicker({ noun, candidates, initial, onAdopt, label = "é
     setSelected((list) => list.includes(text) ? list : insertByKind(list, text, kindOf));
   };
   const parts = selected.map(cleanAttribute).filter(Boolean);
-  const duplicate = duplicateAttributes(parts)[0];
+  const duplicate = sameAttributes(parts)[0];
   const unchanged = parts.length === initial.length && parts.every((part, index) => part === initial[index]);
   const preview = composeGoal(parts, noun, locale);
   const adopt = async () => {

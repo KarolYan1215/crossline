@@ -246,7 +246,7 @@ version
 
 **评测**
 
-`scripts/persona-eval.ts`：设计虚构人物的内核，写成第一人称的生活与感受（`scripts/personas/eval-2026-10-31/`），由 `crossline-eval-persona`（v2：作答卡片、对洞察说准/不准）只凭生活与感受作答。访谈、抽取、画像撰写和模拟用户都走开发者模型，各人用各自的一次性账本。内核文件不进仓库，只交给评判。服务器上是 `server.yml` 的 `persona` / `persona-report` 动作。
+`scripts/persona-eval.ts`：设计虚构人物的内核，写成第一人称的生活与感受（`scripts/personas/eval-2026-10-31/`），由 `crossline-eval-persona`（v2：作答卡片、对洞察说准/不准）只凭生活与感受作答。访谈、抽取、画像撰写和模拟用户都走开发者模型，各人用各自的一次性账本。内核文件不进仓库，只交给评判。服务器上是 `server.yml` 的 `persona` / `persona-report` 动作；派发参数里的 `--set /persona/sets/<名字>` 换掉默认的集合（同一参数出现多次时以最后一次为准）。
 
 ## 十二、P2 的最小形式：导出给 agent（2026-11-03）
 

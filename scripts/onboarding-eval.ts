@@ -32,7 +32,7 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { enterUsageWorkspace, runCodexSkill, setUsageSink, startCodexSupervisor } from "../packages/codex/src/index";
-import { AVAILABILITY_PROPOSED_SETTING, EVAL_HOLD_FILE, INTERVIEW_SETTINGS, ONBOARDING_TONE_SETTING, PROFILE_CONFIRMED, readInterviewSettings, composeGoal, interviewComplete, portraitFingerprint, readyToStart, type ProfileModel, type StoredLineProfile } from "../packages/core/src/index";
+import { AVAILABILITY_PROPOSED_SETTING, EVAL_HOLD_FILE, INTERVIEW_SETTINGS, PROFILE_CONFIRMED, readInterviewSettings, composeGoal, interviewComplete, portraitFingerprint, readyToStart, type ProfileModel, type StoredLineProfile } from "../packages/core/src/index";
 import { CrosslineStore, interviewChecklistFor } from "../packages/db/src/index";
 import { domainGuides } from "../packages/identity-packs/src/index";
 import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY, composeAnswers, type Question } from "../apps/web/app/onboarding/onboarding-types";
@@ -102,7 +102,6 @@ if (carded) {
   const set = setupLines(ctx, LITE_OPENING.lines.map((label) => ({ label, ranked: label === LITE_OPENING.base, hard: LITE_OPENING.fixed.includes(label),
     ...(LITE_OPENING.domains[label] ? { domain: LITE_OPENING.domains[label] } : {}) })));
   if (!set.ok) throw new Error(`setupLines refused: ${set.code}`);
-  store.setSetting(workspaceId, ONBOARDING_TONE_SETTING, LITE_OPENING.tone);
 } else {
   // What the person set on the opening screen before the interview: the identity nouns, the base line and the hard constraint — no goals.
   store.setSetting(workspaceId, "lines.v1", JSON.stringify([

@@ -44,11 +44,22 @@ const BECOME = /^(成为|become(\s+(an?|the))?\b)\s*/i;
 
 /** An attribute as kept: trimmed, without a leading 「成为」 (or "become a") or a trailing 「的」, inner whitespace collapsed. */
 export function cleanAttribute(text: string): string {
-  let value = text.replace(/\s+/g, " ").trim();
-  value = value.replace(/^[\s\p{P}\p{S}]+|[\s\p{P}\p{S}]+$/gu, "");
+  let value = trimEdges(text.replace(/\s+/g, " "));
   value = value.replace(BECOME, "");
   while (value.endsWith("的")) value = value.slice(0, -1).trimEnd(); // i18n-ignore: grammar of the text itself
-  return value.replace(/[\s\p{P}\p{S}]+$/gu, "").slice(0, ATTRIBUTE_MAX_LENGTH);
+  return trimEdges(value, "end").slice(0, ATTRIBUTE_MAX_LENGTH);
+}
+
+/** Symbols that belong to the words they end or start: 「C++」「C#」「R&D」 were cut to 「C」 and 「R&」 (2026-11-14 audit). */
+const PART_OF_WORD = /[+#&%@$]/u;
+const EDGE = /[\s\p{P}\p{S}]/u;
+/** The text without spaces, punctuation and symbols at its edges, except the symbols that belong to a word. */
+function trimEdges(text: string, side: "both" | "end" = "both"): string {
+  const chars = [...text];
+  let start = 0, end = chars.length;
+  while (side === "both" && start < end && EDGE.test(chars[start]!) && !PART_OF_WORD.test(chars[start]!)) start += 1;
+  while (end > start && EDGE.test(chars[end - 1]!) && !PART_OF_WORD.test(chars[end - 1]!)) end -= 1;
+  return chars.slice(start, end).join("");
 }
 
 /** What two attributes are compared by: no 「的」, no punctuation, no whitespace. */
@@ -65,6 +76,21 @@ function nearlyContained(a: string, b: string): boolean {
   let at = 0;
   for (const char of long) if (char === short[at]) at += 1;
   return at === short.length;
+}
+
+/**
+ * Pairs that are the same words (after removing 「的」, punctuation and case): the only duplicate checked in what the person chose or wrote
+ * themselves. 「自由」 and 「财务自由」 are two choices of theirs, not one said twice (docs/onboarding-validation-audit.md §3.4).
+ */
+export function sameAttributes(texts: string[]): Array<[string, string]> {
+  const pairs: Array<[string, string]> = [];
+  for (let i = 0; i < texts.length; i += 1) {
+    for (let j = i + 1; j < texts.length; j += 1) {
+      const a = attributeKey(texts[i]!), b = attributeKey(texts[j]!);
+      if (a && a === b) pairs.push([texts[i]!, texts[j]!]);
+    }
+  }
+  return pairs;
 }
 
 export function duplicateAttributes(texts: string[]): Array<[string, string]> {
@@ -278,7 +304,7 @@ export function checkGoalParts(parts: unknown, locale?: Locale): { ok: true; par
   const clean = parts.filter((part): part is string => typeof part === "string").map(cleanAttribute).filter(Boolean);
   if (!clean.length) return { ok: false, code: "LINE_GOAL_PARTS_EMPTY", message: t("至少选一个定语") };
   if (clean.length > 12) return { ok: false, code: "LINE_GOAL_PARTS_TOO_MANY", message: t("定语最多 12 个") };
-  const duplicate = duplicateAttributes(clean)[0];
+  const duplicate = sameAttributes(clean)[0];
   if (duplicate) return { ok: false, code: "LINE_GOAL_PARTS_DUPLICATE", message: t("「{{a}}」与「{{b}}」重复", { a: duplicate[0], b: duplicate[1] }) };
   return { ok: true, parts: clean };
 }

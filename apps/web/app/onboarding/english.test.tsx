@@ -11,9 +11,8 @@ import { DateBatchCard } from "./date-batch-card";
 const en = (node: React.ReactNode) => renderToStaticMarkup(<LocaleProvider locale="en">{node}</LocaleProvider>);
 
 test("the opening card speaks English and offers the common roles as English words", () => {
-  const html = en(<OpeningCard linesKnown={false} knownLines={[]} initialTone="neutral" busy={false} hasMaterials={false} onStart={() => {}} />);
+  const html = en(<OpeningCard linesKnown={false} knownLines={[]} busy={false} hasMaterials={false} onStart={() => {}} />);
   expect(html).toContain("A note from the developer");
-  expect(html).toContain("How would you like me to talk to you?");
   expect(html).toContain("Which roles are you putting your time into?");
   expect(html).toContain("Researcher");
   expect(html).toContain("Start the interview");
@@ -22,15 +21,15 @@ test("the opening card speaks English and offers the common roles as English wor
 });
 
 test("the first reply is said in English on an English screen, and stays Chinese otherwise", () => {
-  const reply = openingReply({ tone: "neutral", edition: "full", lines: ["Researcher", "Entrepreneur"], domains: {}, base: "", fixed: [] }, true, "en");
+  const reply = openingReply({ edition: "full", lines: ["Researcher", "Entrepreneur"], domains: {}, base: "", fixed: [] }, true, "en");
   expect(reply).toContain("[Edition] Full");
   expect(reply).toContain("[My tracks] Researcher, Entrepreneur");
   expect(reply).toContain("[Base for the next 12–24 months] Several, equally");
   expect(reply).toContain("[Tracks with a fixed schedule] None");
   expect(reply.endsWith("I've added my materials. Please read what you can from them first, then ask about what's missing.")).toBe(true);
-  expect(openingReply({ tone: "neutral", edition: "full", lines: ["研究者"], domains: {}, base: "", fixed: [] }, false)).toContain("【我的主线】研究者");
+  expect(openingReply({ edition: "full", lines: ["研究者"], domains: {}, base: "", fixed: [] }, false)).toContain("【我的主线】研究者");
   // The lite edition on an English screen: the domain lines are English words, named with their domain, and still recognised as domains.
-  const lite = openingReply({ tone: "neutral", edition: "lite", lines: ["Professional", "Health manager"], domains: { "Health manager": "wellness" },
+  const lite = openingReply({ edition: "lite", lines: ["Professional", "Health manager"], domains: { "Health manager": "wellness" },
     base: "Professional", fixed: ["Professional"], said: { Professional: "Work" } }, false, "en");
   expect(lite).toContain("[My tracks] Professional, Health manager (Health)");
   expect(lite).toContain("[Something with a fixed schedule] Work (track: Professional)");

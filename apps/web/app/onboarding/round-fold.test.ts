@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { foldThread, roundSummary } from "./round-fold";
+import { cardsOf, foldThread, roundSummary } from "./round-fold";
 import type { Message } from "./onboarding-types";
 
 const user = (seq: number, text: string): Message => ({ seq, role: "user", content: { text }, createdAt: "" });
@@ -32,4 +32,15 @@ test("an observation on a past round stays out of the fold until it is rated", (
   expect(open.kind === "fold" && open.unratedInsight?.seq).toBe(1);
   const rated = foldThread(messages, (seq) => seq === 1)[0]!;
   expect(rated.kind === "fold" && rated.unratedInsight).toBeUndefined();
+});
+
+test("a round with several cards stays out of the fold until every card is rated", () => {
+  const several: Message = { seq: 1, role: "assistant", createdAt: "", content: { reply: "第一轮。", questions: [], nextAction: "ask", coverage: [],
+    insight: { text: "卡一", refs: [] }, moreInsights: [{ text: "卡二", refs: [] }, { text: "卡三", refs: [] }] } };
+  const messages = [several, user(2, "答"), turn(3, "第二轮。")];
+  expect(cardsOf(several.content as never).map((card) => card.text)).toEqual(["卡一", "卡二", "卡三"]);
+  const partly = foldThread(messages, (seq, index) => seq === 1 && index < 2)[0]!;
+  expect(partly.kind === "fold" && partly.unratedInsight?.seq).toBe(1);
+  const all = foldThread(messages, (seq) => seq === 1)[0]!;
+  expect(all.kind === "fold" && all.unratedInsight).toBeUndefined();
 });

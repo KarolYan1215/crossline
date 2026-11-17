@@ -2,8 +2,10 @@ import { RELATION_KINDS } from "./flywheel-schema";
 import { DATE_EXTRACTION_SCHEMA, type DateExtraction } from "./date-schema";
 import { SCHWARTZ_VALUES } from "./portrait";
 import type { ProfileCard } from "./profile-instruments";
-import type { OnboardingDepth } from "./onboarding-depth";
 import { INTERVIEW_SETTING_KEYS } from "./interview-settings";
+import { DIMENSION_FIELD, DIMENSION_IDS, DIMENSION_NOTE_FIELD, HYPOTHESIS_ITEM_FIELD, URL_FIELD, careerItemSchema, cleanCareers, cleanDimensionNotes, cleanHypotheses, isWebUrl, oneOf,
+  type CareerOption, type DimensionId, type DimensionNote, type Hypothesis } from "./profile-hypotheses";
+import { POINT_CHANGE_FIELD, POINT_OPS, POINT_SECTIONS, POINT_TEXT_MAX, type PointChange, type ProfilePoint } from "./profile-points";
 import {
   ATTRIBUTE_CANDIDATES_MAX, ATTRIBUTE_CANDIDATES_MIN, ATTRIBUTE_KIND_FIELD, ATTRIBUTE_KINDS, ATTRIBUTE_MAX_LENGTH, attributeProblem, cleanAttribute, duplicateAttributes,
   guessKind, notAtomic, type AttributeCandidate, type AttributeKind
@@ -37,6 +39,21 @@ export type TurnQuestion = {
    * question asked again is dropped from the round; one of the app's own waiting questions asked in the model's words is not added again.
    */
   repeats?: number;
+  /**
+   * The question asks for a day (2026-11-14 audit): answered in words or a day off the calendar beside the box. Said by whoever wrote the
+   * question, never guessed from its wording, which turned 「你一周里哪天状态最好？」 into a date box and dropped its options.
+   */
+  date?: boolean;
+  /**
+   * The question builds on an answer already given (2026-11-14 audit): the app's likeness check against answered questions is a hint, and a
+   * follow-up worded like the question it follows is not a repeat. Said by the model, never guessed.
+   */
+  followUp?: boolean;
+  /**
+   * What a date question asks the day of, in a few words the model keeps the same each time (2026-11-15, replay 15 asked one resume date
+   * six times in different words): a subject the person answered 「还没定」 is not asked again (`checkQuestions`). "" for other questions.
+   */
+  about?: string;
 };
 /**
  * A fact as the rest of the app reads it. The model does not write `sourceRef` or `sourceQuote` any more (2026-10-19): it cites numbered
@@ -84,19 +101,23 @@ export const stageIndexIn = (flow: InterviewFlow, stage: string): number => Math
  * for, what absorbs and drains them. The others gather facts in a batch of option cards.
  */
 export const DEEP_STAGES: ReadonlySet<OnboardingStage> = new Set<OnboardingStage>(["narrative", "situation", "compass", "energy"]);
-/** How the interview talks, chosen by the person at the start (default neutral); a setting, so it can change mid-interview. */
-// Two voices since 2026-10-18 (the owner's decision): 「直接犀利」 asked for exactly the 点破/反转 writing that reads as machine-made, so it
-// is gone, and an account that chose it reads as neutral (`readTone`).
-export const ONBOARDING_TONES = ["neutral", "warm"] as const;
-export type OnboardingTone = (typeof ONBOARDING_TONES)[number];
-export const ONBOARDING_TONE_SETTING = "onboarding.tone";
-export const ONBOARDING_TONE_LABEL: Record<OnboardingTone, { label: string; detail: string }> = {
-  neutral: { label: "冷静客观", detail: "就事论事，讲清依据，不带情绪" },
-  warm: { label: "温柔体贴", detail: "先回应感受，再问事情，语气柔和" }
+
+export * from "./profile-hypotheses";
+export * from "./profile-points";
+/** A question the dialogue hands to a research thread (contract C): it needs the web, and the dialogue leaves it alone until it is done. */
+export type ResearchRequest = { question: string; why: string; dimension: DimensionId };
+export const RESEARCH_STATUSES = ["running", "asking", "done", "failed"] as const;
+/** One research thread (contract C), kept in the setting `onboarding.research:<sessionId>`. */
+export type ResearchThread = {
+  id: string; question: string; why: string; dimension: DimensionId;
+  status: (typeof RESEARCH_STATUSES)[number];
+  threadId?: string;
+  messages: Array<{ role: "agent" | "person"; text: string; at: string; sources?: Array<{ title: string; url: string }> }>;
+  ask?: string;
+  conclusion?: string;
+  sources?: Array<{ title: string; url: string }>;
+  createdAt: string; updatedAt: string;
 };
-export function readTone(value: string | null | undefined): OnboardingTone {
-  return (ONBOARDING_TONES as readonly string[]).includes(value ?? "") ? value as OnboardingTone : "neutral";
-}
 /** The facts that are about the person rather than one line (their compass, their energy) are filed under this id. */
 export const PERSON_LINE = "person";
 
@@ -127,10 +148,17 @@ export type ProfileModel = {
    * chapter as they tell it. Empty on a portrait written before.
    */
   careerTheme: string; roleModels: string[]; motto: string; turningPoints: string[]; futureScript: string;
+  /**
+   * The hypothesis log, the career directions and a note per dimension (contract B, 2026-11-12): rewritten whole by every extraction run,
+   * the interview's external memory and the side panel's data. Empty on a portrait written before.
+   */
+  hypotheses: Hypothesis[]; careers: CareerOption[]; dimensions: DimensionNote[];
+  /** The points ledger (`profile-points.ts`, 2026-11-12): what is settled about the person; empty outside the points rules. */
+  points: ProfilePoint[];
 };
 export const EMPTY_PROFILE_MODEL: ProfileModel = { portrait: "", coreConflict: "", problem: "", gravity: [], designable: [], reframes: [], workView: "",
   lifeView: "", consistency: "", trueNorth: "", energyMap: [], flow: [], says: "", does: "", anchor: "", realWant: "", allocation: "", values: [],
-  careerTheme: "", roleModels: [], motto: "", turningPoints: [], futureScript: "" };
+  careerTheme: "", roleModels: [], motto: "", turningPoints: [], futureScript: "", hypotheses: [], careers: [], dimensions: [], points: [] };
 /**
  * For each line: a personal description from what was said, and 3–12 mutually independent attributes (`attributeCandidates`) the person
  * builds a long-term goal 「成为 A 的、B 的<身份>」 from — each cited to the reply or file it came from, labelled with its kind, and an
@@ -169,10 +197,44 @@ export type OnboardingTurn = {
   /** How the person said the system should work (`INTERVIEW_SETTING_KEYS`), each resting on one of their replies (`interview-settings.ts`). */
   settings?: Array<{ key: string; target: string; value: string; sourceRef: string; sourceQuote: string }>;
   profile?: ProfileModel;
-  /** The dialogue's observation of the round (deep stages only; dropped in code when its quotes do not check out). */
+  /**
+   * The dialogue's observations of the round, as it writes them (2026-11-14, the owner: when several cards are ready in one round they
+   * are answered one after another, not spread one a round): at most `INSIGHTS_PER_ROUND`, each dropped in code when its quotes do not
+   * check out. Stored as `insight` (the first) and `moreInsights` (the rest), which is what the page and the ratings read.
+   */
+  insights?: TurnInsight[];
+  /** The round's first observation as stored (and every round stored before 2026-11-14). */
   insight?: TurnInsight;
+  /** The round's other observations as stored, rated under `<session>#<seq>.<n>` (n = 1, 2). */
+  moreInsights?: TurnInsight[];
   /** The dialogue's own record of where the interview stands, handed back next round. */
   progress?: TurnProgress;
+  /** The model marks the round that answers a disclosure of self-harm (the Skill's 安全); the app also reads the reply itself (`mentionsSelfHarm`). */
+  safety?: boolean;
+  /**
+   * The step the dialogue proposes next, one sentence shown under the reply with a 「好，往下」 button (2026-11-15, the owner: the interview
+   * paces itself, and says every round where it would go next). A next step, not the next stage.
+   */
+  next?: string;
+  /** The dialogue asks the app to put `LESSON_QUESTION` this round (2026-11-15): whether the person will talk about what a hard time taught them. */
+  askLesson?: boolean;
+  /** Questions the dialogue hands to research threads this round (contract C); the worker opens one thread per question. */
+  research?: ResearchRequest[];
+  /**
+   * The app's own waiting questions (`openItems` in the round's input, by id) the dialogue puts to the person this round: shown as the
+   * app wrote them, so a tap is read as the fact it settles (2026-11-14 audit: the app no longer adds them to a round by itself).
+   */
+  openItems?: string[];
+  /**
+   * The extraction's hypothesis log, career directions and dimension notes (contract B): only the items new or changed this run, merged
+   * into the ones on record by id (`mergeProfileInsights`, 2026-11-12); a direction that no longer holds is named in `dropCareers`.
+   */
+  hypotheses?: Hypothesis[];
+  careers?: CareerOption[];
+  dimensions?: DimensionNote[];
+  dropCareers?: string[];
+  /** The points ledger's changes (the points rules): added, revised and retracted points, each resting on the person's words. */
+  pointChanges?: PointChange[];
   /**
    * The instrument cards the app put beside the round's questions (`cardsFor`; flow v2, profile stages): never written by the model, so
    * their wording and keys stay the published items'.
@@ -185,10 +247,27 @@ export type OnboardingTurn = {
 export type ItemScore = { itemId: string; score: number; confidence: number; sentences?: number[] };
 
 /**
- * An observation (观察卡): two things the person said in different replies, connected, with the pattern named and no advice. `refs` name
- * the replies (`reply-N`) and a short verbatim span of each; `checkInsight` keeps the card only when every span is in its reply.
+ * An observation (观察卡, contract A, 2026-11-12): an inference about the person that may judge, resting on at least one verbatim span of
+ * their replies (`refs`, `reply-N` and the span), with outside data or literature when there is any (`external`, each with its URL), and
+ * what would show it wrong (`falsifier`, shown under the card as 「如果……，这条就不准」). `checkInsight` keeps the card only when it
+ * has a falsifier and every span is in its reply.
  */
-export type TurnInsight = { text: string; refs: Array<{ replyId: string; quote: string }> };
+/** Observation cards one round may carry: the ones ready together are answered one after another (2026-11-14). */
+export const INSIGHTS_PER_ROUND = 3;
+export type TurnInsight = {
+  /**
+   * The hypothesis it asks about (2026-11-12): one on record by id, or, written "" by the dialogue, a new one the app adds to the log
+   * under the round's own id (`c<seq>`). Absent on a card from before.
+   */
+  hypothesisId?: string;
+  dimension?: DimensionId;
+  text: string;
+  refs: Array<{ replyId: string; quote: string }>;
+  external?: Array<{ text: string; url: string }>;
+  falsifier: string;
+  /** What the card adds that the stage's earlier cards did not, written once the stage has `STAGE_CARDS` (2026-11-15); "" otherwise. */
+  why?: string;
+};
 /**
  * The interview's progress record (2026-10-19, the owner's decision): which part it is in, what of that part is clear and what is not,
  * whether this round's answers finished the part, and what to ask next. Written by the dialogue every round, kept by the app and handed
@@ -197,16 +276,24 @@ export type TurnInsight = { text: string; refs: Array<{ replyId: string; quote: 
 /** A domain line's checklist as the interview is given it (built by `domainGuides` in @crossline/identity-packs). */
 export type DomainGuideContext = { lineId: string; label: string; domain: string; ask: string[]; slots: string[]; attributeHints: string[] };
 
-export type TurnProgress = { part: OnboardingStage; covered: string[]; open: string[]; partDone: boolean; next: string };
+export type TurnProgress = { part: OnboardingStage; covered: string[]; open: string[]; partDone: boolean; next: string;
+  /** The tensions and patterns already said to the person, a few words each (2026-11-15: replay 15 said one tension nine times). */
+  said?: string[] };
 
 /**
  * What the dialogue is shown at the start of the interview (later turns only carry the new reply). The dialogue cites nothing, so it reads
  * the person's words and the files as they are; numbered sentences go only to the extraction (`OnboardingExtractContext`).
  */
 export type OnboardingTurnContext = {
+  /** The progress header, put first (apps/worker/src/onboarding-standing.ts): where the round stands in the whole interview. */
+  standing?: string[];
+  /** The checklist of the stage the round starts in (`stages/<stage>.md` beside the Skill), when the thread does not hold it yet. */
+  stageGuide?: string;
   version: "crossline.onboarding.turn.v1";
   /** `YYYY-MM-DD` in the person's zone, so a date written without a year lands in the right one. */
   today?: string; timeZone?: string;
+  /** The lower bound: `met` once every start item stands, else the start items still open (a line's own interview has none). */
+  startStandard?: { met: boolean; missing: string[] };
   identities: Array<{ id: string; label: string }>;
   projects: Array<{ id: string; identityId: string; name: string; summary: string }>;
   facts: Array<{ identityId: string; projectId: string; slot: string; value: string; status: string }>;
@@ -222,12 +309,13 @@ export type OnboardingTurnContext = {
   profile?: ProfileModel; stage?: OnboardingStage;
   /** The order this interview's stages run in (`INTERVIEW_FLOW_STAGES`); absent in a line's own interview, which runs `details` only. */
   stageOrder?: OnboardingStage[];
-  /** How the person asked to be spoken to (`ONBOARDING_TONE_SETTING`); also sent with every later turn, since it can change. */
-  tone?: OnboardingTone;
-  /** How thorough the person asked the interview to be (`ONBOARDING_DEPTH_SETTING`, onboarding-depth.ts); sent with every turn, since it can change. */
-  depth?: OnboardingDepth;
   /** The completion list's items still open (`interviewChecklist`): what the interview owes before it may say it is ready, and what waits on the person. */
   checklist?: Array<{ label: string; detail: string; owner: "interview" | "person"; start?: boolean }>;
+  /**
+   * The app's own questions still waiting (2026-11-14 audit): put to the person only when the dialogue names them in its `openItems`, as
+   * the app wrote them. `start` marks one the start standard waits on.
+   */
+  openItems?: Array<{ id: string; text: string; start?: boolean }>;
   /** Hours spent in Codex and Claude Code per folder and when in the day (`agentHistoryLines`), when the person allowed it: habits, not a plan. */
   workHistory?: string[];
   /** The connected calendars' events in the next seven days (`calendarWeek`), when any calendar is connected: what the week already holds. */
@@ -239,14 +327,6 @@ export type OnboardingTurnContext = {
   publicAssessment?: { code: string; typeName: string; axes: Record<string, number>; takenAt: string; note: string };
   /** New files that did not fit this turn's reading budget; they come with the next turns. */
   sourcesWaiting?: number;
-  /**
-   * How many rounds the interview has spent in its current stage. From the second round on, `moveOn` says to go to the next stage — an
-   * interview that waits for an answer the person does not have never ends (a simulated user who said 不确定 kept one in 「能量」 for seven
-   * rounds). What the person cannot answer is written as an assumption (「假设：…」) in the same round, by a standing rule of the Skill.
-   * The front stages are the exception: while a start item is open there is no `moveOn`, because those items accept only the person's word.
-   */
-  stageRounds?: number;
-  moveOn?: string;
   /** Only when the conversation had to be rebuilt in a fresh thread: what was said before, oldest first. */
   history?: Array<{ id: string; role: "user" | "assistant"; text: string }>;
   /**
@@ -263,6 +343,11 @@ export type OnboardingTurnContext = {
   unrecorded?: string[];
   /** What the extraction read in earlier replies and could not record, each with why (「组会（周四）— no end time」): ask for it again. */
   notRecorded?: string[];
+  /**
+   * A hard time the person told of (2026-11-15): which reply, that its words are replaced, and whether the person was asked, and agreed,
+   * to talk about what it taught them (`LessonConsent`). Absent when there was none.
+   */
+  disclosure?: string;
   /** The person's reply, as they wrote it. */
   reply: { id: string; text: string };
   /**
@@ -287,6 +372,19 @@ export type OnboardingTurnContext = {
    * W-183: the abstract carried only how many there were, and the dialogue twice told the person their Tuesday 14:00 class was a morning one.
    */
   fixedSchedule?: string[];
+  /**
+   * The research threads of this interview (contract C): a topic whose thread is not `done` is left alone; a `done` one's conclusion is
+   * used from this round on.
+   */
+  research?: Array<{ id: string; question: string; status: ResearchThread["status"]; conclusion?: string }>;
+  /**
+   * The points rules (2026-11-12): the hypothesis log as cards may ask about it (`hypothesisLogLines`: the open ones by id, and how the
+   * person rated the others), and the points ledger (`pointLines`): what is settled, not to be asked again or contradicted.
+   */
+  hypothesisLog?: string[];
+  /** The hypotheses the next card asks about, with the replies they rest on (`cardCandidates`); empty when none is ready. */
+  cardFrom?: string[];
+  points?: string[];
 };
 
 /**
@@ -296,6 +394,16 @@ export type OnboardingTurnContext = {
  */
 export type OnboardingExtractContext = {
   version: "crossline.onboarding.extract.v1";
+  /** Which fields this run writes (`EXTRACT_LANE_KEYS`); absent, all of them. */
+  lane?: ExtractLaneName;
+  /**
+   * The points rules (2026-11-12): the portrait's sections are written only when their stage is over; until then what the replies settle
+   * goes into the points ledger (`pointChanges`). `points` is the ledger as it stands, one line each. `split` asks for the sections on
+   * record (written as paragraphs before the rules) to be split into points, each resting on the person's words.
+   */
+  rules?: "points";
+  points?: string[];
+  split?: ProfileSection[];
   today: string; timeZone: string;
   /**
    * The weekly hours on record (the last proposal), in minutes, so a run that sends `availability` again keeps what the new replies do
@@ -339,6 +447,8 @@ export type OnboardingExtractContext = {
    * replies (`itemScores`), or leaves it out when the words do not say.
    */
   scaleItems?: Array<{ id: string; text: string; anchors: readonly [string, string, string]; card: string }>;
+  /** Conclusions of the interview's finished research threads (contract C), with their sources: outside data the hypotheses may rest on. */
+  research?: Array<{ question: string; conclusion: string; sources: Array<{ title: string; url: string }> }>;
 };
 
 /** What the validator may check a citation against. Never sent to the model. */
@@ -359,13 +469,17 @@ export type KnownSources = {
   attributesOnRecord?: Record<string, number>;
   /** Each line's name, so a candidate that only repeats it is refused (`attributeProblem`). */
   lineLabels?: Record<string, string>;
+  /** The hypothesis ids on record: a career changed this run may rest on hypotheses the run did not rewrite. */
+  hypothesesOnRecord?: string[];
+  /** The research threads' source URLs: the only outside data a point may cite. Absent, any web URL. */
+  researchUrls?: string[];
 };
 /** One citable sentence: the reply (`reply-N`) or file (`src-N`) it is in, and its offsets in that text. */
 export type EvidenceSentence = { ref: string; start: number; end: number; text: string };
 
 const text = (max: number, min = 1) => ({ type: "string", minLength: min, maxLength: max }) as const;
 const slug = { type: "string", minLength: 1, maxLength: 80 } as const;
-const object = (properties: Record<string, unknown>) =>
+const object =(properties: Record<string, unknown>) =>
   ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
 /** Sentence numbers (2026-10-19): the model points at what it was shown instead of copying it, and the system fills the words in. */
 export const REFS = { type: "array", maxItems: 8, items: { type: "integer", minimum: 1 } } as const;
@@ -459,9 +573,15 @@ function turnFields(ids?: TurnIds) {
           items: object({ id: slug, label: text(120), detail: { type: "string", maxLength: 80 } })
         },
         allowOther: { type: "boolean" },
+        // True when the question asks for a day: shown with words and a day picker, no options (the Skill's 日期 rules).
+        date: { type: "boolean" },
         identityId: about, projectId: askedProject,
         // The ledger number of the question this one repeats (`questionLedger`), 0 when it is new.
-        repeats: { type: "integer", minimum: 0 }
+        repeats: { type: "integer", minimum: 0 },
+        // True when it builds on an answer already given: worded like that question, it is still not a repeat.
+        followUp: { type: "boolean" },
+        // A date question's subject in a few words, the same each time it is asked; "" for every other question.
+        about: { type: "string", maxLength: 40 }
       })
     },
     slotUpdates: {
@@ -494,14 +614,38 @@ function turnFields(ids?: TurnIds) {
     },
     fileDates: DATE_EXTRACTION_SCHEMA,
     nextAction: { type: "string", enum: ["ask", "ready_for_milestones"] },
+    // True for the round that answers a disclosure of self-harm (the Skill's 安全): no cards beside it, its reply ends at the help lines.
+    safety: { type: "boolean" },
+    // The next step the dialogue proposes, one sentence; and whether the app should ask the lesson question this round.
+    next: { type: "string", maxLength: 200 },
+    askLesson: { type: "boolean" },
     stage: { type: "string", enum: [...ONBOARDING_STAGES] },
-    // One observation in the deep stages (2026-10-19, the owner's decision): two things the person said, in different replies, connected and
-    // the pattern named, no advice. `text` empty for none. Checked in code (`checkInsight`): each quote must be in the reply it names.
-    insight: object({ text: { type: "string", maxLength: 300 },
-      refs: { type: "array", maxItems: 3, items: object({ replyId: { type: "string", maxLength: 20 }, quote: { type: "string", maxLength: 80 } }) } }),
+    // The round's observation (contract A, 2026-11-12): an inference that may judge, resting on the person's verbatim words, with outside
+    // data when there is any and what would show it wrong. `text` empty for none. Checked in code (`checkInsight`): a falsifier, and each
+    // quote in the reply it names.
+    insights: { type: "array", maxItems: INSIGHTS_PER_ROUND, items: object({ hypothesisId: { type: "string", maxLength: 12 }, dimension: DIMENSION_FIELD,
+      text: { type: "string", maxLength: 400 },
+      refs: { type: "array", maxItems: 4, items: object({ replyId: { type: "string", maxLength: 20 }, quote: { type: "string", maxLength: 40 } }) },
+      external: { type: "array", maxItems: 3, items: object({ text: text(300), url: URL_FIELD }) },
+      falsifier: { type: "string", maxLength: 200 },
+      // What it adds that this stage's earlier cards did not: written once the stage has three cards, "" before.
+      why: { type: "string", maxLength: 120 } }) },
+    // Questions for research threads (contract C): what needs the web to answer, why it matters, the dimension it bears on.
+    research: { type: "array", maxItems: 3, items: object({ question: text(300), why: text(300), dimension: DIMENSION_FIELD }) },
+    // The app's own waiting questions put to the person this round, by the ids the round's `openItems` lists.
+    openItems: { type: "array", maxItems: 5, items: { type: "string", maxLength: 80 } },
+    // The hypothesis log, career directions and dimension notes (contract B): only what is new or changed this run, merged by id.
+    hypotheses: { type: "array", maxItems: 40, items: HYPOTHESIS_ITEM_FIELD },
+    careers: { type: "array", maxItems: 6, items: careerItemSchema(line) },
+    dimensions: { type: "array", maxItems: 10, items: DIMENSION_NOTE_FIELD },
+    // Career directions on record that no longer hold, by their `id` (or `role`).
+    dropCareers: { type: "array", maxItems: 6, items: text(120) },
+    // The points ledger's changes (the points rules): what the replies settle, each resting on sentence numbers.
+    pointChanges: { type: "array", maxItems: 20, items: POINT_CHANGE_FIELD },
     // The interview's own progress record, rewritten every round and handed back at the start of the next (`TurnProgress`).
     progress: object({ part: { type: "string", enum: [...ONBOARDING_STAGES] }, covered: { type: "array", maxItems: 8, items: text(60) },
-      open: { type: "array", maxItems: 8, items: text(60) }, partDone: { type: "boolean" }, next: text(160) }),
+      open: { type: "array", maxItems: 8, items: text(60) }, partDone: { type: "boolean" }, next: text(160),
+      said: { type: "array", maxItems: 8, items: text(40) } }),
     lineProfiles: { type: "array", maxItems: 8, items: object({ lineId: line, description: { type: "string", maxLength: 800 },
       attributeCandidates: { type: "array", maxItems: ATTRIBUTE_CANDIDATES_MAX,
         items: object({ text: text(ATTRIBUTE_MAX_LENGTH), kind: ATTRIBUTE_KIND_FIELD, refs: REFS }) } }) },
@@ -528,10 +672,23 @@ function turnFields(ids?: TurnIds) {
  * and the next questions. The **extraction** — facts with their sentence numbers, projects, dates, line attributes, hours, the
  * portrait — is written by its own run in the background, so its repairs never hold the conversation up.
  */
-export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage", "insight", "progress"] as const;
-export const EXTRACT_KEYS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles", "goalEdits", "availability", "settings", "profileSections", "itemScores"] as const;
+export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage", "insights", "progress", "research", "safety", "openItems", "next", "askLesson"] as const;
+export const EXTRACT_KEYS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles", "goalEdits", "availability", "settings", "profileSections", "itemScores",
+  "hypotheses", "careers", "dimensions", "dropCareers", "pointChanges"] as const;
 export const onboardingDialogueSchema = (ids?: TurnIds) => object(pick(turnFields(ids), DIALOGUE_KEYS));
-export const onboardingExtractSchema = (ids?: TurnIds) => object(pick(turnFields(ids), EXTRACT_KEYS));
+/** The extraction's schema; `keys` narrows it to one lane's fields (`EXTRACT_LANE_KEYS`). */
+export const onboardingExtractSchema = (ids?: TurnIds, keys: readonly (typeof EXTRACT_KEYS)[number][] = EXTRACT_KEYS) => object(pick(turnFields(ids), keys));
+/**
+ * The extraction's three lanes (2026-11-12): fields that rest on each other go together, the rest run beside them. The ledger (facts,
+ * projects, dates, line descriptions, hours, settings, card answers in words) is what the start standard and the next round wait for;
+ * the portrait's sections and the inference log (hypotheses, the careers that cite them, the dimensions) are written by runs of their own.
+ */
+export const EXTRACT_LANE_KEYS = {
+  ledger: ["slotUpdates", "projectsDetected", "fileDates", "lineProfiles", "goalEdits", "availability", "settings", "itemScores"],
+  sections: ["profileSections", "flywheelCandidates", "pointChanges"],
+  insights: ["hypotheses", "careers", "dimensions", "dropCareers"]
+} as const satisfies Record<string, readonly (typeof EXTRACT_KEYS)[number][]>;
+export type ExtractLaneName = keyof typeof EXTRACT_LANE_KEYS;
 export const ONBOARDING_DIALOGUE_SCHEMA = onboardingDialogueSchema();
 export const ONBOARDING_EXTRACT_SCHEMA = onboardingExtractSchema();
 
@@ -559,10 +716,10 @@ export function listsAtLimit(output: unknown, schema: unknown = ONBOARDING_EXTRA
   });
 }
 /** What the person waits for, and what is stored as the round. */
-export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage" | "insight" | "progress">;
+export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage" | "insights" | "progress" | "research" | "safety" | "openItems" | "next" | "askLesson">;
 /** What the background run writes to the ledger. */
 export type OnboardingExtraction = Pick<OnboardingTurn, "slotUpdates" | "projectsDetected" | "flywheelCandidates" | "lineProfiles" | "goalEdits"
-  | "availability" | "settings"> & { fileDates?: DateExtraction; profileSections?: ProfileSections; itemScores?: ItemScore[] };
+  | "availability" | "settings" | "hypotheses" | "careers" | "dimensions" | "dropCareers" | "pointChanges"> & { fileDates?: DateExtraction; profileSections?: ProfileSections; itemScores?: ItemScore[] };
 
 const SLOT = /^[a-z][a-z0-9_]{1,39}$/;
 const ID = /^[a-zA-Z0-9_-]{1,80}$/;
@@ -584,8 +741,8 @@ export function validateOnboardingTurn(value: unknown, known: KnownSources): Onb
 }
 
 /**
- * The turn's rules. `minimumCandidates` is how many attribute candidates a non-empty list must hold: three for a model's answer, one for
- * a turn `keepOnboardingTurn` already pruned, whose short lists `keepCandidates` let through on purpose.
+ * The turn's rules. `minimumCandidates` is how many attribute candidates a non-empty list must hold when the line has more on record:
+ * three for a model's answer, one for a turn `keepOnboardingTurn` already pruned, whose short lists `keepCandidates` let through on purpose.
  */
 function checkTurn(value: unknown, known: KnownSources, minimumCandidates: number): OnboardingTurn {
   const turn = value as OnboardingTurn | undefined;
@@ -646,10 +803,10 @@ function checkTurn(value: unknown, known: KnownSources, minimumCandidates: numbe
       reject("ONBOARDING_OPTIONS_REQUIRED", `问题「${question.id}」是选择题，至少要给 2 个候选；难以回忆的内容要多给候选。`);
     }
   }
-  if (turn.nextAction === "ask" && !turn.questions.length) reject("ONBOARDING_QUESTION_REQUIRED", "还没问完，这一轮必须至少提出一个问题。");
+  if (turn.nextAction === "ask" && !turn.questions.length && !turn.openItems?.length) reject("ONBOARDING_QUESTION_REQUIRED", "还没问完，这一轮必须至少提出一个问题（自己的 questions，或 openItems 里应用的待办题）。");
   for (const line of turn.lineProfiles ?? []) {
     if (!identities.has(line.lineId) || line.lineId === PERSON_LINE) reject("ONBOARDING_IDENTITY_UNKNOWN", `主线描述里的主线「${line.lineId}」不存在。`);
-    const problem = candidatesProblem(line.attributeCandidates ?? [], citable, minimumCandidates, known.lineLabels?.[line.lineId]);
+    const problem = candidatesProblem(line.attributeCandidates ?? [], citable, minimumCandidates, known.lineLabels?.[line.lineId], known.attributesOnRecord?.[line.lineId] ?? 0);
     if (problem) reject(problem.code, `主线「${line.lineId}」的定语候选：${problem.detail}`);
   }
   for (const edit of turn.goalEdits ?? []) {
@@ -669,19 +826,69 @@ function checkTurn(value: unknown, known: KnownSources, minimumCandidates: numbe
     lineProfiles: (turn.lineProfiles ?? []).map((line) => ({ ...line, attributeCandidates: cleanCandidates(line.attributeCandidates ?? []) })),
     goalEdits: (turn.goalEdits ?? []).map((edit) => ({ ...edit, parts: edit.parts.map((part) => ({ text: cleanAttribute(part.text), kind: kindOf(part) })).filter((part) => part.text) })),
     availability: turn.availability ?? { windows: [], why: "" },
-    profile: withValues({ ...EMPTY_PROFILE_MODEL, ...(turn.profile ?? {}) }) };
+    profile: withValues({ ...EMPTY_PROFILE_MODEL, ...(turn.profile ?? {}) }),
+    ...(Array.isArray(turn.research) ? { research: cleanResearch(turn.research) } : {}),
+    ...(Array.isArray(turn.pointChanges) ? { pointChanges: cleanPointChanges(turn.pointChanges, known.researchUrls) } : {}),
+    ...cleanProfileInsights(turn, known) };
+}
+
+const str = (value: unknown, max: number) => typeof value === "string" ? value.trim().slice(0, max) : "";
+
+/**
+ * The points ledger's changes as far as they are well formed: a known op and section, outside data only from the research threads
+ * (`researchUrls`) when they are given. Whether each holds (a quote, a reason) is `applyPointChanges`'s to decide.
+ */
+function cleanPointChanges(list: unknown[], researchUrls?: string[]): PointChange[] {
+  const allowed = researchUrls ? new Set(researchUrls.map((url) => url.trim())) : undefined;
+  return list.flatMap((raw) => {
+    const item = raw as Partial<PointChange> | null;
+    if (!oneOf(POINT_OPS, item?.op) || !oneOf(POINT_SECTIONS, item?.section)) return [];
+    return [{ op: item!.op!, id: str(item!.id, 12), section: item!.section!, text: str(item!.text, POINT_TEXT_MAX),
+      quotes: (Array.isArray(item!.quotes) ? item!.quotes : []).filter((quote) => typeof quote?.ref === "string" && typeof quote.text === "string" && quote.text.trim()),
+      external: (Array.isArray(item!.external) ? item!.external : []).filter((entry) => typeof entry?.text === "string" && isWebUrl(entry.url)
+        && (!allowed || allowed.has(entry.url.trim()))).map((entry) => ({ text: entry.text.trim(), url: entry.url.trim() })),
+      why: str(item!.why, 300) }];
+  });
+}
+
+/** The dialogue's research questions: each with a question and a known dimension, each question once. */
+function cleanResearch(list: unknown[]): ResearchRequest[] {
+  const seen = new Set<string>();
+  return list.flatMap((raw) => {
+    const item = raw as Partial<ResearchRequest> | null;
+    const question = str(item?.question, 300);
+    if (!question || !oneOf(DIMENSION_IDS, item?.dimension) || seen.has(loose(question))) return [];
+    seen.add(loose(question));
+    return [{ question, why: str(item?.why, 300), dimension: item!.dimension! }];
+  });
 }
 
 /**
- * Whether a question takes several answers at once. `kind` says so (`multi`), and the Skill is told when to use it; a choice question
- * whose own words ask for several — 「哪些」, 「哪几」, a goal (「本学期最重要的目标？」: a grade and a skill can both be goals) — is read as
- * `multi` even when the model wrote `single`, because a single choice there forces a wrong answer. A goal measured as one number
- * (目标分数, 目标成绩) stays single.
+ * The extraction's hypotheses, careers and dimension notes, kept only as far as they are what they claim (contract B, 2026-11-12;
+ * `cleanHypotheses`, `cleanCareers`): never a refusal, an item that does not hold is dropped and the rest kept, like the dates. A quote a
+ * hypothesis rests on must be verbatim in the reply or file it names; a career's hypothesis ids are the ones this answer keeps.
  */
-// English as well as Chinese: "which ones", "select all that apply", a goal (but not a target score or grade, which is one number).
-const MANY = /哪些|哪几|多选|可多选|都有什么|目标(?!分|成绩|绩点|线|是多少)|\bwhich (ones|of these|of the following|of them)\b|\bwhat are (all|the)\b|\bselect all\b|\bchoose all\b|\b(all|any) that apply\b|\bpick (any|several|all)\b|\bgoals?\b(?!\s+(score|scores|grade|grades|gpa|mark|marks|number))/iu;
-export function questionKind(question: Pick<TurnQuestion, "kind" | "text">): TurnQuestion["kind"] {
-  return question.kind === "single" && MANY.test(question.text) ? "multi" : question.kind;
+export function cleanProfileInsights(value: Partial<Pick<OnboardingTurn, "hypotheses" | "careers" | "dimensions" | "dropCareers">>,
+  sources: Pick<KnownSources, "replies" | "sources" | "identities" | "hypothesesOnRecord">): Partial<Pick<OnboardingTurn, "hypotheses" | "careers" | "dimensions" | "dropCareers">> {
+  const hypotheses = Array.isArray(value.hypotheses) ? cleanHypotheses(value.hypotheses, (ref) => sources.replies[ref] ?? sources.sources[ref]) : undefined;
+  // A career may rest on hypotheses this run did not rewrite (the run writes only what changed).
+  const hypothesisIds = new Set([...(hypotheses ?? []).map((item) => item.id), ...(sources.hypothesesOnRecord ?? [])]);
+  const dropCareers = Array.isArray(value.dropCareers) ? [...new Set(value.dropCareers.map((role) => str(role, 120)).filter(Boolean))].slice(0, 6) : undefined;
+  return {
+    ...(hypotheses ? { hypotheses } : {}),
+    ...(Array.isArray(value.careers) ? { careers: cleanCareers(value.careers, hypothesisIds,
+      new Set(sources.identities.filter((id) => id !== PERSON_LINE))) } : {}),
+    ...(Array.isArray(value.dimensions) ? { dimensions: cleanDimensionNotes(value.dimensions) } : {}),
+    ...(dropCareers ? { dropCareers } : {})
+  };
+}
+
+/**
+ * The kind a question is shown as: what its writer said. It is no longer read off the wording (2026-11-14 audit: 「最想先推进哪一个」
+ * became multi, 「哪天状态最好」 lost its options for a date box); a day question says so with `date`.
+ */
+export function questionKind(question: Pick<TurnQuestion, "kind">): TurnQuestion["kind"] {
+  return question.kind;
 }
 
 /** Known values only, each once, scores clamped: a profile from before values existed has none. */
@@ -700,18 +907,19 @@ const cleanCandidates = (list: AttributeCandidate[]) => list.map((item) => ({ te
 
 /** What every repair about a candidate's wording ends with: what an attribute is, and that fewer real ones beat made-up ones. */
 /* i18n-ignore-start: a repair message to the model */
-const ATTRIBUTE_HOW = "定语说的是本人想在这条线上成为什么样的人，取自本人原话：形容词或形容性短语（严谨、高产、独立、有影响力、值得信赖、受学生欢迎）或短的领域限定（器件物理方向）；"
+const ATTRIBUTE_HOW = "定语说的是本人想在这条线上成为什么样的人，按本人说过的话归纳，不必是原词：形容词或形容性短语（严谨、高产、独立、有影响力、值得信赖、受学生欢迎）或短的领域限定（器件物理方向）；"
   + "本人只说了要做什么、要拿到什么时，不要硬改成定语，去掉这一个，少给几个也可以。";
 /* i18n-ignore-end */
 
 /**
  * What is wrong with one line's attribute candidates, if anything: an empty list is allowed (it keeps the ones on record); otherwise
- * 3–12, each cited to a reply or file, each one thing, each describing the person rather than an action or an achievement
+ * 3–12, or fewer when the line has no more than that on record (`onRecord`: a thin line gets its one or two real attributes, never
+ * padding; the repair used to ask for three and invited made-up ones, docs/onboarding-agent-session.md C6), each cited to a reply or file, each one thing, each describing the person rather than an action or an achievement
  * (`attributeProblem`), and no two saying the same (after removing 「的」 and punctuation, one contains the other). The detail names
  * the offending attributes, all of them at once for wording, so one repair can fix them together.
  */
 /* i18n-ignore-start: repair messages to the model */
-function candidatesProblem(list: AttributeCandidate[], citable: (ref: string) => boolean, minimum = ATTRIBUTE_CANDIDATES_MIN, label?: string): { code: string; detail: string } | undefined {
+function candidatesProblem(list: AttributeCandidate[], citable: (ref: string) => boolean, minimum = ATTRIBUTE_CANDIDATES_MIN, label?: string, onRecord = 0): { code: string; detail: string } | undefined {
   if (!list.length) return undefined;
   for (const item of list) {
     if (!citable(item.sourceRef)) return { code: "ONBOARDING_UNKNOWN_SOURCE_REF", detail: `「${item.text}」没有引用本轮给出的句子；每个定语在 refs 里写出它来自的句子编号。` };
@@ -722,11 +930,10 @@ function candidatesProblem(list: AttributeCandidate[], citable: (ref: string) =>
   if (wording.length) return { code: "ONBOARDING_ATTRIBUTE_NOT_DESCRIPTIVE", detail: `${wording.slice(0, 3).join("；")}。${ATTRIBUTE_HOW}` };
   const duplicate = duplicateAttributes(list.map((item) => cleanAttribute(item.text)))[0];
   if (duplicate) return { code: "ONBOARDING_ATTRIBUTE_DUPLICATE", detail: `「${duplicate[0]}」与「${duplicate[1]}」重复：去掉「的」和标点后一个包含另一个，只保留一个或改成互不重叠的两个。` };
-  if (list.length < minimum || list.length > ATTRIBUTE_CANDIDATES_MAX) {
-    return { code: "ONBOARDING_ATTRIBUTES_COUNT", detail: list.length < ATTRIBUTE_CANDIDATES_MIN
-      ? `写 ${ATTRIBUTE_CANDIDATES_MIN}–${ATTRIBUTE_CANDIDATES_MAX} 个，现在是 ${list.length} 个：从本人已说的话和文件里补到至少 ${ATTRIBUTE_CANDIDATES_MIN} 个（每个引用句子编号）；`
-        + "只补本人用过的形容说法，本人确实只说了这些时就保持这几个；本人对这条线几乎什么都没说时才留空数组。"
-      : `写 ${ATTRIBUTE_CANDIDATES_MIN}–${ATTRIBUTE_CANDIDATES_MAX} 个，现在是 ${list.length} 个，留下最有区别的 ${ATTRIBUTE_CANDIDATES_MAX} 个。` };
+  if ((list.length < minimum && list.length < onRecord) || list.length > ATTRIBUTE_CANDIDATES_MAX) {
+    return { code: "ONBOARDING_ATTRIBUTES_COUNT", detail: list.length > ATTRIBUTE_CANDIDATES_MAX
+      ? `最多 ${ATTRIBUTE_CANDIDATES_MAX} 个，现在是 ${list.length} 个，留下最有区别的 ${ATTRIBUTE_CANDIDATES_MAX} 个。`
+      : `这条线已经记有 ${onRecord} 个定语，这次只写了 ${list.length} 个：写出完整的 ${ATTRIBUTE_CANDIDATES_MIN}–${ATTRIBUTE_CANDIDATES_MAX} 个，或写空数组保留已有的；不要为凑数补本人没说过的。` };
   }
   return undefined;
 }

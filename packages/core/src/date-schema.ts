@@ -1,4 +1,5 @@
 import { withCourse } from "./task-title";
+import { inRoughWindow } from "./rough-dates";
 
 /**
  * Dates a person's own documents state — class meetings, quiz and homework dates, exams, deadlines.
@@ -126,6 +127,13 @@ export function quoteSupportsDate(date: string, quote: string): boolean {
   const q = arabicDayNumbers(quote.toLowerCase());
   if (new RegExp(`(^|[^0-9])0?${month}\\s*[/\\-.]\\s*0?${day}(?![0-9])`).test(q)) return true;
   if (new RegExp(`0?${month}\\s*月\\s*0?${day}`).test(q)) return true; // i18n-ignore
+  // 「11 月底」「11月末」, 「年底」 and 「end of November」 name the month's last day (2026-11-12 replay: 「11 月底前投出」 was refused three
+  // rounds running, and the interview asked for the date each time though the person had given it).
+  if (day === new Date(Date.UTC(Number(date.slice(0, 4)), month, 0)).getUTCDate()) {
+    if (new RegExp(`(^|[^0-9])0?${month}\\s*月\\s*(底|末)`).test(q)) return true; // i18n-ignore
+    if (month === 12 && /年(底|末)/u.test(q)) return true; // i18n-ignore
+    if (new RegExp(`end\\s+of\\s+(${MONTHS[month - 1]!}|${MONTH_NAMES[month - 1]!})`).test(q)) return true;
+  }
   for (const name of [MONTHS[month - 1]!, MONTH_NAMES[month - 1]!]) {
     if (new RegExp(`(^|[^a-z])${name}[a-z]*\\.?\\s*0?${day}(?![0-9])`).test(q)) return true;
     if (new RegExp(`(^|[^0-9])0?${day}(st|nd|rd|th)?\\s*(of\\s+)?${name}`).test(q)) return true;
@@ -203,8 +211,10 @@ export const RELATIVE_DAY_WORDS = /今天|今晚|明天|明早|明晚|后天|下
 export const RELATIVE_NOTE = "relative:";
 
 /** The person's words support a date when they print it, or, in a reply, name it relative to the day the reply was written. */
+// A reply's rough words (「下周」「11 月底前」「这学期内」, 2026-11-14) support a day inside the window they name: the extraction writes
+// the window's last day, the app keeps it as the deadline, and the person is never asked for the exact day (`roughWindow`).
 const supportsDate = (date: string, quote: string, sourceRef: string, today: string) =>
-  quoteSupportsDate(date, quote) || (sourceRef.startsWith("reply-") && relativeDays(quote, today).has(date));
+  quoteSupportsDate(date, quote) || (sourceRef.startsWith("reply-") && (relativeDays(quote, today).has(date) || inRoughWindow(date, quote, today)));
 
 type Known = { sources: Record<string, string>; today: string };
 

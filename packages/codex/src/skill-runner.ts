@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { agentLanguageLine, runLocale, schemaForLocale, styleInstructions } from "./style";
 import { join } from "node:path";
+import { looksLooping, repairJsonBrackets } from "./json-repair";
 import { cleanAnswerStrings, designNoteText, instructionsText, tFor, type Locale } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
 import { routeForSkill, shiftEffort, tierForSkill, tierRoutes, type ModelRoute, type RouteTier, type SpendMode } from "./model-policy";
@@ -141,6 +142,11 @@ export type SkillRunOptions<T> = {
    * finished image is handed to `onImage` (base64 PNG) as it arrives; nothing is written by the runner itself.
    */
   allowImageGeneration?: boolean;
+  /**
+   * What the runtime's local compaction asks the model to keep when the thread nears its window (Codex `compact_prompt`, set for this
+   * thread only). Without it the runtime's own summary prompt is used. A remote compaction is opaque and ignores it.
+   */
+  compactPrompt?: string;
   onImage?: (image: { base64: string; revisedPrompt: string }) => void;
   onAudit: (audit: AnalysisAudit) => void;
   /** Called as the turn moves (throttled to twice a second while it writes); see `SkillProgress`. */
@@ -149,6 +155,12 @@ export type SkillRunOptions<T> = {
   onQueued?: (ahead: number) => void;
   /** Overrides the gate's priority, which otherwise follows the Skill (`priorityForSkill`). */
   priority?: ModelPriority;
+  /**
+   * The most this run may think, in tokens, where the route can be told (the developer's model: `<model>@think:<tokens>`, which the
+   * gateway turns into the provider's thinking budget). Other routes run as they are. Most of an extraction's output was its reasoning
+   * (76% in the sixth replay, 2026-11-13); capped at 2048 one measured run wrote 3.5k tokens in 39 s instead of 5.8k in 62 s.
+   */
+  thinkingBudget?: number;
   /** The account the gate counts this run against; otherwise the workspace the run is attributed to (`enterUsageWorkspace`). */
   tenant?: string;
   signal?: AbortSignal;
@@ -386,6 +398,12 @@ function withOptionalTools<T>(options: SkillRunOptions<T>, input: unknown, conte
       call: (name, args) => own?.specs.some((spec) => spec.name === name) ? own.call(name, args) : optional.tools.call(name, args) } } };
 }
 
+/** Two tool sets as one: a name of `own` answers from `own`, the rest from `extra`. */
+function mergedTools(own: SkillTools | undefined, extra: SkillTools): SkillTools {
+  return { specs: [...(own?.specs ?? []), ...extra.specs.filter((spec) => !own?.specs.some((mine) => mine.name === spec.name))],
+    call: (name, args) => own?.specs.some((spec) => spec.name === name) ? own.call(name, args) : extra.call(name, args) };
+}
+
 const WEB_TOOLS_INSTRUCTION = "Web access in this run is through the functions `web_search` (results: title, url, snippet) and `web_fetch` "
   + "(the page's text). Search, then fetch every page you rely on before citing it; cite only pages you fetched, by their exact url.";
 
@@ -414,7 +432,7 @@ const MAX_STALL_RETRIES = 2;
  * it back off, and reporting what the run used.
  */
 async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; mainModel?: boolean; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools;
-  onQueued?: (ahead: number) => void; priority?: ModelPriority; signal?: AbortSignal; agent?: AgentMode; tenant?: string; threadId?: string },
+  onQueued?: (ahead: number) => void; priority?: ModelPriority; signal?: AbortSignal; agent?: AgentMode; tenant?: string; threadId?: string; thinkingBudget?: number },
   body: (context: RunContext) => Promise<SkillRunResult<T>>): Promise<SkillRunResult<T>> {
   const queuedAt = Date.now();
   const timing: RunTiming = { laneMs: 0, gateMs: 0, tenant: options.tenant ?? tenantOf(currentUsageWorkspace()) ?? "-" };
@@ -500,7 +518,14 @@ async function releaseSkill(client: CodexRpcBoundary, path: string): Promise<voi
   if (entry.restore) await setNativeSkill(client, path, false);
 }
 
-async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; mainModel?: boolean; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools },
+/** The developer's model's thread provider (`threadProvider` names it `crossline-<id>`), the one route that understands `@think:`. */
+const SPONSOR_THREAD_PROVIDER = "crossline-sponsor";
+/** The provider with its model named to think at most `budget` tokens, when it is the developer's model and no setting is named yet. */
+export function thinkingCapped(provider: ThreadProvider, budget: number | undefined): ThreadProvider {
+  return budget && provider.id === SPONSOR_THREAD_PROVIDER && !provider.model.includes("@think:") ? { ...provider, model: `${provider.model}@think:${budget}` } : provider;
+}
+
+async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; mainModel?: boolean; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools; thinkingBudget?: number },
   body: (context: RunContext) => Promise<SkillRunResult<T>>, timing: RunTiming): Promise<SkillRunResult<T>> {
   const startedAt = Date.now();
   const spendMode = await currentSpendMode();
@@ -509,7 +534,7 @@ async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: stri
   const decision = options.provider ? { via: "provider" as const, provider: options.provider }
     : decideRoute(options.skillName, routing, options.mainModel ? { mainModel: true } : {});
   if (decision.via === "blocked") return { ok: false, blocker: { code: decision.code, message: decision.message }, audit: {} };
-  const provider = decision.via === "provider" ? decision.provider : undefined;
+  const provider = decision.via === "provider" ? thinkingCapped(decision.provider, options.thinkingBudget) : undefined;
   // A stronger look is a cost the person did not ask for: in economy mode the Skill keeps its own route.
   const wanted = provider ? { model: provider.model }
     : options.tier && spendMode === "normal" && process.env.CROSSLINE_MODEL_ROUTING?.trim().toLowerCase() !== "off"
@@ -659,6 +684,11 @@ export type ContinueTurnOptions<T> = {
   keepEarly?: (rejection: Error, output: unknown) => T | undefined;
   /** The tools the thread was started with (they are declared at `thread/start`; this answers their calls on the follow-up turn). */
   tools?: SkillTools;
+  /**
+   * The thread was started with the web (`SkillRunOptions.allowWebSearch`): on Codex its hosted search items are accepted on this turn too,
+   * and on a provider the stand-in `web_search`/`web_fetch` it was started with are answered (2026-11-12, the interview's follow-up turns).
+   */
+  allowWebSearch?: boolean;
   /** As `SkillRunOptions.tier`. */
   tier?: RouteTier;
 };
@@ -894,6 +924,7 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
     ...(options.connectors ? CONNECTORS_READ_ONLY : {}),
     ...(options.onPlan ? { "tools.update_plan.enabled": true } : {}),
     ...(options.askPerson ? ASK_PERSON_CONFIG : {}),
+    ...(options.compactPrompt ? { compact_prompt: options.compactPrompt } : {}),
     ...Object.fromEntries(Object.keys(mcp).map((key) => [`mcp_servers.${key}.enabled`, false])),
     ...ownOnly,
     // Another provider: defined for this thread only (memories are off above for every run).
@@ -1080,8 +1111,26 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
 
   /** Models routinely wrap JSON in a ```json fence even when told to return JSON only: a transport habit, not invented content. */
   const parse = (answer: string): unknown => {
-    try { return cleanAnswerStrings(JSON.parse(answer.trim().replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```$/, ""))); }
-    catch { throw withDetail(new Error("SKILL_SCHEMA_INVALID"), "the answer was not valid JSON (cut off, or it repeated itself); return the complete JSON object once"); }
+    const body = answer.trim().replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```$/, "");
+    try { return cleanAnswerStrings(JSON.parse(body)); }
+    catch (error) {
+      // One bracket wrong in a long answer is mended rather than regenerated (json-repair.ts); the content is still validated.
+      const mended = repairJsonBrackets(body, run.outputSchema);
+      if (mended !== undefined) {
+        console.log(JSON.stringify({ type: "skill.json_mended", skill: run.skillName, length: body.length }));
+        return cleanAnswerStrings(JSON.parse(mended));
+      }
+      // What went wrong and where, never the text: the answer is the person's report (2026-11-16, after replay 16 left nothing to read).
+      const position = Number((error instanceof Error ? error.message : "").match(/position (\d+)/)?.[1] ?? -1);
+      const looping = looksLooping(body);
+      const closed = /[}\]]$/.test(body);
+      console.log(JSON.stringify({ type: "skill.json_unparsed", skill: run.skillName, length: body.length, position, closed, looping }));
+      throw withDetail(new Error("SKILL_SCHEMA_INVALID"), looping
+        ? "the answer repeated the same passage over and over until it was cut off; write each field once and close the JSON object"
+        : position >= 0
+          ? `the answer was not valid JSON at character ${position} of ${body.length} (a quote inside a text not escaped as \\", or a bracket out of place); return the complete JSON object once`
+          : "the answer was not valid JSON (cut off, or a bracket out of place); return the complete JSON object once");
+    }
   };
 
   /** A silent turn is interrupted and the same prompt sent again, a couple of times; every other failure ends the run as before. */
@@ -1198,14 +1247,18 @@ function continueOnThread<T>(client: CodexRpcBoundary, threadId: string, message
     const audit: AnalysisAudit = { threadId };
     holdThread(client, threadId);
     const scope = openScope(client, options);
-    const unregister = options.tools ? registerAgentThread(client, threadId, toolAnswerer(options.tools)) : undefined;
+    // A thread started with the web on a provider was given the stand-in search functions at `thread/start`; their calls are answered here.
+    const web = options.allowWebSearch && context.provider ? context.webTools : undefined;
+    const tools = web ? mergedTools(options.tools, web) : options.tools;
+    const unregister = tools ? registerAgentThread(client, threadId, toolAnswerer(tools)) : undefined;
     try {
       if (threadRouteMoved(client, threadId, context)) fail("SKILL_THREAD_LOST");
       await requireLogin(scope, context);
       await resubscribe(client, scope, threadId);
       const output = await runTurnsUntilValid(client, scope, context, audit, {
         skillName: options.skillName, threadId, outputSchema: schemaForLocale(options.outputSchema, runLocale(options.locale, currentUsageWorkspace())),
-        allowedItemTypes: ["agentMessage", "reasoning", "userMessage", ...(options.tools ? ["dynamicToolCall"] : [])],
+        allowedItemTypes: ["agentMessage", "reasoning", "userMessage", ...(tools ? ["dynamicToolCall"] : []),
+          ...(options.allowWebSearch && !context.provider ? ["webSearch", "webSearchCall"] : [])],
         firstPrompt: message, ...(options.images?.length ? { images: options.images } : {}),
         validate: options.validateOutput, onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),
         ...(options.onProgress ? { onProgress: options.onProgress } : {}),

@@ -328,3 +328,36 @@ html:has(.portrait-page){background:var(--ds-bg)}
 .pt-claims-items .pt-claim-scale{margin-left:0;flex-wrap:wrap}
 .pt-claims-error{color:var(--risk-ink)}
 @media print{.pt-claims{display:none}}
+
+/* 「职业方向」 and 「假设」 (2026-11-12, contract B). */
+.pt-career{display:grid;gap:10px;padding-top:12px;border-top:1px solid var(--pt-track)}
+.pt-career header{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline}
+.pt-career header small{font-size:13px;color:var(--pt-muted)}
+.pt-table-wrap{overflow-x:auto}
+.pt-requirements{width:100%;border-collapse:collapse;font-size:13px;line-height:1.5}
+.pt-requirements caption{text-align:left;font-size:12px;color:var(--pt-muted);padding-bottom:4px}
+.pt-requirements th,.pt-requirements td{padding:5px 8px;border-bottom:1px solid var(--pt-track);text-align:left;vertical-align:top}
+.pt-requirements thead th{font-size:12px;color:var(--pt-muted);font-weight:400}
+.pt-requirements td:nth-child(2){font-variant-numeric:tabular-nums;white-space:nowrap}
+.pt-has{display:inline-block;padding:0 6px;border:1px solid var(--pt-ink);white-space:nowrap}
+.pt-has[data-has="partial"]{border-style:dashed}
+.pt-has[data-has="no"]{border-color:var(--pt-muted);color:var(--pt-muted)}
+.pt-sources{margin:0;padding-left:18px;font-size:12px;overflow-wrap:anywhere}
+.pt-trial{display:grid;gap:6px;padding:10px 14px;border:2px solid var(--pt-ink)}
+.pt-trial small{font-size:12px;color:var(--pt-muted)}
+.pt-trial p{margin:0;font-size:14px;line-height:1.6}
+.pt-trial dl{margin:0;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px}
+.pt-trial dt{color:var(--pt-muted);font-size:12px}
+.pt-trial dd{margin:0;line-height:1.5}
+.pt-hypothesis-group{display:grid;gap:6px}
+.pt-hypotheses{margin:0;padding:0;list-style:none;display:grid;gap:8px}
+.pt-hypotheses li{display:grid;gap:4px;padding:8px 12px;border:1px solid var(--pt-track);border-left:4px solid var(--pt-track)}
+.pt-hypotheses li[data-status="supported"]{border-left-color:var(--pt-ink)}
+.pt-hypotheses li[data-status="refuted"]{border-left-style:dashed}
+.pt-hypotheses li[data-fits]{border:2px solid var(--pt-ink);border-left-width:6px}
+.pt-hypotheses header{display:flex;gap:8px;align-items:baseline}
+.pt-hypotheses p{margin:0;font-size:14px;line-height:1.6}
+.pt-hypotheses small{font-size:12px;color:var(--pt-muted)}
+.pt-basis{margin:0;padding-left:18px;font-size:13px;color:var(--pt-muted)}
+.pt-fits{font-size:12px}
+@media (max-width:600px){.pt-trial dl{grid-template-columns:1fr}}

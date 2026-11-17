@@ -99,3 +99,12 @@ test("a model id with its own colon is not split into model and effort", () => {
   expect(parseRoute("qwen3:8b:high")).toEqual({ model: "qwen3:8b", effort: "high" });
   expect(parseRoute("gpt-5.6-sol:medium")).toEqual({ model: "gpt-5.6-sol", effort: "medium" });
 });
+
+test("a run asked to think less names the cap only on the developer's model, and never twice", async () => {
+  const { thinkingCapped } = await import("./skill-runner");
+  const sponsor = { id: "crossline-sponsor", model: "deepseek-ai/DeepSeek-V4.1-Flash", definition: {} };
+  expect(thinkingCapped(sponsor, 2048).model).toBe("deepseek-ai/DeepSeek-V4.1-Flash@think:2048");
+  expect(thinkingCapped({ ...sponsor, model: "m@think:off" }, 2048).model).toBe("m@think:off");
+  expect(thinkingCapped(sponsor, undefined).model).toBe("deepseek-ai/DeepSeek-V4.1-Flash");
+  expect(thinkingCapped({ ...sponsor, id: "crossline-own" }, 2048).model).toBe("deepseek-ai/DeepSeek-V4.1-Flash");
+});

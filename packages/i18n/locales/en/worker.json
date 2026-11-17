@@ -119,14 +119,6 @@
   "Codex 运行时不可用。": "The Codex runtime is unavailable.",
   "找不到这个工作区的所有者。": "This workspace's owner cannot be found.",
   "请先写点什么，或选一个选项。": "Write something first, or pick an option.",
-  "开始之前还想再问几件事。": "A few more things before we start.",
-  "还有哪条主线、哪份材料没提到？": "Which track or material haven't you mentioned yet?",
-  "哪条主线你最想先说清楚：现在在做什么、想做成什么样？": "Which track do you most want to explain first: what are you doing in it now, and what do you want it to become?",
-  "说说你现在的处境：这几周最占你精力、最让你担心的是什么？": "Tell me where you stand: what has taken most of your energy these weeks, and what worries you most?",
-  "做这些事，你最终想得到什么？": "What do you ultimately want to get from all this?",
-  "一天里什么时候状态最好，什么事最耗你？": "When in the day are you at your best, and what drains you most?",
-  "还有哪个项目的截止日、交付物或验收方式没说清楚？": "Which project's deadline, deliverable or acceptance is still unclear?",
-  "开始使用前，还需要本人回答下面几项。": "Before you start, a few things below need your answer.",
   "今天该到：{{who}}的{{title}}": "Due to arrive today: {{title}} from {{who}}",
   "今天该到：{{title}}": "Due to arrive today: {{title}}",
   "今天到期：{{title}}": "Due today: {{title}}",
@@ -854,7 +846,6 @@
   "超出月度上限 {{amount}}。": "Over the monthly limit by {{amount}}. ",
   "在月度上限内，还剩 {{amount}}。": "Within the monthly limit, {{amount}} to spare. ",
   "考试 {{day}} 已过，备考不再安排": "Exam on {{day}} has passed; preparation is no longer scheduled",
-  "说一件你这几年做过、现在想起来还挺得意的事？小事也行。": "Tell one thing you did in the last few years that you are still a little proud of. A small thing is fine.",
   "邮箱里收到 {{from}} 的邮件「{{subject}}」，可能就是在等的{{who}}的「{{title}}」。到了吗？": "A mail from {{from}}, \"{{subject}}\", may be {{who}}'s \"{{title}}\" you are waiting for. Has it arrived?",
   "邮箱里收到 {{from}} 的邮件「{{subject}}」，可能就是在等的「{{title}}」。到了吗？": "A mail from {{from}}, \"{{subject}}\", may be the \"{{title}}\" you are waiting for. Has it arrived?",
   "到了": "It has arrived",
@@ -902,6 +893,5 @@
   "日期": "Date",
   "每周安排": "Weekly arrangements",
   "没写日期的项": "Items with no date",
-  "关于日期的问题": "Questions about dates",
-  "这一档的访谈轮数已用完：可以开始使用，剩下的问题会放进待确认，随时回来接着答。": "This tier's interview rounds are used up: you can start using the app. The remaining questions go to Decisions; come back to them any time."
+  "关于日期的问题": "Questions about dates"
 }

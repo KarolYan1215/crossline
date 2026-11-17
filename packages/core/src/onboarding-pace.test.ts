@@ -1,22 +1,34 @@
-import { describe, expect, it } from "vitest";
-import { capacityConflict, timelineDeadlines, checkInsight, fixedScheduleLines, interviewAbstract, lineWeights, plainTerms, portraitConfirmedByInsights, progressLines, progressView, readTurnProgress, skeletonDraft, withPlainTerms } from "./onboarding-pace";
+import { describe, expect, it, test } from "vitest";
+import { capacityConflict, timelineDeadlines, checkInsight, fixedScheduleLines, interviewAbstract, lineWeights, portraitConfirmedByInsights, progressLines, progressView, readTurnProgress, skeletonDraft,
+  DISCLOSURE_PLACEHOLDER, SAFETY_ROUND_PLACEHOLDER, LESSON_QUESTION, NEXT_ACCEPTED, disclosureEchoes, disclosureWords, interviewerWords, lessonAnswer, ownWords, nextTaken, sensitiveReplies, wantsToStart, withoutDisclosures } from "./onboarding-pace";
 import { DEADLINE_GUESS_PREFIX, answeredGapFacts, profileGaps } from "./profile-gaps";
 import { interviewChecklist, interviewComplete, interviewOwnedOpen } from "./interview-checklist";
 
 const replies = { "reply-2": "最投入的两次都是和同学一起赶比赛项目，熬夜也不累。", "reply-6": "底座是我一个人做的研究，常常一整天不说话。" };
 
 describe("观察卡", () => {
-  it("引用两条不同回答且原文对得上时保留", () => {
-    const kept = checkInsight({ text: "你说最投入的时候是和人一起赶东西；底座主线是一个人做的研究。",
+  const falsifier = "如果一个人赶的项目也让你同样投入，这条就不准";
+  it("有证伪条件、每段引文都在所引回答里、连着至少两条不同的回答时保留", () => {
+    const kept = checkInsight({ text: "有人等着结果的事更容易让你投入。", falsifier,
       refs: [{ replyId: "reply-2", quote: "和同学一起赶比赛项目" }, { replyId: "reply-6", quote: "一个人做的研究" }] }, replies, "energy");
     expect(kept?.refs).toHaveLength(2);
+    expect(kept?.falsifier).toBe(falsifier);
+    // 只引一条回答的不留，同一条回答引两段也不算连接（2026-11-12：观察要连接本人说过的事，不读一条回答缺什么）。
+    expect(checkInsight({ text: "x", falsifier, refs: [{ replyId: "reply-2", quote: "熬夜也不累" }] }, replies, "lines")).toBeUndefined();
+    expect(checkInsight({ text: "x", falsifier, refs: [{ replyId: "reply-2", quote: "熬夜也不累" }, { replyId: "reply-2", quote: "赶比赛项目" }] }, replies, "lines")).toBeUndefined();
   });
-  it("引用不在原文、只引一条回答、或不在深度阶段时丢掉", () => {
+  it("引文不在原文、没有证伪条件、没有引文、空文本或在单条主线访谈里时丢掉", () => {
     const refs = [{ replyId: "reply-2", quote: "和同学一起赶比赛项目" }, { replyId: "reply-6", quote: "一个人做的实验" }];
-    expect(checkInsight({ text: "x", refs }, replies, "energy")).toBeUndefined();
-    expect(checkInsight({ text: "x", refs: [refs[0]!, { replyId: "reply-2", quote: "熬夜也不累" }] }, replies, "energy")).toBeUndefined();
-    expect(checkInsight({ text: "x", refs: [refs[0]!, { replyId: "reply-6", quote: "一个人做的研究" }] }, replies, "lines")).toBeUndefined();
-    expect(checkInsight({ text: "", refs: [] }, replies, "compass")).toBeUndefined();
+    expect(checkInsight({ text: "x", falsifier, refs }, replies, "energy")).toBeUndefined();
+    expect(checkInsight({ text: "x", falsifier: " ", refs: [refs[0]!] }, replies, "energy")).toBeUndefined();
+    expect(checkInsight({ text: "x", falsifier, refs: [] }, replies, "energy")).toBeUndefined();
+    expect(checkInsight({ text: "x", falsifier, refs: [refs[0]!] }, replies, "details")).toBeUndefined();
+    expect(checkInsight({ text: "", falsifier, refs: [] }, replies, "compass")).toBeUndefined();
+  });
+  it("外部数据只留带网址的", () => {
+    const kept = checkInsight({ text: "x", falsifier, refs: [{ replyId: "reply-2", quote: "熬夜也不累" }, { replyId: "reply-6", quote: "一个人做的研究" }],
+      external: [{ text: "内隐与外显动机相关 r = .13", url: "https://www.frontiersin.org/articles/10.3389/fpsyg.2014.00826/full" }, { text: "没有出处", url: "某论文" }] }, replies, "compass");
+    expect(kept?.external).toEqual([{ text: "内隐与外显动机相关 r = .13", url: "https://www.frontiersin.org/articles/10.3389/fpsyg.2014.00826/full" }]);
   });
   it("三个深度阶段各有一条「准」才算确认画像", () => {
     const at = "2026-10-19T00:00:00Z";
@@ -37,9 +49,15 @@ describe("进度账", () => {
     expect(readTurnProgress({ part: "nope" })).toBeUndefined();
     expect(progressView(undefined, "details").index).toBe(5);
   });
+  it("说过的张力记在进度里，下一轮读回（2026-11-15）", () => {
+    const progress = readTurnProgress({ part: "energy", covered: [], open: [], partDone: false, next: "", said: ["和人一起才投入", " "] });
+    expect(progress?.said).toEqual(["和人一起才投入"]);
+    expect(progressLines(progress)).toContain("已经对本人说过的张力：和人一起才投入");
+    expect(readTurnProgress({ part: "energy", covered: [], open: [], partDone: false, next: "" })).not.toHaveProperty("said");
+  });
   it("最远到过的部分记下来：回到前面的部分补问一题，不算重新开始（W-235）", () => {
-    expect(progressView(undefined, "compass", "v2", "quick", ["narrative", "compass", "lines", "compass"])).toMatchObject({ index: 2, total: 6, reached: 6 });
-    expect(progressView(undefined, "compass", "v2", "quick", ["narrative", "", "nope"])).toMatchObject({ index: 2, reached: 2 });
+    expect(progressView(undefined, "compass", "v2", ["narrative", "compass", "lines", "compass"])).toMatchObject({ index: 2, total: 6, reached: 6 });
+    expect(progressView(undefined, "compass", "v2", ["narrative", "", "nope"])).toMatchObject({ index: 2, reached: 2 });
   });
   it("部分编号只有一个来源：按本轮的阶段数，模型进度记录说的是别的部分时不算（W-186）", () => {
     // The round is in the compass part; the model's own record still names the lines part, the sixth of six in the newer order.
@@ -48,8 +66,8 @@ describe("进度账", () => {
     // The same part: its record counts.
     const own = readTurnProgress({ part: "compass", covered: ["工作观"], open: ["人生观"], partDone: false, next: "" });
     expect(progressView(own, "compass", "v2")).toMatchObject({ index: 2, total: 6, clear: 1, of: 2 });
-    // The thorough tier's details part makes seven, wherever the count is shown.
-    expect(progressView(undefined, "narrative", "v2", "thorough")).toMatchObject({ index: 1, total: 7 });
+    // No tier adds a details part any more (2026-11-12): six, whatever depth an account once stored.
+    expect(progressView(undefined, "narrative", "v2")).toMatchObject({ index: 1, total: 6 });
   });
   it("摘要不超过十五行", () => {
     const lines = Array.from({ length: 6 }, (_, index) => ({ id: `l${index}`, label: `线${index}`, description: "描述", goal: "" }));
@@ -124,21 +142,6 @@ describe("项目细节不再拖住访谈", () => {
   });
 });
 
-describe("the app's own terms", () => {
-  it("are put into everyday words wherever the interview speaks to the person", () => {
-    expect(plainTerms("「上班」是硬约束；左栏已有 3 个候选定语。")).toBe("「上班」是固定安排；左栏已有 3 个候选词。");
-    const round = withPlainTerms({ reply: "定语选好了吗？", questions: [{ id: "q", text: "哪些定语合适？", kind: "multi" as const, allowOther: true,
-      identityId: "", projectId: "", options: [{ id: "a", label: "硬约束", detail: "定语" }] }] });
-    expect(round.reply).toBe("形容词选好了吗？");
-    expect(round.questions[0]!.options[0]).toEqual({ id: "a", label: "固定安排", detail: "形容词" });
-  });
-  // 2026-10-31 walkthrough C: an option with no detail ended the interview with 「Cannot read properties of undefined (reading 'replace')」.
-  it("leave out what a round left out", () => {
-    const options = [{ id: "a", label: "硬约束" }] as unknown as Array<{ id: string; label: string; detail: string }>;
-    const round = withPlainTerms({ reply: "好", questions: [{ id: "q", text: "选一个", kind: "single" as const, allowOther: true, identityId: "", projectId: "", options }] });
-    expect(round.questions[0]!.options[0]).toEqual({ id: "a", label: "固定安排", detail: undefined });
-  });
-});
 it("counts a project's deadline once when one of its items falls on it, and names what a course's deadline is (W-240)", () => {
   const deadlines = timelineDeadlines([
     { name: "MoS₂ 存内计算研究", deadline: "2026-12-01（第一阶段器件仿真交导师查看）", items: [{ date: "2026-12-01", title: "MoS₂ 存内计算第一阶段器件仿真提交导师" }] },
@@ -151,4 +154,69 @@ it("counts a project's deadline once when one of its items falls on it, and name
     { date: "2026-11-21", title: "ECE 555 作业 5" },
     { date: "2026-11-20", title: "ECE 548 期中考试" }
   ]);
+});
+
+it("the replies no model reads again: a disclosure answered as one, its answer, and one naming self-harm no round has answered yet", () => {
+  const user = (seq: number, text: string) => ({ role: "user", seq, content: { text } });
+  const round = (seq: number, safety: boolean) => ({ role: "assistant", seq, content: { reply: "好。", safety } });
+  const topic = [user(1, "我在写综述，题目是大学生自杀预防。"), round(2, false), user(3, "下周交。")];
+  expect([...sensitiveReplies(topic)]).toEqual([]);
+  const own = [user(1, "大二自残过。"), round(2, true), user(3, "现在没有了。"), round(4, false), user(5, "周末在家。")];
+  expect([...sensitiveReplies(own)].sort()).toEqual(["reply-1", "reply-3"]);
+  // The extraction reads a reply beside its round: before the round says what it was, it is held back.
+  expect([...sensitiveReplies([user(1, "有过不想活的念头。")])]).toEqual(["reply-1"]);
+  const shown = withoutDisclosures(own, sensitiveReplies(own));
+  expect(shown.map((message) => (message.content as { text?: string; reply?: string }).text ?? (message.content as { reply?: string }).reply))
+    .toEqual([DISCLOSURE_PLACEHOLDER, SAFETY_ROUND_PLACEHOLDER, DISCLOSURE_PLACEHOLDER, "好。", "周末在家。"]);
+});
+
+it("a text echoes a disclosure by four Chinese characters only it said, not by words the other replies also hold", () => {
+  const disclosure = ["大二那段时间压力很大，没人可说，晚上睡不着。"];
+  const ordinary = ["那段时间我在实习，晚上睡不着就写代码。"];
+  expect(disclosureEchoes("你那时没人可说，后来转了专业。", disclosure, ordinary)).toEqual(["没人可说"]);
+  expect(disclosureEchoes("那段时间你晚上睡不着。", disclosure, ordinary)).toEqual([]);
+  expect(disclosureEchoes("压力很大没人可说的时候", disclosure, ordinary)).toEqual(["压力很大没人可说"]);
+  expect(disclosureEchoes("Nobody would listen to me then.", ["back then nobody would listen to me"], [])).toEqual(["nobody would listen to", "would listen to me"]);
+});
+
+it("a disclosure is compared by the person's own words where it is, never by the question text or the talk around it", () => {
+  // Replay 16: the round of the disclosure also asked the week, and the round after it asked the goal; both came back as echoes.
+  expect(ownWords("【到现在最难的一段是什么时候？】补充：有过一段很低落的时候，不想多聊。\n【每周哪几天固定？】选择：工作日\n好，往下。"))
+    .toEqual(["有过一段很低落的时候，不想多聊。", "好，往下。"]);
+  const user = (seq: number, text: string) => ({ role: "user", seq, content: { text } });
+  const messages = [user(1, "【最难的一段？】补充：有过不想活的念头，现在没有了。\n【每周哪天空？】补充：周二和周末全天可以自己安排。"),
+    { role: "assistant", seq: 2, content: { reply: "谢谢你愿意说出来。", safety: true, questions: [{ text: "「学生」想成为怎样的学生？", options: [{ label: "学业扎实" }] }] } },
+    user(3, "【「学生」想成为怎样的学生？】选择：学业扎实\n【这周要做什么？】补充：本周内要交一版方案。"),
+    { role: "assistant", seq: 4, content: { reply: "方案放在周二。", questions: [{ text: "周二几点开始？" }] } }];
+  const hidden = new Set(["reply-1", "reply-3"]);
+  expect(disclosureWords(messages, hidden)).toEqual(["有过不想活的念头，现在没有了。"]);
+  expect(interviewerWords(messages)).toEqual(["「学生」想成为怎样的学生？", "学业扎实", "方案放在周二。", "周二几点开始？"]);
+  const echoes = (text: string) => disclosureEchoes(text, disclosureWords(messages, hidden), interviewerWords(messages));
+  expect(echoes("周二整天可以自己安排，本周内要交一版方案；想成为怎样的学生你选了学业扎实。")).toEqual([]);
+  expect(echoes("你说现在没有了")).toEqual(["现在没有了"]);
+  // Without a self-harm word the disclosure reply counts by all its own words; a reply after the safety round, by none of them.
+  const plain = [user(1, "【最难的一段？】补充：那段时间压力很大没人可说。"), { role: "assistant", seq: 2, content: { reply: "谢谢你愿意说出来。", safety: true } },
+    user(3, "现在好多了，周末在家。")];
+  expect(disclosureWords(plain, new Set(["reply-1", "reply-3"]))).toEqual(["那段时间压力很大没人可说。"]);
+});
+
+it("the lesson question's answer: only 「可以聊聊」 is a yes", () => {
+  expect(lessonAnswer(`【${LESSON_QUESTION.text}】选择：可以聊聊`)).toBe("yes");
+  expect(lessonAnswer(`【${LESSON_QUESTION.text}】选择：先不聊`)).toBe("no");
+  expect(lessonAnswer("我想先说说别的。")).toBe("no");
+});
+
+test("the person took the proposed step only when a line of the reply is the button's own (2026-11-15)", () => {
+  expect(nextTaken(NEXT_ACCEPTED)).toBe(true);
+  expect(nextTaken(`【项目 A 的图表清单在哪？】选择：师兄给的文档\n${NEXT_ACCEPTED}`)).toBe(true);
+  expect(nextTaken("Go on.")).toBe(true);
+  expect(nextTaken("好，往下之前我想先说一下周末的事。")).toBe(false);
+  expect(nextTaken("周末一般在家。")).toBe(false);
+});
+
+test("the person wants to start when their own words say so; a picked label or a question about a day does not count (replay 16)", () => {
+  for (const said of ["差不多了吧，能直接排一周吗", "差不多了吧，能先排一周吗。", "能开始用了吗？", "【题目】补充：就是想排一周，别的先不聊。",
+    "先用起来再说", "Can we just start?"]) expect(wantsToStart(said)).toBe(true);
+  for (const said of ["【只能选一边时，更看重哪个？】点选：3/5（两边差不多）", "这个能排在周六吗", "【成长过程中你敬佩谁？】补充：跟排日程有关系吗。",
+    "好，往下。", "周末一般在家。"]) expect(wantsToStart(said)).toBe(false);
 });

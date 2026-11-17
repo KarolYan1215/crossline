@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { PROFILE_ITEMS, type InstrumentAnswers, type ItemAnswer } from "./profile-instruments";
 import {
-  claimIdOf, exportableClaims, instrumentClaims, instrumentReadings, readClaimStatus, reportSections, resolveWrittenClaims
+  claimIdOf, exportableClaims, instrumentClaims, instrumentLevels, instrumentReadings, readClaimStatus, reportSections, resolveWrittenClaims
 } from "./profile-claims";
 import { WRITTEN_CLAIMS_SCHEMA, claimProblem, readPrivacyChoices, type WrittenClaim } from "./profile-report";
 import { PORTRAIT_SCHEMA } from "./portrait";
@@ -48,6 +48,14 @@ describe("the cards' claims", () => {
     const lines = instrumentReadings(answersFor("swls", () => 5));
     expect(lines).toEqual(["生活满意度：偏高（5 题点选）"]);
     expect(lines.join("")).not.toMatch(/\d+\/100/);
+  });
+
+  test("the person's page gets each scored dimension's level in words, nothing for a dimension left half answered", () => {
+    expect(instrumentLevels(answersFor("swls", () => 1))).toEqual([{ label: "生活满意度", level: "偏低" }]);
+    const levels = instrumentLevels(answersFor("mini_ipip", () => 3));
+    expect(levels).toHaveLength(5);
+    expect(levels.every((item) => item.level === "中等" && !/\d/u.test(item.label + item.level))).toBe(true);
+    expect(instrumentLevels({})).toEqual([]);
   });
 });
 

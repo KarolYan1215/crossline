@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
   AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, INTERVIEW_SETTINGS, mergeInterviewSettings, readInterviewSettings, DEEP_SECTIONS, EMPTY_PROFILE_MODEL, PROFILE_SECTIONS, PROFILE_SECTIONS_SETTING, mergeProfileSections,
-  type ProfileSection, type SectionRecord, GOAL_EDITS_SETTING, SECTION_EMPTY_RUNS_MAX, sectionClosed, citationWarnings, duplicateAttributes, mergeDateExtractions,
+  type ProfileSection, type SectionRecord, GOAL_EDITS_SETTING, SECTION_EMPTY_RUNS_MAX, sectionClosed, citationWarnings, duplicateAttributes, ATTRIBUTE_CANDIDATES_MAX, mergeDateExtractions,
   resolveAvailability, sanitizeDateExtraction, withContentIds, withoutDecidedDates, withoutOffHours,
   type DateDrop, type DateExtraction, type OnboardingExtraction, type PendingGoalEdit, type ProfileModel, type StoredLineProfile,
-  PROFILE_INSTRUMENTS_SETTING, mergeInstrumentAnswers, readInstrumentAnswers
+  PROFILE_INSTRUMENTS_SETTING, mergeInstrumentAnswers, mergeProfileInsights, readInstrumentAnswers, applyPointChanges, readPoints, numberNewHypotheses
 } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
@@ -27,7 +27,9 @@ export function personTimeZone(store: CrosslineStore, workspaceId: string): stri
     const zone = raw ? (JSON.parse(raw) as { timeZone?: unknown }).timeZone : undefined;
     if (typeof zone === "string" && zone) return zone;
   } catch { /* an unreadable setting falls back to the default zone */ }
-  return "America/Chicago";
+  // The same default the web uses (`effectiveSchedulePreferences`): the server's configured zone first. The 2026-11-12 replay 4 had no
+  // device zone, read America/Chicago, and researched US internships (the Federal Reserve) for a student in China.
+  return process.env.CROSSLINE_TIME_ZONE?.trim() || "America/Chicago";
 }
 
 export type PersistContext = {
@@ -41,6 +43,11 @@ export type PersistContext = {
   reread: boolean;
   /** The portrait's sections this run was to rewrite whole because their stage is over, and whether it was to write the synthesis. */
   profileTask?: { finalize: ProfileSection[]; synthesize: boolean };
+  /**
+   * The points rules (2026-11-12): a section is written only when its stage is over (or the synthesis when owed); what the replies settle
+   * until then goes into the points ledger (`pointChanges`).
+   */
+  rules?: boolean;
 };
 
 export function readSectionRecords(store: CrosslineStore, workspaceId: string): Partial<Record<ProfileSection, SectionRecord>> {
@@ -55,7 +62,8 @@ export function persistExtraction(store: CrosslineStore, workspaceId: string, ex
   // A line's own interview adds to the facts but does not touch the person's portrait.
   if (!sessionId.startsWith("line-") && context.profileTask) {
     const task = context.profileTask;
-    const allowed = new Set<ProfileSection>([...DEEP_SECTIONS, ...(task.synthesize ? ["synthesis" as const] : [])]);
+    // Under the points rules a stage's view is written once, when it is over: not reworded every run while the stage is under way.
+    const allowed = new Set<ProfileSection>([...(context.rules ? task.finalize : DEEP_SECTIONS), ...(task.synthesize ? ["synthesis" as const] : [])]);
     const sections = extraction.profileSections ?? {};
     if (PROFILE_SECTIONS.some((section) => sections[section] && allowed.has(section)))
       store.setSetting(workspaceId, "profile.model", JSON.stringify(mergeProfileSections(readProfileModel(store, workspaceId), sections, allowed)));
@@ -75,6 +83,25 @@ export function persistExtraction(store: CrosslineStore, workspaceId: string, ex
     }
     store.setSetting(workspaceId, PROFILE_SECTIONS_SETTING, JSON.stringify(records));
   }
+  // The points ledger (the points rules): added, revised and retracted points, each resting on the person's words; a change that does not
+  // hold is left out (`applyPointChanges`). A line's own interview never touches it.
+  if (context.rules && !sessionId.startsWith("line-") && extraction.pointChanges?.length) {
+    const profile = readProfileModel(store, workspaceId);
+    const { points } = applyPointChanges(readPoints(profile.points), extraction.pointChanges, now);
+    store.setSetting(workspaceId, "profile.model", JSON.stringify({ ...profile, points }));
+  }
+  // The hypothesis log, career directions and dimension notes (contract B): the run sends only what is new or changed, merged by id
+  // (`mergeProfileInsights`, 2026-11-12); what it did not name stays. The person's 准/不准 on a hypothesis stays with its id. Written by
+  // a lane of its own (`EXTRACT_LANE_KEYS.insights`), which owes no portrait section; a line's own interview never touches them.
+  const { hypotheses, careers, dimensions, dropCareers } = extraction;
+  if (!sessionId.startsWith("line-") && (hypotheses?.length || careers?.length || dimensions?.length || dropCareers?.length)) {
+    const profile = readProfileModel(store, workspaceId);
+    // New hypotheses take the log's own numbering (`h<n>`), never a card's (`c<seq>`).
+    const numbered = numberNewHypotheses(profile.hypotheses ?? [], hypotheses ?? [], careers ?? []);
+    store.setSetting(workspaceId, "profile.model", JSON.stringify({ ...profile,
+      ...mergeProfileInsights(profile, { ...(hypotheses ? { hypotheses: numbered.hypotheses } : {}), ...(careers ? { careers: numbered.careers } : {}), ...(dimensions ? { dimensions } : {}),
+        ...(dropCareers ? { dropCareers } : {}) }, now) }));
+  }
   // Card items the person answered in words: scored as `mapped` only for items still waiting to be read (a tap is never replaced).
   if (!sessionId.startsWith("line-") && extraction.itemScores?.length) {
     const kept = readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING));
@@ -83,17 +110,21 @@ export function persistExtraction(store: CrosslineStore, workspaceId: string, ex
     if (mapped.length) store.setSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING, JSON.stringify(mergeInstrumentAnswers(kept, mapped)));
   }
   // Each line's personal description and attribute candidates, kept by line so a later run or a line's own interview refines one line
-  // only. An empty candidate list keeps those on record; new ones replace them, except the attributes split from the adopted goal.
+  // only. New candidates come first and the ones on record follow, minus those a new one restates, up to the most a line holds: replay 13
+  // (2026-11-14) ended with one candidate, 「务实」, because a later run's one-word list replaced the whole list the person had picked from.
+  // The attributes split from the adopted goal always stay.
   if (extraction.lineProfiles?.length) {
     let current: Record<string, StoredLineProfile> = {};
     try { current = JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") as Record<string, StoredLineProfile>; } catch { /* rebuilt below */ }
     for (const line of extraction.lineProfiles) {
       const previous = current[line.lineId] ?? {};
       const fresh = line.attributeCandidates ?? [];
-      const fromGoal = (previous.attributes ?? []).filter((item) => item.sourceRef === "goal"
-        && !duplicateAttributes([...fresh.map((other) => other.text), item.text]).some((pair) => pair.includes(item.text)));
+      const restated = (item: { text: string }) => duplicateAttributes([...fresh.map((other) => other.text), item.text]).some((pair) => pair.includes(item.text));
+      const onRecord = (previous.attributes ?? []).filter((item) => !restated(item));
+      const fromGoal = onRecord.filter((item) => item.sourceRef === "goal");
+      const others = onRecord.filter((item) => item.sourceRef !== "goal").slice(0, Math.max(0, ATTRIBUTE_CANDIDATES_MAX - fresh.length - fromGoal.length));
       current[line.lineId] = fresh.length
-        ? { description: line.description || previous.description || "", attributes: [...fresh, ...fromGoal] }
+        ? { description: line.description || previous.description || "", attributes: [...fresh, ...others, ...fromGoal] }
         : { ...previous, description: line.description || previous.description || "" };
     }
     store.setSetting(workspaceId, "lines.profiles", JSON.stringify(current));

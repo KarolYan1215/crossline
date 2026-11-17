@@ -4,7 +4,7 @@ import { get } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { accountConcurrency, breakdownOfResponsesUsage, codexProcessEnvironment, flushMeteredUsage, recordMeteredUsage, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, modelGateStatus, setDesignNoteProvider, setInstructionsProvider, setEffortPreferenceProvider, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
+import { accountConcurrency, breakdownOfResponsesUsage, codexProcessEnvironment, flushMeteredUsage, recordMeteredUsage, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, installUndiciAssertionGuard, modelGateStatus, setDesignNoteProvider, setInstructionsProvider, setEffortPreferenceProvider, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
 import { containerMemory, containerPeak, createCollectMemory, heldMemory } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
@@ -80,8 +80,9 @@ import { createMilestoneConversation, createMilestoneProposer, createRelationRev
 import { createGoalBackplanner, milestonesAwaitingBackplan } from "./goal-backplanner";
 import { createPlanExplainer } from "./plan-explainer-runner";
 import { createWeeklyInsight } from "./weekly-insight-runner";
-import { createOnboardingSessionRunner } from "./onboarding-session";
-import { createOnboardingExtractor, extractionRunning, requestExtraction } from "./onboarding-extract";
+import { createOnboardingSessionRunner, finishInterview } from "./onboarding-session";
+import { researchRunnerFor } from "./onboarding-research";
+import { createOnboardingExtractor, EXTRACT_LANES, extractionRunning, requestExtraction } from "./onboarding-extract";
 import { extractText, reextractForLayout } from "./extract";
 import { WHISPER_MODEL, createTranscriber, createWhisperEngine, modelsDirectory } from "./transcribe";
 import { recordingPass, recordingsOn, transcribeConcurrency } from "./recordings";
@@ -100,7 +101,7 @@ import { createDictationService } from "./dictation";
 import { probeSandboxShell } from "./sandbox-probe";
 import { automationPass, reconcileAutomationRuns, createAutomationService, designPending, onNewMail, suggestFromRepeats, type AutomationDeps } from "./automations";
 import { createWorkflowThreadService } from "./workflow-thread";
-import { monthSpend, ownerOf, runtimeOwner, runtimesDir } from "./owner";
+import { monthSpend, ownerOf, runtimeOwner, runtimeTmpFor, runtimesDir } from "./owner";
 import { createNodeHub, type NodeHub } from "./node/hub";
 import { skillLibraryDir } from "./skill-library";
 import { identityLines } from "./lines";
@@ -453,14 +454,18 @@ async function firstDraftsPass(workspaceId: string, checkedAt = new Date().toISO
 
 /** Starts the interview's extraction when one of the workspace's conversations has replies or files waiting and is due (not backing off). */
 async function onboardingExtractPass(workspaceId: string): Promise<void> {
-  if (!codexSupervisor || extractionRunning(workspaceId) || paused(workspaceId, "planning")) return;
+  if (!codexSupervisor || paused(workspaceId, "planning")) return;
   // The start-on-use handle: a guest's runtime that went idle after the reply is started again, or the retry fails for want of a client.
   const extractor = createOnboardingExtractor(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId));
-  if (!extractor.nextSession()) return;
+  // Each lane on its own (the ledger, the portrait's sections and its inferences): one that is running or has nothing due is left alone.
+  const due = EXTRACT_LANES.filter((lane) => !extractionRunning(workspaceId, lane) && extractor.nextSession([], lane));
+  if (!due.length) return;
   // A turn starts its own extraction whatever the quota says (the person is there); a retry from the tick is core work like any other.
   if (!spendAllows(await spendFor(workspaceId), "core")) return;
-  void requestExtraction(workspaceId, (preferred) => { enterUsageWorkspace(workspaceId); return extractor.runOnce(preferred); })
-    .then(() => { void firstDraftsPass(workspaceId).catch(() => undefined); });
+  for (const lane of due) {
+    const done = requestExtraction(workspaceId, (preferred) => { enterUsageWorkspace(workspaceId); return extractor.runOnce(preferred, lane); }, undefined, lane);
+    if (lane === "ledger") void done.then(() => { void firstDraftsPass(workspaceId).catch(() => undefined); });
+  }
 }
 
 /**
@@ -1074,6 +1079,9 @@ if (!claimWorkerLock()) {
   console.info(JSON.stringify({ type: "worker.already_running", lockPath }));
   process.exit(0);
 }
+// A provider closing a stream mid-response can make undici assert from a socket event, outside every request's promise; that one
+// assertion is logged and the worker stays up instead of taking every account's model runs with it (packages/codex/src/undici-guard.ts).
+installUndiciAssertionGuard();
 const analysisStore = new CrosslineStore(path.join(dataDir, "crossline.db"));
 // Keys and links that are credentials (a model provider's key, a calendar's private link): DPAPI files, never the ledger.
 const secrets = createDpapiSecretStore(dataDir);
@@ -1414,7 +1422,7 @@ const agentService = createAgentService({
   sandbox: (workspaceId) => ({
     readable: [path.dirname(process.env.CROSSLINE_CODEX_PATH ?? "/opt/codex/codex")],
     deny: [dataDir, process.env.CROSSLINE_STATE_DIR ?? path.join(dataDir, "..", "state")],
-    runtimeTmp: path.join(runtimesDir(), workspaceId.replace(/[^a-zA-Z0-9_-]/g, "_"), "codex-home", "tmp") }),
+    runtimeTmp: runtimeTmpFor(workspaceId, runtimeOwner(analysisStore)) }),
   confine: { dataDir, stateDir: process.env.CROSSLINE_STATE_DIR ?? path.join(dataDir, "..", "state") },
   clientFor: accountClient,
   mailFor: (workspaceId) => mailService.lookup(workspaceId),
@@ -1884,6 +1892,18 @@ if (!capabilitySecret) {
           // The interview just finished: the first drafts, and the search for the lines' skills (lineSetupDue), start now, not at the next tick.
           if (outcome.state === "ready") { void firstDraftsPass(workspaceId).catch(() => undefined); void publicSkillPass(workspaceId, new Date().toISOString()).catch(() => undefined); }
           return outcome; }),
+    onboardingFinish: async (_client, sessionId, workspaceId) => {
+      const { outcome, settled } = finishInterview(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId), sessionId);
+      if (outcome.state !== "finished") return outcome;
+      // Marked as being written at once, so the page says so and the background pass does not write a report before the extraction finished.
+      analysisStore.appendEvent({ ownerId: analysisStore.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `portrait.requested:${Date.now()}`,
+        type: "portrait.requested", entityId: workspaceId, payload: { via: "finish" } });
+      void settled.then(() => writePortraitFor(workspaceId)).catch(() => undefined).finally(() => {
+        void firstDraftsPass(workspaceId).catch(() => undefined); void publicSkillPass(workspaceId, new Date().toISOString()).catch(() => undefined); });
+      return outcome;
+    },
+    onboardingResearch: async (_client, sessionId, threadId, text, workspaceId) =>
+      researchRunnerFor(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId)).answer(sessionId, threadId, text),
     transcriptionStatus: () => transcriber.status(),
     startTranscriptionDownload: async () => {
       const current = await transcriber.status();

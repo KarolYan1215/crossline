@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import * as core from "./index";
 import {
-  admittedSkills, capabilityGap, conformanceCases, conformanceCurrent, exportedSchemaNames, jsonSchemaProblems, SKILL_NEEDS, summarizeConformance, unavailableOnThirdParty,
+  admittedSkills, capabilityGap, conformanceCases, conformanceCurrent, exportedSchemaNames, jsonSchemaProblems, SKILL_NEEDS, summarizeConformance, THIRD_PARTY_CAPABILITIES, unavailableOnThirdParty,
   type ConformanceRun
 } from "./provider-conformance";
 import { structuredOutputProblems } from "./structured-output";
@@ -49,6 +49,10 @@ test("admission: everything structured passes → served; what needs web, images
   for (const skill of ["crossline-due-diligence", "crossline-portrait-illustrator", "crossline-agent", "crossline-flywheel-scout", "crossline-conformance"])
     expect(admitted).not.toContain(skill);
   expect(capabilityGap("crossline-portrait-illustrator")).toContain("图片");
+  // The interview's research thread is nothing but web lookups; the interview itself only may search, so it stays on a model without search.
+  expect(admitted).not.toContain("crossline-onboarding-research");
+  expect(admittedSkills(summarizeConformance(base, allPassing()), { ...THIRD_PARTY_CAPABILITIES, webSearch: true })).toEqual(
+    expect.arrayContaining(["crossline-onboarding", "crossline-onboarding-extract", "crossline-onboarding-research", "crossline-portrait-writer"]));
 });
 
 test("admission: a model that never calls the offered function keeps the Skills that need functions out; a record from before the case is read as before", () => {

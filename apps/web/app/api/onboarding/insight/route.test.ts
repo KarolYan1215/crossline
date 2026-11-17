@@ -25,3 +25,25 @@ test("a rating is kept per round, and the receipt's 撤销 (`clear`) takes it ba
   expect((await rate({ sessionId: "s1", seq, verdict: "maybe" })).status).toBe(400);
 // Cold import of the web lib graph, as in the other route tests.
 }, 30_000);
+
+test("under the points rules 准 puts the card's hypothesis in the ledger, 部分对 needs and records a correction, and changing it undoes the last", async () => {
+  vi.stubEnv("CROSSLINE_SEED_EXAMPLES", "");
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  const ws = TEST_CTX.workspaceId;
+  store.setSetting(ws, "profile.model", JSON.stringify({ hypotheses: [{ id: "c3", dimension: "D2", statement: "被看见时更投入",
+    basis: [{ kind: "quote", text: "有人看的时候", ref: "reply-1" }], falsifier: "没人看时也一样", alternative: "", status: "open" }], points: [] }));
+  const seq = store.appendOnboardingMessage({ workspaceId: ws, sessionId: "s1", role: "assistant", createdAt: "2026-11-12T00:00:00Z",
+    content: { reply: "…", questions: [], stage: "energy", insight: { hypothesisId: "c3", dimension: "D2", text: "被看见时更投入",
+      refs: [{ replyId: "reply-1", quote: "有人看的时候" }, { replyId: "reply-3", quote: "交给导师前" }], falsifier: "没人看时也一样" } } });
+  const profile = () => JSON.parse(store.getSetting(ws, "profile.model")!) as { hypotheses: Array<{ status: string; rated?: string }>; points: Array<{ id: string; source: string; text: string }> };
+  expect((await rate({ sessionId: "s1", seq, verdict: "fits" })).status).toBe(200);
+  expect(profile().points).toMatchObject([{ id: "p1", source: "confirmed", text: "被看见时更投入" }]);
+  expect(profile().hypotheses[0]).toMatchObject({ status: "supported", rated: "fits" });
+  expect((await rate({ sessionId: "s1", seq, verdict: "partial" })).status).toBe(400);
+  expect((await rate({ sessionId: "s1", seq, verdict: "partial", correction: "只在导师看的时候" })).status).toBe(200);
+  expect(profile().points).toMatchObject([{ source: "corrected", text: "只在导师看的时候" }]);
+  expect(profile().hypotheses[0]).toMatchObject({ status: "open", rated: "partial" });
+  expect((await rate({ sessionId: "s1", seq, verdict: "clear" })).status).toBe(200);
+  expect(profile().points).toEqual([]);
+  expect(profile().hypotheses[0]!.rated).toBeUndefined();
+}, 30_000);
