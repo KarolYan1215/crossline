@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: diagnose, deploy, backup, compare-list, compare, compare-report, persona, persona-report, clone, clone-apply, sponsor or sponsor-apply
+        description: diagnose, deploy, backup, backup-rewrap (args = backup run id), compare-list, compare, compare-report, persona, persona-report, clone, clone-apply, sponsor or sponsor-apply
         default: diagnose
       args:
         description: "compare: e.g. --email someone@example.com --steps 6; clone: <from-email> <to-email>; sponsor: <email>"
@@ -25,6 +25,8 @@ on:
 permissions:
   contents: read
   packages: read
+  # backup-rewrap downloads another run's artifact.
+  actions: read
 
 env:
   HOST: 47.245.88.172
@@ -49,6 +51,8 @@ jobs:
           mkdir -p ~/.ssh && printf '%s\n' "$KEY" > ~/.ssh/id && chmod 600 ~/.ssh/id
           ssh-keyscan -T 15 "$HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
       - name: Diagnose
+        # Not for re-encrypting a backup, which needs no host (it is for when the host is gone).
+        if: inputs.action != 'backup-rewrap'
         run: |
           exec >>"$RUNNER_TEMP/ops.log" 2>&1; echo "== $GITHUB_ACTION $(date -u +%FT%TZ)"
           ssh -i ~/.ssh/id -o ConnectTimeout=30 -o ServerAliveInterval=15 admin@"$HOST" '
@@ -379,6 +383,32 @@ jobs:
           name: crossline-backup-${{ github.run_id }}
           path: crossline-backup.tgz.enc
           retention-days: 30
+      # An off-host backup (args: the run id that made it) re-encrypted to the owner's ops key, for an owner who no longer has the
+      # BACKUP_PASSPHRASE (2026-11-17: the Singapore host went down and the passphrase was not kept anywhere). Streamed: the plaintext
+      # never touches the runner's disk. Read it with
+      #   gh run download <this run> -n crossline-backup-gpg-<this run>; gpg --homedir ~/.crossline-ops-gnupg -d crossline-backup.tgz.gpg > backup.tgz
+      - name: Re-encrypt an off-host backup to the owner's key
+        if: github.event_name == 'workflow_dispatch' && inputs.action == 'backup-rewrap'
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ inputs.args }}
+        run: |
+          exec >>"$RUNNER_TEMP/ops.log" 2>&1; echo "== $GITHUB_ACTION $(date -u +%FT%TZ)"
+          test -n "$BACKUP_PASSPHRASE" || { echo "BACKUP_PASSPHRASE is not set"; exit 1; }
+          case "$RUN" in ''|*[!0-9]*) echo "args: the run id of the backup"; exit 1;; esac
+          gh run download "$RUN" -R "$GITHUB_REPOSITORY" -n "crossline-backup-$RUN" -D "$RUNNER_TEMP/rewrap"
+          gpg --batch --quiet --import .github/ops-log-key.asc
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_PASSPHRASE -in "$RUNNER_TEMP/rewrap/crossline-backup.tgz.enc" \
+            | gpg --batch --yes --trust-model always --recipient DADCC038ED848A9BDE023BA2E7E937A58B1A6897 --output crossline-backup.tgz.gpg --encrypt
+          rm -rf "$RUNNER_TEMP/rewrap"
+          ls -l crossline-backup.tgz.gpg
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && inputs.action == 'backup-rewrap'
+        with:
+          name: crossline-backup-gpg-${{ github.run_id }}
+          path: crossline-backup.tgz.gpg
+          retention-days: 7
       # Every step above writes to $RUNNER_TEMP/ops.log, never to the job log: the repository is public, so the job log is readable by
       # anyone (decided 2026-11-05). The log leaves the runner only encrypted to the owner's key (.github/ops-log-key.asc); the private key
       # is on the owner's machine alone. Read it with scripts/ops-log.sh <run id>.
