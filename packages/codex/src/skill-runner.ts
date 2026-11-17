@@ -1283,7 +1283,7 @@ function continueOnThread<T>(client: CodexRpcBoundary, threadId: string, message
       });
       return { ok: true, output, audit };
     } catch (error) { return failureResult<T>(client, error, audit, options.locale); }
-    finally { unregister?.(); scope.dispose(); releaseThread(client, threadId, THREAD_KEEP_MS); queueCompaction(client, threadId, options.skillName); }
+    finally { unregister?.(); scope.dispose(); releaseThread(client, threadId, threadKeepMs(options.skillName)); queueCompaction(client, threadId, options.skillName); }
   }));
 }
 
@@ -1323,6 +1323,17 @@ function onSkillModel<T>(options: SkillRunOptions<T>): boolean {
  * `THREAD_KEEP_MS` without a turn.
  */
 export const THREAD_KEEP_MS = Math.max(60_000, (Number(process.env.CROSSLINE_THREAD_KEEP_MINUTES) || 10) * 60_000);
+/**
+ * The interview's own threads (its dialogue and its research threads; 2026-11-17, the owner: no limit on the interview's context, the
+ * model at least as free as in Codex itself). They stay loaded an hour without a turn rather than `THREAD_KEEP_MS` (a thread unloaded
+ * part way through is rebuilt from the ledger and loses what it reasoned in the thread), and are compacted only near the runtime's own
+ * limit (`contextWindowConfig`: 0.8 of the window), not from `COMPACT_AT`.
+ */
+const INTERVIEW_THREADS = new Set(["crossline-onboarding", "crossline-onboarding-research"]);
+export const interviewThread = (skillName: string) => INTERVIEW_THREADS.has(skillName.replace(/^crossline:/, ""));
+export const INTERVIEW_THREAD_KEEP_MS = 60 * 60_000;
+export const INTERVIEW_COMPACT_AT = 0.75;
+export const threadKeepMs = (skillName: string) => interviewThread(skillName) ? Math.max(THREAD_KEEP_MS, INTERVIEW_THREAD_KEEP_MS) : THREAD_KEEP_MS;
 const releaseTimers = new WeakMap<object, Map<string, ReturnType<typeof setTimeout>>>();
 /** Threads this client unsubscribed from: a later turn on one must subscribe again first (`resubscribe`). */
 const releasedThreads = new WeakMap<object, Set<string>>();
@@ -1472,7 +1483,7 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, given: unknown, wanted:
   } catch (error) { return failureResult<T>(client, error, audit, options.locale); }
   finally {
     unregister?.(); scope?.dispose();
-    if (audit.threadId) releaseThread(client, audit.threadId, options.keepThread ? THREAD_KEEP_MS : 0);
+    if (audit.threadId) releaseThread(client, audit.threadId, options.keepThread ? threadKeepMs(options.skillName) : 0);
     if (audit.threadId && options.keepThread) queueCompaction(client, audit.threadId, options.skillName);
   }
 }
@@ -1518,20 +1529,21 @@ function noteContext(client: CodexRpcBoundary, threadId: string, params: Record<
   const window = Number(usage?.modelContextWindow);
   if (used > 0 && window > 0) contextsOf(client).set(threadId, { used, window });
 }
-/** Whether the thread's context has filled past `COMPACT_AT` of its window, and how far. */
-export function compactionDue(client: CodexRpcBoundary, threadId: string): { used: number; window: number } | undefined {
+/** Whether the thread's context has filled past `COMPACT_AT` of its window (an interview's: `INTERVIEW_COMPACT_AT`), and how far. */
+export function compactionDue(client: CodexRpcBoundary, threadId: string, skillName = ""): { used: number; window: number } | undefined {
   const context = contextsOf(client).get(threadId);
-  return context && context.used >= context.window * COMPACT_AT ? context : undefined;
+  const at = interviewThread(skillName) ? Math.max(COMPACT_AT, INTERVIEW_COMPACT_AT) : COMPACT_AT;
+  return context && context.used >= context.window * at ? context : undefined;
 }
 /** Queues a compaction behind the thread's current turn when one is due; the next turn on the thread waits for it. */
 function queueCompaction(client: CodexRpcBoundary, threadId: string, skillName: string): void {
-  if (!compactionDue(client, threadId)) return;
+  if (!compactionDue(client, threadId, skillName)) return;
   void inLane(threadLanes, `${runtimeKey(client)}:${threadId}`, () => compactThread(client, threadId, skillName)).catch(() => undefined);
 }
 
 /** Compacts one thread now, if still due. Resolves true when the runtime reported the compaction done; logged as `skill.compacted`. */
 export async function compactThread(client: CodexRpcBoundary, threadId: string, skillName: string): Promise<boolean> {
-  const before = compactionDue(client, threadId);
+  const before = compactionDue(client, threadId, skillName);
   if (!before) return false;
   holdThread(client, threadId);
   const startedAt = Date.now();
@@ -1545,7 +1557,7 @@ export async function compactThread(client: CodexRpcBoundary, threadId: string, 
     outcome = { ok: false, code: skillErrorCode(error) };
   } finally {
     // Kept for the conversation as after any turn.
-    releaseThread(client, threadId, THREAD_KEEP_MS);
+    releaseThread(client, threadId, threadKeepMs(skillName));
   }
   if (outcome.ok) contextsOf(client).delete(threadId);
   console.info(JSON.stringify({ type: "skill.compacted", skill: skillName, threadId, ok: outcome.ok, ...(outcome.code ? { code: outcome.code } : {}),

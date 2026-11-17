@@ -334,5 +334,10 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
   // Replay 17 (2026-11-17): the cards held from a person who wanted to start were the only item the start lacked.
   { id: "IR-162", layer: "L2", verdict: "model", status: "active", rule: "本人想开始而开始只差卡片题：说答完右侧卡片就能开始，不另出题，不用自己的话复述卡片题",
     text: { file: INTERVIEW_SKILL, anchor: "**只差画像卡片题时**" } },
+  // 2026-11-17, the owner: make the observation cards more accurate. Information and aims from replays 17–18, not a new gate.
+  { id: "IR-163", layer: "L2", verdict: "model", status: "active", rule: "一张卡一个论断；出卡前拿整场记录核对反例和本人给过的原因；说行为的条件，不评人；结论的范围和证据一样大",
+    text: { file: INTERVIEW_SKILL, anchor: "**「准」从哪来。**" } },
+  { id: "IR-164", layer: "L4", verdict: "model", status: "active", rule: "假设只说依据盖得住的范围，一条一个论断；查反例，不写「一直」；本人给过的原因之外才写更深一层",
+    text: { file: EXTRACT_SKILL, anchor: "**`statement` 只说 `basis` 盖得住的范围，一条一个论断。**" } },
 ];
 /* i18n-ignore-end */

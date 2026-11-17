@@ -40,7 +40,7 @@ test("every routed Skill actually has a skill directory", async () => {
 });
 
 test("in economy mode a Skill steps down one tier, and the lowest stays where it is", () => {
-  expect(routeForSkill("crossline-onboarding", {}, "economy")).toEqual(DEFAULT_TIERS.mid);
+  expect(routeForSkill("crossline-milestone-architect", {}, "economy")).toEqual(DEFAULT_TIERS.mid);
   expect(routeForSkill("crossline-due-diligence", {}, "economy")).toEqual(DEFAULT_TIERS.low);
   expect(routeForSkill("crossline-plan-explainer", {}, "economy")).toEqual(DEFAULT_TIERS.low);
 });
@@ -48,6 +48,13 @@ test("in economy mode a Skill steps down one tier, and the lowest stays where it
 test("the gate and the capture analysis never step down", () => {
   for (const skill of ["crossline-milestone-gate", "crossline-automation-stripper"]) {
     expect(routeForSkill(skill, {}, "economy")).toEqual(routeForSkill(skill, {}, "normal"));
+  }
+});
+
+test("the interview's Skills run on the top tier and never step down (2026-11-17)", () => {
+  for (const skill of ["crossline-onboarding", "crossline-onboarding-extract", "crossline-onboarding-research", "crossline-portrait-writer"]) {
+    expect(routeForSkill(skill, {}, "normal")).toEqual(DEFAULT_TIERS.top);
+    expect(routeForSkill(skill, {}, "economy")).toEqual(DEFAULT_TIERS.top);
   }
 });
 

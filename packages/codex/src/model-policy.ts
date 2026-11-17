@@ -31,10 +31,11 @@ export const DEFAULT_TIERS: Record<RouteTier, ModelRoute> = {
 /** Keyed by the Skill's own name, without the `crossline:` plugin prefix. */
 export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-onboarding": "top",
-  // The interview's second layer (2026-10-19): facts, dates and line attributes from numbered sentences. Careful reading, not synthesis.
-  "crossline-onboarding-extract": "mid",
-  // An interview research thread (2026-11-12): web lookups and a short sourced conclusion, like the material researcher.
-  "crossline-onboarding-research": "mid",
+  // The interview's second layer (2026-10-19): facts, dates and line attributes from numbered sentences, and the portrait's
+  // inferences the observation cards are made from. Top since 2026-11-17 (the owner: the interview gets the runtime's full model).
+  "crossline-onboarding-extract": "top",
+  // An interview research thread (2026-11-12): web lookups and a short sourced conclusion. Top since 2026-11-17, like the extraction.
+  "crossline-onboarding-research": "top",
   "crossline-milestone-architect": "top",
   "crossline-artifact-planner": "top",
   // Reads drafts critically for what could keep them from being reached; a judgement, not a lookup.
@@ -116,7 +117,10 @@ export const SKILL_OVERRIDES: Record<string, Partial<ModelRoute>> = {};
  * Skills that never step down a tier when the budget is tight. The gate decides whether work counts as done and
  * the analysis decides what a capture is: a weaker reading of either is a wrong answer, not a cheaper one.
  */
-export const NEVER_DOWNGRADED = new Set(["crossline-milestone-gate", "crossline-automation-stripper", "crossline-agent"]);
+export const NEVER_DOWNGRADED = new Set(["crossline-milestone-gate", "crossline-automation-stripper", "crossline-agent",
+  // The interview (2026-11-17, the owner: no limit on the model in the interview, at least as free as Codex itself): its dialogue, its
+  // extraction and research threads and the portrait it ends in keep their tier when the budget is tight.
+  "crossline-onboarding", "crossline-onboarding-extract", "crossline-onboarding-research", "crossline-portrait-writer"]);
 
 const TIERS: RouteTier[] = ["top", "mid", "low"];
 const skillKey = (skillName: string) => skillName.replace(/^crossline:/, "");

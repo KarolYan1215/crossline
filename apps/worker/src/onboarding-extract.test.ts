@@ -431,12 +431,15 @@ test("a split run of an account moved to the points rules writes points only and
   expect(store.getSetting(workspaceId, POINTS_SPLIT_SETTING)).toBeUndefined();
 });
 
-test("while an interview is under way the portrait's lanes wait for three replies, or for the oldest to have waited ten minutes; the ledger never waits, and the inferences only while the log has cards to offer", () => {
+test("by default every lane reads a reply as it comes (2026-11-17); a batch set by environment makes the portrait's lanes wait for it, or for the oldest to have waited ten minutes; the ledger never waits, and the inferences only while the log has cards to offer", () => {
   const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
   const now = new Date().toISOString();
   store.saveOnboardingSession({ id: "s", ownerId, workspaceId, state: "active", coverage: { stage: "situation", flow: "v1" }, createdAt: now, updatedAt: now });
   const extractor = createOnboardingExtractor(store, workspaceId, "C:\repo", () => undefined);
-  for (const text of ["一", "二"]) store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text }, createdAt: now });
+  store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text: "一" }, createdAt: now });
+  expect(extractor.nextSession(["s"], "sections")).toBe("s");
+  process.env.CROSSLINE_PORTRAIT_BATCH = "3";
+  store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text: "二" }, createdAt: now });
   expect(extractor.nextSession([], "ledger")).toBe("s");
   expect(extractor.nextSession(["s"], "sections")).toBeUndefined();
   // The inferences wait too only once the log has two hypotheses to offer the next cards.

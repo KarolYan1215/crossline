@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { continueSkillTurn, runCodexSkill } from "@crossline/codex";
+import { continueSkillTurn, runCodexSkill, THREAD_KEEP_MS, threadKeepMs } from "@crossline/codex";
 import { fakeRuntime } from "./testing/fake-runtime";
 
 const SKILL = "crossline:crossline-concierge";
@@ -39,6 +39,23 @@ test("a context well inside the window is left alone, and a one-off run is never
   await runCodexSkill(oneOff.rpc, {}, options);
   await settle();
   expect(oneOff.calls()).not.toContain("thread/compact/start");
+});
+
+test("the interview's thread is compacted only past 75% of the window and is kept an hour (2026-11-17, no limit in the interview)", async () => {
+  const interview = "crossline:crossline-onboarding";
+  expect(threadKeepMs(interview)).toBe(60 * 60_000);
+  expect(threadKeepMs(SKILL)).toBe(THREAD_KEEP_MS);
+  const at72 = fakeRuntime(["{}", "{}"], interview, { usage: { input: 70_000, output: 2_000 }, contextWindow: 100_000 });
+  const first = await runCodexSkill(at72.rpc, {}, { ...options, skillName: interview, keepThread: true });
+  await continueSkillTurn(at72.rpc, first.audit.threadId!, "下一句", { ...turnOptions, skillName: interview });
+  await settle();
+  expect(at72.calls()).not.toContain("thread/compact/start");
+
+  const at78 = fakeRuntime(["{}", "{}"], interview, { usage: { input: 76_000, output: 2_000 }, contextWindow: 100_000 });
+  const again = await runCodexSkill(at78.rpc, {}, { ...options, skillName: interview, keepThread: true });
+  await continueSkillTurn(at78.rpc, again.audit.threadId!, "下一句", { ...turnOptions, skillName: interview });
+  await settle();
+  expect(at78.calls()).toContain("thread/compact/start");
 });
 
 test("a window the runtime did not report is no reason to compact (its own automatic compaction still holds)", async () => {

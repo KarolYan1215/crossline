@@ -3,6 +3,8 @@ import { runCodexSkill, setEffortPreferenceProvider, setSpendModeProvider, setUs
 import { fakeRuntime } from "./testing/fake-runtime";
 
 const TOP = "crossline:crossline-onboarding";
+// A top-tier Skill that steps down when the budget is tight (the interview's no longer do, 2026-11-17).
+const TOP_STEPS = "crossline:crossline-milestone-architect";
 const LOW = "crossline:crossline-plan-explainer";
 const MID = "crossline:crossline-due-diligence";
 
@@ -64,20 +66,20 @@ test("a failed run is reported too, with why", async () => {
 
 test("when the budget is tight the run steps down a tier, and the report says which mode it ran in", async () => {
   setSpendModeProvider(async () => "economy");
-  const { rpc } = fakeRuntime(["{}"], TOP, { usage: { input: 10, output: 5 } });
-  await runCodexSkill(rpc, {}, options(TOP));
+  const { rpc } = fakeRuntime(["{}"], TOP_STEPS, { usage: { input: 10, output: 5 } });
+  await runCodexSkill(rpc, {}, options(TOP_STEPS));
   expect(usage[0]).toMatchObject({ spendMode: "economy", tier: "top", model: "gpt-5.6-terra", effort: "medium" });
 });
 
 test("the person's 模型强度 moves the effort on their own Codex, and 更强 is not taken while the budget is tight", async () => {
   setEffortPreferenceProvider(() => "lower");
-  const first = fakeRuntime(["{}"], TOP);
-  await runCodexSkill(first.rpc, {}, options(TOP));
+  const first = fakeRuntime(["{}"], TOP_STEPS);
+  await runCodexSkill(first.rpc, {}, options(TOP_STEPS));
   expect(usage[0]).toMatchObject({ tier: "top", effort: "medium" });
   setEffortPreferenceProvider(() => "higher");
   setSpendModeProvider(async () => "economy");
-  const second = fakeRuntime(["{}"], TOP);
-  await runCodexSkill(second.rpc, {}, options(TOP));
+  const second = fakeRuntime(["{}"], TOP_STEPS);
+  await runCodexSkill(second.rpc, {}, options(TOP_STEPS));
   expect(usage[1]).toMatchObject({ spendMode: "economy", effort: "medium" });
 });
 

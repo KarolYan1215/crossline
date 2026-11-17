@@ -47,15 +47,16 @@ const DOCUMENTS_PER_RUN = 12;
 /** Replies one run reads at most; more wait for the next run, which follows at once. The portrait's lanes read more at a time. */
 const REPLIES_PER_RUN = 6;
 const REPLIES_PER_PORTRAIT_RUN = 12;
-/** What an extraction run may think on the developer's model (`thinkingBudget`, docs/token-economy.md §4, 2026-11-13). */
-export const EXTRACT_THINKING_BUDGET = 2048;
-/** The portrait's lanes read a batch and reason over the whole portrait: at 2048 three of their seven runs needed a repair (7th replay). */
-export const PORTRAIT_THINKING_BUDGET = 4096;
+/**
+ * No extraction lane has a thinking cap (2026-11-17, the owner: no limit on the model in the interview; it should be at least as free
+ * as Codex itself). Until then the lanes thought at most 2048, 4096 and 8192 tokens on the developer's model (docs/token-economy.md §4).
+ */
 /**
  * Replies the portrait's lanes wait for while an interview is under way (`CROSSLINE_PORTRAIT_BATCH` overrides it), and how long the oldest
- * may wait before they read it anyway.
+ * may wait before they read it anyway. 1 since 2026-11-17 (the owner: no limit in the interview): each reply is read as it comes, and a
+ * run reads every reply that arrived while the one before it ran. It was 3.
  */
-export const PORTRAIT_BATCH = 3;
+export const PORTRAIT_BATCH = 1;
 /** The observation ratings a portrait run reads, oldest dropped first: every correction of a usual interview. */
 const OBSERVATIONS_READ = 16;
 
@@ -354,8 +355,6 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       // as a turn, outside the account's two background slots, which the portrait's two lanes may both hold for minutes. They queue as
       // planning, ahead of discretionary work.
       ...(portraitLane(lane) ? { priority: "planning" as const } : lane === "ledger" && session?.state === "active" ? { priority: "interactive" as const } : {}),
-      // On the developer's model each lane thinks at most this much (docs/token-economy.md §4): most of its output was reasoning.
-      thinkingBudget: portraitLane(lane) ? PORTRAIT_THINKING_BUDGET : EXTRACT_THINKING_BUDGET,
       // The prompt cache (docs/token-economy.md §2.5): the lines, projects and portrait first, the facts on record (which grow) after
       // them, and this run's replies, files, task and date last.
       stableKeys: ["version", "lane", "timeZone", "lines", "domainGuides", "lineProfiles", "projects", "focusLine", "profile", "facts"],
