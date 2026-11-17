@@ -915,7 +915,9 @@ test("as the person reads a round: the safety reply ends at its help lines; the 
 });
 
 test("a reply that sets a date nobody gave is sent back once; the rewrite leaves the day to the person", async () => {
-  const { rpc, prompts } = fakeRuntime([turn({ reply: "试做定在 11 月 17 日周二：约两位从业者聊一次。" }), turn({ reply: "试做是约两位从业者聊一次，哪天由你定。" })]);
+  // A day ten days ahead: a fixed 11 月 17 日 stopped being invented on that day (it was today, 2026-11-17).
+  const ahead = new Date(Date.now() + 10 * 86_400_000);
+  const { rpc, prompts } = fakeRuntime([turn({ reply: `试做定在 ${ahead.getMonth() + 1} 月 ${ahead.getDate()} 日：约两位从业者聊一次。` }), turn({ reply: "试做是约两位从业者聊一次，哪天由你定。" })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });
   await run({ sessionId: "s", text: "【未来两周先做哪一件？】选择：约两位从业者聊一次" });
   expect(dialogue(prompts).some((prompt) => prompt.includes("可本人没说过这个日期"))).toBe(true);

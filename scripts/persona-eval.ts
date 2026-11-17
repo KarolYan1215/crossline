@@ -77,6 +77,9 @@ const scratch = mkdtempSync(path.join(tmpdir(), "crossline-persona-"));
 // Skills and the line library are written beside the Codex home: a throwaway state directory, never the server's.
 process.env.CROSSLINE_STATE_DIR = path.join(scratch, "state");
 process.env.CROSSLINE_DATA_DIR = path.join(scratch, "data");
+// Every model answer, rejected ones included, kept beside the transcripts (made-up people only): replay 16's three portrait answers
+// that never parsed were lost, and with them what broke them (2026-11-17).
+process.env.CROSSLINE_RECORD_DIR ??= path.join(out, "answers");
 
 // ---- usage, the gateway and the routing: what the worker gives an invited account, the model pinned ----
 const SKILLS = ["crossline-onboarding", "crossline-onboarding-extract", "crossline-onboarding-research", "crossline-portrait-writer", "crossline-eval-persona"];

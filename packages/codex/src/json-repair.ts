@@ -11,7 +11,10 @@
  *
  * On replay 16 the writer failed three answers in a row on the same model (about 9k tokens each, the size of a whole report, so not
  * cut off) and bracket edits could not mend them. The raw answers were not kept; the other common way a model's JSON breaks is a
- * quote inside a text left unescaped (「他说"好"」), so a quote that the JSON could not go on after is escaped as text.
+ * quote inside a text left unescaped (「他说"好"」), so a quote that the JSON could not go on after is escaped as text. The other
+ * slips a parser refuses and a reader would not notice are mended the same way, none of them changing a word: a line break or tab
+ * typed raw inside a text (escaped), a backslash before a letter JSON has no escape for (escaped), a comma before a closer (dropped),
+ * and a sentence before the object or after it (dropped, when it holds no bracket or quote: a second object is never glued on).
  */
 
 type SchemaNode = Record<string, unknown> | undefined;
@@ -41,6 +44,8 @@ export function repairJsonBrackets(text: string, schema: unknown, maxEdits = MAX
   let pendingKey: string | undefined;
   let rootDone = false;
   let quoteEdits = 0;
+  // Slips mended without changing a word (raw line breaks, stray backslashes, trailing commas, a sentence around the object).
+  let textEdits = 0;
   const opened = (closer: "}" | "]") => {
     const parent = stack.at(-1);
     const schemaNode = parent ? childOf(parent.schema, parent.closer === "}" ? pendingKey : undefined) : asNode(schema);
@@ -50,8 +55,20 @@ export function repairJsonBrackets(text: string, schema: unknown, maxEdits = MAX
   };
   const afterClose = () => { expectKey = false; if (!stack.length) rootDone = true; };
 
-  for (let at = 0; at < text.length; at += 1) {
+  // A sentence before the object (「以下是报告：」) holds no bracket or quote of its own.
+  const first = text.indexOf("{");
+  if (first > 0 && text.slice(0, first).trim()) {
+    if (/[{}[\]"]/.test(text.slice(0, first))) return undefined;
+    textEdits += 1;
+  }
+  for (let at = Math.max(0, first); at < text.length; at += 1) {
     const char = text[at]!;
+    // After the object only a sentence may follow (「希望有帮助」, a closing fence): dropped. Brackets or quotes there are refused.
+    if (rootDone && /\S/.test(char)) {
+      if (/[{}[\]"]/.test(text.slice(at))) return undefined;
+      textEdits += 1;
+      break;
+    }
     if (char === "\"") {
       const top = stack.at(-1);
       const isKey = top?.closer === "}" && expectKey;
@@ -60,7 +77,24 @@ export function repairJsonBrackets(text: string, schema: unknown, maxEdits = MAX
       let literal = "\"";
       let end = at + 1;
       for (; end < text.length; end += 1) {
-        if (text[end] === "\\") { literal += text.slice(end, end + 2); end += 1; continue; }
+        if (text[end] === "\\") {
+          const escaped = text[end + 1] ?? "";
+          if (/^["\\/bfnrt]$/.test(escaped) || (escaped === "u" && /^[0-9a-fA-F]{4}$/.test(text.slice(end + 2, end + 6)))) {
+            literal += text.slice(end, end + 2);
+            end += 1;
+            continue;
+          }
+          // A backslash JSON has no escape for (`\'`, `\x`, a Windows path): kept as the character it reads as.
+          textEdits += 1;
+          literal += "\\\\";
+          continue;
+        }
+        if (text.charCodeAt(end) < 0x20) {
+          // A line break or tab typed raw inside a text.
+          textEdits += 1;
+          literal += JSON.stringify(text[end]).slice(1, -1);
+          continue;
+        }
         if (text[end] === "\"") {
           let after = end + 1;
           while (after < text.length && /\s/.test(text[after]!)) after += 1;
@@ -106,8 +140,13 @@ export function repairJsonBrackets(text: string, schema: unknown, maxEdits = MAX
       continue;
     }
     if (char === "}" || char === "]") {
+      // A comma before a closer is dropped.
+      let commaAt = out.length - 1;
+      while (commaAt >= 0 && !out[commaAt]!.trim()) commaAt -= 1;
+      if (out[commaAt] === ",") { out.splice(commaAt, 1); textEdits += 1; }
       const top = stack.at(-1);
-      const restHasContent = /\S/.test(text.slice(at + 1));
+      // Only brackets and quotes are more of the answer; a sentence after it is not.
+      const restHasContent = /[{}[\]"]/.test(text.slice(at + 1));
       if (top?.closer === char && !(stack.length === 1 && restHasContent)) {
         stack.pop();
         out.push(char);
@@ -149,7 +188,7 @@ export function repairJsonBrackets(text: string, schema: unknown, maxEdits = MAX
     if (edits > maxEdits) return undefined;
     out.push(...stack.reverse().map((item) => item.closer));
   }
-  if (!edits && !quoteEdits) return undefined;
+  if (!edits && !quoteEdits && !textEdits) return undefined;
   const mended = out.join("");
   try { JSON.parse(mended); return mended; } catch { return undefined; }
 }

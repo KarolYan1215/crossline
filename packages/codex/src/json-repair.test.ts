@@ -63,6 +63,20 @@ test("a quote inside a text left unescaped is escaped; one the JSON can go on af
   expect(repairJsonBrackets(whole, SCHEMA)).toBeUndefined();
 });
 
+test("slips that change no word are mended: raw line breaks, stray backslashes, trailing commas, a sentence around the object", () => {
+  const whole = JSON.stringify(WHOLE);
+  const raw = whole.replace("\"summary\":\"s\"", "\"summary\":\"第一行\n第二行\t完\"");
+  expect(JSON.parse(repairJsonBrackets(raw, SCHEMA)!).formulation.summary).toBe("第一行\n第二行\t完");
+  const slash = whole.replace("\"summary\":\"s\"", "\"summary\":\"C:\\Users\\x 和 \\'引\\'\"");
+  expect(JSON.parse(repairJsonBrackets(slash, SCHEMA)!).formulation.summary).toBe("C:\\Users\\x 和 \\'引\\'");
+  const commas = whole.replace("\"drivers\":[\"a\",\"b\"]", "\"drivers\":[\"a\",\"b\",],").replace("\"sensitive\":[\"x\"]}", "\"sensitive\":[\"x\"],}");
+  expect(JSON.parse(repairJsonBrackets(commas, SCHEMA)!)).toEqual(WHOLE);
+  expect(JSON.parse(repairJsonBrackets(`以下是报告：\n\`\`\`json\n${whole}\n\`\`\`\n希望有帮助。`, SCHEMA)!)).toEqual(WHOLE);
+  // A second object after the first, or one with a bracket in the sentence before it, is not taken.
+  expect(repairJsonBrackets(`${whole}\n另一版：{"cover":{}}`, SCHEMA)).toBeUndefined();
+  expect(repairJsonBrackets(`[草稿] ${whole}`, SCHEMA)).toBeUndefined();
+});
+
 test("an answer that goes round in a loop to the end is told apart from one broken once", () => {
   const passage = "\"insight\":\"她把研究当成安全感的来源，每次换方向都先问稳不稳\",";
   expect(looksLooping(`{"insights":[{${passage.repeat(80)}`)).toBe(true);
