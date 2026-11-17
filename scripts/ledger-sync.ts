@@ -7,7 +7,7 @@
  * side is deploy/server/ledger-sync.sh, copied over and run with sudo on each call.
  *
  *   pnpm exec tsx scripts/ledger-sync.ts [--direction auto|to-server|to-local] [--dry-run] [--check]
- *     [--email <server account>] [--workspace <local workspace id>] [--host admin@47.245.88.172] [--key ~/.ssh/crossline_hk]
+ *     [--email <server account>] [--workspace <local workspace id>] [--host admin@43.134.0.203] [--key ~/.ssh/crossline_hk]
  *
  * `auto` (the default) compares `lastPersonActivity` on both sides — the person's own latest action, never what the worker wrote —
  * and does nothing when they are equal (which they are right after a sync). `to-server` / `to-local` force a direction. The losing
@@ -31,7 +31,7 @@ type State = { email?: string; localWorkspace?: string; serverWorkspace?: string
 const state: State = existsSync(statePath) ? JSON.parse(readFileSync(statePath, "utf8")) as State : {};
 const email = arg("email") ?? state.email ?? (() => { throw new Error("missing --email: the address signed in on the server"); })();
 const localWorkspace = arg("workspace") ?? state.localWorkspace ?? (() => { throw new Error("missing --workspace: the local workspace id"); })();
-const host = arg("host") ?? state.host ?? "admin@47.245.88.172";
+const host = arg("host") ?? state.host ?? "admin@43.134.0.203";
 const key = (arg("key") ?? state.key ?? "~/.ssh/crossline_hk").replace(/^~/, homedir());
 const direction = (arg("direction") ?? "auto") as "auto" | "to-server" | "to-local";
 const dryRun = flag("dry-run"), check = flag("check");

@@ -29,7 +29,7 @@ permissions:
   actions: read
 
 env:
-  HOST: 47.245.88.172
+  HOST: 43.134.0.203
 
 jobs:
   server:
