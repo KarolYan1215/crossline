@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { SkillTools } from "@crossline/codex";
-import type { CrosslineStore, StoredSourceDocument } from "@crossline/db";
+import { dueDateReader, type CrosslineStore, type StoredSourceDocument } from "@crossline/db";
 import { tFor } from "@crossline/core";
 import { localeOf } from "./locale";
 import { extractText } from "./extract";
@@ -240,19 +240,23 @@ export function createAgentToolbox(deps: {
         const plans = new Map(deps.store.listStepPlans(deps.workspaceId).map((plan) => [plan.workOrderId, plan]));
         const orders = deps.store.listWorkOrders(deps.workspaceId).filter((order) => status === "all" ? true
           : status === "done" ? order.state === "accepted" : !["accepted", "archived"].includes(order.state));
+        // Due as the task page shows it, the milestone's deadline included (W-277).
+        const dueOf = dueDateReader(deps.store, deps.workspaceId);
         return JSON.stringify({ tasks: orders.slice(0, 80).map((order) => {
-          const payload = order.payload as { title?: string; dueDate?: string };
+          const payload = order.payload as { title?: string };
           const current = plans.get(order.id)?.steps.find((step) => step.status !== "done");
+          const due = dueOf(order);
           return { id: order.id, title: payload.title ?? order.intent.slice(0, 80), line: order.identityId, state: order.state,
-            ...(payload.dueDate ? { due: payload.dueDate } : {}), ...(current ? { currentStep: current.title } : {}) };
+            ...(due ? { due } : {}), ...(current ? { currentStep: current.title } : {}) };
         }) });
       }
       case "read_task": {
         const order = deps.store.getWorkOrder(deps.workspaceId, s("id")) ?? fail(`没有 id 为「${s("id")}」的任务。`);
-        const payload = order.payload as { title?: string; dueDate?: string; humanCore?: string; automationParts?: string[] };
+        const payload = order.payload as { title?: string; humanCore?: string; automationParts?: string[] };
         const plan = deps.store.getStepPlan(deps.workspaceId, order.id);
+        const due = dueDateReader(deps.store, deps.workspaceId)(order);
         return JSON.stringify({ id: order.id, title: payload.title ?? "", intent: order.intent, line: order.identityId, state: order.state,
-          ...(payload.dueDate ? { due: payload.dueDate } : {}), ...(payload.humanCore ? { personDoes: payload.humanCore } : {}),
+          ...(due ? { due } : {}), ...(payload.humanCore ? { personDoes: payload.humanCore } : {}),
           ...(payload.automationParts?.length ? { assistantMay: payload.automationParts } : {}),
           steps: (plan?.steps ?? []).map((step) => ({ title: step.title, status: step.status, by: step.executor, minutes: step.estimate.p50Minutes })) });
       }

@@ -34,6 +34,11 @@ test("an automatic approval is listed for a day, can be taken back once, and onl
     type: "work_order.auto_approved", entityId: "auto", payload: { reason: "内部准备" } });
   expect(recentAutoApprovals(TEST_CTX)).toMatchObject([{ id: "auto", undoable: true }]);
   expect(recentAutoApprovals(TEST_CTX, Date.now() + 25 * 3_600_000)).toEqual([]);
+  // W-279: archived since, it is no longer listed (it had been shown as 「已开始做」).
+  const order = store.listWorkOrders(TEST_CTX.workspaceId)[0]!;
+  store.saveWorkOrder({ ...order, state: "archived" });
+  expect(recentAutoApprovals(TEST_CTX)).toEqual([]);
+  store.saveWorkOrder({ ...order });
   expect(revokeAutoApproval(TEST_CTX, "auto")).toEqual({ ok: true });
   expect(store.listWorkOrders(TEST_CTX.workspaceId)[0]!.state).toBe("awaiting_plan_approval");
   expect(recentAutoApprovals(TEST_CTX)).toEqual([]);

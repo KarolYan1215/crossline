@@ -1,6 +1,6 @@
 import "server-only";
 import {
-  COMMIT_GROUPS, commitWeekOf, deferTarget, groupMinutes, onPersonsBoard, parseWeeklyCommit, proposeWeeklyCommit, taskTitleOf, WEEKLY_COMMIT_SETTING, weeklyCommitDue,
+  COMMIT_GROUPS, commitWeekOf, deferTarget, groupMinutes, isAttending, onPersonsBoard, parseWeeklyCommit, proposeWeeklyCommit, taskTitleOf, WEEKLY_COMMIT_SETTING, weeklyCommitDue,
   type AccessContext, type CommitGroup, type CommitSuggestion, type CommitTask, type WeeklyCommitRecord
 } from "@crossline/core";
 import { formatInTimeZone } from "date-fns-tz";
@@ -89,8 +89,9 @@ export function loadWeeklyCommit(ctx: AccessContext, now = appNow()): WeeklyComm
     const begun = order.state === "active" || started.has(order.id) || stepsDone.has(order.id);
     if (notBefore && notBefore > weekEnd && !begun) return [];
     if (!(begun || (due && due <= weekEnd) || upcoming.has(order.id))) return [];
+    const passedEvent = Boolean(due && due < today && isAttending(order.intent));
     const task: CommitTask = { id: order.id, minutes: Math.round(minutes.get(order.id) ?? order.estimate.p50Minutes), started: begun,
-      weight: order.milestoneId ? effectiveWeight(ctx, order.milestoneId) : 50, ...(due ? { dueDay: due } : {}) };
+      ...(passedEvent ? { passedEvent } : {}), weight: order.milestoneId ? effectiveWeight(ctx, order.milestoneId) : 50, ...(due ? { dueDay: due } : {}) };
     return [{ task, title: taskTitleOf(order), line: order.identityId }];
   });
   const { groups } = proposeWeeklyCommit({ tasks: tasks.map((item) => item.task), capacityMinutes, today, weekStart: week });
@@ -110,7 +111,8 @@ function chosenGroups(view: WeeklyCommitView, chosen: Record<string, unknown>): 
   for (const row of view.rows) {
     const value = chosen[row.id];
     if (value !== undefined && !COMMIT_GROUPS.includes(value as CommitGroup)) return undefined;
-    out[row.id] = (value as CommitGroup | undefined) ?? row.suggestion.group;
+    // A passed event is only ever 「不参加了」: never pushed to next week (W-258).
+    out[row.id] = row.passedEvent ? "drop" : (value as CommitGroup | undefined) ?? row.suggestion.group;
   }
   return out;
 }

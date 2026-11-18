@@ -27,6 +27,8 @@ test("eligible proposals take effect with the system as approver and are told in
   expect(said).toHaveLength(1);
   const text = JSON.stringify(said[0]!.payload);
   expect(text).toContain("3 项任务已自动生效");
+  // W-278: said before any step is scheduled, so it claims no block.
+  expect(text).not.toContain("排进日程");
   expect(text).toContain("最近自动生效");
   expect(text).toContain("\"delivery\":\"pending\"");
   // Nothing new took effect: nothing more is said.

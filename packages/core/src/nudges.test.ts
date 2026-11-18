@@ -70,6 +70,19 @@ test("too little time before a due day: tight below a day's worth of free time, 
   expect(planNudges(base({ blocks: [], slack: [{ orderId: "o", title: "x", dueDay: "2026-10-27", remainingMinutes: 60, freeMinutes: 1000, dailyMinutes: 420 }] }))).toEqual([]);
 });
 
+test("several short of time are said as one message, one slot of the cap, urgent when any is late; each is said once (W-273)", () => {
+  const item = (orderId: string, remainingMinutes: number) => ({ orderId, title: orderId, dueDay: "2026-10-27", remainingMinutes, freeMinutes: 800, dailyMinutes: 420 });
+  const slack = [item("a", 600), item("b", 900), item("c", 700), item("d", 650)];
+  const said = planNudges(base({ blocks: [], slack, countedToday: 5 }));
+  expect(said).toHaveLength(1);
+  expect(said[0]).toMatchObject({ kind: "latest_start", urgent: true, fingerprint: "latest:b:2026-10-27:late",
+    covers: ["latest:a:2026-10-27:tight", "latest:c:2026-10-27:tight", "latest:d:2026-10-27:tight"] });
+  expect(said[0]!.text).toContain("4 件的余量不够了");
+  // Already said: the rest come alone.
+  expect(planNudges(base({ blocks: [], slack, sent: new Set(["latest:b:2026-10-27:late", "latest:a:2026-10-27:tight", "latest:c:2026-10-27:tight"]) })))
+    .toMatchObject([{ fingerprint: "latest:d:2026-10-27:tight" }]);
+});
+
 test("under two days' measured worth to spare is said early; a self-set due day offers 推迟截止, every one 去本周承诺 (closed-loop-1030 §4–5)", () => {
   const item = { orderId: "o", title: "周报", dueDay: "2026-10-27", remainingMinutes: 60, freeMinutes: 800, dailyMinutes: 420 };
   const [early] = planNudges(base({ blocks: [], slack: [item] }));

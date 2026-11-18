@@ -1,4 +1,5 @@
 import { clipWidth } from "./text-width";
+import { isAttending } from "./mail-events";
 import { tFor, type Locale } from "./i18n";
 import { ARCHETYPE_IDS, PRODUCT_OWNER, STEP_PRODUCTS, STEP_ROLES, archetypeById, isStepRole, productOf, type Archetype, type StepProduct, type StepRole } from "./archetypes";
 import { normalizeAiAssist } from "./ai-tools";
@@ -479,6 +480,9 @@ export function assignStepOwners(steps: PlannedStep[], questions: StepQuestion[]
       step.owner = step.executor === "agent" ? (owner === "ask" ? "ask" : "assistant") : "person";
     } else step.owner = "person";
     if (step.executor === "agent") step.schedulable = false;
+    // Attending an event happens at the event's own time, never in free hours (W-274: 「参加 ECE 555 小测」 was placed as six work
+    // blocks). The step stays; preparing for it starts with another verb and stays work.
+    if (isAttending(step.title)) step.schedulable = false;
     // A first move is the person's: the assistant's steps and waits have none.
     if (step.executor === "agent" || step.role === "wait") step.firstAction = "";
   }

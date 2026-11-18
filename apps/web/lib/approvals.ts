@@ -86,6 +86,9 @@ export function recentAutoApprovals(ctx: AccessContext, now = Date.now()): AutoA
       const order = orders.get(event.entityId);
       // The assistant's preparation took effect too, but nothing of it is on the person's week to take back (docs/work-split.md).
       if (!order || !onPersonsBoard(order)) return [];
+      // An order archived or accepted since is no longer something that "took effect" to take back (W-279: an archived one was listed
+      // as 「已开始做」).
+      if (order.state === "archived" || order.state === "accepted") return [];
       return [{ id: order.id, intent: order.intent, title: taskTitleOf(order), approvedAt: event.createdAt,
         reason: String((event.payload as { reason?: string }).reason ?? ""),
         undoable: ["approved", "preparing", "ready_for_human"].includes(order.state) && !started.has(order.id) }];

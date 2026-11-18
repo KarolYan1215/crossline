@@ -26,6 +26,7 @@
   "排得下": "Fits",
   "本周排不下": "Doesn't fit this week",
   "逾期一周以上且未开始": "Over a week overdue and not started",
+  "活动已过": "The event has passed",
   "已撤销本周承诺，任务回到原来的安排。": "This week's commitment is undone; tasks are back where they were.",
   "本周不调整，排程照旧。": "No changes this week; the schedule stays as it is.",
   "本周已定：推后 {{deferred}} 项，砍掉 {{dropped}} 项（在已归档里可恢复）。": "This week is set: {{deferred}} pushed, {{dropped}} cut (recoverable from Archived).",

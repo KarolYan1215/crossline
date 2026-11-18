@@ -52,11 +52,13 @@ export type CommitTask = {
   dueDay?: string;
   /** The person already worked on it (a timer ran, a step is done). */
   started: boolean;
+  /** An event to attend whose day has passed (`isAttending`): only 「不参加了」 is offered for it (W-258, the owner's decision of 2026-11-11). */
+  passedEvent?: boolean;
   /** The importance (0–100) of the milestone it serves. */
   weight: number;
 };
 
-export type CommitSuggestion = { group: CommitGroup; reason: "started" | "due" | "fits" | "over_capacity" | "stale" };
+export type CommitSuggestion = { group: CommitGroup; reason: "started" | "due" | "fits" | "over_capacity" | "stale" | "event_passed" };
 
 /**
  * The week the commitment is about: on a Sunday from `SUNDAY_EVENING` on, next week; otherwise this week. Returned as its Monday.
@@ -89,6 +91,7 @@ export function proposeWeeklyCommit(input: { tasks: CommitTask[]; capacityMinute
   let kept = 0;
   for (const task of [...input.tasks].sort(commitOrder(weekEnd, input.today))) {
     const overdueDays = task.dueDay && task.dueDay < input.today ? between(task.dueDay, input.today) : 0;
+    if (task.passedEvent) { groups[task.id] = { group: "drop", reason: "event_passed" }; continue; }
     if (!task.started && overdueDays >= DROP_OVERDUE_DAYS && task.weight < IMPORTANT) { groups[task.id] = { group: "drop", reason: "stale" }; continue; }
     const minutes = Math.max(0, task.minutes);
     if (kept + minutes <= input.capacityMinutes) {

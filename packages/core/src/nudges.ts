@@ -206,13 +206,16 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
       buttons: [{ kind: "href", label: t("收工"), href: "/wrap" }, mute] });
   // Free time before a due day is read at the measured pace (docs/plans/closed-loop-1030.md §4): under two days' worth to spare is said
   // two days or more before the deadline, not on its eve.
+  // Several are said as one message (W-273: four at 09:00 used up the day's cap before the overrun of a running step could be said): one
+  // slot of the cap, urgent when any is late, the most pressing one's buttons; each still said once (`covers`).
+  const latest: PlannedNudge[] = [];
   for (const item of input.slack) {
     const slack = item.freeMinutes - item.remainingMinutes;
     if (slack >= 2 * item.dailyMinutes) continue;
     const late = slack < 0;
     const level = late ? "late" : slack < item.dailyMinutes ? "tight" : "margin";
     const values = { title: item.title, remaining: hours(t, item.remainingMinutes), due: md(item.dueDay), free: hours(t, item.freeMinutes) };
-    out.push({ kind: "latest_start", fingerprint: `latest:${item.orderId}:${item.dueDay}:${level}`, urgent: late, counted: true,
+    latest.push({ kind: "latest_start", fingerprint: `latest:${item.orderId}:${item.dueDay}:${level}`, urgent: late, counted: true,
       text: level === "late" ? t("「{{title}}」按保守估时还需 {{remaining}}，{{due}} 截止前只剩 {{free}} 可用，来不及。", values)
         : level === "tight" ? t("「{{title}}」余量已不足一天：{{due}} 截止前可用 {{free}}，还需 {{remaining}}。最晚现在开始。", values)
         : t("「{{title}}」按实测进度余量已不足两天：{{due}} 截止前可用 {{free}}，还需 {{remaining}}。", values),
@@ -221,6 +224,13 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
           action: op(item.orderId, "due", t("{{label}}截止推到 {{day}}", { label: quoted(t, item.title), day: md(item.deferDue) }), { date: item.deferDue }) }] : []),
         { kind: "href", label: t("去本周承诺"), href: "/commit" },
         { kind: "href", label: t("调整计划"), href: "/plan" }, mute] });
+  }
+  const fresh = latest.filter((item) => !input.sent.has(item.fingerprint)).sort((a, b) => Number(b.urgent) - Number(a.urgent));
+  if (fresh.length === 1) out.push(fresh[0]!);
+  else if (fresh.length > 1) {
+    const [first] = fresh;
+    out.push({ ...first!, covers: fresh.slice(1).map((item) => item.fingerprint), urgent: fresh.some((item) => item.urgent),
+      text: `${t("{{count}} 件的余量不够了：", { count: fresh.length })}\n${fresh.map((item) => `- ${item.text}`).join("\n")}` });
   }
   const timer = input.timer;
   if (timer && timer.usualMinutes >= 10) {

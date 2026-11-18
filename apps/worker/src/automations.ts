@@ -6,7 +6,7 @@ import {
   type AgentCategory, type Automation, type AutomationPlan, type AutomationRun
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import { approveCategory, listAgentTasks, readCategories, requestAutomation, requestThreadId, type CrosslineStore } from "@crossline/db";
+import { approveCategory, dueDateReader, listAgentTasks, readCategories, requestAutomation, requestThreadId, type CrosslineStore } from "@crossline/db";
 import type { AgentOutcome, AgentTaskInput } from "./agent-task";
 import type { DispatchResult } from "./agent-service";
 import { identityLines } from "./lines";
@@ -414,7 +414,9 @@ export async function automationPass(deps: AutomationDeps, workspaceId: string):
         const tomorrow = new Intl.DateTimeFormat("en-CA", { timeZone: deps.zone(workspaceId), year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(now.getTime() + 86_400_000));
         const lastDay = automation.lastFiredAt ? new Intl.DateTimeFormat("en-CA", { timeZone: deps.zone(workspaceId), year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(automation.lastFiredAt)) : "";
         const today = new Intl.DateTimeFormat("en-CA", { timeZone: deps.zone(workspaceId), year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
-        const due = [...orders.values()].filter((order) => !["accepted", "archived"].includes(order.state) && (order.payload as { dueDate?: string }).dueDate === tomorrow && ofLine(order.id));
+        // Due as the task page shows it, the milestone's deadline included (W-277).
+        const dueOf = dueDateReader(deps.store, workspaceId);
+        const due = [...orders.values()].filter((order) => !["accepted", "archived"].includes(order.state) && dueOf(order) === tomorrow && ofLine(order.id));
         if (due.length && lastDay !== today) fired.push(fireOrQueue(deps, workspaceId, automation, { reason: t("{{count}} 个任务明天到期", { count: due.length }),
           // i18n-ignore: what the run is told (model-facing)
           context: `明天到期的任务（用 read_task 按 id 读）：\n${due.slice(0, 10).map((order) => `- id ${order.id} · ${title(order.id)}`).join("\n")}` }));

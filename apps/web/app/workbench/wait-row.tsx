@@ -26,7 +26,8 @@ export function WaitRow({ detail, kind, label, today }: { detail: TaskDetail; ki
     <span className="tk-wait-why"><Hourglass {...ICON} size={14} />{label}</span>
     {go ? <a className="tk-wait-go" href={go.href}>{go.text}</a>
       : kind === "returned" ? <button type="button" className="tk-wait-go" onClick={() => setOpen(true)}>{t("查看原因")}</button>
-      : kind === "provide" ? <button type="button" className="tk-wait-go" onClick={() => setOpen(true)}>{t("上传或点「没有」")}</button> : <span />}
+      : kind === "provide" ? <button type="button" className="tk-wait-go" onClick={() => setOpen(true)}>{t("上传或点「没有」")}</button>
+      : kind === "passed" ? <button type="button" className="tk-wait-go" onClick={() => setOpen(true)}>{t("完成或归档")}</button> : <span />}
     <TaskDialog detail={detail} today={today} open={open} onOpenChange={setOpen} />
   </li>;
 }

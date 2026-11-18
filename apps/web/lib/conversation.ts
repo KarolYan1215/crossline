@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { formatInTimeZone } from "date-fns-tz";
-import { closeMailReply, listAgentTasks, readGrownSkills, resultsAwaitingReview, type StoredConversationMessage } from "@crossline/db";
+import { closeMailReply, dueDateReader, listAgentTasks, readGrownSkills, resultsAwaitingReview, type StoredConversationMessage } from "@crossline/db";
 import {
   ACTIONS, AUTOMATIONS_SETTING, CONCIERGE_MAX_ACTIONS, CONCIERGE_MAX_IMAGES, LINE_PROFILES_SETTING, MAIL_ACCOUNTS_SETTING, actionProblem, isImmediate, redactSecrets, readAutomations, readMailAccounts, triggerLabel, availableSlots, conciergeRefs, needsReview, taskTitleOf, type StoredLineProfile,
   type AccessContext, type AvailabilityWindow, type ClarifyOption, type ConciergePack, type ConciergeTurn, type DiffLine, type ProposedAction
@@ -105,7 +105,7 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
   }
   // Why a task has no time on the calendar, in the plan page's own words: what the person asks when something looks wrong.
   const unplaced = new Map((() => { try { return planRanking(ctx, plan); } catch { return []; } })().flatMap((item) => item.blocker ? [[item.id, item.blocker] as const] : []));
-  const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
+  const dueOf = dueDateReader(store, ctx.workspaceId);
   const milestones = store.listMilestones(ctx.workspaceId).filter((item) => item.status !== "archived");
   const docs = store.listSourceDocuments(ctx.workspaceId);
   const latestEnergy = store.listEnergyObservations(ctx.workspaceId).at(-1);
@@ -120,16 +120,17 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
     lines: identityLines(ctx).map((line) => ({ id: line.id, label: line.label, goals: line.goals ?? [], hard: Boolean(line.hard), description: profiles[line.id]?.description ?? "",
       ...(line.domain ? { domain: DOMAIN_PACKS[line.domain].label } : {}) })),
     tasks: orders.filter((order) => OPEN.includes(order.state)).map((order) => {
-      const payload = (order.payload ?? {}) as { dueDate?: string; notBefore?: string };
+      const payload = (order.payload ?? {}) as { notBefore?: string };
+      // Due as the task page shows it (W-277: only `payload.dueDate` was read, so 「本周截止」 found none of the milestone-dated tasks).
       return { id: order.id, title: taskTitleOf(order), line: label(order.identityId), project: projects.get(order.projectId) ?? "", state: order.state,
-        dueDate: payload.dueDate ?? "", notBefore: payload.notBefore ?? "", usualMinutes: order.estimate.p50Minutes, nextBlock: nextBlock.get(order.id) ?? "",
+        dueDate: dueOf(order) ?? "", notBefore: payload.notBefore ?? "", usualMinutes: order.estimate.p50Minutes, nextBlock: nextBlock.get(order.id) ?? "",
         ...(unplaced.has(order.id) ? { unplaced: unplaced.get(order.id)! } : {}),
         steps: (store.getStepPlan(ctx.workspaceId, order.id)?.steps ?? []).map((step) => ({ id: step.id, title: step.title, status: step.status,
           minutes: step.estimate.p50Minutes, executor: step.executor, ...(step.provides && step.status === "planned" ? { asksPersonForMaterial: true } : {}) })) };
     }),
     proposals: orders.filter((order) => order.state === "awaiting_plan_approval").map((order) => ({ id: order.id, title: taskTitleOf(order), line: label(order.identityId) })),
     milestones: milestones.map((item) => ({ id: item.id, title: item.title, line: label(item.identityId), status: item.status,
-      deadline: anchors.get(item.id)?.deadline ?? "", weight: item.status === "approved" ? effectiveWeight(ctx, item.id) : 0 })),
+      deadline: dueOf({ milestoneId: item.id, payload: {} }) ?? "", weight: item.status === "approved" ? effectiveWeight(ctx, item.id) : 0 })),
     asks: openAsks(ctx, now).map((ask) => ({ id: ask.id, kind: ask.kind, title: ask.title, why: ask.why.slice(0, 400), urgency: ask.urgency,
       options: ask.options.filter((option) => !option.href).map((option) => ({ id: option.id, label: option.label,
         fields: (option.fields ?? []).map((field) => ({ id: field.id, label: field.label, required: field.required })) })) })),

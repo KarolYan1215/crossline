@@ -58,5 +58,14 @@ test("a step split again is said in the summary once its smaller plan exists, fo
     store.saveStepPlan(ws, "hw3", plan("读第 1 题题干"), TEST_CTX.principalId, "revised");
     expect(readFinerSplits(TEST_CTX, new Date("2026-10-14T13:00:00Z"))).toEqual([{ orderId: "hw3", title: "完成作业 3", step: "推导第 1–2 题", days: 2 }]);
     expect(readFinerSplits(TEST_CTX, new Date("2026-10-15T13:00:00Z"))).toEqual([]);
+    // W-280: a smaller plan left with nothing of the person's to do, or a task no longer committed, is not announced.
+    const agentOnly = plan("起草请求");
+    agentOnly.steps[0] = { ...agentOnly.steps[0]!, executor: "agent" as never };
+    store.saveStepPlan(ws, "hw3", agentOnly, TEST_CTX.principalId, "revised");
+    expect(readFinerSplits(TEST_CTX, new Date("2026-10-14T13:00:00Z"))).toEqual([]);
+    store.saveStepPlan(ws, "hw3", plan("读第 1 题题干"), TEST_CTX.principalId, "revised");
+    expect(readFinerSplits(TEST_CTX, new Date("2026-10-14T13:00:00Z"))).toHaveLength(1);
+    store.saveWorkOrder({ ...store.listWorkOrders(ws).find((order) => order.id === "hw3")!, state: "archived" });
+    expect(readFinerSplits(TEST_CTX, new Date("2026-10-14T13:00:00Z"))).toEqual([]);
   } finally { vi.useRealTimers(); }
 });

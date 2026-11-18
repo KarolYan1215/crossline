@@ -1408,6 +1408,8 @@ export function readChangeSummary(ctx: AccessContext, now = appNow()): ScheduleC
  * change summary on Today for a day once the smaller plan exists. Said there and nowhere else — no push, nothing to answer.
  */
 export type FinerSplitNote = { orderId: string; title: string; step: string; days: number };
+/** The states the step planner plans in (`PLANNABLE` in apps/worker/src/step-planner.ts). */
+const FINER_SPLIT_STATES = new Set(["approved", "preparing", "ready_for_human", "active"]);
 export function readFinerSplits(ctx: AccessContext, now = appNow()): FinerSplitNote[] {
   const store = getStore();
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
@@ -1417,6 +1419,11 @@ export function readFinerSplits(ctx: AccessContext, now = appNow()): FinerSplitN
     const order = orders.get(event.entityId);
     const redone = planned.find((item) => item.entityId === event.entityId && item.createdAt > event.createdAt);
     if (!split || !order || !redone || now.getTime() - Date.parse(redone.createdAt) >= 86_400_000) return [];
+    // Said only while the smaller plan is the person's to do (W-280: a task whose new steps were all the assistant's, already marked
+    // done, was announced as 「已拆成更小的步骤」): the task still committed, and a step of the person's still open on the calendar.
+    if (!FINER_SPLIT_STATES.has(order.state)) return [];
+    const steps = store.getStepPlan(ctx.workspaceId, order.id)?.steps ?? [];
+    if (!steps.some((step) => step.status === "planned" && step.schedulable && step.executor !== "agent")) return [];
     return [{ orderId: order.id, title: taskTitleOf(order), step: split.title ?? "", days: split.days?.length ?? 2 }];
   });
 }

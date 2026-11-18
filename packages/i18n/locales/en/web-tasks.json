@@ -9,6 +9,7 @@
   "证据与里程碑相矛盾": "Evidence contradicts the milestone",
   "分析中断，需重新分析": "Analysis interrupted; needs a rerun",
   "等本人批准": "Waiting for your approval",
+  "活动已过 · 去了就点完成，没去就归档": "The event has passed · complete it if you went, archive it if not",
   "材料准备已停止 · {{message}}": "Material preparation stopped · {{message}}",
   "等材料准备": "Waiting for materials",
   "已提交 · 等验收": "Submitted · waiting for acceptance",

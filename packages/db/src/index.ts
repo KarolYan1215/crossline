@@ -4981,6 +4981,7 @@ export * from "./artifacts";
 export * from "./portrait";
 export * from "./skills";
 export * from "./overdue";
+export * from "./due-date";
 export * from "./locale";
 export * from "./invites";
 export * from "./evidence-backfill";

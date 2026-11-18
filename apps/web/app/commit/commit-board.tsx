@@ -17,7 +17,7 @@ type Preview = { keptMinutes: number; impact: { week: { unplacedBefore: number; 
 
 /** Why the row was suggested where it is, in words. */
 const REASON: Record<string, string> = {
-  started: "已开始", due: "本周截止", fits: "排得下", over_capacity: "本周排不下", stale: "逾期一周以上且未开始"
+  started: "已开始", due: "本周截止", fits: "排得下", over_capacity: "本周排不下", stale: "逾期一周以上且未开始", event_passed: "活动已过"
 };
 /** Each group's column: its heading and the icon its move button carries elsewhere. */
 const COLUMN: Record<CommitGroup, { title: string; move: string; icon: ReactNode }> = {
@@ -170,7 +170,7 @@ export function CommitBoard({ view, labels }: { view: WeeklyCommitView; labels: 
         <small className="cm-reason">{moved ? t("本人改到这里；建议{{group}}：{{reason}}", { group: t(COLUMN[row.suggestion.group].title), reason: t(REASON[row.suggestion.reason]!) })
           : t("理由：{{reason}}", { reason: t(REASON[row.suggestion.reason]!) })}{row.weight !== 50 ? ` · ${t("里程碑重要性 {{weight}}", { weight: Math.round(row.weight) })}` : ""}</small>
       </div>
-      <span className="cm-row-moves">{COMMIT_GROUPS.filter((other) => other !== group).map((other) =>
+      <span className="cm-row-moves">{COMMIT_GROUPS.filter((other) => other !== group && !row.passedEvent).map((other) =>
         <IconButton key={other} label={t("「{{title}}」{{move}}", { title: row.title, move: t(COLUMN[other].move) })} icon={COLUMN[other].icon} disabled={busy}
           className="cm-move" onClick={() => choose(row.id, other)} />)}</span>
     </li>;

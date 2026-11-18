@@ -2,7 +2,7 @@ import "server-only";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { agentAskProgress, urgencyFor, type AccessContext, type AgentChain, type AgentProgressRecord, type Ask, type AskOption, type AskPreview } from "@crossline/core";
+import { agentAskProgress, isAttending, urgencyFor, type AccessContext, type AgentChain, type AgentProgressRecord, type Ask, type AskOption, type AskPreview } from "@crossline/core";
 import { agentChainsFor, closeAgentTask, listAgentTasks, requestAgentRetry, takeStepBack, type AgentTaskRow } from "@crossline/db";
 import { archiveWorkOrder, getStore } from "./crossline";
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "./codex-runtime";
@@ -48,22 +48,26 @@ export function agentBlockedAsks(ctx: AccessContext, now: Date, today: string): 
     const exhausted = failure.kind === "interrupted";
     const progress = agentAskProgress({ title, failure, record: progressRecord(row, latest.taskId), retries: chain.retries, exhausted, locale });
     const dueDay = (order?.payload as { dueDate?: string } | undefined)?.dueDate;
+    // An event to attend that has passed (W-275: 「按我的补充重试」 was recommended for one five days gone): nothing left to retry, so it
+    // is not urgent and 「不做了」 is what is recommended.
+    const passed = Boolean(order && isAttending(order.intent) && dueDay && dueDay < today);
     const why = failure.kind === "interrupted" ? t("{{stuck}}。先停下，等本人安排下一步。", { stuck: progress.stuckAt })
       : failure.kind === "external" ? t("{{stuck}}。不会自动重试：{{why}}。", { stuck: progress.stuckAt, why: failure.noRetryWhy })
       : failure.kind === "needs_input" ? t("{{stuck}}。需要本人：{{needs}}。", { stuck: progress.stuckAt, needs: progress.needs[0] ?? t("补充信息") })
       : failure.workaround ? t("{{stuck}}。可以换个方法：{{workaround}}。", { stuck: progress.stuckAt, workaround: failure.workaround })
       : t("{{reason}}。", { reason: progress.stuckAt });
     const options: AskOption[] = [
-      ...(failure.kind === "hard" && failure.workaround ? [{ id: "alternative", label: t("换个方法重试"), detail: failure.workaround, recommended: true }] : []),
+      ...(!passed && failure.kind === "hard" && failure.workaround ? [{ id: "alternative", label: t("换个方法重试"), detail: failure.workaround, recommended: true }] : []),
       { id: "retry", label: failure.external ? t("我已处理好，按我的补充重试") : t("按我的补充重试"), detail: t("把下面写的话交给助手，接着已写出的文件做"),
-        ...(failure.kind === "interrupted" || failure.kind === "needs_input" ? { recommended: true } : {}) },
+        ...(!passed && (failure.kind === "interrupted" || failure.kind === "needs_input") ? { recommended: true } : {}) },
       { id: "self", label: latest.stepId ? t("我自己做这一步") : t("我自己做"), detail: latest.stepId ? t("这一步排进本人的日程，助手不再接手") : t("助手不再接手"),
-        ...(failure.kind === "external" ? { recommended: true } : {}) },
-      { id: "drop", label: t("不做了"), detail: latest.stepId ? t("跳过这一步") : latest.workOrderId && !latest.stepId ? t("这件事归档") : t("不再做这件事") },
+        ...(!passed && failure.kind === "external" ? { recommended: true } : {}) },
+      { id: "drop", label: t("不做了"), detail: latest.stepId ? t("跳过这一步") : latest.workOrderId && !latest.stepId ? t("这件事归档") : t("不再做这件事"),
+        ...(passed ? { recommended: true } : {}) },
       { id: "look", label: t("查看助手做到哪"), href: previewOf(t, chain, row).href }
     ];
     return {
-      id: `agent:${latest.taskId}`, kind: "agent_blocked", entityId: latest.taskId, urgency: urgencyFor(dueDay, today), ...(dueDay ? { dueDay } : {}),
+      id: `agent:${latest.taskId}`, kind: "agent_blocked", entityId: latest.taskId, urgency: passed ? "later" : urgencyFor(dueDay, today), ...(dueDay ? { dueDay } : {}),
       ...(order?.identityId ? { line: order.identityId } : {}), raisedAt: latest.endedAt ?? latest.requestedAt,
       fingerprint: `${latest.blockerCode}:${latest.taskId}`, important: true,
       title: t("助手没做成「{{title}}」", { title: short(title) }), why, options, preview: previewOf(t, chain, row), progress,

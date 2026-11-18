@@ -1,3 +1,4 @@
+import { isAttending } from "@crossline/core";
 import type { TaskDetail } from "../../lib/task-detail";
 import { tFor, type Locale } from "../../lib/i18n";
 import { shortDate } from "./format";
@@ -7,7 +8,7 @@ import { shortDate } from "./format";
  * picture of the steps, what the task waits for, and which of the page's four questions it answers — 现在 (do it today), 接下来 (it has
  * a time ahead), 在等 (it waits for a decision, an input, material or the gate) or 任务库 (its milestone is beyond the window).
  */
-export type CardDetail = Pick<TaskDetail, "state" | "paused" | "stepPlan" | "window" | "blocker" | "materialBlocker"> & Partial<Pick<TaskDetail, "preparing">>;
+export type CardDetail = Pick<TaskDetail, "state" | "paused" | "stepPlan" | "window" | "blocker" | "materialBlocker"> & Partial<Pick<TaskDetail, "preparing" | "title">>;
 type Step = NonNullable<TaskDetail["stepPlan"]>["steps"][number];
 export type TaskSlotLike = { day: string; start: string; end: string };
 
@@ -58,7 +59,7 @@ export function stepSegments(detail: Pick<CardDetail, "stepPlan">): Segment[] {
  */
 const awaited = (title: string) => title.replace(/^(?:等待\s*|wait(?:ing)?\s+(?:for|on)\s+)/iu, ""); // i18n-ignore
 
-export type WaitKind = "approval" | "preparing" | "returned" | "material" | "gate" | "input" | "provide" | "release";
+export type WaitKind = "approval" | "preparing" | "returned" | "material" | "gate" | "input" | "provide" | "release" | "passed";
 
 /**
  * Why a task was sent back, in words: the ledger keeps a code (the gate's `MILESTONE_GATE_INSUFFICIENT`, an analysis blocker), which the
@@ -84,6 +85,11 @@ export function waitReason(detail: CardDetail, today: string, locale?: Locale): 
   if (detail.state === "preparing") return { kind: "material", label: detail.materialBlocker ? t("材料准备已停止 · {{message}}", { message: detail.materialBlocker.message }) : t("等材料准备") };
   if (detail.state === "evidence_review") return { kind: "gate", label: t("已提交 · 等验收") };
   if (detail.state === "active") return undefined;
+  // An event to attend whose day has passed is not work for today (W-274: 8 of the 16 under 「现在」 were 「参加…」 2–18 days gone). It
+  // waits for the person to say whether they went; nothing is closed for them (the owner's rule of 2026-11-05: a passed date is not
+  // decided by default; 2026-11-11: the old orders are not migrated).
+  if (detail.title && isAttending(detail.title) && detail.window.dueBy && detail.window.dueBy < today)
+    return { kind: "passed", label: t("活动已过 · 去了就点完成，没去就归档") };
   const step = currentStep(detail);
   if (step && !step.schedulable) {
     // Material only the person has: settled on the task itself (upload, or 「没有」), never on 待确认 (W-170).
@@ -108,7 +114,7 @@ export function groupOf(detail: CardDetail, { today, slot, library }: { today: s
 }
 
 /** The order inside a group: what runs first, then what comes up soonest, then the nearest deadline; the waiting by what is asked of the person first. */
-const WAIT_ORDER: Record<WaitKind, number> = { returned: 0, approval: 1, provide: 1, input: 2, release: 3, preparing: 4, material: 4, gate: 5 };
+const WAIT_ORDER: Record<WaitKind, number> = { returned: 0, approval: 1, provide: 1, passed: 2, input: 2, release: 3, preparing: 4, material: 4, gate: 5 };
 export function compareInGroup(group: TaskGroup, today: string) {
   return (a: { detail: CardDetail; slot?: TaskSlotLike | undefined; library?: string | undefined; id: string },
     b: { detail: CardDetail; slot?: TaskSlotLike | undefined; library?: string | undefined; id: string }): number => {

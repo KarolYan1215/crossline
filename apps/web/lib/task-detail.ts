@@ -1,7 +1,7 @@
 import "server-only";
-import { archetypeById, completionRule, preparesOf, STEP_ANSWER_SLOT, stepAnswerSlot, finishedSteps, goalSettingKey, proposalReady, producedArtifacts, relevantDocuments, staleDateMentions, stepDatesFollowingDue, taskProgress, taskTitleOf, usedArtifacts, type AccessContext, type FamiliarityLevel, type Preparation, type SuccessCriterion,
+import { archetypeById, completionRule, preparesOf, STEP_ANSWER_SLOT, stepAnswerSlot, finishedSteps, proposalReady, producedArtifacts, relevantDocuments, staleDateMentions, stepDatesFollowingDue, taskProgress, taskTitleOf, usedArtifacts, type AccessContext, type FamiliarityLevel, type Preparation, type SuccessCriterion,
   sessionWorkedMinutes, type EvidenceQuestionTemplate } from "@crossline/core";
-import { doneKinds, familiarityBook, familiarityFor, listAgentTasks, mailLinksOf, needStatesOf, preparationOf, readStoredArtifactPlan, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
+import { doneKinds, dueDateReader, familiarityBook, familiarityFor, listAgentTasks, mailLinksOf, needStatesOf, preparationOf, readStoredArtifactPlan, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
   type StoredBackgroundFact, type StoredStepPlan, type StoredTaskStep } from "@crossline/db";
 import { defaultIdentityPacks, identityPacksFor } from "@crossline/identity-packs";
 import { appNow, effectiveSchedulePreferences, getStore, resolvedEstimate, relationKindLabel, accents, suggestedSessionMinutes } from "./crossline";
@@ -29,7 +29,7 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
   const done = doneKinds(store, workspaceId, allPlans);
   const book = familiarityBook(store, workspaceId, allPlans);
   const milestones = new Map(store.listMilestones(workspaceId).map((milestone) => [milestone.id, milestone]));
-  const anchors = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
+  const dueOf = dueDateReader(store, workspaceId);
   const relations = store.listMilestoneRelations(workspaceId).filter((relation) => relation.status === "approved" || relation.status === "candidate");
   const labels = new Map(identityPacksFor((key) => store.getSetting(workspaceId, key), { includeArchived: true }).map((pack) => [pack.id, t(pack.label)]));
   const executions = store.listExecutions(workspaceId);
@@ -61,11 +61,10 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
   for (const order of orders) {
     const payload = (order.payload ?? {}) as { notBefore?: string; dueDate?: string; byproducts?: Array<{ lineId: string; artifact: string }>;
       gateReview?: { criteriaVerdict?: Array<{ criterionId: string; met: string; observed: string }> } };
-    let goalDeadline: string | undefined;
-    try { goalDeadline = (JSON.parse(store.getSetting(workspaceId, goalSettingKey(order.milestoneId)) ?? "{}") as { confirmedDeadline?: string }).confirmedDeadline; } catch { /* none */ }
     // The goal setting replaces the anchor's date; taking the earlier of the two showed a moved milestone's old day (2026-10-28:
     // 「选定首轮选题」 read 10/19 on its card and 11/2 on Today).
-    const dueBy = [payload.dueDate, goalDeadline || anchors.get(order.milestoneId)].filter((value): value is string => Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value))).sort()[0];
+    // (`dueDateReader`, shared with the assistant's task list since W-277.)
+    const dueBy = dueOf(order);
     const plan = plans.get(order.id);
     const milestone = milestones.get(order.milestoneId);
     const supports = [

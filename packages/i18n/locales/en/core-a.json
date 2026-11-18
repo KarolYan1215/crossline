@@ -213,6 +213,8 @@
   "稍后": "Later",
   "后台完成了 {{count}} 件：_one": "{{count}} background job finished:",
   "后台完成了 {{count}} 件：_other": "{{count}} background jobs finished:",
+  "{{count}} 件的余量不够了：_one": "{{count}} task is short of time:",
+  "{{count}} 件的余量不够了：_other": "{{count}} tasks are short of time:",
   "按时型": "from your chronotype",
   "按睡眠中点": "from your sleep midpoint",
   "按本人所述高效时段": "from the best hours you named",
