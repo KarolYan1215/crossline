@@ -39,7 +39,8 @@ export { RESET_KEEPS };
 /**
  * 「清空数据重新开始」 (2026-10-18, the owner's request to rebuild their own account, which as the machine owner's cannot be deleted): the
  * person types the account's email and everything the account has built goes — the interview, portrait, lines, milestones, tasks, files,
- * conversation and calendar links — while the login, the model connection and the machine-owner mark stay. The next page is the
+ * conversation and calendar subscriptions — while the login, the model connection, the machine-owner mark and the calendar writers' setup
+ * and records stay (`RESET_KEEPS`: the next publish withdraws what they wrote that is still to come). The next page is the
  * interview's opening card. Offered to every hosted account; an installed copy is reset by reinstalling.
  */
 export function resetAccountData(ctx: AccessContext, session: { email: string }, typedEmail: string): AccountReset {

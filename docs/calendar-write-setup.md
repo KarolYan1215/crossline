@@ -65,6 +65,10 @@
 7. 托管版设置 `CROSSLINE_SECRET_KEY`（与其他密钥共用）和 `CROSSLINE_DATA_DIR`，重启服务。
 8. 本机：仓库根目录运行 `pnpm exec tsx scripts/graph-write-login.ts`，按提示打开网址、输入设备码；同意页应写着「读取和写入你的日历」。成功后账号记入 `calendar.write.account`，「Microsoft 日历」一项默认开启。
 
+## 清空数据之后（2026-11-17）
+
+「清空数据重新开始」保留四条写入方式的设置和记录：`calendar.write.*`（哪几条开着、Microsoft 账号）、`calendar.published` / `calendar.published.google`（各自写过哪些事件）、`calendar.imip.*`（收件地址、发过的邀请）、`calendar.feed.*`（订阅链接的密钥）。跳过「没变化」的哈希（`calendar.autopublish.hash`、`calendar.google.hash`、`calendar.fixed.hash`）照删，所以清空后的第一次自动发布（十分钟内）读到空计划，按各条的老规则撤回：Graph 和 Google 删掉自己写的未来事件，邀请发 CANCEL（每次 5 封、每天 30 封的上限照旧），订阅链接变空。本人改过的事件不动，已过去的不删。之前清空会连记录一起删，日历上已写的事件就再没人认领，下一份计划又写一遍。
+
 ## 邮件里的活动
 
 邮件分拣多了一类「活动」（讲座、宣讲会、活动、会议、导师约见、面试、组会）：模型读出标题、日期、时间、地点、相关度和是否是给本人的邀请，日期和引文必须在原文里找得到（`packages/core/src/mail-events.ts`）。给本人的邀请或相关度 ≥ 50 的，变成问答卡「要去吗：「…」」，给本人的排在最前并默认推荐「去」；点「去」才建固定日程并按上面开着的方式写入日历，点「不去」就丢掉。其余群发通知只进复盘页的「邮件里的活动」一周汇总，不打扰。邮件本身从不直接写日历。要报名的活动仍走机会卡。

@@ -870,7 +870,7 @@
   "删除访谈、画像、主线、里程碑、任务、上传的文件和对话，无法恢复；账号、登录方式和模型连接保留": "Deletes the interview, portrait, tracks, milestones, tasks, uploaded files and conversations; this cannot be undone. The account, sign-in methods and model connection stay",
   "清空中…": "Clearing…",
   "清空并重新访谈": "Clear and redo the interview",
-  "清空后从访谈的开场重新开始；日历订阅和授权的文件夹需要重新添加。": "After clearing, the interview starts again from its opening; calendar subscriptions and authorized folders need adding again.",
+  "清空后从访谈的开场重新开始；日历订阅和授权的文件夹需要重新添加。Crossline 已写进日历的未来事件会被撤回，写入日历的设置保留。": "After clearing, the interview starts again from its opening; calendar subscriptions and authorized folders need adding again. Future events Crossline wrote to your calendars are withdrawn; the calendar-writing settings stay.",
   "约 {{minutes}} 分钟后": "in about {{minutes}} min",
   "约 {{hours}} 小时 {{minutes}} 分钟后": "in about {{hours}} h {{minutes}} min",
   "约 {{hours}} 小时后": "in about {{hours}} h",

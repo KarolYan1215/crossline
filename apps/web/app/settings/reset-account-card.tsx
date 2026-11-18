@@ -32,6 +32,6 @@ export function ResetAccountCard({ email }: { email: string }) {
       <button className="secondary-button" type="submit" disabled={!matches || busy}>{busy ? t("清空中…") : t("清空并重新访谈")}</button>
     </form>
       {status && <small role={status === t("正在清空…") ? "status" : "alert"}>{status}</small>}
-      <small>{t("清空后从访谈的开场重新开始；日历订阅和授权的文件夹需要重新添加。")}</small></div>
+      <small>{t("清空后从访谈的开场重新开始；日历订阅和授权的文件夹需要重新添加。Crossline 已写进日历的未来事件会被撤回，写入日历的设置保留。")}</small></div>
   </section>;
 }
