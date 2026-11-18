@@ -4,7 +4,7 @@ import {
   ACCOUNT_CLASS_LABEL, ATTENTION_SNAPSHOT, BACKGROUND_BLOCKER, CALENDAR_LINES, degradedService, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
   localStamp, prepStepRetried, readableFromMaterial, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
   validateAskChoice, withFrozen, type AccessContext, type Ask, type AskField, type AskItem, type AskOption, type AskPreview, type AskSnooze,
-  attendedName, isAttending, isPreparationOnlyMilestone, onPersonsBoard, outcomeCriteriaVerdict, preparesOf, workOwner, decisionFor, similarTitles, type TimedItem,
+  attendedName, attendedText, isPreparationOnlyMilestone, onPersonsBoard, outcomeCriteriaVerdict, preparesOf, workOwner, decisionFor, similarTitles, type TimedItem,
   MILESTONE_RISK_KIND_LABEL, MILESTONE_RISK_LEVEL_LABEL, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskBufferDays, riskCriteriaKeys, riskLevelOf,
   parseRiskDigestSeen, RISK_DIGEST_SETTING, riskDigestShows, weekStartOf, type MilestoneRisk, type RiskDigestSeen
 } from "@crossline/core";
@@ -542,7 +542,7 @@ function overdueFoldAsks(source: Source): Ask[] {
       options: [{ id: "split", label: t("逐个处理"), recommended: true, detail: t("拆成每项一张卡") },
         ...(events.length ? [{ id: "drop_events", label: t("过去的 {{count}} 个活动不参加了", { count: events.length }),
           detail: t("{{titles}} 归档，可从已归档恢复；其余照旧等本人决定", { titles: events.map((item) =>
-            `「${item.ask.dueDay ? `${format(item.ask.dueDay, locale)} ` : ""}${short(attendedName(item.order.intent), 24)}」`).join("、") }) }] : [])] };
+            `「${item.ask.dueDay ? `${format(item.ask.dueDay, locale)} ` : ""}${short(attendedName(attendedText(item.order) ?? item.order.intent), 24)}」`).join("、") }) }] : [])] };
   });
 }
 
@@ -551,7 +551,7 @@ function pastEventsIn(members: Ask[], tasks: Map<string, StoredWorkOrder>): Arra
   return members.flatMap((ask) => {
     const order = ask.kind === "overdue_task" ? tasks.get(ask.entityId) : undefined;
     // Attending something: its day passing means it is over, not overdue work (a talk, rehearsal, forum, exam sitting).
-    return order && isAttending(order.intent) ? [{ ask, order }] : [];
+    return order && attendedText(order) ? [{ ask, order }] : [];
   });
 }
 
@@ -1174,9 +1174,15 @@ export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
 type StepQuestionEntry = { order: StoredWorkOrder; plannedAt: string; version: number; question: { text: string; why?: string; options: string[] } };
 
 /** The open step questions, one entry per question, the same question from two tasks of one project once (the answer is per project). */
-function openStepQuestions({ store, ctx }: Source): StepQuestionEntry[] {
-  const orders = new Map(store.listWorkOrders(ctx.workspaceId).filter((order) => ["approved", "preparing", "ready_for_human", "active"].includes(order.state) && onPersonsBoard(order))
-    .map((order) => [order.id, order]));
+function openStepQuestions({ store, ctx, today }: Source): StepQuestionEntry[] {
+  // An event whose day has passed has nothing left to plan (2026-11-17 live walk: 「参加 CoE 校友职业奖座谈会」 still asked for its
+  // start and end time eleven days after it).
+  const passedEvent = (order: StoredWorkOrder) => {
+    const due = (order.payload as { dueDate?: string } | undefined)?.dueDate;
+    return Boolean(due && due < today && attendedText(order));
+  };
+  const orders = new Map(store.listWorkOrders(ctx.workspaceId).filter((order) => ["approved", "preparing", "ready_for_human", "active"].includes(order.state) && onPersonsBoard(order)
+    && !passedEvent(order)).map((order) => [order.id, order]));
   const answered = new Set(store.listProfileFacts(ctx.workspaceId).filter((fact) => fact.slot.startsWith(STEP_ANSWER_SLOT)).map((fact) => `${fact.projectId}|${fact.slot}`));
   const asked = new Set<string>();
   // What a task's own files answer (the problem set, how it is handed in, the AI rule) is read from them, never asked: the worker's task

@@ -36,9 +36,10 @@ test("a started course homework past its due day is asked: can it still be hande
 
 test("passed talks and rehearsals on the folded card are let go in one answer; homework still waits for its own", async () => {
   const store = setup();
-  for (const [id, intent] of [["talk", "参加 ECE 研究系列讲座"], ["rehearsal", "参加 BadgerShop 排练"]] as const) {
+  // The rehearsal's description does not start with the verb; its title does (2026-11-17 live walk: 「于 11 月 5 日 11:00 参加…」 was missed).
+  for (const [id, intent, title] of [["talk", "参加 ECE 研究系列讲座", undefined], ["rehearsal", "于 11 月 3 日 18:00 参加 BadgerShop 排练", "参加 BadgerShop 排练"]] as const) {
     store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research", projectId: "ece555", milestoneId: "", intent, state: "active", riskTier: "routine",
-      estimate, payload: { dueDate: "2026-11-03" } });
+      estimate, payload: { dueDate: "2026-11-03", ...(title ? { title } : {}) } });
   }
   const folded = collectAsks(TEST_CTX, NOW).find((ask) => ask.id.startsWith("fold:overdue:"))!;
   const option = folded.options.find((item) => item.id === "drop_events")!;

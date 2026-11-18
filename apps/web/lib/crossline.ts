@@ -77,7 +77,7 @@ import { FIRST_DRAFTS_SETTING, firstDraftsState, STEP_ENERGY_CEILING, learnedEff
 import { statedShares } from "./plan-stats";
 import { milestonesBeingBackplanned } from "./backplan-status";
 import { nearestDueProposal } from "./urgent-proposal";
-import { completionRule, onPersonsBoard, proposalReady, type CompletionMode, type CompletionOutcome } from "@crossline/core";
+import { attendedText, completionRule, onPersonsBoard, proposalReady, type CompletionMode, type CompletionOutcome } from "@crossline/core";
 import { MILESTONE_RISKS_SETTING, parseMilestoneRisks, riskBufferDays } from "@crossline/core";
 import { energyRhythm, statedSleep } from "@crossline/core";
 import { OVER_CAPACITY_TAG, statedWeeklyHours, weeklyAvailableHours } from "@crossline/core";
@@ -2028,11 +2028,14 @@ export function planRanking(ctx: AccessContext, plan: PersistedPlan): RankedTask
       .sort((a, b) => `${a.day} ${a.start}`.localeCompare(`${b.day} ${b.start}`));
     const blocker = plan.schedule.blockers.find((item) => item.taskId === order.id || item.taskId.startsWith(`${order.id}#`));
     const local = (instant: string | undefined) => instant ? formatInTimeZone(new Date(instant), zone, "yyyy-MM-dd") : null;
+    // An event whose day has passed is not work waiting for room or material (2026-11-17 live walk: 「改截止日…才会重新排入」 and
+    // 「在等：提供…日历邀请」 beside talks gone for days, while the task list said 「活动已过」).
+    const passedEvent = Boolean(local(task.deadline) && local(task.deadline)! < today && attendedText(order));
     return { id: order.id, title: taskTitleOf(order), line: order.identityId, milestoneId: order.milestoneId, tier: task.deadlineTier,
       weight: task.weight, deadline: local(task.deadline), notBefore: local(task.notBefore),
       firstDay: blocks[0]?.day ?? null, firstStart: blocks[0]?.start ?? null,
       weekMinutes: blocks.filter((block) => block.day! >= today && block.day! < weekEnd).reduce((sum, block) => sum + minutesOf(block), 0),
-      blocker: blocks.length ? null : blocker
+      blocker: blocks.length ? null : passedEvent ? t("活动已过 · 去了就点完成，没去就归档") : blocker
         // Past its own deadline the planner cannot place it at all, which read as 「截止日前的可用时段不足」 (W-174).
         ? (local(task.deadline) && local(task.deadline)! < today ? t("已过截止日；改截止日或标为不做后才会重新排入")
           : UNPLACED_REASON[blocker.code] ? t(UNPLACED_REASON[blocker.code]!) : blocker.message)

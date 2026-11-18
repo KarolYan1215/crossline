@@ -123,6 +123,8 @@ const object = (properties: Record<string, unknown>) => ({ type: "object", prope
 
 /** At most this many of the person's materials are asked for in one plan; a provide step takes this long (finding and uploading a file). */
 export const MAX_NEEDS = 4;
+/** What names a secret — a password, a login credential, a code or key that signs someone in. Never asked for as an upload. */
+const SECRET_MATERIAL = /凭据|凭证|密码(?!学)|口令|验证码|恢复代码|恢复码|密钥|私钥|助记词|\b(passwords?|passcodes?|credentials?|api[ -]?keys?|tokens?|recovery codes?|otp|2fa)\b/i;
 export const PROVIDE_MINUTES = 5;
 /** The key under which the person's choice of who does a kind of step is kept (setting `steps.ownerPreferences`): line, role, product. */
 export const ownerPreferenceKey = (lineId: string, role: string, product: StepProduct) => `${lineId}|${role}|${product}`;
@@ -282,7 +284,9 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
   });
   // The person's own material first: each need becomes a provide step at the front (an upload box and 「没有」, no calendar time).
   // Only material something on record says the person has: a need without that is guessed, and asking for it wastes their time.
-  const needs = (Array.isArray(plan.needs) ? plan.needs : []).filter((need) => need && text(need.what).trim() && text(need.basis).trim()).slice(0, MAX_NEEDS)
+  // A secret is never material to hand over: the person signs in themselves (2026-11-17 live walk: 「提供Engineering VPN 登录凭据 · 上传文件」).
+  const needs = (Array.isArray(plan.needs) ? plan.needs : []).filter((need) => need && text(need.what).trim() && text(need.basis).trim() && !SECRET_MATERIAL.test(text(need.what)))
+    .slice(0, MAX_NEEDS)
     .map((need, index) => ({ id: String(need.id || `n${index + 1}`).slice(0, 40), what: text(need.what).trim().slice(0, 80), why: text(need.why).trim().slice(0, 200),
       basis: text(need.basis).trim().slice(0, 200), kind: need.kind === "personal" ? "personal" as const : "reference" as const }));
   const needIds = new Set(needs.map((need) => need.id));

@@ -30,6 +30,17 @@ export function isAttending(text: string): boolean {
   return ATTENDING.test(text);
 }
 
+/**
+ * A task's words that say it is going to something: its description, else its short title (both verb-first when they are). The description
+ * is free text and does not always start with the verb — 「于 11 月 5 日 11:00 参加…」「通过 Zoom 参加…」 — while the title does
+ * (2026-11-17 live walk: such tasks showed 「活动已过」 on the task list, from the title, yet their cards still recommended a retry).
+ */
+export function attendedText(order: { intent: string; payload?: unknown }): string | undefined {
+  if (isAttending(order.intent)) return order.intent;
+  const title = (order.payload as { title?: unknown } | undefined)?.title;
+  return typeof title === "string" && isAttending(title) ? title : undefined;
+}
+
 const LEADING_DAY = /^\s*(\d{1,2}\s*月\s*\d{1,2}\s*[日号]|\d{1,2}\/\d{1,2})\s*(上午|中午|下午|傍晚|晚上|晚间|早上)?\s*(在\s*)?/;
 /**
  * What is attended, as a list names it: without the verb, the day (said beside it from the task's own date) and 「在…举行的」, so the part

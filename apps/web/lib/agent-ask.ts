@@ -2,7 +2,7 @@ import "server-only";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { agentAskProgress, isAttending, urgencyFor, type AccessContext, type AgentChain, type AgentProgressRecord, type Ask, type AskOption, type AskPreview } from "@crossline/core";
+import { agentAskProgress, attendedText, urgencyFor, type AccessContext, type AgentChain, type AgentProgressRecord, type Ask, type AskOption, type AskPreview } from "@crossline/core";
 import { agentChainsFor, closeAgentTask, listAgentTasks, requestAgentRetry, takeStepBack, type AgentTaskRow } from "@crossline/db";
 import { archiveWorkOrder, getStore } from "./crossline";
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "./codex-runtime";
@@ -50,7 +50,7 @@ export function agentBlockedAsks(ctx: AccessContext, now: Date, today: string): 
     const dueDay = (order?.payload as { dueDate?: string } | undefined)?.dueDate;
     // An event to attend that has passed (W-275: 「按我的补充重试」 was recommended for one five days gone): nothing left to retry, so it
     // is not urgent and 「不做了」 is what is recommended.
-    const passed = Boolean(order && isAttending(order.intent) && dueDay && dueDay < today);
+    const passed = Boolean(order && attendedText(order) && dueDay && dueDay < today);
     const why = failure.kind === "interrupted" ? t("{{stuck}}。先停下，等本人安排下一步。", { stuck: progress.stuckAt })
       : failure.kind === "external" ? t("{{stuck}}。不会自动重试：{{why}}。", { stuck: progress.stuckAt, why: failure.noRetryWhy })
       : failure.kind === "needs_input" ? t("{{stuck}}。需要本人：{{needs}}。", { stuck: progress.stuckAt, needs: progress.needs[0] ?? t("补充信息") })

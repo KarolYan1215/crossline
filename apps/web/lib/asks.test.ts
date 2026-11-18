@@ -662,6 +662,19 @@ test("a step question the task's own files answer is not asked; the same questio
   expect(cards().map((ask) => ask.title.split("：")[1])).toEqual(["当前完成状态？"]);
 });
 
+test("an event whose day has passed asks no step question (2026-11-17 live walk: a talk eleven days gone asked for its start time)", () => {
+  const store = setup();
+  const event = (id: string, intent: string, dueDate: string, title?: string) => store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research",
+    projectId: id, milestoneId: "", intent, state: "approved", riskTier: "routine", estimate, payload: { dueDate, ...(title ? { title } : {}) } });
+  event("gone", "参加 10 月 6 日在 Levy Hall 举行的 CoE 校友座谈会", "2026-10-06");
+  event("gone-prefixed", "通过 Zoom 参加第 13 期 Biolog 线上活动", "2026-10-05", "参加第 13 期 Biolog");
+  event("coming", "参加 ECE 研究系列讲座", "2026-10-09");
+  const plan = { archetypeId: "event", quantity: { basis: "次", amount: 1, unit: "次" }, rationale: "", steps: [],
+    questions: [{ id: "q1", text: "补充活动起止时间", why: "", options: [] }] };
+  for (const id of ["gone", "gone-prefixed", "coming"]) store.saveStepPlan(ws, id, plan as never, owner, "t");
+  expect(collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "step_question").map((ask) => ask.entityId)).toEqual(["coming"]);
+});
+
 test("a project's questions are settled on one card: 都按建议 in one tap, or 逐条改 where an empty line keeps the suggestion", async () => {
   const store = setup();
   for (const id of ["a", "b"]) store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "startup", projectId: "mvp", milestoneId: "", intent: `任务 ${id}`,

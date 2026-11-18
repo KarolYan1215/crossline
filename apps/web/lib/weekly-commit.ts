@@ -1,6 +1,6 @@
 import "server-only";
 import {
-  COMMIT_GROUPS, commitWeekOf, deferTarget, groupMinutes, isAttending, onPersonsBoard, parseWeeklyCommit, proposeWeeklyCommit, taskTitleOf, WEEKLY_COMMIT_SETTING, weeklyCommitDue,
+  COMMIT_GROUPS, commitWeekOf, deferTarget, groupMinutes, attendedText, onPersonsBoard, parseWeeklyCommit, proposeWeeklyCommit, taskTitleOf, WEEKLY_COMMIT_SETTING, weeklyCommitDue,
   type AccessContext, type CommitGroup, type CommitSuggestion, type CommitTask, type WeeklyCommitRecord
 } from "@crossline/core";
 import { formatInTimeZone } from "date-fns-tz";
@@ -89,7 +89,7 @@ export function loadWeeklyCommit(ctx: AccessContext, now = appNow()): WeeklyComm
     const begun = order.state === "active" || started.has(order.id) || stepsDone.has(order.id);
     if (notBefore && notBefore > weekEnd && !begun) return [];
     if (!(begun || (due && due <= weekEnd) || upcoming.has(order.id))) return [];
-    const passedEvent = Boolean(due && due < today && isAttending(order.intent));
+    const passedEvent = Boolean(due && due < today && attendedText(order));
     const task: CommitTask = { id: order.id, minutes: Math.round(minutes.get(order.id) ?? order.estimate.p50Minutes), started: begun,
       ...(passedEvent ? { passedEvent } : {}), weight: order.milestoneId ? effectiveWeight(ctx, order.milestoneId) : 50, ...(due ? { dueDay: due } : {}) };
     return [{ task, title: taskTitleOf(order), line: order.identityId }];

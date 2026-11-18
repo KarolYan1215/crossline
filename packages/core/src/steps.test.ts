@@ -270,3 +270,16 @@ describe("drill forms (the owner's rule of 2026-11-10: no 订正-type task from 
     expect(normalizeStepPlan(clean).plan.questions).toEqual([]);
   });
 });
+
+describe("needs", () => {
+  it("a secret is never asked for as an upload; other material still becomes a provide step (2026-11-17 live walk)", () => {
+    const needs = [
+      { id: "n1", what: "Engineering VPN 登录凭据", why: "建立远程访问", basis: "邮件提到需要 VPN", kind: "personal" },
+      { id: "n2", what: "GitHub recovery codes", why: "保存", basis: "邮件", kind: "personal" },
+      { id: "n3", what: "密码学讲义", why: "复习要用", basis: "课程大纲", kind: "reference" }
+    ];
+    const { plan: normalized } = normalizeStepPlan({ ...plan([step("s1", "draft", { uses: ["n1", "n3"] } as never)]), needs } as never);
+    expect(normalized.steps.filter((item) => item.provides).map((item) => item.title)).toEqual(["提供密码学讲义"]);
+    expect(normalized.steps.find((item) => item.id === "s1")!.uses).toEqual(["n3"]);
+  });
+});

@@ -1073,6 +1073,7 @@
   "没有参加": "Did not take it",
   "里程碑归档，可从已归档恢复": "The milestone is archived; it can be restored from Archived",
   "已过截止日；改截止日或标为不做后才会重新排入": "Past its deadline; it is scheduled again once the deadline is changed or it is dropped",
+  "活动已过 · 去了就点完成，没去就归档": "The event has passed · complete it if you went, archive it if not",
   "已挂到任务，在等这份材料的步骤可以开始了": "Attached; the steps waiting for this material can start",
   "配对码输错太多次，一小时后再试。": "Too many wrong pairing codes. Try again in an hour.",
   "这个账号的全部模型运行（访谈、规划、整理、助手）都可能在那台电脑上进行，它能看到运行用到的资料": "Any of this account's model runs (interview, planning, organising, the assistant) may run on that computer, and it sees the material those runs use",
