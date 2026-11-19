@@ -675,6 +675,8 @@ function answerWeeklyCommitAsk(ctx: AccessContext, ask: Ask, optionId: string): 
  * that they cannot tell what slipped. Everything else rolls forward without a question.
  */
 const MISSED_ASK_HORIZON_DAYS = 7;
+/** How many days back a block not started is still asked about: long enough for the ask to wait out the 48 hours and be settled. */
+const MISSED_LOOKBACK_DAYS = 3;
 /** Set by 「逐个处理」 on the folded card: while the same blocks wait, each is its own card again. */
 const MISSED_SPLIT = "asks.missed.split";
 
@@ -743,9 +745,12 @@ function missedAsks(source: Source): Ask[] {
   const items: AskItem[] = [...members].sort((a, b) => (a.dueDay ?? "9999").localeCompare(b.dueDay ?? "9999")).map((ask) => ({ id: ask.entityId,
     title: taskTitleOf(source.store.listWorkOrders(source.ctx.workspaceId).find((order) => order.id === ask.entityId) ?? { intent: quotedTitle(ask.title) }),
     ...(ask.dueDay ? { dueDay: ask.dueDay } : {}), ...(ask.line ? { line: ask.line } : {}), href: `/workbench/${encodeURIComponent(ask.entityId)}` }));
-  return [{ id: `missed:batch:${members[0]!.fingerprint}`, kind: "missed_block", entityId: "batch", urgency: urgencyFor(due, today), ...(due ? { dueDay: due } : {}),
-    raisedAt: members.map((ask) => ask.raisedAt).sort().at(-1) ?? "", fingerprint, items,
-    title: t("昨天排好的 {{count}} 项工作没开始", { count: members.length }),
+  // Counted from the oldest block on it: the card has waited as long as its oldest question.
+  const first = [...members].sort((a, b) => a.raisedAt.localeCompare(b.raisedAt))[0]!;
+  return [{ id: `missed:batch:${first.fingerprint}`, kind: "missed_block", entityId: "batch", urgency: urgencyFor(due, today), ...(due ? { dueDay: due } : {}),
+    raisedAt: first.raisedAt, fingerprint, items,
+    title: members.every((ask) => ask.fingerprint === dayBefore(today)) ? t("昨天排好的 {{count}} 项工作没开始", { count: members.length })
+      : t("这几天排好的 {{count}} 项工作没开始", { count: members.length }),
     why: t("它们都已顺延到后面的空档，最近的截止是 {{day}}。顺延没问题就点一下；要补记做过的或不做了，点「逐个处理」。", { day: due ? format(due, locale) : "—" }),
     options: [
       { id: "roll", label: t("都顺延"), detail: t("按重新排的时间做"), recommended: true },
@@ -753,31 +758,55 @@ function missedAsks(source: Source): Ask[] {
     ] }];
 }
 
+/** The day before `day`. */
+const dayBefore = (day: string) => new Date(Date.parse(`${day}T00:00:00Z`) - DAY).toISOString().slice(0, 10);
+
+/**
+ * The last day a missed-block answer covers, per order: the day of the ask answered, or `through` (the day before the answer was given)
+ * when later. One answer settles every day missed up to then, so rolling Monday's ask on Wednesday does not raise Tuesday's next.
+ */
+function missedHandledThrough(ctx: AccessContext, store: Source["store"]): Map<string, string> {
+  const through = new Map<string, string>();
+  for (const event of live(ctx, store.listEvents(ctx.workspaceId, { type: "missed.handled" }))) {
+    const payload = event.payload as { askId?: string; through?: string };
+    const day = [payload.askId?.split(":").at(-1) ?? "", payload.through ?? ""].sort().at(-1)!;
+    if (day > (through.get(event.entityId) ?? "")) through.set(event.entityId, day);
+  }
+  return through;
+}
+
 function missedMembers({ store, ctx, today, t, locale }: Source): Ask[] {
-  const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - DAY).toISOString().slice(0, 10);
-  const placed = readScheduledDay(ctx, yesterday);
-  if (!Object.keys(placed).length) return [];
+  const yesterday = dayBefore(today);
+  // Each task is asked about for its earliest unanswered day of the last few, so the ask stays open until it is answered or settled after
+  // 48 hours. An ask that only ever looked at yesterday was gone after a day and a half: never answered, and never said to be handled.
+  const days: string[] = [];
+  for (let day = yesterday; days.length < MISSED_LOOKBACK_DAYS; day = dayBefore(day)) days.unshift(day);
+  const placedOn = days.map((day) => ({ day, placed: readScheduledDay(ctx, day) })).filter(({ placed }) => Object.keys(placed).length);
+  if (!placedOn.length) return [];
   const anchors = deadlines(store, ctx);
-  const handled = new Set(live(ctx, store.listEvents(ctx.workspaceId, { type: "missed.handled" })).map((event) => (event.payload as { askId?: string }).askId));
+  const handledThrough = missedHandledThrough(ctx, store);
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
   // A block the person already answered the completion check for (any answer, 未执行 included) is not asked about again.
   const confirmed = new Set(store.listEvents(ctx.workspaceId, { type: "block.confirmed" })
-    .filter((event) => (event.payload as { day?: string }).day === yesterday).map((event) => String((event.payload as { workOrderId?: string }).workOrderId)));
+    .map((event) => event.payload as { day?: string; workOrderId?: string }).map((payload) => `${payload.workOrderId}|${payload.day}`));
   // A task the person moved to a later day since (the input box's 「推到明天」, 推迟 on the task) has been answered already (W-141).
-  const deferred = new Set(store.listEvents(ctx.workspaceId, { type: "work_order.deferred" })
-    .filter((event) => event.createdAt.slice(0, 10) >= yesterday && String((event.payload as { after?: string }).after ?? "") > yesterday)
-    .map((event) => event.entityId));
-  return Object.entries(placed).flatMap(([orderId, start]) => {
+  const deferrals = store.listEvents(ctx.workspaceId, { type: "work_order.deferred" });
+  const deferred = (orderId: string, day: string) => deferrals.some((event) => event.entityId === orderId && event.createdAt.slice(0, 10) >= day
+    && String((event.payload as { after?: string }).after ?? "") > day);
+  const asked = new Set<string>();
+  return placedOn.flatMap(({ day, placed }) => Object.entries(placed).flatMap(([orderId, start]) => {
     const order = orders.get(orderId);
-    const id = `missed:${orderId}:${yesterday}`;
+    const id = `missed:${orderId}:${day}`;
     // Still not begun: approved, preparing or ready. Started (or done, or discarded) is not missed.
-    if (!order || !["approved", "preparing", "ready_for_human"].includes(order.state) || handled.has(id) || confirmed.has(orderId) || deferred.has(orderId)
-      || !onPersonsBoard(order)) return [];
+    if (asked.has(orderId) || !order || !["approved", "preparing", "ready_for_human"].includes(order.state) || day <= (handledThrough.get(orderId) ?? "")
+      || confirmed.has(`${orderId}|${day}`) || deferred(orderId, day) || !onPersonsBoard(order)) return [];
     const dueDay = dueOf(order, anchors);
     if (!dueDay || daysBetween(today, dueDay) > MISSED_ASK_HORIZON_DAYS) return [];
+    asked.add(orderId);
     return [{ id, kind: "missed_block" as const, entityId: orderId, line: order.identityId, urgency: urgencyFor(dueDay, today), dueDay, preview: taskPreview(t, orderId),
-      raisedAt: `${yesterday}T${start}`, fingerprint: yesterday,
-      title: t("昨天 {{time}} 排的「{{title}}」没开始", { time: start, title: short(order.intent) }),
+      raisedAt: `${day}T${start}`, fingerprint: day,
+      title: day === yesterday ? t("昨天 {{time}} 排的「{{title}}」没开始", { time: start, title: short(order.intent) })
+        : t("{{day}} {{time}} 排的「{{title}}」没开始", { day: format(day, locale), time: start, title: short(order.intent) }),
       why: t("它已经被顺延到后面的空档，关系到 {{day}} 的截止（{{left}}）。顺延没问题就点一下；要是其实做了，去补记；要是已经不需要，就不做了。", {
         day: format(dueDay, locale), left: ((left) => left > 0 ? t("还剩 {{count}} 天", { count: left }) : left === 0 ? t("今天截止", { context: "inline" }) : t("已过 {{count}} 天", { count: -left }))(daysBetween(today, dueDay)) }),
       options: [
@@ -786,7 +815,7 @@ function missedMembers({ store, ctx, today, t, locale }: Source): Ask[] {
         { id: "done", label: t("其实做了，去补记"), href: `/workbench/${encodeURIComponent(orderId)}` },
         { id: "drop", label: t("不做了"), fields: [{ id: "reason", label: t("为什么不做"), kind: "text" as const, required: true }] }
       ] }];
-  });
+  }));
 }
 
 /** At most this many questions on one card (docs/work-split.md: ≤2 questions, ≤10 minutes of the person's time). */
@@ -1491,10 +1520,11 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
         if (optionId === "split") { store.setSetting(ctx.workspaceId, MISSED_SPLIT, ask.fingerprint); return { ok: true }; }
         if (optionId !== "roll") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
         for (const member of missedMembers({ store, ctx, today: planToday(ctx), now: appNow(), t: tOf(ctx), locale: localeFor(ctx) }))
-          record(ctx, "missed.handled", member.entityId, `missed:handled:${member.id}:${Date.now()}`, { askId: member.id, how: "roll" });
+          record(ctx, "missed.handled", member.entityId, `missed:handled:${member.id}:${Date.now()}`, { askId: member.id, how: "roll", through: dayBefore(planToday(ctx)) });
         return { ok: true };
       }
-      const handled = () => record(ctx, "missed.handled", ask.entityId, `missed:handled:${ask.id}:${Date.now()}`, { askId: ask.id, how: optionId });
+      const handled = () => record(ctx, "missed.handled", ask.entityId, `missed:handled:${ask.id}:${Date.now()}`,
+        { askId: ask.id, how: optionId, through: dayBefore(planToday(ctx)) });
       if (optionId === "drop") { const result = archiveWorkOrder(ctx, ask.entityId, values.reason!); if (result.ok) handled(); return result; }
       if (optionId === "later") {
         const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === ask.entityId);

@@ -451,6 +451,34 @@ test("a block whose completion check was answered yesterday is not asked about a
   expect(collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "missed_block").map((ask) => ask.entityId)).toEqual(["silent"]);
 });
 
+test("a block not started stays asked about past the next morning, as its earliest unanswered day, and one answer covers the days after it", async () => {
+  const store = setup();
+  store.saveWorkOrder({ id: "x", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p",
+    milestoneId: "", intent: "任务 x", state: "approved", riskTier: "routine", estimate, payload: { dueDate: "2026-10-10" } });
+  store.setSetting(ws, "schedule.day:2026-10-05", JSON.stringify({ x: "09:00" }));
+  store.setSetting(ws, "schedule.day:2026-10-06", JSON.stringify({ x: "10:00" }));
+  const missed = () => collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "missed_block");
+  expect(missed().map((ask) => [ask.id, ask.title])).toEqual([["missed:x:2026-10-05", "10/5 09:00 排的「任务 x」没开始"]]);
+  expect(await answerAsk(TEST_CTX, missed()[0]!.id, "roll", {}, NOW)).toMatchObject({ ok: true });
+  expect(missed()).toEqual([]);
+});
+
+test("a block not started that nobody answers is rolled forward after 48 hours and the notice says so, linking to the task", async () => {
+  const store = setup();
+  const { autoAnswerDue } = await import("./answer-all");
+  const { planToday } = await import("./crossline");
+  store.saveWorkOrder({ id: "x", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p",
+    milestoneId: "", intent: "任务 x", state: "approved", riskTier: "routine", estimate, payload: { dueDate: "2026-10-10" } });
+  // Placed two days ago at 09:00: 54 hours before NOW, and no longer yesterday's.
+  store.setSetting(ws, "schedule.day:2026-10-05", JSON.stringify({ x: "09:00" }));
+  expect((await autoAnswerDue(TEST_CTX, NOW)).done).toBe(1);
+  expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "missed_block")).toBe(false);
+  const said = store.listConversationMessages(ws, store.conversationFor(ws, planToday(TEST_CTX, NOW)).id).filter((message) => message.role === "nudge");
+  const card = (said[0]!.payload as { card: { clarify: { question: string; options: Array<{ kind?: string; href?: string }> } } }).card;
+  expect(card.clarify.question).toBe("「任务 x」等了 48 小时没有回应，已按推荐处理：顺延就好（按重新排的时间做）。24 小时内可撤销。");
+  expect(card.clarify.options.find((option) => option.kind === "href")?.href).toBe("/workbench/x");
+});
+
 describe("work that is not the person's own (docs/work-split.md)", () => {
   const save = (store: CrosslineStore, id: string, intent: string, state: string, payload: Record<string, unknown>) => store.saveWorkOrder({ id, ownerId: owner,
     workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "mos2", intent, state: state as never, riskTier: "routine", estimate, payload: { title: intent, ...payload } });
