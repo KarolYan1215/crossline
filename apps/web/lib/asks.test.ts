@@ -315,7 +315,12 @@ test("a safe decision left 48 hours takes its recommendation by itself, said onc
   expect(readRiskDecisions(TEST_CTX).mos2).toMatchObject({ how: "accept" });
   const said = store.listConversationMessages(ws, store.conversationFor(ws, planToday(TEST_CTX, later)).id).filter((message) => message.role === "nudge");
   expect(said).toHaveLength(1);
-  expect(JSON.stringify(said[0]!.payload)).toContain("48 小时");
+  // It says what was done, not only that something was, and opens the milestone it was about.
+  const card = (said[0]!.payload as { card: { clarify: { question: string; options: Array<{ label: string; kind?: string; href?: string }> } } }).card;
+  expect(card.clarify.question).toContain("「本周 1 个里程碑有风险」等了 48 小时没有回应，已按推荐处理：全部接受，按风险提前安排（");
+  expect(card.clarify.question).toContain("24 小时内可撤销");
+  expect(card.clarify.options.filter((option) => option.kind === "href")).toEqual([{ label: "去看看", actions: [], kind: "href", href: "/milestones?open=mos2" }]);
+  expect(said[0]!.payload.nudge).toMatchObject({ href: "/milestones?open=mos2" });
   // Nothing left to settle: the next pass says nothing more.
   expect(await autoAnswerDue(TEST_CTX, later)).toEqual({ done: 0 });
   expect(undoOp(TEST_CTX, result.op!.id)).toMatchObject({ ok: true });
@@ -323,6 +328,54 @@ test("a safe decision left 48 hours takes its recommendation by itself, said onc
   // Undone is the person's no: the ask stays theirs.
   expect(await autoAnswerDue(TEST_CTX, later)).toEqual({ done: 0 });
   expect(readRiskDecisions(TEST_CTX).mos2).toBeUndefined();
+});
+
+test("a proposal put away by itself says it was archived and links to its task page, where it can be restored", async () => {
+  const store = setup();
+  const { autoAnswerDue } = await import("./answer-all");
+  const { planToday } = await import("./crossline");
+  store.saveWorkOrder({ id: "ece541", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "", intent: "注册 ECE 541 候补课程",
+    state: "awaiting_plan_approval", riskTier: "routine", estimate, payload: { dueDate: "2026-10-05" } });
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "t-ece541", type: "work_order.transitioned", entityId: "ece541", payload: {} });
+  store.saveStepPlan(ws, "ece541", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "一步", steps: [{ id: "s1", role: "solve",
+    title: "注册", deliverable: "注册", doneCriterion: "注册了", share: 1, estimate: { p25Minutes: 30, p50Minutes: 45, p85Minutes: 60 }, dependsOn: [], notBefore: "", dueBy: "",
+    schedulable: true, executor: "human", tickOutcome: "" }] }, owner, "initial");
+  expect((await autoAnswerDue(TEST_CTX, NOW)).done).toBe(1);
+  const said = store.listConversationMessages(ws, store.conversationFor(ws, planToday(TEST_CTX, NOW)).id).filter((message) => message.role === "nudge");
+  const card = (said[0]!.payload as { card: { clarify: { question: string; options: Array<{ kind?: string; href?: string }> } } }).card;
+  expect(card.clarify.question).toBe("「注册 ECE 541 候补课程」等了 48 小时没有回应，已按推荐处理：提议过期没人批准，已归档（任务页可恢复）。24 小时内可撤销。");
+  expect(card.clarify.options.find((option) => option.kind === "href")?.href).toBe("/workbench/ece541");
+  expect(said[0]!.payload.nudge).toMatchObject({ href: "/workbench/ece541" });
+});
+
+test("an ask about one milestone settled by itself is named by the milestone, not by its own sentence that already quotes it", async () => {
+  const store = setup();
+  const { MILESTONE_RISKS_SETTING, milestoneRiskFingerprint } = await import("@crossline/core");
+  const { autoAnswerDue } = await import("./answer-all");
+  const { planToday } = await import("./crossline");
+  // Due in two days: its own card (not the weekly one), raised more than 48 hours ago.
+  store.setSetting(ws, MILESTONE_RISKS_SETTING, JSON.stringify({ mos2: { fingerprint: milestoneRiskFingerprint({ title: "实测 MoS₂ 参数已可直接驱动 NeuroSim",
+    deadline: "2026-10-09", criteria: [], dependsOn: [] }), at: "2026-10-05T00:00:00Z", source: "model", risks: [{ level: "medium", kind: "capacity", note: "同月还有三个截止" }] } }));
+  expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "milestone_risk_review")).toBe(true);
+  expect((await autoAnswerDue(TEST_CTX, NOW)).done).toBe(1);
+  const said = store.listConversationMessages(ws, store.conversationFor(ws, planToday(TEST_CTX, NOW)).id).filter((message) => message.role === "nudge");
+  const card = (said[0]!.payload as { card: { clarify: { question: string; options: Array<{ kind?: string; href?: string }> } } }).card;
+  expect(card.clarify.question).toMatch(/^「实测 MoS₂ 参数已可直接驱动 NeuroSim」等了 48 小时没有回应，已按推荐处理：接受，按风险提前安排（/);
+  expect(card.clarify.options.find((option) => option.kind === "href")?.href).toBe("/milestones?open=mos2");
+});
+
+test("several things settled by themselves are each named with what was done, three at most, with a link to each page", async () => {
+  const { autoAnsweredNotice } = await import("./answer-all");
+  const { tFor } = await import("./i18n");
+  const item = (n: number) => ({ title: `任务 ${n}`, did: "顺延就好（按重新排的时间做）", href: `/workbench/t${n}` });
+  const notice = autoAnsweredNotice(tFor(undefined), [item(1), item(2), item(3), item(4)]);
+  expect(notice.text).toBe("4 项等了 48 小时没有回应，已按推荐处理：「任务 1」顺延就好（按重新排的时间做）；「任务 2」顺延就好（按重新排的时间做）；"
+    + "「任务 3」顺延就好（按重新排的时间做）；另有 1 项。24 小时内可撤销。");
+  expect(notice.links).toEqual([{ label: "看「任务 1」", href: "/workbench/t1" }, { label: "看「任务 2」", href: "/workbench/t2" }, { label: "看「任务 3」", href: "/workbench/t3" }]);
+  // English names the thing and says what was done the same way; the titles stay as written.
+  const en = autoAnsweredNotice(tFor("en"), [{ title: "Old proposal", did: "Ask next week", href: "/approvals" }, item(2)]);
+  expect(en.text).toContain("Ask next week");
+  expect(en.text).not.toMatch(/等了|已按推荐/);
 });
 
 test("an ask with no time of its own is settled 48 hours after it was first seen", async () => {

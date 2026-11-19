@@ -235,7 +235,7 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
   const visibleAt = store.getSetting(workspaceId, "presence.visibleAt");
   const pageShown = Boolean(visibleAt) && now.getTime() - Date.parse(visibleAt!) <= PRESENCE_FRESH_MS;
   for (const message of store.listRecentNudges(workspaceId, new Date(now.getTime() - 3_600_000).toISOString())) {
-    const nudge = message.payload.nudge as { delivery?: string; fingerprint?: string; kind?: string; replaces?: string; desktopOnly?: boolean } | undefined;
+    const nudge = message.payload.nudge as { delivery?: string; fingerprint?: string; kind?: string; replaces?: string; desktopOnly?: boolean; href?: string } | undefined;
     const text = (message.payload.card as { clarify?: { question?: string } } | undefined)?.clarify?.question ?? "";
     if (nudge?.delivery !== "pending" || !text) continue;
     const confirm = nudge.kind === "block_confirm";
@@ -255,10 +255,12 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
     const snooze = start && snoozer?.workOrderId === start && snoozer.text ? snoozer.text : undefined;
     // The evening wrap-up opens its own page (a link that writes nothing, like the confirm page).
     const wrap = nudge.kind === "day_wrap";
-    const path = confirm ? `/confirm/${encodeURIComponent(message.id)}` : wrap ? "/wrap" : start ? `/workbench/${encodeURIComponent(start)}` : "/";
+    // A nudge about one thing (a decision settled by itself) opens the page that shows it (its own `href`, a path of this app).
+    const own = nudge.href?.startsWith("/") && !nudge.href.startsWith("//") ? nudge.href : undefined;
+    const path = confirm ? `/confirm/${encodeURIComponent(message.id)}` : wrap ? "/wrap" : start ? `/workbench/${encodeURIComponent(start)}` : own ?? "/";
     // Said again after a snooze: the first prompt's tag, so the phone replaces that notification instead of adding a second.
     const tag = nudge.replaces ?? nudge.fingerprint ?? message.id;
-    const url = `${baseUrl}${confirm || wrap ? path : "/"}`;
+    const url = `${baseUrl}${confirm || wrap || (own && !start) ? path : "/"}`;
     // A block's start after 「少问这类」 goes to the desktop only (the owner's decision of 2026-11-11).
     if (!await (nudge.desktopOnly ? deliver("Crossline", body, url) : both("Crossline", body, url, { title: "Crossline", body, path, tag, ...(start ? { start } : {}), ...(start && step ? { step } : {}),
       ...(snooze ? { snooze } : {}),

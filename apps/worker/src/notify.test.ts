@@ -172,6 +172,23 @@ test("a block's start after 「少问这类」 goes to the desktop only, not the
   store.close();
 });
 
+test("a decision settled by itself opens the thing it settled, on the desktop and the phone (its nudge's own href)", async () => {
+  const store = new CrosslineStore(":memory:");
+  store.setSetting("w", "notify.level", "off");
+  const conversation = store.conversationFor("w", "2026-10-12");
+  store.appendConversationMessage({ id: "a1", workspaceId: "w", conversationId: conversation.id, role: "nudge", text: "", createdAt: "2026-10-12T13:50:00.000Z",
+    payload: { nudge: { kind: "auto_answered", fingerprint: "auto_answered:op1", counted: false, urgent: false, delivery: "pending", href: "/workbench/wo-9" },
+      card: { actions: [{ action: "undo", summary: "撤销自动处理", args: { opId: "op1" } }],
+        clarify: { question: "「注册 ECE 541 候补课程」等了 48 小时没有回应，已按推荐处理：提议过期没人批准，已归档（任务页可恢复）。24 小时内可撤销。", options: [] } } } });
+  const desktop: string[] = [];
+  const pushed: Array<{ path: string }> = [];
+  await notifyPass(store, "w", new Date("2026-10-12T13:52:00.000Z"), async (_title, _body, url) => { desktop.push(url); return true; }, "http://127.0.0.1:3210",
+    async (_ws, message) => { pushed.push(message); return true; });
+  expect(desktop).toEqual(["http://127.0.0.1:3210/workbench/wo-9"]);
+  expect(pushed).toMatchObject([{ path: "/workbench/wo-9" }]);
+  store.close();
+});
+
 test("a completion check goes to the desktop and the phone even with a page open, opening its confirm page, with no 「开始计时」", async () => {
   const store = new CrosslineStore(":memory:");
   store.setSetting("w", "notify.level", "off");

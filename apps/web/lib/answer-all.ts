@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { answerAllSteps, onPersonsBoard, safeAssistantResult, staleProposal, taskTitleOf, tidySentenceEnds, type AccessContext, type AnswerAllStep, type AskKind } from "@crossline/core";
+import { answerAllSteps, onPersonsBoard, safeAssistantResult, staleProposal, taskTitleOf, tidySentenceEnds, type AccessContext, type AnswerAllStep, type Ask, type AskKind } from "@crossline/core";
 import { resultsAwaitingReview, reviewAgentTask } from "@crossline/db";
 import { appNow, archiveWorkOrder, getStore, milestoneDeadline, planToday } from "./crossline";
 import { answerAsk, listed, openAsks, snoozeAsk, thisWeek } from "./asks";
@@ -51,7 +51,8 @@ export function answerAllPlan(ctx: AccessContext, now = appNow()): AnswerAllPlan
 /** Carries the plan out under one undo. What failed (a thing that changed in the meantime) is counted and left as it was. */
 export async function runAnswerAll(ctx: AccessContext, now = appNow()): Promise<{ ok: true; done: number; failed: number; op?: { id: string; label: string } }> {
   const plan = answerAllPlan(ctx, now);
-  return carryOut(ctx, plan, tOf(ctx)("全部按推荐处理 {{count}} 项", { count: plan.total }), now);
+  const { settled: _settled, ...result } = await carryOut(ctx, plan, tOf(ctx)("全部按推荐处理 {{count}} 项", { count: plan.total }), now);
+  return result;
 }
 
 /** How long a safe decision waits for the person before its recommendation is taken (2026-11-05, docs/hosted-hardening.md §5). */
@@ -98,17 +99,53 @@ export async function autoAnswerDue(ctx: AccessContext, now = appNow()): Promise
   const t = tOf(ctx);
   const result = await carryOut(ctx, { ...plan, asks, results: [], proposals, total }, t("没有回应 48 小时，已按推荐处理 {{count}} 项", { count: total }), now);
   if (result.done && result.op) {
-    const names = [...asks.map((step) => step.title), ...proposals.map((item) => item.title)].slice(0, 3).map((title) => t("「{{title}}」", { title })).join(t("、"));
-    say(ctx, result.done > 3
-      ? t("{{names}}等 {{count}} 项等了 48 小时没有回应，已按推荐处理。24 小时内可撤销。", { names, count: result.done })
-      : t("{{names}}等了 48 小时没有回应，已按推荐处理。24 小时内可撤销。", { names }), result.op.id, now);
+    // What each settled thing was, what was done to it, and where it can be seen (and changed) now: the bare 「已按推荐处理」 said none of it.
+    const settled = new Set(result.settled);
+    // An ask about one task or milestone is named by it: its own title is a sentence that already quotes it (「昨天 09:00 排的「X」没开始」).
+    const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, taskTitleOf(order)]));
+    const milestones = new Map(store.listMilestones(ctx.workspaceId).map((milestone) => [milestone.id, milestone.title]));
+    const subjectOf = (ask: Ask) => orders.get(ask.entityId) ?? milestones.get(ask.entityId);
+    const items: AutoAnswered[] = [
+      ...asks.filter((step) => settled.has(step.askId)).map((step) => describeStep(t, step, open.get(step.askId), subjectOf)),
+      ...proposals.filter((item) => settled.has(item.id)).map((item) => ({ title: item.title, did: t("提议过期没人批准，已归档（任务页可恢复）"),
+        href: `/workbench/${encodeURIComponent(item.id)}` }))];
+    say(ctx, autoAnsweredNotice(t, items), result.op.id, now);
   }
   return { done: result.done, ...(result.op ? { op: result.op } : {}) };
 }
 
-async function carryOut(ctx: AccessContext, plan: AnswerAllPlan, label: string, now: Date): Promise<{ ok: true; done: number; failed: number; op?: { id: string; label: string } }> {
+/** One thing `autoAnswerDue` settled: its name, what was done to it in the person's words, and the page that shows it now. */
+export type AutoAnswered = { title: string; did: string; href: string };
+
+function describeStep(t: ReturnType<typeof tOf>, step: AnswerAllStep, ask: Ask | undefined, subjectOf: (ask: Ask) => string | undefined): AutoAnswered {
+  const option = "optionId" in step ? ask?.options.find((item) => item.id === step.optionId) : undefined;
+  const did = "snooze" in step ? t("下周再问")
+    : option?.detail ? t("{{label}}（{{detail}}）", { label: option.label, detail: option.detail }) : option?.label ?? t("按推荐");
+  // One item of a batch (the week's risks with a single milestone) is that item's page; otherwise the thing the ask previews.
+  const href = (ask?.items?.length === 1 ? ask.items[0]!.href : undefined) ?? ask?.preview?.href ?? ask?.items?.[0]?.href ?? "/approvals";
+  return { title: (ask && subjectOf(ask)) || step.title, did, href };
+}
+
+const shortTitle = (title: string) => title.length > 14 ? `${title.slice(0, 13)}…` : title;
+
+/** The message and its links: each thing by name with what was done, at most three named, and a link to each (at most three pages). */
+export function autoAnsweredNotice(t: ReturnType<typeof tOf>, items: AutoAnswered[]): { text: string; links: Array<{ label: string; href: string }> } {
+  const name = (item: AutoAnswered) => t("「{{title}}」", { title: item.title });
+  const text = items.length === 1
+    ? t("{{name}}等了 48 小时没有回应，已按推荐处理：{{did}}。24 小时内可撤销。", { name: name(items[0]!), did: items[0]!.did })
+    : t("{{count}} 项等了 48 小时没有回应，已按推荐处理：{{list}}。24 小时内可撤销。", { count: items.length,
+      list: items.slice(0, 3).map((item) => t("{{name}}{{did}}", { name: name(item), did: item.did })).join(t("；"))
+        + (items.length > 3 ? t("；另有 {{count}} 项", { count: items.length - 3 }) : "") });
+  const pages = [...new Map(items.map((item) => [item.href, item])).values()].slice(0, 3);
+  const links = pages.map((item) => ({ label: pages.length === 1 ? t("去看看") : t("看{{name}}", { name: t("「{{title}}」", { title: shortTitle(item.title) }) }), href: item.href }));
+  return { text, links };
+}
+
+async function carryOut(ctx: AccessContext, plan: AnswerAllPlan, label: string, now: Date): Promise<{ ok: true; done: number; failed: number; settled: string[]; op?: { id: string; label: string } }> {
   const t = tOf(ctx);
   const accepted: string[] = [];
+  /** The asks' and proposals' ids that were settled, for saying what was done to each. */
+  const settled: string[] = [];
   let done = 0, failed = 0;
   const asks = new Map(thisWeek(listed(openAsks(ctx, now))).map((ask) => [ask.id, ask]));
   const result = await withUndo(ctx, label, async () => {
@@ -116,26 +153,28 @@ async function carryOut(ctx: AccessContext, plan: AnswerAllPlan, label: string, 
       const ask = asks.get(step.askId);
       const outcome = !ask ? { ok: false } : "snooze" in step ? snoozeAsk(ctx, step.askId, step.snooze, now, undefined, { undo: false, ask })
         : await answerAsk(ctx, step.askId, step.optionId, {}, now, { undo: false, ask });
-      if (outcome.ok) done += 1; else failed += 1;
+      if (outcome.ok) { done += 1; settled.push(step.askId); } else failed += 1;
     }
     for (const item of plan.results) {
       if (reviewAgentTask(getStore(), ctx.workspaceId, item.taskId, "accepted", t("全部按推荐时采纳")).ok) { accepted.push(item.taskId); done += 1; } else failed += 1;
     }
     for (const item of plan.proposals) {
-      if (archiveWorkOrder(ctx, item.id, t("全部按推荐：提议已过期，归档")).ok) done += 1; else failed += 1;
+      if (archiveWorkOrder(ctx, item.id, t("全部按推荐：提议已过期，归档")).ok) { done += 1; settled.push(item.id); } else failed += 1;
     }
     return { ok: true as const, done, failed };
   }, () => accepted.length ? [{ kind: "agent.reopen", taskIds: accepted }] : []);
-  return { ...result, done, failed };
+  return { ...result, done, failed, settled };
 }
 
 /** One message in the day's conversation with 撤销, left pending so the worker's notification pass sends it when no page is open. */
-function say(ctx: AccessContext, text: string, opId: string, now: Date): void {
+function say(ctx: AccessContext, { text, links }: { text: string; links: Array<{ label: string; href: string }> }, opId: string, now: Date): void {
   const store = getStore();
   const t = tOf(ctx);
   const conversation = store.conversationFor(ctx.workspaceId, planToday(ctx, now));
   store.appendConversationMessage({ id: randomUUID(), workspaceId: ctx.workspaceId, conversationId: conversation.id, role: "nudge", text: "", createdAt: now.toISOString(),
-    payload: { nudge: { kind: "auto_answered", fingerprint: `auto_answered:${opId}`, urgent: false, counted: false, delivery: "pending" },
+    // `href`: where the desktop and phone notification opens (apps/worker/src/notify.ts), the first thing settled.
+    payload: { nudge: { kind: "auto_answered", fingerprint: `auto_answered:${opId}`, urgent: false, counted: false, delivery: "pending", ...(links[0] ? { href: links[0].href } : {}) },
       card: { actions: [{ action: "undo", summary: t("撤销自动处理"), args: { opId } }], items: [{ state: "pending" }], confidence: "high", nudgeKind: "auto_answered",
-        clarify: { question: tidySentenceEnds(text), options: [{ label: t("撤销"), actions: [0], kind: "action" }, { label: t("知道了"), actions: [], kind: "ack" }] } } } });
+        clarify: { question: tidySentenceEnds(text), options: [{ label: t("撤销"), actions: [0], kind: "action" },
+          ...links.map((link) => ({ label: link.label, actions: [], kind: "href", href: link.href })), { label: t("知道了"), actions: [], kind: "ack" }] } } } });
 }
