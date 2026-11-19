@@ -13,6 +13,7 @@ import { tFor, type Locale } from "./i18n";
 import { recordProblem } from "./records";
 import { ACCOUNT_CLASSES, wealthProblem, type AccountClass } from "./wealth";
 import { DESIGN_NOTE_MAX, designProblem } from "./personal-design";
+import { SKILL_CATALOGUE } from "./skill-catalogue";
 import { INSTRUCTIONS_MAX, instructionsProblem } from "./instructions";
 import { SETTING_KEYS, SETTINGS_SECTION_IDS, settingCatalogLines, settingProblem, type SettingKey, type SettingsSection } from "./setting-catalog";
 
@@ -569,6 +570,10 @@ export type ConciergePack = {
   learned?: Array<{ id: string; text: string; lapsed: boolean }>;
   /** 「给 Crossline 的话」: the version in force and the earlier ones, newest first (`get_instructions`). */
   instructions?: { version: number; text: string; versions: Array<{ version: number; at: string; text: string; revertOf?: number }> };
+  /** The person's current note per Skill (「我的设计」) with its earlier versions, newest first (`find_system_part`). */
+  /** Each Skill's short name (`SKILL_NEEDS` labels), passed in: provider-conformance imports this module, so it is not imported here. */
+  designLabels?: Record<string, string>;
+  designNotes?: Array<{ id: string; text: string; paused: boolean; history: Array<{ at: string; text: string }> }>;
 };
 
 export function conciergeRefs(pack: ConciergePack): ConciergeRefs {
@@ -608,12 +613,29 @@ export const CONCIERGE_TOOL_SPECS = [
   { name: "read_material", description: "读一个文件的文本（从 offset 起约 6000 字）", inputSchema: { type: "object",
     properties: { id: { type: "string" }, offset: { type: "integer" } }, required: ["id", "offset"], additionalProperties: false } },
   { name: "get_profile_facts", description: "本人确认过的情况（背景、课程评分、目标等），按关键词筛选", inputSchema: QUERY },
+  { name: "find_system_part", description: "改系统某一部分怎么做事时先查：按关键词（中文或英文：访谈、步骤、任务、日历、邮件、订正、语气…）找负责这件事的环节，返回 id、名称、它负责什么、本人现有指令与历次版本；没有匹配时列出全部环节。改它用 design.change kind=skill id=该环节 id", inputSchema: QUERY },
   { name: "get_instructions", description: "「给 Crossline 的话」：现行版本号与全文，以及历次版本（版本号、时间、全文；revertOf 为恢复自哪一版），最新在前", inputSchema: NONE },
   { name: "list_settings", description: "可用 setting.change 修改的全部设置：键名、名称、针对的对象、可选值、是否隐私同意，以及当前值；另列自动化、邮箱、工作流的 id，以及系统学到的偏好（learned：id、内容、是否已失效）", inputSchema: NONE },
   { name: "ledger_query", description: "查总账：某月（YYYY-MM，空为本月）按分类、商户、账户、种类（expense 支出含退款冲减 / income / refund）筛选的已记账合计（按币种）与最多 30 笔明细。回答花了多少钱只用它的数字",
     inputSchema: { type: "object", properties: { month: { type: "string" }, category: { type: "string" }, merchant: { type: "string" }, account: { type: "string" }, kind: { type: "string" } },
       required: ["month", "category", "merchant", "account", "kind"], additionalProperties: false } }
 ] as const;
+
+/**
+ * Which part of Crossline owns a behaviour (the owner, 2026-11-18: 「确保用户可以通过和小帮手对话修改系统对应部分的提示词，做好 routing」):
+ * every Skill a note can go to, with its label, what it does (its SKILL.md description) and the person's note on it. A query that matches
+ * nothing lists them all, so the model still routes by reading (a Chinese wish against an English description).
+ */
+function systemParts(pack: ConciergePack, query: string) {
+  const ids = pack.designSkills?.length ? pack.designSkills : Object.keys(SKILL_CATALOGUE);
+  const parts = ids.map((id) => {
+    const note = pack.designNotes?.find((item) => item.id === id);
+    return { id, label: pack.designLabels?.[id] ?? id, does: (SKILL_CATALOGUE[id] ?? "").slice(0, 320),
+      ...(note ? { note: note.text, paused: note.paused, history: note.history.slice(0, 5) } : {}) };
+  });
+  const hit = parts.filter((part) => matches(query, part.id, part.label, part.does, part.note ?? ""));
+  return hit.length ? hit : parts.map(({ history: _history, ...part }) => ({ ...part, does: part.does.slice(0, 200) }));
+}
 
 const matches = (query: string, ...texts: string[]) => {
   const q = query.trim().toLowerCase();
@@ -640,6 +662,7 @@ export function answerFromPack(pack: ConciergePack, name: string, args: Record<s
     case "list_projects": return json(pack.projects);
     case "get_profile_facts": return json(pack.facts.filter((fact) => matches(query, fact)).slice(0, 40));
     case "get_instructions": return json(pack.instructions ?? { version: 0, text: "", versions: [] });
+    case "find_system_part": return json(systemParts(pack, query));
     case "list_settings": return json({ catalog: settingCatalogLines(), current: pack.settings ?? [], mailboxes: pack.mailAccounts ?? [],
       automations: (pack.automations ?? []).map(({ id, name, status }) => ({ id, name, status })), workflows: pack.workflows ?? [], learned: pack.learned ?? [] });
     default: return `没有名为 ${name} 的查询`;

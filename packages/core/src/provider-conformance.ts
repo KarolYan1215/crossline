@@ -24,6 +24,7 @@ import { DATE_EXTRACTION_SCHEMA } from "./date-schema";
 import { ONBOARDING_RESEARCH_SCHEMA } from "./onboarding-research";
 import { DILIGENCE_OUTPUT_SCHEMA } from "./diligence-schema";
 import { ENERGY_ADVICE_REVIEW_SCHEMA } from "./energy-advice";
+import { METHOD_RESEARCH_SCHEMA } from "./method-research";
 import { FLYWHEEL_OUTPUT_SCHEMA } from "./flywheel-schema";
 import { GOAL_SPLIT_SCHEMA } from "./line-attributes";
 import { MANUAL_DESIGN_SCHEMA, MATERIAL_SEARCH_SCHEMA, NODE_WRITEUP_SCHEMA } from "./manualbook-schema";
@@ -116,6 +117,8 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-milestone-gate": { label: "验收判定", schemas: ["MILESTONE_GATE_OUTPUT_SCHEMA"], critical: true },
   "crossline-weekly-insight": { label: "每周洞察", schemas: ["WEEKLY_INSIGHT_OUTPUT_SCHEMA"] },
   "crossline-due-diligence": { label: "网上查证", schemas: ["DILIGENCE_OUTPUT_SCHEMA"], webSearch: true },
+  // After the interview: the person's habits and researched ways of doing their kinds of work (method-research.ts); web is its point.
+  "crossline-method-research": { label: "做事方法研究", schemas: ["METHOD_RESEARCH_SCHEMA"], tools: true },
   "crossline-energy-advisor": { label: "精力时段复核", schemas: ["ENERGY_ADVICE_REVIEW_SCHEMA"], webSearch: true },
   "crossline-background-facts": { label: "背景整理", schemas: ["BACKGROUND_FACTS_OUTPUT_SCHEMA"] },
   "crossline-plan-explainer": { label: "排程说明", schemas: ["PLAN_EXPLAINER_OUTPUT_SCHEMA"] },
@@ -207,7 +210,9 @@ const CONFORMANCE_SCHEMAS: Record<string, Record<string, unknown>> = {
   ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA, ONBOARDING_RESEARCH_SCHEMA, PLAN_EXPLAINER_OUTPUT_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_GAP_SCHEMA, STEP_PLAN_SCHEMA,
   VALIDATION_REVIEW_SCHEMA, PROGRESS_ASSESSMENT_SCHEMA, TASK_TITLES_SCHEMA, WEEKLY_INSIGHT_OUTPUT_SCHEMA, PUBLIC_SKILL_REVIEW_SCHEMA, PUBLIC_SKILL_BATCH_REVIEW_SCHEMA, SKILL_SCOUT_SCHEMA, TASK_MERGE_REVIEW_SCHEMA,
   OPPORTUNITY_WATCHES_SCHEMA, OPPORTUNITY_READING_SCHEMA, VISA_READING_SCHEMA, QUOTE_READING_SCHEMA,
-  FORM_FILL_SCHEMA, FORM_CHECK_SCHEMA, FORM_OBSERVE_SCHEMA, DICTATION_CORRECTION_SCHEMA, WORKFLOW_TURN_SCHEMA, TIME_ATTRIBUTION_SCHEMA
+  FORM_FILL_SCHEMA, FORM_CHECK_SCHEMA, FORM_OBSERVE_SCHEMA, DICTATION_CORRECTION_SCHEMA, WORKFLOW_TURN_SCHEMA, TIME_ATTRIBUTION_SCHEMA,
+  // Appended, not sorted in: a case's position is its id's order in the conformance run, which recorded fixtures index by.
+  METHOD_RESEARCH_SCHEMA
 } as unknown as Record<string, Record<string, unknown>>;
 
 /** How many times a critical Skill's schema is run: at 3 runs, "repair rate ≤ 5%" means no repair at all. */

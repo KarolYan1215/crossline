@@ -22,7 +22,7 @@ export const DESIGN_KNOB_IDS = Object.keys(DESIGN_KNOBS) as DesignKnobId[];
 export const isDesignKnob = (id: unknown): id is DesignKnobId => typeof id === "string" && id in DESIGN_KNOBS;
 
 /** The longest note a person may give one Skill. */
-export const DESIGN_NOTE_MAX = 600;
+export const DESIGN_NOTE_MAX = 2000;
 
 export type DesignEntry = { kind: "knob"; id: DesignKnobId; value: number; at: string; paused?: boolean }
   | { kind: "skill"; id: string; text: string; at: string; paused?: boolean };

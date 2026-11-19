@@ -61,3 +61,8 @@ test("a backplan loses the drill forms the person never named; an item that is o
   expect(screenBackplanDrills(steps, ["我复习的习惯是做完卷子订正，错题抄进错题本"]).items.map((entry) => entry.title))
     .toEqual(["做 2 套往年卷并订正", "整理错题本", "按讲义推导第 5 章"]);
 });
+
+test("a 、 between numbers lists them: the clause is not split there", () => {
+  expect(stripDrillForms("完成 ECE 548 作业 1、2 订正", new Set())).toBe("");
+  expect(stripDrillForms("读讲义、整理错题本", new Set())).toBe("读讲义");
+});

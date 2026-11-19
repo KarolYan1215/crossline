@@ -23,8 +23,11 @@ const FORMS: Array<{ form: DrillForm; written: RegExp; backed: RegExp }> = [
 ];
 /** A backing sentence that turns the form down (「不用错题本」「从不打卡」) backs nothing. */
 const NEGATED = /(?:不|没|别|无|讨厌|反感|不想|从不|never|not|don't|no)\s*\S{0,3}$/i;
-/** Where a sentence can be cut: the clause joints. 「及时」「以及」 are words, not joints of their own. */
-const JOINT = /(并且|并|然后|随后|以及|及(?!时|格)|和|、|，|,|；|;|\s+(?:and|then)\s+)/;
+/**
+ * Where a sentence can be cut: the clause joints. 「及时」「以及」 are words, not joints of their own; a 、 before a number lists numbers
+ * (「作业 1、2 订正」 is one clause about both, not 「作业 1」 and 「2 订正」).
+ */
+const JOINT = /(并且|并|然后|随后|以及|及(?!时|格)|和|、(?!\s*\d)|，|,|；|;|\s+(?:and|then)\s+)/;
 /* i18n-ignore-end */
 
 /** The drill forms a text names. */

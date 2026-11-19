@@ -1,7 +1,7 @@
 import "server-only";
 import {
-  DESIGN_KNOBS, DESIGN_KNOB_IDS, PERSONAL_DESIGN_SETTING, SKILL_NEEDS, designProblem, isDesignKnob, knobValue, readDesign, withEntry,
-  type AccessContext, type DesignArgs, type DesignKnobId, type PersonalDesign
+  DESIGN_KNOBS, DESIGN_KNOB_IDS, PERSONAL_DESIGN_SETTING, SKILL_NEEDS, designProblem, isDesignKnob, knobValue, lineDiff, readDesign, withEntry,
+  type AccessContext, type DiffLine, type DesignArgs, type DesignKnobId, type PersonalDesign
 } from "@crossline/core";
 import { getStore } from "./crossline";
 import { tOf } from "./locale";
@@ -25,8 +25,17 @@ export const noteSkills = (): Array<{ id: string; label: string }> =>
   Object.entries(SKILL_NEEDS).filter(([, needs]) => !needs.testOnly).map(([id, needs]) => ({ id, label: needs.label }));
 export const noteSkillIds = (): Set<string> => new Set(noteSkills().map((skill) => skill.id));
 
-/** The card's 当前 → 改成 for a design change. */
-export function describeDesignChange(ctx: AccessContext, args: DesignArgs): SettingView {
+/** One event per change of a Skill's note, with the text before and after: the note's version history (revert = its old text again). */
+export const DESIGN_NOTE_EVENT = "design.note_set";
+
+/** A Skill note's earlier versions, newest first: what it said before each change. */
+export function noteHistory(ctx: AccessContext, id: string): Array<{ at: string; text: string }> {
+  return getStore().listEvents(ctx.workspaceId, { type: DESIGN_NOTE_EVENT, entityId: id }).reverse()
+    .map((event) => ({ at: event.createdAt, text: String((event.payload as { before?: string }).before ?? "") }));
+}
+
+/** The card's 当前 → 改成 for a design change; a Skill note also gets its line diff, as 「给 Crossline 的话」 does. */
+export function describeDesignChange(ctx: AccessContext, args: DesignArgs): SettingView & { diff?: DiffLine[] } {
   const t = tOf(ctx);
   const design = designOf(ctx);
   if (args.kind === "knob" && isDesignKnob(args.id)) {
@@ -36,8 +45,9 @@ export function describeDesignChange(ctx: AccessContext, args: DesignArgs): Sett
   }
   const skill = noteSkills().find((item) => item.id === args.id.replace(/^crossline:/, ""));
   const current = design.entries.find((entry) => entry.kind === "skill" && entry.id === skill?.id);
-  return { label: t("规则与指令：给「{{skill}}」的本人指令", { skill: t(skill?.label ?? args.id) }), from: current?.kind === "skill" ? current.text : t("未设置"),
-    to: args.value.trim() || t("删除"), consequence: t("之后这一环节的每次运行都会读到这段话；安全规则和输出格式不受它影响") };
+  const before = current?.kind === "skill" ? current.text : "";
+  return { label: t("规则与指令：给「{{skill}}」的本人指令", { skill: t(skill?.label ?? args.id) }), from: before || t("未设置"),
+    to: args.value.trim() || t("删除"), diff: lineDiff(before, args.value.trim()), consequence: t("之后这一环节的每次运行都会读到这段话；安全规则和输出格式不受它影响") };
 }
 
 export function applyDesignChange(ctx: AccessContext, args: DesignArgs): { ok: true; message: string; href: string } | { ok: false; code: string; message: string } {
@@ -48,7 +58,17 @@ export function applyDesignChange(ctx: AccessContext, args: DesignArgs): { ok: t
   const id = args.kind === "skill" ? args.id.replace(/^crossline:/, "") : args.id;
   const value = args.value.trim();
   const entry = !value ? undefined : args.kind === "knob" ? { kind: "knob" as const, id: id as DesignKnobId, value: Number(value), at } : { kind: "skill" as const, id, text: value, at };
-  save(ctx, withEntry(designOf(ctx), args.kind, id, entry));
+  const design = designOf(ctx);
+  if (args.kind === "skill") {
+    const previous = design.entries.find((item) => item.kind === "skill" && item.id === id);
+    const before = previous?.kind === "skill" ? previous.text : "";
+    if (before !== value) {
+      const attempt = getStore().listEvents(ctx.workspaceId, { type: DESIGN_NOTE_EVENT, entityId: id }).length;
+      getStore().appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `${DESIGN_NOTE_EVENT}:${id}:${attempt}`,
+        type: DESIGN_NOTE_EVENT, entityId: id, payload: { before, after: value } });
+    }
+  }
+  save(ctx, withEntry(design, args.kind, id, entry));
   return { ok: true, message: value ? t("已保存到规则与指令") : t("已恢复为系统默认"), href: "/settings#design" };
 }
 

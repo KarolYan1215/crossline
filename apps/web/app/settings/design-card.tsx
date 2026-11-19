@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Tag } from "../ui/tag";
 import { useT } from "../locale-context";
+import { DESIGN_NOTE_MAX } from "@crossline/core";
 
 type Knob = { id: string; label: string; unit: string; min: number; max: number; default: number; consequence: string; value: number; changed: boolean; paused: boolean };
 type Note = { id: string; label: string; text: string; paused: boolean; at: string };
@@ -62,7 +63,7 @@ export function DesignCard({ knobs, notes, skills }: { knobs: Knob[]; notes: Not
       <header><h3>{t("给各环节的本人指令")}</h3><small>{t("之后这一环节的每次运行都会读到；安全规则和输出格式不受影响")}</small></header>
       {notes.length > 0 && <ul className="st-design">{notes.map((note) => <li key={note.id}>
         <span className="st-row-label">{t(note.label)}{note.paused && <> <Tag>{t("已暂停")}</Tag></>}</span>
-        <textarea aria-label={t(note.label)} maxLength={600} value={draft[`skill:${note.id}`] ?? note.text}
+        <textarea aria-label={t(note.label)} maxLength={DESIGN_NOTE_MAX} value={draft[`skill:${note.id}`] ?? note.text}
           onChange={(event) => setDraft({ ...draft, [`skill:${note.id}`]: event.target.value })} />
         <span className="st-design-actions">
           <button type="button" className="ui-button" disabled={!draft[`skill:${note.id}`] || draft[`skill:${note.id}`] === note.text}
@@ -75,7 +76,7 @@ export function DesignCard({ knobs, notes, skills }: { knobs: Knob[]; notes: Not
         <select aria-label={t("环节")} value={skill} onChange={(event) => setSkill(event.target.value)}>
           {skills.map((item) => <option key={item.id} value={item.id}>{t(item.label)}</option>)}
         </select>
-        <textarea aria-label={t("新指令")} maxLength={600} placeholder={t("例如：教程先给结论，再给步骤")} value={draft["skill:new"] ?? ""}
+        <textarea aria-label={t("新指令")} maxLength={DESIGN_NOTE_MAX} placeholder={t("例如：教程先给结论，再给步骤")} value={draft["skill:new"] ?? ""}
           onChange={(event) => setDraft({ ...draft, "skill:new": event.target.value })} />
         <button type="button" className="ui-button" disabled={!draft["skill:new"]?.trim()} onClick={() => void ask("skill", skill, draft["skill:new"] ?? "")}>{t("预览")}</button>
       </div>

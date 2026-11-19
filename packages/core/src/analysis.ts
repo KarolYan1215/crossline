@@ -429,7 +429,8 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext,
   // preference or the interview's conclusions (drill-forms.ts, 2026-11-10). The quotes stay verbatim; they are the person's words already.
   const backed = backedDrillForms([context.capture.title, context.capture.context, ...context.availableInputs.map((item) => item.text),
     ...(context.personalPreferences ?? []), ...(context.personProfile ?? [])]);
-  proposal.title = stripDrillForms(proposal.title, backed) || proposal.title;
+  // A title that is nothing but the drill falls back to the words the person captured (which back no drill, or it would not be cut).
+  proposal.title = stripDrillForms(proposal.title, backed) || context.capture.title.trim() || proposal.title;
   proposal.intent = stripDrillForms(proposal.intent, backed) || proposal.title;
   for (const part of proposal.humanCore) part.intent = stripDrillForms(part.intent, backed) || part.intent;
   for (const item of proposal.evidenceContract) item.description = stripDrillForms(item.description, backed) || proposal.title;

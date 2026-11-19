@@ -422,6 +422,41 @@ function withWebTools<T>(options: SkillRunOptions<T>, context: RunContext): Skil
     tools: { specs: [...(own?.specs ?? []), ...web.specs.filter((spec) => !own?.specs.some((mine) => mine.name === spec.name))],
       call: (name, args) => own?.specs.some((spec) => spec.name === name) ? own.call(name, args) : web.call(name, args) } };
 }
+/**
+ * Every model has the web and the person's own files, used as needed (the owner, 2026-11-18: 「给所有模型都配上网络搜索工具，按需使用，但是
+ * 优先检索本地的文件，没找到相关资源再搜索网络」). A run that says nothing about the web gets it whenever the route can search (Codex with its
+ * search host, a provider with Crossline's stand-in); `allowWebSearch: false` still keeps a run off it. Where the route calls functions, the
+ * person's files are offered as lookups (`setLocalLookupProvider`). Neither is ever a blocker: a route without them runs as before.
+ */
+let webAvailable: () => boolean = () => false;
+/** Whether the account's own Codex can search now (the worker: `webResearchBlocker()` finds the search host). */
+export function setWebAvailableProvider(provider: () => boolean): void { webAvailable = provider; }
+let localLookupProvider: ((workspaceId: string | undefined, skillName: string) => SkillTools | undefined) | undefined;
+/** The person's own files as lookups for any run (the worker: their documents' passages), read per run. */
+export function setLocalLookupProvider(provider: typeof localLookupProvider): void { localLookupProvider = provider; }
+
+export const SOURCE_ORDER_INSTRUCTION = "Sources, in this order, each only when the work needs it: (1) this run's input and the person's own "
+  + "material — call the lookup functions that read their files, ledger or documents (search_my_files, search_material, read_document, read_file, "
+  + "read_ledger, whichever this run has) before anything else; (2) the web, only when their material does not have what the work needs and the "
+  + "answer depends on an outside fact you do not reliably know or that may have changed (current methods, tools, prices, rules, dates). Never search "
+  + "for what the input already says. A search query carries only the general topic: never a person's name, email, phone, address, account number "
+  + "or a passage of their private text.";
+
+const lookupNames = (tools: SkillTools | undefined) => new Set((tools?.specs ?? []).map((spec) => spec.name));
+
+/** The web by default where the route has it; the person's files as lookups where the route calls functions. */
+type SourceOptions = Pick<SkillRunOptions<unknown>, "skillName" | "agent" | "tools" | "allowWebSearch" | "developerInstructions">;
+export function withSourceDefaults<O extends SourceOptions>(options: O, context: Pick<RunContext, "provider" | "webTools" | "functionCalls">): O {
+  if (options.agent) return options;
+  const web = options.allowWebSearch ?? (context.provider ? Boolean(context.webTools) : webAvailable());
+  const own = lookupNames(options.tools);
+  // A run that already reads the person's material its own way (the step planner's search_material) keeps only that.
+  const local = context.functionCalls && !own.has("search_material") ? localLookupProvider?.(currentUsageWorkspace(), options.skillName) : undefined;
+  if (!web && !local) return options.allowWebSearch === undefined ? { ...options, allowWebSearch: false } : options;
+  return { ...options, allowWebSearch: web, ...(local ? { tools: mergedTools(options.tools, local) } : {}),
+    developerInstructions: `${options.developerInstructions}\n\n${SOURCE_ORDER_INSTRUCTION}` };
+}
+
 const DEFAULT_MAX_REPAIRS = 2;
 /** No event of any kind for this long means a hung turn. Generous: slow work still produces events, silence does not. */
 const DEFAULT_IDLE_MS = 20 * 60_000;
@@ -1264,8 +1299,13 @@ function continueOnThread<T>(client: CodexRpcBoundary, threadId: string, message
     holdThread(client, threadId);
     const scope = openScope(client, options);
     // A thread started with the web on a provider was given the stand-in search functions at `thread/start`; their calls are answered here.
-    const web = options.allowWebSearch && context.provider ? context.webTools : undefined;
-    const tools = web ? mergedTools(options.tools, web) : options.tools;
+    // A thread started with the source defaults (`withSourceDefaults`) may call the web and the person's files on this turn too: their
+    // calls are answered and their items accepted (a thread started without them cannot make such calls, so answering them is harmless).
+    const defaults = withSourceDefaults<SourceOptions>({ skillName: options.skillName, ...(options.tools ? { tools: options.tools } : {}),
+      ...(options.allowWebSearch !== undefined ? { allowWebSearch: options.allowWebSearch } : {}), developerInstructions: "" }, context);
+    const allowWeb = Boolean(defaults.allowWebSearch);
+    const web = allowWeb && context.provider ? context.webTools : undefined;
+    const tools = web ? mergedTools(defaults.tools, web) : defaults.tools;
     const unregister = tools ? registerAgentThread(client, threadId, toolAnswerer(tools)) : undefined;
     try {
       if (threadRouteMoved(client, threadId, context)) fail("SKILL_THREAD_LOST");
@@ -1274,7 +1314,7 @@ function continueOnThread<T>(client: CodexRpcBoundary, threadId: string, message
       const output = await runTurnsUntilValid(client, scope, context, audit, {
         skillName: options.skillName, threadId, outputSchema: schemaForLocale(options.outputSchema, runLocale(options.locale, currentUsageWorkspace())),
         allowedItemTypes: ["agentMessage", "reasoning", "userMessage", ...(tools ? ["dynamicToolCall"] : []),
-          ...(options.allowWebSearch && !context.provider ? ["webSearch", "webSearchCall"] : [])],
+          ...(allowWeb && !context.provider ? ["webSearch", "webSearchCall"] : [])],
         firstPrompt: message, ...(options.images?.length ? { images: options.images } : {}),
         validate: options.validateOutput, onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),
         ...(options.onProgress ? { onProgress: options.onProgress } : {}),
@@ -1440,9 +1480,9 @@ export function firstPromptTexts(skillName: string, extraSkills: readonly string
 
 async function runSkillTurn<T>(client: CodexRpcBoundary, given: unknown, wanted: SkillRunOptions<T>, context: RunContext): Promise<SkillRunResult<T>> {
   const { options: requested, input } = withOptionalTools(wanted, given, context);
-  const options = withWebTools(requested, context);
+  const options = withWebTools(withSourceDefaults(requested, context), context);
   const audit: AnalysisAudit = {};
-  // Web search is the only tool any Skill may use, and only when that Skill was granted it.
+  // Web search (by default where the route has it, `withSourceDefaults`), images and the run's own lookups are the only tools a Skill may use.
   const allowedItemTypes = ["agentMessage", "reasoning", "userMessage",
     ...(options.allowWebSearch ? ["webSearch", "webSearchCall"] : []), ...(options.allowImageGeneration ? ["imageGeneration"] : []),
     ...(options.tools ? ["dynamicToolCall"] : []), ...(options.connectors ? ["mcpToolCall"] : [])];

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { ACTIONS, ACTION_IDS, actionProblem, CONCIERGE_SCHEMA, cardActionIndexes, keepUsable, structuredOutputProblems, validateConciergeTurn, type ConciergeRefs } from "./index";
+import { ACTIONS, ACTION_IDS, actionProblem, CONCIERGE_SCHEMA, cardActionIndexes, keepUsable, structuredOutputProblems, validateConciergeTurn, type ConciergeRefs, answerFromPack, type ConciergePack } from "./index";
 
 const refs = (): ConciergeRefs => ({
   tasks: new Map([["wo-1", new Set(["v1s1", "v1s2"])]]), asks: new Map([["wait:w1", new Set(["arrived", "cancelled"])]]),
@@ -65,4 +65,17 @@ test("修工作流 names one of the person's grown workflows and says what is wr
   expect(actionProblem(fix("flow-media-xhs", "整理收藏又失败了"), known)).toBe("");
   expect(actionProblem(fix("flow-nope", "整理收藏又失败了"), known)).toContain("不存在");
   expect(actionProblem(fix("flow-media-xhs", " "), known)).toBe("内容为空");
+});
+
+test("find_system_part routes a wish to the part that owns it, with the person's note and its versions", () => {
+  const pack = { designSkills: ["crossline-step-planner", "crossline-onboarding"],
+    designLabels: { "crossline-step-planner": "步骤拆分", "crossline-onboarding": "访谈" },
+    designNotes: [{ id: "crossline-step-planner", text: "不要订正", paused: false, history: [{ at: "2026-11-18T00:00:00Z", text: "" }] }] } as unknown as ConciergePack;
+  const hit = JSON.parse(answerFromPack(pack, "find_system_part", { query: "访谈" })) as Array<{ id: string; does: string }>;
+  expect(hit.map((part) => part.id)).toEqual(["crossline-onboarding"]);
+  expect(hit[0]!.does.length).toBeGreaterThan(10);
+  const steps = JSON.parse(answerFromPack(pack, "find_system_part", { query: "订正" })) as Array<{ id: string; note?: string; history?: unknown[] }>;
+  expect(steps).toMatchObject([{ id: "crossline-step-planner", note: "不要订正", history: [{ text: "" }] }]);
+  // Nothing matches: every part is listed, so the model can still route by reading.
+  expect((JSON.parse(answerFromPack(pack, "find_system_part", { query: "zzz-nothing" })) as unknown[]).length).toBe(2);
 });

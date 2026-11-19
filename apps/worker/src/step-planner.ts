@@ -70,7 +70,7 @@ export function planningContext(store: CrosslineStore, workspaceId: string, orde
       .map((item) => `${item.date}${item.startTime ? ` ${item.startTime}` : ""} ${item.title}`);
   });
   const profile = (() => { try { return JSON.parse(store.getSetting(workspaceId, "profile.model") ?? "{}") as { energyMap?: Array<{ activity: string; skill: string; love: string }> }; } catch { return {}; } })();
-  return { material, documents: material.documents(), person, factIndex, answers, dated: [...new Set(dated)].sort().slice(0, 40), profile: personProfileFor(store, workspaceId),
+  return { material, documents: material.documents(), person, factIndex, answers, dated: [...new Set(dated)].sort().slice(0, 40), profile: personProfileFor(store, workspaceId, order.identityId),
     strengths: (profile.energyMap ?? []).filter((item) => item.skill === "high").map((item) => item.activity).slice(0, 8) };
 }
 

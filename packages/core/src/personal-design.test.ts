@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { designNoteText, designProblem, knobValue, readDesign, skillNote, withEntry } from "./personal-design";
+import { DESIGN_NOTE_MAX, designNoteText, designProblem, knobValue, readDesign, skillNote, withEntry } from "./personal-design";
 
 const skills = new Set(["crossline-step-planner"]);
 test("a knob takes only an integer in its range; an empty value resets", () => {
@@ -10,7 +10,7 @@ test("a knob takes only an integer in its range; an empty value resets", () => {
   expect(designProblem({ kind: "knob", id: "made.up", value: "1" }, skills)).toMatch(/^DESIGN_KNOB_UNKNOWN/);
   expect(designProblem({ kind: "skill", id: "crossline:crossline-step-planner", value: "先给结论" }, skills)).toBe("");
   expect(designProblem({ kind: "skill", id: "crossline-unknown", value: "x" }, skills)).toMatch(/^DESIGN_SKILL_UNKNOWN/);
-  expect(designProblem({ kind: "skill", id: "crossline-step-planner", value: "x".repeat(601) }, skills)).toMatch(/^DESIGN_NOTE_TOO_LONG/);
+  expect(designProblem({ kind: "skill", id: "crossline-step-planner", value: "x".repeat(DESIGN_NOTE_MAX + 1) }, skills)).toMatch(/^DESIGN_NOTE_TOO_LONG/);
 });
 
 test("the person's value wins unless paused; bad entries are dropped on read", () => {

@@ -22,7 +22,7 @@ import { tOf } from "./locale";
 import { captureProgress } from "./capture-progress";
 import { currentSettings, describeSettingChange, type SettingView } from "./setting-change";
 import { keepNote } from "./person-notes";
-import { describeDesignChange, designEntryKeys, designSnapshotLine, noteSkills } from "./personal-design";
+import { describeDesignChange, designEntryKeys, designSnapshotLine, designView, noteHistory, noteSkills } from "./personal-design";
 import { describeInstructionsChange, instructionsSnapshotLine, instructionsView } from "./instructions";
 
 /** Where the person typed from: the page and the object open there (a task, a milestone, a plan day). */
@@ -147,6 +147,9 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
     settings: await currentSettings(ctx),
     design: `${designSnapshotLine(ctx)}\n${instructionsSnapshotLine(ctx)}`, designSkills: noteSkills().map((skill) => skill.id),
     designEntries: designEntryKeys(ctx),
+    // What each part of the system is called and the person's note on it with earlier versions (`find_system_part`, routing a wish).
+    designLabels: Object.fromEntries(noteSkills().map((skill) => [skill.id, skill.label])),
+    designNotes: designView(ctx).notes.map((note) => ({ id: note.id, text: note.text, paused: note.paused, history: noteHistory(ctx, note.id).slice(0, 5) })),
     learned: store.listPreferences(ctx.workspaceId, { includeInvalidated: true }).slice(0, 60)
       .map((item) => ({ id: item.id, text: item.text.slice(0, 160), lapsed: Boolean(item.invalidatedAt) })),
     instructions: (() => { const view = instructionsView(ctx);
@@ -423,7 +426,7 @@ async function settleItems(ctx: AccessContext, card: Card, due: Array<{ item: Pr
     if (item.action === "setting.change") {
       try { card.items[index] = { ...card.items[index]!, setting: await describeSettingChange(ctx, item.args) }; } catch { /* shown without it */ }
     } else if (item.action === "design.change") {
-      try { card.items[index] = { ...card.items[index]!, setting: describeDesignChange(ctx, item.args) }; } catch { /* shown without it */ }
+      try { const { diff, ...setting } = describeDesignChange(ctx, item.args); card.items[index] = { ...card.items[index]!, setting, ...(diff ? { diff } : {}) }; } catch { /* shown without it */ }
     } else if (item.action === "instructions.set") {
       try { const { diff, ...setting } = describeInstructionsChange(ctx, item.args.text); card.items[index] = { ...card.items[index]!, setting, diff }; } catch { /* shown without it */ }
     } else if (isImmediate(item)) card.items[index] = outcomeItem(await executeAction(ctx, item));

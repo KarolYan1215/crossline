@@ -3,6 +3,8 @@ export * from "./i18n";
 export * from "./availability";
 export * from "./importance";
 export * from "./drill-forms";
+export * from "./method-research";
+export * from "./skill-catalogue";
 export * from "./analysis";
 export * from "./assistant-schema";
 export * from "./background-facts-schema";

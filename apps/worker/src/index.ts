@@ -4,7 +4,7 @@ import { get } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { accountConcurrency, breakdownOfResponsesUsage, codexProcessEnvironment, flushMeteredUsage, recordMeteredUsage, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, installUndiciAssertionGuard, modelGateStatus, setDesignNoteProvider, setInstructionsProvider, setEffortPreferenceProvider, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
+import { accountConcurrency, breakdownOfResponsesUsage, codexProcessEnvironment, flushMeteredUsage, recordMeteredUsage, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, installUndiciAssertionGuard, modelGateStatus, setDesignNoteProvider, setInstructionsProvider, setLocalLookupProvider, setWebAvailableProvider, webResearchBlocker, setEffortPreferenceProvider, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
 import { containerMemory, containerPeak, createCollectMemory, heldMemory } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
@@ -17,6 +17,9 @@ import { workflowMergeDue, workflowMergePass } from "./workflow-merge";
 import { NEEDS_PER_PASS, createNeedChecker, needsAwaitingCheck } from "./need-check";
 import { autoApproveEligible } from "./auto-approval";
 import { retireShadowedDemos } from "./demo-cleanup";
+import { sweepLegacyDrills } from "./drill-sweep";
+import { localLookupsFor } from "./local-lookups";
+import { methodResearchDue, runMethodResearch } from "./method-research";
 import { notifyPass } from "./notify";
 import { createActivityTracker } from "./activity-recorder";
 import { agentHistoryPass } from "./agent-history";
@@ -508,6 +511,30 @@ async function minePass(workspaceId: string, checkedAt: string): Promise<void> {
  * too). The setup search is core work; the monthly one is non-core (the quota saver), as are its reviews.
  */
 const scoutingSkills = new Set<string>();
+/**
+ * After the interview (the owner, 2026-11-18): the person's habits and the researched way to do their kinds of work (method-research.ts),
+ * once per finished interview. Core work: every later plan is shaped by it.
+ */
+const researchingMethods = new Set<string>();
+async function methodResearchPass(workspaceId: string, checkedAt: string): Promise<void> {
+  if (researchingMethods.has(workspaceId) || !codexSupervisor || paused(workspaceId, "research")) return;
+  if (!methodResearchDue(analysisStore, workspaceId)) return;
+  const retryAt = analysisStore.getSetting(workspaceId, "method.research.retryAt");
+  if (retryAt && retryAt > checkedAt) return;
+  if (!spendAllows(await spendFor(workspaceId), "core")) return;
+  const client = accountClient(workspaceId);
+  if (!client) return;
+  researchingMethods.add(workspaceId);
+  try {
+    enterUsageWorkspace(workspaceId);
+    const outcome = await runMethodResearch(analysisStore, workspaceId, repoRoot, { client });
+    if ("blocked" in outcome) analysisStore.setSetting(workspaceId, "method.research.retryAt", new Date(Date.parse(checkedAt) + 6 * 3_600_000).toISOString());
+    console.info(JSON.stringify({ type: "method.research", checkedAt, workspaceId, ...("blocked" in outcome ? outcome
+      : { habits: outcome.habits.length, methods: outcome.methods.length, sources: outcome.sources.length, droppedSources: outcome.droppedSources }) }));
+  } catch (error) { console.warn(JSON.stringify({ type: "method.research_failed", workspaceId, message: String(error) })); }
+  finally { researchingMethods.delete(workspaceId); }
+}
+
 async function publicSkillPass(workspaceId: string, checkedAt: string, offPeakWait = false): Promise<void> {
   try {
     const removed = cleanPublicSkills(analysisStore, workspaceId);
@@ -945,6 +972,7 @@ async function workspaceTick(workspace: { id: string }, checkedAt: string): Prom
   await goalSplitPass(workspace.id, checkedAt);
   await milestoneRiskPass(workspace.id, checkedAt);
   void firstDraftsPass(workspace.id, checkedAt).catch(() => undefined);
+  void methodResearchPass(workspace.id, checkedAt).catch(() => undefined);
   // The milestone gate. Without this it existed only inside `scripts/gate-loop-check.ts`, so on the
   // real ledger a milestone-bound work order reached `evidence_review`, the approvals page said
   // 「等待里程碑闸门」 — and nothing was ever going to judge it. A verdict other than `pass` holds the
@@ -1168,6 +1196,9 @@ setLocaleProvider((workspaceId) => workspaceId ? readLocale(analysisStore, works
 // The person's own note for a Skill (「我的设计」, packages/core/src/personal-design.ts), read per run.
 setDesignNoteProvider((workspaceId, skill) => workspaceId ? designSkillNote(analysisStore, workspaceId, skill) : undefined);
 setInstructionsProvider((workspaceId) => workspaceId ? currentInstructionsOf(analysisStore, workspaceId).text || undefined : undefined);
+// Every model has the web as needed and the person's own files first (2026-11-18, `withSourceDefaults` in skill-runner).
+setWebAvailableProvider(() => !webResearchBlocker());
+setLocalLookupProvider((workspaceId) => workspaceId ? localLookupsFor(analysisStore, workspaceId) : undefined);
 // The person's 模型强度 (Settings → 模型连接), read per run; only runs on the account's own Codex take it (skill-runner).
 setEffortPreferenceProvider((workspaceId) => effortPreferenceOf(workspaceId ? analysisStore.getSetting(workspaceId, MODEL_EFFORT_SETTING) : null));
 // The one quota gate for every background pass (core: keeps the person's own work moving; discretionary: nobody is waiting on it).
@@ -1487,6 +1518,12 @@ for (const workspace of analysisStore.listWorkspaces()) {
   const repaired = repairFrozenRace(analysisStore, workspace.id, ownerOf(analysisStore, workspace.id));
   if (repaired && (repaired.released.length || repaired.republished.length))
     console.info(JSON.stringify({ type: "repair.frozen_race", workspaceId: workspace.id, released: repaired.released.length, republished: repaired.republished.length, checkedAt: new Date().toISOString() }));
+  // Once: tasks and steps written before the drill-form rule (订正/错题本/背诵/打卡, 2026-11-10) get the same screen new plans get.
+  try {
+    const swept = sweepLegacyDrills(analysisStore, workspace.id);
+    if (swept && (swept.archived.length || swept.skippedSteps || swept.rewrittenOrders.length))
+      console.info(JSON.stringify({ type: "drill.swept", workspaceId: workspace.id, ...swept, checkedAt: new Date().toISOString() }));
+  } catch (error) { console.warn(JSON.stringify({ type: "drill.sweep_failed", workspaceId: workspace.id, message: String(error) })); }
   // Once: work the person marked done before 完成 became the acceptance (2026-10-15) and the gate then blocked is accepted as done.
   const ownDone = repairOwnCompletions(analysisStore, workspace.id, ownerOf(analysisStore, workspace.id));
   if (ownDone?.length) console.info(JSON.stringify({ type: "repair.own_completion", workspaceId: workspace.id, accepted: ownDone, checkedAt: new Date().toISOString() }));
@@ -1899,7 +1936,8 @@ if (!capabilitySecret) {
       analysisStore.appendEvent({ ownerId: analysisStore.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `portrait.requested:${Date.now()}`,
         type: "portrait.requested", entityId: workspaceId, payload: { via: "finish" } });
       void settled.then(() => writePortraitFor(workspaceId)).catch(() => undefined).finally(() => {
-        void firstDraftsPass(workspaceId).catch(() => undefined); void publicSkillPass(workspaceId, new Date().toISOString()).catch(() => undefined); });
+        void firstDraftsPass(workspaceId).catch(() => undefined); void publicSkillPass(workspaceId, new Date().toISOString()).catch(() => undefined);
+        void methodResearchPass(workspaceId, new Date().toISOString()).catch(() => undefined); });
       return outcome;
     },
     onboardingResearch: async (_client, sessionId, threadId, text, workspaceId) =>
