@@ -523,7 +523,8 @@ function overdueFoldAsks(source: Source): Ask[] {
   const { t, today, locale } = source;
   const members = [...overdueAsks(source), ...overdueTaskAsks(source)];
   return foldAsks(source.ctx, "overdue", members, (rest): Ask => {
-    const sorted = [...rest].sort((a, b) => (a.dueDay ?? "").localeCompare(b.dueDay ?? ""));
+    // Same-day items in id order: the store's own order is not stable between machines (it failed CI once).
+    const sorted = [...rest].sort((a, b) => (a.dueDay ?? "").localeCompare(b.dueDay ?? "") || a.entityId.localeCompare(b.entityId));
     const due = sorted[0]?.dueDay;
     const tasks = new Map(source.store.listWorkOrders(source.ctx.workspaceId).map((order) => [order.id, order]));
     const milestones = new Map(source.store.listMilestones(source.ctx.workspaceId).map((milestone) => [milestone.id, milestone.title]));
@@ -533,7 +534,7 @@ function overdueFoldAsks(source: Source): Ask[] {
       href: ask.kind === "milestone_overdue" ? `/milestones?open=${encodeURIComponent(ask.entityId)}` : `/workbench/${encodeURIComponent(ask.entityId)}` }));
     // A talk, rehearsal or meeting whose day is gone cannot be made up: one answer for all of them instead of a card each (2026-11-11, the
     // owner's plan held eight such 「参加…」 tasks as 「已过截止日」).
-    const events = pastEventsIn(rest, tasks);
+    const events = pastEventsIn(sorted, tasks);
     return { id: foldId("overdue", rest), kind: "overdue_task", entityId: "batch", urgency: urgencyFor(due, today) === "later" ? "soon" : urgencyFor(due, today),
       ...(due ? { dueDay: due } : {}), raisedAt: rest.map((ask) => ask.raisedAt).sort().at(-1) ?? "", fingerprint: foldFingerprint(rest), items,
       important: rest.some((ask) => ask.important),
