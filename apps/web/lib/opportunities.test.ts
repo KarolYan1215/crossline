@@ -4,7 +4,7 @@ import { RUNTIME_OWNER_SETTING, emptyStats, validateAskAnswer, type Ask, type Op
 vi.mock("server-only", () => ({}));
 vi.mock("./codex-runtime", () => ({ requestCodexSupervisor: vi.fn(async () => ({})), CodexSupervisorRequestError: class extends Error {} }));
 import {
-  addWatch, answerApplicationResult, answerOpportunityOffer, autoTrackWatches, changeWatch, loadLineWatches, loadOpportunitySettings, loadOutOfView,
+  addWatch, answerApplicationResult, answerOpportunityOffer, autoTrackWatches, changeWatch, loadLineWatches, loadOpportunitySettings, loadOpportunityWeek, loadOutOfView,
   opportunityOfferAsks, quietUnusedReading, undoLess
 } from "./opportunities";
 import { TEST_CTX } from "./test-support";
@@ -169,7 +169,7 @@ test("offers carry their type and lines, most relevant first; one no line holds 
 
 test("offers wait for the weekly review unless due within the week; news and papers are read there with 有用 / 少来这类 (§7.3)", async () => {
   const store = setup();
-  const tag = (anchors: string[]) => [{ lineId: "research", confidence: 0.9, relevance: 0.9, reason: "", anchors }];
+  const tag = (anchors: string[]) => [{ lineId: "research", confidence: 0.9, relevance: 0.9, reason: "正对实验的基线", anchors }];
   save(store, { id: "far", key: "far", needId: undefined, lines: tag(["goal"]), type: "competition", deadlines: [{ day: "2026-12-30", quote: "Register by December 30, 2026" }] });
   save(store, { id: "near", key: "near", needId: undefined, lines: tag(["goal"]), type: "competition", deadlines: [{ day: "2026-11-05", quote: "Register by November 5, 2026" }] });
   save(store, { id: "paper", key: "paper", needId: undefined, lines: tag(["m1"]), type: "paper", kind: "event", deadlines: [], startsAt: undefined, url: "https://arxiv.org/abs/2611.1" });
@@ -178,6 +178,9 @@ test("offers wait for the weekly review unless due within the week; news and pap
   expect(offer(asks, "opp:near").inReview).toBeUndefined();
   expect(offer(asks, "opp:paper")).toMatchObject({ inReview: true });
   expect(offer(asks, "opp:paper").options.map((option) => option.id)).toEqual(["useful", "less_kind", "less"]);
+  // A paper's card says why it is worth reading, not a deadline, a date or a visa (found in the walkthrough).
+  expect(offer(asks, "opp:paper").why).toBe("为什么值得看：正对实验的基线。");
+  expect(loadOpportunityWeek(TEST_CTX, NOW).found).toBe(2);
   expect(await answerOpportunityOffer(TEST_CTX, offer(asks, "opp:paper"), "useful", {}, NOW)).toEqual({ ok: true });
   expect(store.listOpportunities(ws, { id: "paper" })[0]!.decision).toBe("read");
   expect(opportunityOfferAsks(TEST_CTX, NOW).some((ask) => ask.id === "opp:paper")).toBe(false);

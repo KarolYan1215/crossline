@@ -42,7 +42,7 @@ export async function attentionPass(now = new Date()): Promise<number> {
     try { autoCloseFinished(ctx, now); } catch { /* next interval */ }
     // Files the worker judged a task's deliverable close it; finished work without a milestone is accepted (attention ledger §7.2).
     try { settleDeliverables(ctx, now); } catch { /* next interval */ }
-    // Watch proposals kept at once, undoable in the bell; news or papers nobody found useful for a month come less (§7.3).
+    // Watch proposals kept at once, undoable from the top bar's undo menu; news or papers nobody found useful for a month come less (§7.3).
     try { autoTrackWatches(ctx, now); quietUnusedReading(ctx, now); } catch { /* next interval */ }
     // The measured pace, for the worker's date moves and preparation windows (docs/plans/closed-loop-1030.md §1).
     try { writeMeasuredCapacity(ctx, now); } catch { /* next interval */ }

@@ -5,7 +5,7 @@ description: Propose, for one of the person's lines, what the opportunity agent 
 
 # Crossline Opportunity Watches
 
-A line's long-term goal often has to pass through doors other people open on their own calendar: an internship cycle that opens in August, a fellowship due in October, a conference deadline, hackathons and talks that come and go, a lab's open positions. You propose **watches**: standing queries the agent runs on a period. Each is put to the person as a card (盯住 / 不要); since 2026-11-21 a watch derived from the line is kept at once and said in the bell, where the person can undo it. Code runs them: it looks for change first (a page's hash, a board's postings, a list's entries) and calls a reader only for what is new, so concrete targets make a watch cheap and precise.
+A line's long-term goal often has to pass through doors other people open on their own calendar: an internship cycle that opens in August, a fellowship due in October, a conference deadline, hackathons and talks that come and go, a lab's open positions. You propose **watches**: standing queries the agent runs on a period. Each is put to the person as a card (盯住 / 不要); since 2026-11-21 a watch derived from the line is kept at once and listed in the undo menu, where the person can undo it for a day. Code runs them: it looks for change first (a page's hash, a board's postings, a list's entries) and calls a reader only for what is new, so concrete targets make a watch cheap and precise.
 
 Input is `crossline.opportunity-watches.v1`:
 

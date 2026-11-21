@@ -127,7 +127,8 @@ export function AskCard({ ask, preview, onDone, level = 3, keys = false }: { ask
   };
   const latest = useRef({ answerable, picked, busy, chooseOne, toggle, confirm, snooze: () => {} });
   const snooze = (choice: "tomorrow" | "week") => void send("/api/asks/snooze", { askId: ask.id, choice, seconds: seconds() });
-  latest.current = { answerable, picked, busy, chooseOne, toggle, confirm, snooze: () => snooze("tomorrow") };
+  // A weekly-review card is looked at once a week, so 「明天再问」 means nothing there: it is put off to next week (found in the walkthrough).
+  latest.current = { answerable, picked, busy, chooseOne, toggle, confirm, snooze: () => snooze(ask.inReview ? "week" : "tomorrow") };
   useEffect(() => {
     if (!keys) return;
     const onKey = (event: globalThis.KeyboardEvent) => {
@@ -214,7 +215,7 @@ export function AskCard({ ask, preview, onDone, level = 3, keys = false }: { ask
     </div>}
 
     <p className="ask-later">
-      <button type="button" className="text-button" disabled={busy} onClick={() => snooze("tomorrow")}>{t("明天再问")}</button>
+      {!ask.inReview && <button type="button" className="text-button" disabled={busy} onClick={() => snooze("tomorrow")}>{t("明天再问")}</button>}
       <button type="button" className="text-button" disabled={busy} onClick={() => snooze("week")}>{t("下周再问")}</button>
       {status && <small role="status">{status}</small>}
     </p>

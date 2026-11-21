@@ -67,7 +67,7 @@ const whereOf = (watch: StoredWatch, t: ReturnType<typeof tFor>) =>
 export const WATCH_ASK_DAYS = 14;
 
 /**
- * Watches the line's derivation proposed are kept at once and said in the bell, undoable for a day (§7.3, round 1 A3, 2026-11-21). Before,
+ * Watches the line's derivation proposed are kept at once and listed in the top bar's undo menu for a day (§7.3, round 1 A3, 2026-11-21). Before,
  * each was a 盯住 / 不要 card (W-228 folded two or more into one). An undo retires the watch, remembered as 「不要」, which the next
  * derivation reads. The scout's and exploration's still wait for 视野外 in the weekly review; one older than `WATCH_ASK_DAYS` stays a
  * proposal on the opportunities page, as before.
@@ -136,7 +136,13 @@ export function opportunityOfferAsks(ctx: AccessContext, now = new Date()): Ask[
     const quote = row.deadlines.find((item) => item.day === deadline)?.quote;
     const facts = row.verdict.state === "eligible" && row.terms.length ? t("资格：按记录全部符合。") : "";
     const questions = row.verdict.state === "unknown" ? row.verdict.questions : [];
-    const parts = [
+    // News and a paper have no deadline, place or eligibility: the card says only why it is worth reading and where it came from.
+    const reading = isReading(row.type);
+    const reason = row.reason || (row.lines ?? []).slice().sort((a, b) => b.relevance - a.relevance)[0]?.reason || "";
+    const parts = reading ? [
+      reason ? t("为什么值得看：{{reason}}。", { reason: reason.replace(/[。.！!？?；;，,\s]+$/u, "") }) : "",
+      watch ? t("来自监视项「{{title}}」。", { title: watch.title }) : isScoutFind(row) ? t("每周侦察发现。") : ""
+    ].filter(Boolean) : [
       row.reason ? t("为什么值得看：{{reason}}。", { reason: row.reason.replace(/[。.！!？?；;，,\s]+$/u, "") }) : "",
       watch ? t("来自监视项「{{title}}」。", { title: watch.title }) : isScoutFind(row) ? t("每周侦察发现。") : "",
       deadline ? t("截止 {{day}}（原文：{{quote}}）。", { day: deadline, quote: short(quote ?? "", 80) }) : t("页面没写截止。"),
@@ -151,7 +157,6 @@ export function opportunityOfferAsks(ctx: AccessContext, now = new Date()): Ask[
     ].filter(Boolean);
     const answerFields: AskField[] = questions.map((question, index) => ({ id: `q${index}`, label: question.question, kind: "text", required: true }));
     // News and a paper are read or not (§7.3): 有用 / 少来这类, nothing to apply for.
-    const reading = isReading(row.type);
     const options: AskOption[] = reading ? [
       { id: "useful", label: t("有用"), recommended: true, detail: t("记下，以后多找这类") },
       { id: "less_kind", label: t("少来这类"), detail: t("这类隔久一点再看") },
@@ -532,7 +537,8 @@ export function loadOpportunityWeek(ctx: AccessContext, now = new Date()): Oppor
   const store = getStore();
   const since = new Date(now.getTime() - 7 * DAY).toISOString();
   const rows = store.listOpportunities(ctx.workspaceId);
-  const week = rows.filter((row) => row.foundAt >= since);
+  // News and papers are read, not eligible or ineligible: they are counted in 「机会与动态」, not here (found in the walkthrough).
+  const week = rows.filter((row) => row.foundAt >= since && !isReading(opportunityTypeOf(row)));
   const decidedThisWeek = rows.filter((row) => (row.decidedAt ?? "") >= since);
   const runs = new Map(readFormRuns(store, ctx.workspaceId).map((run) => [run.opportunityId, run]));
   return {
@@ -682,7 +688,7 @@ const READING_TYPES: OpportunityType[] = ["news", "paper"];
 
 /**
  * News or papers nobody found useful for a month come less (§7.3 「某类一个月没人点有用，自动降频」): the type joins the quiet types
- * (`holdBack`: only a find at `QUIET_TYPE_RELEVANCE` still comes), undoable in the bell for a day and listed in Settings. One marked useful
+ * (`holdBack`: only a find at `QUIET_TYPE_RELEVANCE` still comes), undoable from the top bar's undo menu for a day and listed in Settings. One marked useful
  * in the month makes it loud again.
  */
 export function quietUnusedReading(ctx: AccessContext, now = appNow()): OpportunityType[] {

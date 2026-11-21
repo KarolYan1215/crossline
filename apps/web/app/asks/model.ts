@@ -55,7 +55,10 @@ const OUTCOMES: Record<AskKind, { answered: string; unanswered: string }> = {
 /** What an answer does and what silence does. An option's own detail is preferred over the kind's sentence when it is the recommended one. */
 export function askOutcome(ask: Pick<Ask, "kind" | "options">, locale?: Locale): { answered: string; unanswered: string } {
   const t = tFor(locale);
-  const fallback = OUTCOMES[ask.kind] ?? { answered: "按所选处理。", unanswered: "相关工作保持现状。" };
+  // News and papers (offered with 有用) have no deadline: unread, they leave the weekly review after three weeks (READING_SHOWN_DAYS).
+  const reading = ask.kind === "opportunity_offer" && ask.options.some((option) => option.id === "useful");
+  const fallback = reading ? { answered: OUTCOMES.opportunity_offer.answered, unanswered: "留在周复盘，三周没看自动消失。" }
+    : OUTCOMES[ask.kind] ?? { answered: "按所选处理。", unanswered: "相关工作保持现状。" };
   const recommended = ask.options.find((option) => option.recommended && !option.href && option.detail);
   // The option's label and detail were written by the server in the page's language; only the frame is said here.
   return { answered: recommended ? t("推荐「{{label}}」：{{detail}}", { label: recommended.label, detail: recommended.detail }) : t(fallback.answered),

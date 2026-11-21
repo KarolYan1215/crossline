@@ -58,6 +58,7 @@ test("in English the outcome, sources and refusals are English, and names quoted
   expect(askSources({ kind: "milestone_risk", entityId: "m1", title: "“Midterm” may be late", options: [] }, "en")[0])
     .toEqual({ label: "Milestone “Midterm”", href: "/milestones?open=m1" });
   expect(askSources({ kind: "capture_blocked", entityId: "c", title: "x", options: [] }, "en")[0]!.label).toBe("Capture");
+  expect(askOutcome({ kind: "opportunity_offer", options: [{ id: "useful", label: "有用", detail: "记下", recommended: true }] }).unanswered).toBe("留在周复盘，三周没看自动消失。");
   expect(askOutcome({ kind: "gate_failed", options: [] }, "en")).toEqual({ answered: "The acceptance check runs again.", unanswered: "The submitted evidence remains unjudged." });
   expect(askOutcome({ kind: "missed_block", options: [{ id: "r", label: "Roll over", detail: "Done at the new time", recommended: true }] }, "en").answered)
     .toBe("Recommended \"Roll over\": Done at the new time");
