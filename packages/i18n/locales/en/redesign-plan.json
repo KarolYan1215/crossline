@@ -86,5 +86,19 @@
   "改动前": "Before the change",
   "过去一周的计划与实际在「周复盘」→": "Last week's plan against actual is in the weekly review →",
   "排程依据说明": "How the schedule decides",
-  "{{note}}，原因见「排不下的原因」": "{{note}}; see \"Why it doesn't fit\""
+  "{{note}}，原因见「排不下的原因」": "{{note}}; see \"Why it doesn't fit\"",
+  "{{count}} 项未排进：{{parts}}_one": "{{count}} task not on the calendar: {{parts}}",
+  "{{count}} 项未排进：{{parts}}_other": "{{count}} tasks not on the calendar: {{parts}}",
+  "{{count}} 项时段不够_one": "{{count}} no room in the hours",
+  "{{count}} 项时段不够_other": "{{count}} no room in the hours",
+  "{{count}} 项部分步骤未排_one": "{{count}} placed in part",
+  "{{count}} 项部分步骤未排_other": "{{count}} placed in part",
+  "{{count}} 项已过截止_one": "{{count}} past due",
+  "{{count}} 项已过截止_other": "{{count}} past due",
+  "{{count}} 项在等材料或前一步_one": "{{count}} waiting for material or an earlier step",
+  "{{count}} 项在等材料或前一步_other": "{{count}} waiting for material or an earlier step",
+  "{{count}} 个活动已过_one": "{{count}} event already passed",
+  "{{count}} 个活动已过_other": "{{count}} events already passed",
+  "{{count}} 项暂不排_one": "{{count}} left for later",
+  "{{count}} 项暂不排_other": "{{count}} left for later"
 }

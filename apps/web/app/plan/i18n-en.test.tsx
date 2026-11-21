@@ -11,7 +11,7 @@ import type { RankedTask } from "../../lib/crossline";
 
 const plan: PlanVersionData = { id: "plan-7", version: 7, blocks: [{ id: "scheduled:w1:v1s1", lane: "human", title: "Read", start: "09:00", end: "10:00", source: "排程", readOnly: false }] };
 const task = (over: Partial<RankedTask>): RankedTask => ({ id: "w1", title: "Problem set 3", line: "research", milestoneId: "m1", tier: 2, weight: 50, deadline: "2026-10-20",
-  notBefore: null, firstDay: "2026-10-14", firstStart: "09:00", weekMinutes: 90, blocker: null, libraryUntil: null, p50Minutes: 60, p85Minutes: 90, ...over });
+  notBefore: null, firstDay: "2026-10-14", firstStart: "09:00", weekMinutes: 90, blocker: null, blockerKind: null, libraryUntil: null, p50Minutes: 60, p85Minutes: 90, ...over });
 
 describe("the plan page's geometry in both languages", () => {
   test("minute ticks: Chinese as before, English in English", () => {
@@ -47,7 +47,7 @@ describe("the plan page in English", () => {
       <PlanKpiRow configuredWeekly={39} labels={{ research: "Researcher" }} estimates={{ covered: 0, coverage: null, points: [] }}
         kpis={{ usableMinutes: 2340, scheduledMinutes: 1860, unplaced: { count: 1, minutes: 150, earliest: "2026-11-03" }, bias: null }} />
       <UnplacedCard labels={{ research: "Researcher" }} today="2026-10-28" items={[{ id: "w1", title: "Watchlist", line: "research", deadline: "2026-11-03",
-        notBefore: null, minutes: 150, partial: true, reason: null }]} />
+        notBefore: null, minutes: 150, partial: true, reason: null, kind: "partial" }]} />
     </LocaleProvider>);
     expect(html).toContain("Available this week");
     expect(html).toContain("Not scheduled");

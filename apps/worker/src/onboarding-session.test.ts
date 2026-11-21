@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore, interviewChecklistFor, rateInsight, writeExtractState } from "@crossline/db";
-import { cardWordsHead, DISCLOSURE_PLACEHOLDER, LESSON_QUESTION, NEXT_ACCEPTED, ONBOARDING_STAGES, PROFILE_FRAMEWORK, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
+import { cardWordsHead, DISCLOSURE_PLACEHOLDER, LESSON_QUESTION, PROFILE_SECTIONS_SETTING, NEXT_ACCEPTED, ONBOARDING_STAGES, PROFILE_FRAMEWORK, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
   type OnboardingProgress, type ProfileCard } from "@crossline/core";
 import { cardsForRound, createOnboardingSessionRunner as createRunner, finishInterview, INSTRUCTIONS, ONBOARDING_SKILL, stageGuide, stageOrderFor, withoutEndHint } from "./onboarding-session";
 import { correctedSince, correctionUnread, INSTRUCTIONS as EXTRACT_INSTRUCTIONS } from "./onboarding-extract";
@@ -195,6 +195,17 @@ test("before the start standard stands, the model is told what is still owed, an
   expect(last.questions).toEqual([]);
   // The model is told outright that the lower bound does not stand yet, and what it lacks.
   expect(dialogue(prompts)[0]).toContain('"startStandard":{"met":false,"missing":[');
+});
+
+test("the start standard is not said to stand while a deep part of the interview has not had its minimum (W-269)", async () => {
+  const { rpc, prompts } = fakeRuntime([turn({ stage: "narrative" })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });
+  await run({ sessionId: "s", text: "我在读大三" });
+  const [first] = dialogue(prompts);
+  // Situation was skipped entirely in the walkthrough and 「可以开始使用」 came at round 10: every deep part is owed until it is walked
+  // and its portrait section rests on the person's words.
+  for (const part of ["处境", "指南针", "能量", "经历"]) expect(first).toContain(`访谈的「${part}」部分`);
+  expect(first).toContain('"startStandard":{"met":false');
 });
 
 test("every round's input opens with the progress header, counted from the rounds already in the ledger", async () => {
@@ -480,14 +491,17 @@ test("a person who says they want to start gets no rating card that round, and t
 });
 test("a person who wants to start still gets the cards when they are all the start lacks, and the header says so (replay 17)", async () => {
   const free = (id: string) => ({ id, text: `题 ${id}`, kind: "free", allowOther: true, identityId: "person", projectId: "", options: [] });
-  const { rpc, prompts } = fakeRuntime([turn({ stage: "compass", questions: [free("q1")] }), turn({ stage: "compass", questions: [free("q2")] })]);
+  const deep = ["narrative", "compass", "energy", "situation"];
+  const { rpc, prompts } = fakeRuntime([...deep.map((stage, index) => turn({ stage, questions: [free(`q${index + 1}`)] })), turn({ stage: "compass", questions: [free("q9")] })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   const lastCards = () => ((store.listOnboardingMessages(workspaceId, "s").filter((message) => message.role === "assistant").at(-1)!.content) as { cards?: ProfileCard[] }).cards ?? [];
   const openStart = () => interviewChecklistFor(store, workspaceId, [], { unfiledFiles: 0 }).filter((item) => item.start && !item.done).map((item) => item.id);
-  // No line yet and the available hours on record: once the interview has begun, the cards are the only start item left.
+  // No line yet and the available hours on record: once the interview has begun, the cards are the only start item left. Every deep part
+  // has had a round and rests on the person's words, so nothing else is owed (W-269).
   store.setSetting(workspaceId, "lines.v1", "[]");
   store.setSetting(workspaceId, "schedule.availability.proposed", JSON.stringify({ windows: [{ days: [1, 2, 3, 4, 5], startMinute: 540, endMinute: 720, energy: "high" }], why: "本人所述" }));
-  await run({ sessionId: "s", text: "先从经历说起吧" });
+  store.setSetting(workspaceId, PROFILE_SECTIONS_SETTING, JSON.stringify(Object.fromEntries(["situation", "compass", "energy"].map((section) => [section, { sentences: [1], final: false }]))));
+  for (const index of deep.keys()) await run({ sessionId: "s", text: `先从经历说起吧（${index + 1}）` });
   expect(openStart()).toEqual(["profile_cards"]);
   await run({ sessionId: "s", text: "差不多了吧，能直接排一周吗" });
   expect(lastCards().length).toBeGreaterThan(0);

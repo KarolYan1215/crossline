@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { DATE_EXTRACTION_SCHEMA, expandRecurring, mergeDateExtractions, withoutOffHours, quoteSupportsDate, relativeDays, sanitizeDateExtraction, validateDateExtraction, type DateExtraction } from "./date-schema";
+import { DATE_EXTRACTION_SCHEMA, expandRecurring, mergeDateExtractions, withoutOffHours, quoteSupportsDate, relativeDays, sanitizeDateExtraction, settleRoughFactValue, validateDateExtraction, type DateExtraction } from "./date-schema";
 
 const known = {
   today: "2026-10-02",
@@ -265,5 +265,35 @@ describe("what a person says the way people say it is recorded, and what is not 
     const bad = out({ dates: [item({ quote: "Week-8: 27th Oct.", date: "2026-10-28" })] });
     expect(() => sanitizeDateExtraction(bad, known)).toThrow("DATE_NOTHING_VERIFIABLE");
     expect(sanitizeDateExtraction(bad, known, { allowEmpty: true }).dropped).toEqual([expect.objectContaining({ code: "DATE_QUOTE_DOES_NOT_SUPPORT_DATE" })]);
+  });
+});
+
+describe("rough days and the term's end in replies (W-268)", () => {
+  // 2026-11-14 is a Saturday.
+  const today = "2026-11-14";
+  const plan = "这周改简历，下周开始投递，年前投出去。";
+  const sources = { "reply-4": plan, "reply-5": "暂定课表：每周二、四 10:00–11:40 上宏观经济学。", "reply-6": "寒假也上，每周二 10:00–11:40 上口语课。",
+    "reply-7": "每周二、四 10:00–11:40 跑步。" };
+  test("a start keeps the window's first day, a deadline its last; 「年前」 is the day before the Spring Festival, never 12-31", () => {
+    const start = item({ id: "s", date: "2026-11-21", kind: "other", title: "开始投递", project: "", sourceRef: "reply-4", quote: "下周开始投递" });
+    const due = item({ id: "d", date: "2026-12-31", kind: "deadline", title: "投出去", project: "", sourceRef: "reply-4", quote: plan });
+    const { extraction, dropped } = sanitizeDateExtraction(out({ dates: [start, due] }), { today, sources });
+    expect(dropped).toEqual([]);
+    expect(extraction.dates.map((entry) => [entry.id, entry.date])).toEqual([["s", "2026-11-16"], ["d", "2027-02-05"]]);
+  });
+  test("a deadline fact written from rough words takes the day they stand for", () => {
+    expect(settleRoughFactValue({ slot: "deadline", value: "2026-12-31（年前投出去）", sourceRef: "reply-4", sourceQuote: "年前投出去" }, today)).toBe("2027-02-05（年前投出去）");
+    expect(settleRoughFactValue({ slot: "date_start_applying", value: "2026-11-21（下周开始投）", sourceRef: "reply-4", sourceQuote: "下周开始投" }, today)).toBe("2026-11-16（下周开始投）");
+    // A printed day, and a fact that is not a date, stay as they are.
+    expect(settleRoughFactValue({ slot: "deadline", value: "2026-12-20", sourceRef: "reply-4", sourceQuote: "12 月 20 日交" }, today)).toBe("2026-12-20");
+    expect(settleRoughFactValue({ slot: "goal", value: "2026-12-31（年前）", sourceRef: "reply-4", sourceQuote: "年前" }, today)).toBe("2026-12-31（年前）");
+  });
+  test("a course's weekly classes told in a reply stop at the term's end, unless the reply says they go on", () => {
+    const course = { id: "c", title: "宏观经济学", project: "", weekdays: [2, 4], startTime: "10:00", endTime: "11:40", from: "2026-11-14", to: "2027-03-31",
+      exceptions: [], location: "", sourceRef: "reply-5", quote: "暂定课表：每周二、四 10:00–11:40 上宏观经济学。", confidence: "medium" as const };
+    const holiday = { ...course, id: "h", title: "口语课", weekdays: [2], sourceRef: "reply-6", quote: "寒假也上，每周二 10:00–11:40 上口语课" };
+    const run = { ...course, id: "r", title: "跑步", sourceRef: "reply-7", quote: "每周二、四 10:00–11:40 跑步。" };
+    const { extraction } = sanitizeDateExtraction(out({ dates: [], recurring: [course, holiday, run] }), { today, sources });
+    expect(extraction.recurring.map((entry) => [entry.id, entry.to])).toEqual([["c", "2027-01-15"], ["h", "2027-03-31"], ["r", "2027-03-31"]]);
   });
 });

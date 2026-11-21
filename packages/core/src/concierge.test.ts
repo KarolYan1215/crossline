@@ -79,3 +79,19 @@ test("find_system_part routes a wish to the part that owns it, with the person's
   // Nothing matches: every part is listed, so the model can still route by reading.
   expect((JSON.parse(answerFromPack(pack, "find_system_part", { query: "zzz-nothing" })) as unknown[]).length).toBe(2);
 });
+
+test("「周四前」 is due Thursday, never Wednesday: a due day one day early is sent back (W-192)", () => {
+  // 2026-11-03 is a Tuesday.
+  const heard = { ...refs(), today: "2026-11-03", heard: "周四前写完作业 3 的前两题" };
+  const create = (dueDate: string) => ({ action: "task.create", summary: "作业 3 前两题", args: { title: "写完作业 3 的前两题", context: "", lineId: "", dueDate, milestoneId: "" } });
+  expect(actionProblem(create("2026-11-04") as never, heard)).toContain("2026-11-05");
+  expect(() => validateConciergeTurn(turn([create("2026-11-04")]), heard)).toThrow("CONCIERGE_ACTION_INVALID");
+  expect(validateConciergeTurn(turn([create("2026-11-05")]), heard).actions).toHaveLength(1);
+  // A task's due day moved: the same.
+  expect(actionProblem(op({ date: "2026-11-04" }) as never, heard)).toContain("2026-11-05");
+  expect(actionProblem(op({ date: "2026-11-05" }) as never, heard)).toBe("");
+  // 「下周四之前」 and "by Thursday" too; with no such words, any day stands.
+  expect(actionProblem(create("2026-11-11") as never, { ...heard, heard: "下周四之前交" })).toContain("2026-11-12");
+  expect(actionProblem(create("2026-11-04") as never, { ...heard, heard: "finish it by Thursday" })).toContain("2026-11-05");
+  expect(actionProblem(create("2026-11-04") as never, { ...heard, heard: "周三交" })).toBe("");
+});

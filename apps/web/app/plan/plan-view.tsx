@@ -7,6 +7,7 @@ import { useT } from "../locale-context";
 import { ICON, IconButton } from "../ui/icon-button";
 import type { Translate } from "../../lib/i18n";
 import { unplacedTaskIds } from "../../lib/unplaced";
+import { unplacedBreakdown, type UnplacedItem, type UnplacedKind } from "../../lib/plan-stats";
 
 export type ScheduleBlockData = {
   id: string;
@@ -47,6 +48,19 @@ function unplacedNote(plan: PlanVersionData, t: Translate): string {
   const placed = new Set(plan.blocks.filter((block) => block.id.startsWith("scheduled:")).map((block) => block.id.split(":")[1]));
   const partial = [...blocked].filter((id) => placed.has(id)).length, none = blocked.size - partial;
   return [none ? t("{{count}} 个任务未排入", { count: none }) : "", partial ? t("{{count}} 个任务部分步骤未排入", { count: partial }) : ""].filter(Boolean).join(t("，"));
+}
+
+const KIND_LABEL: Record<UnplacedKind, string> = { room: "{{count}} 项时段不够", partial: "{{count}} 项部分步骤未排", overdue: "{{count}} 项已过截止",
+  waiting: "{{count}} 项在等材料或前一步", passed_event: "{{count}} 个活动已过", later: "{{count}} 项暂不排" };
+
+/**
+ * The same count as the 「未排进」 figure and 「排不下的原因」 list, split by why (`unplacedBreakdown`): the status line used to count only
+ * what the solver reported (「13 个任务未排入」) under a figure of 34 (2026-11-20 live walk).
+ */
+function breakdownNote(items: UnplacedItem[], t: Translate): string {
+  const { total, parts } = unplacedBreakdown(items);
+  if (!total) return "";
+  return t("{{count}} 项未排进：{{parts}}", { count: total, parts: parts.map((part) => t(KIND_LABEL[part.kind], { count: part.count })).join(t("，")) });
 }
 
 /**
@@ -111,13 +125,15 @@ export function PlanActions({ calendarWrite = false, children }: { calendarWrite
  * The schedule's state in one line under the figures: which engine placed it, and what could not be placed, linked to 「排不下的原因」.
  * Nothing at all while the plan is empty.
  */
-export function ScheduleStatus({ plan }: { plan: PlanVersionData }) {
+export function ScheduleStatus({ plan, unplaced }: { plan: PlanVersionData;
+  /** The page's 「排不下的原因」 list; with it the line counts the same tasks, by kind. */
+  unplaced?: UnplacedItem[] }) {
   const t = useT();
   if (!plan.schedule || (plan.schedule.solver === "empty" && !plan.schedule.blockers.length)) return null;
-  const note = unplacedNote(plan, t);
+  const note = unplaced ? breakdownNote(unplaced, t) : unplacedNote(plan, t);
   return <section className="schedule-status" role="status" data-status={plan.schedule.status}>
-    <strong>{plan.schedule.status === "feasible" ? t("建议时段已排入")
-      : plan.schedule.status === "partial" ? t("部分任务未排入") : t("当前没有可行的建议时段")}</strong>
+    <strong>{plan.schedule.status === "feasible" && !note ? t("建议时段已排入")
+      : plan.schedule.status === "infeasible" ? t("当前没有可行的建议时段") : t("部分任务未排入")}</strong>
     {plan.schedule.solver === "feasible_time_limit" && <span>{t("已显示验证过的可行安排；未证明最优。")}</span>}
     {plan.schedule.solver === "fallback" && !plan.schedule.simpleOnly && (plan.schedule.optimal
       ? <span>{t("这次没算出最优排法，先用一份简单排法，每块都核对过不冲突。")}</span>

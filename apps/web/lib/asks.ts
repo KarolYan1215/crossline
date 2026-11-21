@@ -1631,7 +1631,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
     }
     case "relation_check": return answerRelationCheck(ctx, ask, optionId, values);
     case "opportunity_need": return answerOpportunityNeed(ctx, ask, optionId, values);
-    case "opportunity_offer": return answerOpportunityOffer(ctx, ask, optionId, values);
+    case "opportunity_offer": return answerOpportunityOffer(ctx, ask, optionId, values, appNow());
     case "opportunity_result": return answerApplicationResult(ctx, ask, optionId);
     case "opportunity_apply_ready": return answerOpportunityApplyReady(ctx, ask, optionId);
     case "outcome_check": return answerOutcome(ctx, ask, optionId, values, choice.note);

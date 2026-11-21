@@ -9,7 +9,7 @@ import {
   mentionsSelfHarm, safetyRound, sensitiveReplies, withoutDisclosures, disclosureEchoes, disclosureWords, interviewerWords, lessonAnswer, LESSON_QUESTION, nextTaken, wantsToStart, type LessonConsent, readTurnProgress, safetyReplyOnly, researchCopied, RESEARCH_FIGURES_MAX,
   inventedDates, type KnownSources, type OnboardingDialogue, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, ONBOARDING_LAST_FAILURE, readPartialTurn, type OnboardingProgress, calendarWeek,
   tFor, flowOf, INTERVIEW_FLOW_STAGES, PROFILE_MODULE_STAGES, cardsFor, readCardAnswers, mergeInstrumentAnswers, readInstrumentAnswers,
-  settledItems, PROFILE_INSTRUMENTS_SETTING, type CardSet, type InterviewFlow, type ProfileCard, type ProfileStage, INTERVIEW_PACE
+  settledItems, PROFILE_INSTRUMENTS_SETTING, type CardSet, type InterviewFlow, type ProfileCard, type ProfileStage, INTERVIEW_PACE, PART_LABEL, partsUncovered
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillProgress } from "@crossline/codex";
 import {
@@ -392,11 +392,18 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // seven rounds before it did, reading the open items of `checklist` as settled). Only a line's own interview goes without.
     // An item the person answered that the extraction has not written down yet is not missing: it is listed as answered, so the dialogue
     // neither asks it again nor tells the person it is 「还在记录」 (replay 10).
+    // Every deep part of the interview has its minimum before the start standard is said to stand (W-269: compass had one round, energy
+    // two, situation none, and 「可以开始使用」 came in round 10): a part no round has been in, or whose portrait section has nothing of the
+    // person's yet, is still owed (`partsUncovered`). The pages' own gate (`readyToStart`) is unchanged.
+    const partsOwed = () => focusLine ? [] : partsUncovered({ stageOrder: stageOrderFor(flow), items: checklistNow(),
+      stagesSeen: messages.filter((message) => message.role === "assistant").map((message) => String((message.content as { stage?: string }).stage ?? "")) });
+    const partsOwedLabels = () => partsOwed().map((stage) => `访谈的「${PART_LABEL[stage as OnboardingStage] ?? stage}」部分（${stage}）还没谈到`); // i18n-ignore: model-facing
+    const startOpenNow = () => startOpen() || partsOwed().length > 0;
     const startStandard = () => {
       if (focusLine) return {};
       const answered = new Set(openChecklist(Infinity, (item) => !item.start, sessionId).filter((item) => item.recording).map((item) => item.label));
-      const missing = checklistNow().filter((item) => item.start && !item.done).map((item) => item.label);
-      return { startStandard: { met: !startOpen(), missing: missing.filter((label) => !answered.has(label)), ...(answered.size ? { answered: [...answered] } : {}) } };
+      const missing = [...checklistNow().filter((item) => item.start && !item.done).map((item) => item.label), ...partsOwedLabels()];
+      return { startStandard: { met: !startOpenNow(), missing: missing.filter((label) => !answered.has(label)), ...(answered.size ? { answered: [...answered] } : {}) } };
     };
     // The progress header (onboarding-standing.ts), first in every round's input: the rounds so far, the parts walked, since when the start
     // standard stands, what `ready_for_milestones` still lacks and the latest cards. Only the main interview has one.
@@ -414,7 +421,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       }
       return out;
     };
-    const startMetRound = focusLine || startOpen() ? null : coverage.startMetRound ?? assistantRounds.length + 1;
+    const startMetRound = focusLine || startOpenNow() ? null : coverage.startMetRound ?? assistantRounds.length + 1;
     /** The step the round before proposed, which the person took with the button or went past (2026-11-15). */
     const lastNext = String((assistantRounds.at(-1)?.content as { next?: string } | undefined)?.next ?? "").trim();
     /** Facts the latest ledger extractions of this interview wrote, for the replies they read (`onboarding.extracted`). */
@@ -436,8 +443,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         }),
         stage: stageNow, stageOrder: stageOrderFor(flow), startMetRound, undecided: dateSubjects().filter((item) => item.undecided).map((item) => item.about),
         ...(lastNext ? { lastNext: { text: lastNext, taken: nextTaken(replyText) } } : {}), facts: extractedFacts(),
-        ...(wantsToStart(replyText) ? { wantsToStart: onlyCardsLeft() ? "cards_left" as const : true } : {}),
-        startMissing: checklistNow().filter((item) => item.start && !item.done).map((item) => item.label),
+        ...(wantsToStart(replyText) ? { wantsToStart: onlyCardsLeft() && !partsOwed().length ? "cards_left" as const : true } : {}),
+        startMissing: [...checklistNow().filter((item) => item.start && !item.done).map((item) => item.label), ...partsOwedLabels()],
         profile: { dimensions: profile.dimensions, hypotheses: profile.hypotheses, careers: profile.careers }
       }) };
     };
@@ -551,7 +558,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         detail: `reply 说事情定在 ${invented.join("、")}，可本人没说过这个日期。日期由本人定：reply 里不写它，要定就在 questions 里用不带选项的 free 问本人想放在什么时候。` }); // i18n-ignore: model-facing repair note
       // Before the start standard stands the end button refuses: a reply pointing at it, or saying the app can be used, goes back to the
       // model (2026-11-14 audit: it used to be cut silently).
-      if (!focusLine && startOpen() && endHinted(valid.reply)) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
+      if (!focusLine && startOpenNow() && endHinted(valid.reply)) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
         detail: "开始标准还没齐（见 startStandard.missing）：reply 不提「结束并出报告」，也不说已经可以开始使用；接着问缺的那几项。" }); // i18n-ignore: model-facing repair note
       // The reply and the next step pointing back at a disclosure (2026-11-15): sent back, the safety round's own reply aside.
       const echo = safetyRound(valid) ? "" : echoOf(valid.reply) || echoOf(valid.next ?? "");
@@ -607,7 +614,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       // Past the repairs a sentence pointing at a button that would refuse is left out too (interview-rules IR-035).
       if (!kept) return kept;
       const quiet = safetyRound(kept);
-      return { ...kept, reply: withoutInventedDates(quiet ? kept.reply : withoutEchoes(!focusLine && startOpen() ? withoutEndHint(kept.reply) : kept.reply)),
+      return { ...kept, reply: withoutInventedDates(quiet ? kept.reply : withoutEchoes(!focusLine && startOpenNow() ? withoutEndHint(kept.reply) : kept.reply)),
         ...(kept.next !== undefined && !quiet ? { next: withoutEchoes(kept.next) } : {}), ...(lessonRefused(kept) ? { askLesson: false } : {}) };
     };
     // A turn that only needs one or two questions dropped is kept now instead of rewritten in full by a repair; one that lists the research is not.
@@ -620,7 +627,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         && researchCopied(kept.reply, findings()).length <= RESEARCH_FIGURES_MAX && !setDates(kept.reply).length
         && (safetyRound(kept) || !(echoOf(kept.reply) || echoOf(kept.next ?? ""))) && !lessonRefused(kept)
         && !SCORE_TALK.test(`${kept.reply}\n${kept.next ?? ""}`) && (safetyRound(kept) || kept.nextAction !== "ask" || Boolean(kept.next?.trim()))
-        && !(!focusLine && startOpen() && endHinted(kept.reply)) ? kept : undefined;
+        && !(!focusLine && startOpenNow() && endHinted(kept.reply)) ? kept : undefined;
     };
 
     // The public quick test's result, only when the person pressed 「使用该结果」 (apps/web/lib/assess-link.ts): corroboration for the
@@ -761,7 +768,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // Nor to a person who just said they want to start (replay 16: z asked 「能直接排一周吗」 nine rounds running and got cards in five
     // of six); the header tells the dialogue so, and the Skill has it say what is still missing instead. Unless the cards are all that
     // is missing (replay 17): then they are what starting takes, and they come.
-    const holdCardsForStart = wantsToStart(replyText) && !onlyCardsLeft();
+    const holdCardsForStart = wantsToStart(replyText) && !(onlyCardsLeft() && !partsOwed().length);
     const cards = result.output.nextAction === "ask" && !safetyRound(result.output) && !holdCardsForStart ? cardsLeft : [];
     // Which project a file that came with this reply belongs to: the app's own bookkeeping question, put beside the round as it wrote it.
     const freshDocs = new Set(sent.map(([, doc]) => doc.id));

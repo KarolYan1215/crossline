@@ -237,7 +237,8 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
     const own = input.facts.filter((fact) => fact.projectId === project.id && confirmed(fact));
     const code = courseCodeOf(project.name) ?? courseCodeOf(project.id);
     const course = Boolean(code) || own.some((fact) => fact.slot === "grading");
-    if (!course || meets.has(project.id) || meets.has(project.name) || own.some((fact) => MEETING_SLOT.test(fact.slot))) continue;
+    // 「8–21 点之间不固定」 is when it meets, as far as anyone can say (W-268): the question is answered, not asked again.
+    if (!course || meets.has(project.id) || meets.has(project.name) || own.some((fact) => MEETING_SLOT.test(fact.slot) || saysVaries(fact))) continue;
     // A part of a course (its final project, an exam) does not meet on its own; nor does a course whose class times another project with
     // the same code already holds. Asking when 「RBT 610 期末项目」 meets was found walking the app as an invitee (2026-10-15).
     if (!own.some((fact) => fact.slot === "grading") && COURSE_PART.test(project.name)) continue;
@@ -333,6 +334,10 @@ export function undatedKey(title: string): string {
 
 
 const MEETING_SLOT = /^(meeting|class)_?times?$|^no_meetings$/;
+/** A course's class times the person said are not fixed: 「不固定」「没有固定时间」「看情况」. */
+const VARIES = /不固定|没有固定|没固定|看情况|随机|not fixed|varies/iu; // i18n-ignore: matched against the person's words
+const saysVaries = (fact: { slot: string; value: string }) => VARIES.test(fact.value)
+  && (/time|schedule|class|meeting|hour/iu.test(fact.slot) || /\d{1,2}\s*[:：点]/u.test(fact.value)); // i18n-ignore: a clock in the person's words
 
 /** A fact to write; or, with an empty `slot`, an action: filing a file (`file`), the person's 「符合」 for the portrait, or a chosen goal. */
 export type GapAnswer = { identityId: string; projectId: string; slot: string; value: string; quote: string;

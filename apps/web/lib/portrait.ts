@@ -1,12 +1,12 @@
 import "server-only";
 import { formatInTimeZone } from "date-fns-tz";
-import { answerLine, energyRhythm, statedSleep, ONBOARDING_INSIGHTS, portraitConfirmedByInsights, portraitFingerprint, portraitStillConfirmed, PROFILE_CONFIRMED, readInsightRatings,
+import { answerLine, energyRhythm, statedBands, statedEnergyWindows, statedSleep, WORKDAYS, ONBOARDING_INSIGHTS, portraitConfirmedByInsights, portraitFingerprint, portraitStillConfirmed, PROFILE_CONFIRMED, readInsightRatings,
   PROFILE_CLAIM_STATUS_SETTING, REPORT_PRIVACY_SETTING, currentMineVersion, exportableClaims, mineSkillSettingKey, readClaimStatus, readMineSkill, readPrivacyChoices, redactPortrait,
   type AccessContext, type EnergyLevel, type EnergyRhythm, type PortraitReport, type ProfileModel } from "@crossline/core";
 import { interviewLocale, readLocale, sayDoFor } from "@crossline/db";
 import { tFor } from "./i18n";
 import { requestCodexSupervisor } from "./codex-runtime";
-import { effectiveSchedulePreferences, getStore, readAvailability } from "./crossline";
+import { effectiveSchedulePreferences, getStore, readAvailability, resolvedAvailability } from "./crossline";
 import { energyModel } from "./energy";
 import { currentFigure, figureUrl } from "./figures";
 import { identityLines } from "./lines";
@@ -109,14 +109,15 @@ export function loadAgentKitInput(ctx: AccessContext): AgentKitInput {
   };
 }
 
-/** The energy model drawn over the person's usual day, in their own zone. */
+/** The energy model drawn over the person's usual day, in their own zone; the best hours from what they said first (W-265). */
 function portraitRhythm(ctx: AccessContext, now: Date): EnergyRhythm {
   const model = energyModel(ctx, readAvailability(ctx));
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
   const reports = getStore().listEnergyObservations(ctx.workspaceId).filter((item) => item.source === "self_report" && item.level !== "uncalibrated")
     .map((item) => ({ at: item.observedAt, level: item.level as EnergyLevel }));
   return energyRhythm({ episodes: model.episodes, hourOf: model.hourOf, weekdayOf: (iso) => Number(formatInTimeZone(new Date(iso), zone, "i")),
-    phaseShift: model.phaseShift, calibration: model.calibration, reports, now: now.toISOString(), stated: statedSleep(getStore().listProfileFacts(ctx.workspaceId)) });
+    phaseShift: model.phaseShift, calibration: model.calibration, reports, now: now.toISOString(), stated: statedSleep(getStore().listProfileFacts(ctx.workspaceId)),
+    statedEnergy: statedBands(statedEnergyWindows(resolvedAvailability(ctx)), WORKDAYS) });
 }
 
 /** The interview's own question about the portrait (`PORTRAIT_UNCONFIRMED`): its wording and options, so an answer here reads as one there. */

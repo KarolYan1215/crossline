@@ -14,8 +14,9 @@ export const INTERVIEW_PARTS: OnboardingStage[] = ["orientation", "lines", "situ
 /** The parts of a flow's main interview, in order (`v2` puts the profile module first, docs/profile-and-agent-kit.md §四). */
 export const interviewParts = (flow: InterviewFlow = "v1"): OnboardingStage[] =>
   flow === "v1" ? INTERVIEW_PARTS : INTERVIEW_FLOW_STAGES[flow].filter((stage) => stage !== "details");
+// `orientation` collects the start items (the hours, the fixed schedule): 「日程」, not 「开场」, which flow v2 shows as part 5 (W-269).
 export const PART_LABEL: Record<OnboardingStage, string> = {
-  narrative: "经历", orientation: "开场", lines: "主线", situation: "处境", compass: "指南针", energy: "能量", details: "细节"
+  narrative: "经历", orientation: "日程", lines: "主线", situation: "处境", compass: "指南针", energy: "能量", details: "细节"
 };
 /** The three deep stages every flow has: 「准」 in each confirms the portrait (the life story's observation is welcome, not required). */
 const CONFIRMING_STAGES: OnboardingStage[] = ["situation", "compass", "energy"];

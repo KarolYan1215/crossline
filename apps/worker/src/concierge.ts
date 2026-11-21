@@ -120,7 +120,8 @@ export function createConcierge(store: CrosslineStore, workspaceId: string, cwd:
     if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: t("模型服务未运行。") };
     const conversation = store.getConversation(workspaceId, request.conversationId);
     if (!conversation) return { state: "blocked", code: "CONVERSATION_NOT_FOUND", message: t("会话不存在。") };
-    const refs = conciergeRefs(request.pack);
+    // The person's words go with the refs: a due day is checked against the weekday they named (W-192).
+    const refs = { ...conciergeRefs(request.pack), heard: request.text };
     const replyId = request.replyId;
     const tools = recordingTools(conciergeTools(store, workspaceId, request.pack),
       replyId ? (step) => recordStep(store, workspaceId, replyId, request.review ? { ...step, review: true } : step) : undefined);

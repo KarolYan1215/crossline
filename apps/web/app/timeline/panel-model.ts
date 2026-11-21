@@ -19,7 +19,7 @@ const ALL_DAY_MINUTES = 20 * 60;
  * Rest (`isRestEvent`: 「休息」, meals, sleep) is not a commitment and is left out of `fixed`: 「今晚 9 点以后不排工作」 made a 21:00–23:59
  * 「休息」 event and the day read 「固定日程 7.5 小时」 (W-156). It still keeps work off those hours.
  */
-export function dayLoad(items: TimelineItem[], day: string): { planned: number; pencilled: number; fixed: number; allDay: string[] } {
+export function dayLoad(items: TimelineItem[], day: string, nowMinute?: number): { planned: number; pencilled: number; fixed: number; allDay: string[]; past: number } {
   const ofDay = items.filter((item) => item.day === day);
   const sum = (kinds: Array<TimelineItem["kind"]>) => ofDay.filter((item) => kinds.includes(item.kind)).reduce((total, item) => total + length(item), 0);
   const fixedItems = ofDay.filter((item) => item.kind === "calendar" || item.kind === "import");
@@ -34,8 +34,14 @@ export function dayLoad(items: TimelineItem[], day: string): { planned: number; 
   }
   // A missed block (「未完成」) stays on view so the person can still start it, but its work is already placed again: counting it too made
   // the same step count twice (W-254).
-  const planned = ofDay.filter((item) => item.kind === "scheduled" && !item.missed).reduce((total, item) => total + length(item), 0);
-  return { planned, pencilled: sum(["optional"]), fixed, allDay: [...new Set(allDay.map((item) => item.title))] };
+  const work = ofDay.filter((item) => item.kind === "scheduled" && !item.missed);
+  // With the clock (today): only what is still ahead, the same reading as 今日概览's 「待办」 (`remainingMinutes` over the plan's
+  // `scheduled:` blocks). Counting the whole day said 「已排 4.1 小时」 beside 「待办 3 时 5 分」 at 18:58 (2026-11-20 live walk, W-172);
+  // what has gone by is said apart (`past`).
+  const ahead = (item: TimelineItem) => nowMinute === undefined ? length(item) : Math.max(0, toMinutes(item.end) - Math.max(toMinutes(item.start), nowMinute));
+  const planned = work.reduce((total, item) => total + ahead(item), 0);
+  const past = work.reduce((total, item) => total + length(item), 0) - planned;
+  return { planned, pencilled: sum(["optional"]), fixed, allDay: [...new Set(allDay.map((item) => item.title))], past };
 }
 
 /** The first block of work on the day that has not ended yet (on today, after `nowMinute`; on another day, the first of the day). */

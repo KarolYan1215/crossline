@@ -23,6 +23,13 @@ test("a composed goal reads as Chinese: fields share one 的, the noun's stem is
   expect(recomposes(["即刻内容创作", "公众号长文创作"], "创作者", "成为即刻内容创作的、公众号长文创作的创作者")).toBe(true);
 });
 
+test("states said together share one 的, so the goal saved reads as the one previewed (W-269)", () => {
+  expect(composeGoal(["作息有序", "情绪稳定"], "学生")).toBe("成为作息有序、情绪稳定的学生");
+  expect(["体面", "经济从容", "生活有序"].map(guessKind)).toEqual(["state", "state", "state"]);
+  // The picker previews and the line saves through the same function: what the person adopted is what is stored.
+  expect(composeGoal(["经济学方向", "作息有序", "情绪稳定"], "学生")).toBe("成为经济学方向的、作息有序、情绪稳定的学生");
+});
+
 test("cleaning keeps the phrase and drops what composing adds back", () => {
   expect(cleanAttribute("  成为 神经形态计算方向的。")).toBe("神经形态计算方向");
   expect(cleanAttribute("「能独立立项」")).toBe("能独立立项");

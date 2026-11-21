@@ -96,7 +96,8 @@ export function rhythmStats(rhythm: EnergyRhythm, locale?: Locale): Array<{ titl
   const pending = t("待定");
   const twoEach = t("需要工作日与休息日各两晚睡眠记录");
   return [
-    { title: t("最佳时段"), value: `${hourClock(rhythm.peak.start)}–${hourClock(rhythm.peak.end)}`, detail: t("模型曲线最高的连续 3 小时") },
+    { title: t("最佳时段"), value: rhythm.best.map((window) => `${hourClock(window.start)}–${hourClock(window.end)}`).join(t("、")),
+      detail: rhythm.bestFrom === "self" ? t("按本人所述的精力时段与自评，其余按模型曲线") : t("模型曲线最高的连续 3 小时") },
     chrono?.chronotype ? { title: t("早晚型"), value: t(CHRONOTYPE_LABEL[chrono.chronotype]), detail: t("休息日校正睡眠中点 {{time}}", { time: hourClock(chrono.msfSc!) }) }
       : { title: t("早晚型"), value: pending, detail: twoEach },
     sjl === null ? { title: t("社会时差"), value: pending, detail: twoEach }

@@ -275,11 +275,17 @@ export function availabilityGrid(windows: AvailabilityWindow[]): number[][] {
 /* ── the plan page's head (2026-10-28 redesign) ── */
 
 /** What `planRanking` says of one task, as far as the page's head needs it (`RankedTask` in lib/crossline.ts, server-only). */
+/**
+ * Why a task is not (fully) on the calendar, as one of a few kinds: no room in the hours (`room`), only some steps placed (`partial`),
+ * waiting for a step, material or another task (`waiting`), past its own deadline (`overdue`), an event whose day has gone
+ * (`passed_event`), or deliberately left for later (`later`: no deadline and low importance, beyond the horizon, before its latest start).
+ */
+export type UnplacedKind = "room" | "partial" | "waiting" | "overdue" | "passed_event" | "later";
 export type RankedLike = { id: string; title: string; line: string; deadline: string | null; notBefore: string | null; firstDay: string | null;
-  blocker: string | null; libraryUntil: string | null; p50Minutes: number };
+  blocker: string | null; blockerKind?: UnplacedKind | null; libraryUntil: string | null; p50Minutes: number };
 /** A task the schedule did not place in full: wholly (`partial` false) or some of its steps (`partial` true), with the planner's reason. */
 export type UnplacedItem = { id: string; title: string; line: string; deadline: string | null; notBefore: string | null; minutes: number;
-  partial: boolean; reason: string | null };
+  partial: boolean; reason: string | null; kind: UnplacedKind };
 
 /**
  * 「排不下的原因」 (Motion's 「Could not fit」, Todoist's Plan list): every task outside the task library that has no block at all, and
@@ -288,8 +294,21 @@ export type UnplacedItem = { id: string; title: string; line: string; deadline: 
 export function unplacedItems(ranking: RankedLike[], blocked: ReadonlySet<string>): UnplacedItem[] {
   return ranking.filter((task) => !task.libraryUntil && (!task.firstDay || blocked.has(task.id)))
     .map((task) => ({ id: task.id, title: task.title, line: task.line, deadline: task.deadline, notBefore: task.notBefore, minutes: task.p50Minutes,
-      partial: Boolean(task.firstDay), reason: task.blocker }))
+      partial: Boolean(task.firstDay), reason: task.blocker, kind: task.firstDay ? "partial" as const : task.blockerKind ?? "room" }))
     .sort((a, b) => (a.deadline ?? "9999").localeCompare(b.deadline ?? "9999") || a.title.localeCompare(b.title));
+}
+
+const UNPLACED_ORDER: UnplacedKind[] = ["room", "partial", "overdue", "waiting", "passed_event", "later"];
+
+/**
+ * The one count of unplaced work, split by kind: the plan page's 「未排进」 figure, its status line and 「排不下的原因」 all read this, so
+ * they cannot say 34 in one place and 「13 个任务未排入」 in another (W-172/W-173 family, 2026-11-20 live walk). Kinds with no task are
+ * left out; the parts always add up to `total`.
+ */
+export function unplacedBreakdown(items: ReadonlyArray<Pick<UnplacedItem, "kind">>): { total: number; parts: Array<{ kind: UnplacedKind; count: number }> } {
+  const counts = new Map<UnplacedKind, number>();
+  for (const item of items) counts.set(item.kind, (counts.get(item.kind) ?? 0) + 1);
+  return { total: items.length, parts: UNPLACED_ORDER.filter((kind) => counts.get(kind)).map((kind) => ({ kind, count: counts.get(kind)! })) };
 }
 
 /** The four figures over the plan page: this week's usable and scheduled minutes, what could not be placed, and the estimate bias. */

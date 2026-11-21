@@ -4,6 +4,7 @@ import { createGoalBackplanner } from "./goal-backplanner";
 import { absorbParts, existingTasksFor, foldNewTask } from "./duplicate-guard";
 import { materializeDatePairs } from "./date-pairs";
 import { fakeRuntime } from "./testing/fake-runtime";
+import { taskWindow } from "./step-planner";
 
 /** Duplicates are prevented where tasks are written; the daily merge is only the backstop (the owner's direction of 2026-10-15). */
 let store: CrosslineStore;
@@ -116,4 +117,22 @@ test("a part of a task goes into the whole, in either order (W-194)", () => {
   // Another homework is never taken.
   order("hw4", "作业 4 第 1 题", { state: "awaiting_plan_approval" });
   expect(foldNewTask(store, ws, "hw4")).toBeUndefined();
+});
+
+test("a captured part keeps its earlier day as a sub-deadline of the whole, which keeps its own due day (W-194)", () => {
+  store = new CrosslineStore(":memory:");
+  order("whole", "完成 ECE 548 作业 3", { payload: { dueDate: "2026-11-09" } });
+  // 「周四前写完作业 3 的前两题」 typed on Today: the analysis wrote the part, due Thursday.
+  order("part", "作业 3 的前两题", { state: "preparing", payload: { dueDate: "2026-11-05" } });
+  expect(foldNewTask(store, ws, "part")).toMatchObject({ kind: "extends", part: true, keep: "whole" });
+  expect(store.getWorkOrder(ws, "part")!.state).toBe("archived");
+  expect(store.getWorkOrder(ws, "whole")!.payload).toMatchObject({ dueDate: "2026-11-09", partDeadlines: [{ title: "ECE 548 作业 3 的前两题", dueDate: "2026-11-05" }] });
+  expect(store.listEvents(ws, { type: "task.steps_replan_requested", entityId: "whole" }).map((event) => (event.payload as { feedback: string }).feedback))
+    .toEqual([expect.stringContaining("须在 2026-11-05 前完成")]);
+  expect(taskWindow(store, ws, store.getWorkOrder(ws, "whole")!, new Date("2026-11-03T15:00:00Z")))
+    .toMatchObject({ dueBy: "2026-11-09", partDeadlines: [{ title: "ECE 548 作业 3 的前两题", dueDate: "2026-11-05" }] });
+  // Another homework's part stands on its own.
+  order("hw4", "作业 4 的前两题", { state: "preparing", payload: { dueDate: "2026-11-05" } });
+  expect(foldNewTask(store, ws, "hw4")).toBeUndefined();
+  expect(store.getWorkOrder(ws, "hw4")!.state).toBe("preparing");
 });

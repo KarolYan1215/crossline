@@ -1,5 +1,5 @@
-import { withCourse } from "./task-title";
-import { inRoughWindow } from "./rough-dates";
+import { courseCodeOf, withCourse } from "./task-title";
+import { STARTS_WORDS, inRoughWindow, roughWindow, settleRoughDay } from "./rough-dates";
 
 /**
  * Dates a person's own documents state — class meetings, quiz and homework dates, exams, deadlines.
@@ -202,6 +202,27 @@ export function relativeDays(quote: string, today: string): Set<string> {
   return days;
 }
 
+/**
+ * The days 「周四前」「下周四之前」「by Thursday」 name, said on `today` (W-192, 2026-11-03: 「周四前写完作业 3 的前两题」 typed on a Tuesday
+ * became due Wednesday 11-04). The person means by the end of that day, so it is that weekday itself, never the day before. A bare weekday
+ * is this week's and next week's, as `relativeDays` reads it.
+ */
+export function byWeekdayDays(text: string, today: string): Set<string> {
+  const days = new Set<string>();
+  if (!ISO.test(today)) return days;
+  const q = text.toLowerCase();
+  const monday = -((new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7);
+  const weekday = (target: number, weeksAhead: number) => isoPlus(today, monday + ((target + 6) % 7) + 7 * weeksAhead);
+  for (const match of q.matchAll(/(下下|下个?|这个?|本)?\s*(周|星期|礼拜|禮拜)([一二三四五六日天])\s*(之前|以前|前)/gu)) { // i18n-ignore
+    const prefix = match[1] ?? "";
+    for (const weeks of prefix.startsWith("下下") ? [2] : prefix.startsWith("下") ? [1] : prefix ? [0] : [0, 1]) days.add(weekday(CN_WEEKDAY[match[3]!]!, weeks)); // i18n-ignore
+  }
+  for (const match of q.matchAll(/\b(?:by|before)\s+(next|this)?\s*(sun|mon|tue|wed|thu|fri|sat)[a-z]*\b/g)) {
+    for (const weeks of match[1] === "next" ? [1] : match[1] ? [0] : [0, 1]) days.add(weekday(EN_WEEKDAY.indexOf(match[2]!), weeks));
+  }
+  return days;
+}
+
 /** Words that name a day relative to when they were written, whose day a file alone cannot give (「下周」「明天」「next week」). */
 export const RELATIVE_DAY_WORDS = /今天|今晚|明天|明早|明晚|后天|下下?个?(周|星期|礼拜|月)|这个?(周|星期|礼拜)|本(周|月)|下学期|tomorrow|today|tonight|next (week|month|mon|tue|wed|thu|fri|sat|sun)|this (week|mon|tue|wed|thu|fri|sat|sun)/iu; // i18n-ignore
 /**
@@ -317,6 +338,47 @@ const dateAcrossMidnight = (item: DateCandidate): DateCandidate => {
   return item.endTime === item.startTime || item.startTime === "23:59" ? { ...item, endTime: "" } : { ...item, endTime: "23:59" };
 };
 
+/**
+ * A date a reply gave only roughly (「下周开始投」「年前投出去」) is kept as the one day those words stand for (W-268): the check accepts any
+ * day inside the window, and the model picked that week's Saturday for a start and 12-31 for 「年前」. A start is the window's first day,
+ * anything else its last (`settleRoughDay`); a day the words print or name exactly is left as it is.
+ */
+function settledDate(item: DateCandidate, today: string): DateCandidate {
+  if (!item.sourceRef.startsWith("reply-") || quoteSupportsDate(item.date, item.quote) || relativeDays(item.quote, today).has(item.date)) return item;
+  const day = settleRoughDay(item.date, item.quote, today, STARTS_WORDS.test(item.title) ? "start" : undefined);
+  return day && day !== item.date ? { ...item, date: day } : item;
+}
+
+/**
+ * The same for a deadline-like fact the extraction wrote as 「YYYY-MM-DD（原话）」 from a reply (`deadline`, `date_*`, `*_deadline`): the
+ * day is the one the person's rough words stand for. Returns the value unchanged when there is nothing to settle.
+ */
+export function settleRoughFactValue(fact: { slot: string; value: string; sourceRef: string; sourceQuote: string }, today: string): string {
+  const match = /^(\d{4}-\d{2}-\d{2})/u.exec(fact.value.trim());
+  if (!match || !fact.sourceRef.startsWith("reply-") || !/^deadline$|^date_|_deadline$|_date$|^start/u.test(fact.slot)) return fact.value;
+  const date = match[1]!;
+  if (quoteSupportsDate(date, fact.sourceQuote) || relativeDays(fact.sourceQuote, today).has(date)) return fact.value;
+  const day = settleRoughDay(date, fact.sourceQuote, today, /start|begin/u.test(fact.slot) ? "start" : undefined);
+  return day && day !== date ? fact.value.trim().replace(date, day) : fact.value;
+}
+
+/** A class meeting (as opposed to a job's shift or a weekly habit): its title, project or sentence names a course or a timetable. */
+const COURSE_WORDS = /课|course|class|lecture|seminar|tutorial|recitation/iu; // i18n-ignore: matched against titles
+/** Words that carry a weekly arrangement past the term on purpose: 「寒假也上」「下学期还是这个时间」. */
+const PAST_TERM = /寒假|暑假|假期|下学期|下个学期|next (term|semester)|over the (break|holiday)/iu; // i18n-ignore: matched against the reply
+/**
+ * A course's weekly meetings told in a reply stop at the end of the term (W-268: a tentative timetable was kept past the term end and
+ * across the winter break). The term ends as `roughWindow` reads 「这学期」: mid-January for an autumn term, early July for a spring one.
+ * A file's own range, an end the reply prints, or a reply that says the classes go on past the term is left as it is.
+ */
+function withinTerm(meeting: RecurringMeeting, today: string): RecurringMeeting {
+  const termEnd = roughWindow("这学期", today)?.to; // i18n-ignore: the words the term window is read from
+  if (!termEnd || !meeting.sourceRef.startsWith("reply-") || meeting.to <= termEnd || meeting.from > termEnd) return meeting;
+  const course = COURSE_WORDS.test(`${meeting.title} ${meeting.project} ${meeting.quote}`) || Boolean(courseCodeOf(meeting.project) ?? courseCodeOf(meeting.title));
+  if (!course || quoteSupportsDate(meeting.to, meeting.quote) || PAST_TERM.test(meeting.quote)) return meeting;
+  return { ...meeting, to: termEnd };
+}
+
 /** Why an item was not recorded: `reason` is the detail the model is shown, `code` what the person's screens word for themselves. */
 export type DateDrop = { id: string; title: string; reason: string; code: string };
 
@@ -342,14 +404,15 @@ export function sanitizeDateExtraction(value: unknown, known: Known, options: { 
       return false;
     }
   });
-  const dates = attempt(out.dates.map(dateAcrossMidnight), (item) => checkDate(item, known));
+  const dates = attempt(out.dates.map(dateAcrossMidnight), (item) => checkDate(item, known)).map((item) => settledDate(item, known.today));
   // A file's 「下周五」 has no day the app can check: kept as an undated item carrying the file's words, and the person is asked which day.
   const relative = out.dates.filter((item) => !item.sourceRef.startsWith("reply-") && RELATIVE_DAY_WORDS.test(item.quote)
     && dropped.some((drop) => drop.id === item.id && drop.code === "DATE_QUOTE_DOES_NOT_SUPPORT_DATE"));
   for (const item of relative) dropped.splice(dropped.findIndex((drop) => drop.id === item.id), 1);
   const askedUndated: UndatedItem[] = relative.map((item) => ({ id: item.id, kind: item.kind, title: item.title, project: item.project, sourceRef: item.sourceRef,
     quote: item.quote, note: `${RELATIVE_NOTE}${item.quote.slice(0, 120)}` }));
-  const recurring = attempt(out.recurring.flatMap((meeting) => acrossMidnight(openEnded(meeting, known.today))), (meeting) => checkMeeting(meeting, known));
+  const recurring = attempt(out.recurring.flatMap((meeting) => acrossMidnight(openEnded(meeting, known.today))), (meeting) => checkMeeting(meeting, known))
+    .map((meeting) => withinTerm(meeting, known.today));
   // The same for one the model already put in `undated[]` (as the Skill asks): its relative words are kept, so it is asked whatever its
   // kind — a class 「下周五补课」 is not a graded part, and was skipped without a word (W-230). The model's own note gives way: on the
   // 2026-11-06 rerun it wrote 「下周五 14:30 至 15:45，Engineering Hall B201。」 there, and the item was again never asked (W-232).

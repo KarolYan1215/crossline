@@ -17,6 +17,8 @@ import { tFor, type Locale } from "./i18n";
  * - **info request**: a standalone request for a fact (`info-request.ts`) is folded into the task it serves — the one that names it as a
  *   dependency, else the main task of the same milestone, else of the same project — as that task's first step. Requests with nothing to
  *   serve in one milestone are merged into one (one email can ask both).
+ * - **part**: a task whose title names a part of an open task (`partOf`: 「作业 3 的前两题」 of 「完成 ECE 555 作业 3」) goes into it; the
+ *   part's earlier due day becomes a sub-deadline of the whole (W-194).
  *
  * The task kept is the one with the most progress, then the furthest state, then a step plan, then the earliest due day.
  */
@@ -30,8 +32,11 @@ export type MergeTask = {
   owner?: "person" | "assistant" | "ask";
 };
 const sideOf = (task: MergeTask) => task.owner ?? "person";
-/** `requests`: for an info-request merge, what each absorbed task asks (it becomes a drafted email and a send in the kept task). */
-export type MergeGroup = { kind: "duplicate" | "info_request"; keep: string; absorb: string[]; reason: string; requests: Record<string, InfoRequest> };
+/**
+ * `requests`: for an info-request merge, what each absorbed task asks (it becomes a drafted email and a send in the kept task). `part`: the
+ * absorbed tasks each name a part of the kept one (`partOf`, W-194) — an earlier due day of theirs is a sub-deadline, not the whole's.
+ */
+export type MergeGroup = { kind: "duplicate" | "info_request"; keep: string; absorb: string[]; reason: string; requests: Record<string, InfoRequest>; part?: boolean };
 export type MergePair = { a: string; b: string; why: string };
 
 export const TITLE_SAME = 0.6;
@@ -173,7 +178,19 @@ export function planMerges(tasks: MergeTask[], sameByModel: ReadonlySet<string> 
       requests: Object.fromEntries(items.filter((item) => item.task.id !== keep.id).map((item) => [item.task.id, item.traits.request!])) });
     for (const id of absorb) taken.add(id);
   }
-  // 2. Duplicates among what is left (requests included: two identical requests are one).
+  // 2. A piece of an open task goes into the whole (W-194: 「作业 3 第 1、2 题」 beside 「完成 ECE 555 作业 3」); 作业 3 and 作业 4 never meet.
+  for (const task of live) {
+    if (taken.has(task.id) || !absorbable(task)) continue;
+    const wholes = live.filter((other) => other.id !== task.id && !taken.has(other.id) && partOf(task, other));
+    if (!wholes.length) continue;
+    const whole = keeperOf(wholes);
+    const group = groups.find((item) => item.part && item.keep === whole.id);
+    if (group) { group.absorb.push(task.id); group.reason += t("；「{{title}}」同样并入", { title: task.title }); }
+    else groups.push({ kind: "duplicate", part: true, keep: whole.id, absorb: [task.id], requests: {},
+      reason: t("「{{title}}」是「{{target}}」的一部分", { title: task.title, target: whole.title }) });
+    taken.add(task.id);
+  }
+  // 3. Duplicates among what is left (requests included: two identical requests are one).
   const rest = live.filter((task) => !taken.has(task.id));
   const unsure: MergePair[] = [];
   const parent = new Map(rest.map((task) => [task.id, task.id]));

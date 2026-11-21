@@ -181,6 +181,9 @@ fi
 if [ "$want" = all ] || [ "$want" = worker ]; then
   # The worker's heartbeat lock outlives a removed container and reads as fresh for 45 minutes, so the new worker would exit
   # (worker.already_running) and restart in a loop. The old container is removed first, so no other worker holds it.
+  # Until the new worker serves, pages say 「后台服务正在重启」 rather than the red 「后台服务没有运行」 that every deploy used to show for
+  # a minute (apps/web/lib/runtime-status.ts); the worker removes the mark once its supervisor answers.
+  date -u +%Y-%m-%dT%H:%M:%SZ > /srv/crossline/data/worker.restarting
   stop_container crossline-worker
   rm -f /srv/crossline/data/worker.lock
   # The prebuilt worker (scripts/build-worker.mjs) when the image has it, else tsx as before. The Codex runtimes are its children and

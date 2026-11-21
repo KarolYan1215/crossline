@@ -90,7 +90,7 @@ export function existingOutputs(store: CrosslineStore, workspaceId: string, orde
 }
 
 export function taskWindow(store: CrosslineStore, workspaceId: string, order: StoredWorkOrder, now = new Date()) {
-  const payload = (order.payload ?? {}) as { notBefore?: string; dueDate?: string };
+  const payload = (order.payload ?? {}) as { notBefore?: string; dueDate?: string; partDeadlines?: Array<{ title: string; dueDate: string }> };
   let goalDeadline: string | undefined;
   try { goalDeadline = (JSON.parse(store.getSetting(workspaceId, goalSettingKey(order.milestoneId)) ?? "{}") as { confirmedDeadline?: string }).confirmedDeadline; } catch { /* unreadable: none */ }
   const anchor = store.listMilestoneAnchors(workspaceId).find((item) => item.milestoneId === order.milestoneId)?.deadline;
@@ -103,7 +103,9 @@ export function taskWindow(store: CrosslineStore, workspaceId: string, order: St
   const days = dueBy ? Math.max(1, Math.round((Date.parse(`${dueBy}T12:00:00Z`) - Date.parse(`${notBefore}T12:00:00Z`)) / 86_400_000) + 1) : undefined;
   // Average working minutes per day of the weekly pattern, over the window; other work shares this time, so it is an upper bound.
   const availableMinutes = days ? Math.round((weeklyAvailableHours(windows) * 60 / 7) * days) : undefined;
-  return { notBefore, dueBy, ...(availableMinutes !== undefined ? { availableMinutes } : {}) };
+  // A part merged in with an earlier day of its own (W-194, `applyMerge`): the steps that do it are due by then.
+  const partDeadlines = (payload.partDeadlines ?? []).filter((item) => item.dueDate >= today);
+  return { notBefore, dueBy, ...(availableMinutes !== undefined ? { availableMinutes } : {}), ...(partDeadlines.length ? { partDeadlines } : {}) };
 }
 
 /**

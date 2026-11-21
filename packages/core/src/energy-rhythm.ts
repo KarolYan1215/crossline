@@ -1,4 +1,5 @@
 import { mctqLite, type MctqLiteResult } from "./assess";
+import { bestWindows, dayLevels, reportBandsOf, type EnergyBand } from "./energy-best";
 import { alertnessAt, shiftedDefaultNight, sleepDebt, type EnergyCalibration, type SleepEpisode } from "./energy-model";
 import type { EnergyLevel } from "./index";
 
@@ -15,8 +16,14 @@ export type EnergyRhythm = {
   curve: Array<{ hour: number; value: number | null }>;
   /** Usual sleep onset and wake, local hours (onset may exceed 24 for after midnight). */
   sleep: { from: number; to: number };
-  /** The three waking hours with the highest mean alertness. */
+  /** The three waking hours with the highest mean alertness: the model's own peak. */
   peak: { start: number; end: number };
+  /**
+   * The best hours shown (W-265): with anything the person said — levels stated for their hours, reports agreeing on a band — every run
+   * at the highest level of `dayLevels`, the same levels the plan page's advice is made of; with nothing said, the model's `peak`.
+   */
+  best: Array<{ start: number; end: number }>;
+  bestFrom: "self" | "model";
   /** The person's cut points between low, medium and high on the same scale. */
   thresholds: { low: number; high: number };
   reports: Array<{ hour: number; level: EnergyLevel }>;
@@ -72,6 +79,8 @@ export function energyRhythm(input: {
   phaseShift: number; calibration: EnergyCalibration; reports: Array<{ at: string; level: EnergyLevel }>; now: string;
   /** The usual night the person told the interview (`statedSleep`), used while no night is recorded; hours, onset past midnight as 25. */
   stated?: { from: number; to: number } | undefined;
+  /** The levels the person stated for their workday hours (`statedBands` of `statedEnergyWindows`). */
+  statedEnergy?: EnergyBand[] | undefined;
 }): EnergyRhythm {
   const since = Date.parse(input.now) - 28 * 24 * HOUR;
   const nights = input.episodes.filter((episode) => Date.parse(episode.wakeAt) >= since && Date.parse(episode.wakeAt) <= Date.parse(input.now))
@@ -95,18 +104,25 @@ export function energyRhythm(input: {
     return { hour, value: value === undefined ? null : Math.round(value * 100) / 100 };
   });
   // The best three hours: six consecutive half-hour points, all awake.
-  let best = { start: usual.to, mean: -Infinity };
+  let top = { start: usual.to, mean: -Infinity };
   for (let index = 0; index + 6 < curve.length; index += 1) {
     const window = curve.slice(index, index + 7).map((point) => point.value);
     if (window.some((value) => value === null)) continue;
     const mean = (window as number[]).reduce((sum, value) => sum + value, 0) / window.length;
-    if (mean > best.mean) best = { start: curve[index]!.hour, mean };
+    if (mean > top.mean) top = { start: curve[index]!.hour, mean };
   }
   const work = nights.filter((night) => !night.free), free = nights.filter((night) => night.free);
   const middle = (list: typeof nights) => ({ sleep: clock(median(list.map((night) => night.onset))), wake: clock(median(list.map((night) => night.wake))) });
   const debt = sleepDebt(input.now, input.episodes);
+  // What the person said outranks the model (`dayLevels`, read at the middle of each half hour as the plan page's advice reads it).
+  const said = { stated: input.statedEnergy ?? [], reports: reportBandsOf(input.reports, input.hourOf, input.now) };
+  const best = said.stated.length || said.reports.length ? bestWindows(dayLevels(Array.from({ length: 48 }, (_, slot) => {
+    const middle = slot / 2 + 0.25;
+    return asleep(middle) ? null : alertnessAt(iso(today + middle * HOUR), episodes, utcHour, input.phaseShift) ?? null;
+  }), said)) : [];
   return {
-    curve, sleep: usual, peak: { start: best.start, end: best.start + 3 },
+    curve, sleep: usual, peak: { start: top.start, end: top.start + 3 },
+    best: best.length ? best : [{ start: top.start, end: top.start + 3 }], bestFrom: best.length ? "self" : "model",
     thresholds: { low: input.calibration.low, high: input.calibration.high },
     reports: input.reports.filter((report) => Date.parse(report.at) >= since).map((report) => ({ hour: Math.round(input.hourOf(report.at) * 2) / 2, level: report.level })),
     chronotype: work.length >= 2 && free.length >= 2 ? mctqLite({ workdays: 5, work: middle(work), free: middle(free) }) : null,

@@ -40,7 +40,7 @@ describe("the panel beside the day", () => {
   test("with nothing picked: the load on top, the next block with its start, and the row of ways out at the bottom", () => {
     const html = render({ proposals: [{ id: "p1", title: "提案" }] });
     expect(html).toContain("当日负荷");
-    expect(html).toContain("已排 1 小时");
+    expect(html).toContain("还剩 1 小时");
     expect(html).toContain("下一项");
     expect(html).toContain("开始计时");
     // Opened by default with the block's actions (2026-10-29), without the in-place edits and the person's part.

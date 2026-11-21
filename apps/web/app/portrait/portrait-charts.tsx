@@ -197,7 +197,7 @@ export function AdviceMatrix({ insights }: { insights: PortraitReport["insights"
 
 /**
  * The 「精力节律」 curve (decided 2026-10-14): the energy model over one usual day at the person's phase (`energyRhythm`), the usual
- * sleep shaded, the best three hours as a band in the type group's colour, the person's low/high cut points as dashed lines, and each
+ * sleep shaded, the best hours (`rhythm.best`: what the person said first, else the model's three) as bands in the type group's colour, the person's low/high cut points as dashed lines, and each
  * of their own L/M/H reports as a hollow dot in its band at the hour it was given.
  */
 export function RhythmChart({ rhythm, width = 620, height = 240 }: { rhythm: EnergyRhythm; width?: number; height?: number }) {
@@ -227,11 +227,14 @@ export function RhythmChart({ rhythm, width = 620, height = 240 }: { rhythm: Ene
   const from = rhythm.sleep.from >= 24 ? rhythm.sleep.from - 24 : rhythm.sleep.from;
   const sleepSpans = rhythm.sleep.from >= 24 ? [[from, rhythm.sleep.to]] : [[0, rhythm.sleep.to], [from, 24]];
   const plotTop = pad.top, plotHeight = height - pad.top - pad.bottom;
+  const bestHours = rhythm.best.map((window) => `${hourClock(window.start)}–${hourClock(window.end)}`).join(t("、"));
   return <svg className="pt-chart" viewBox={`0 0 ${width} ${height}`} role="img"
-    aria-label={t("一日精力曲线：最佳时段 {{start}}–{{end}}，通常 {{sleep}} 入睡、{{wake}} 醒来", { start: hourClock(rhythm.peak.start), end: hourClock(rhythm.peak.end), sleep: hourClock(rhythm.sleep.from), wake: hourClock(rhythm.sleep.to) })}>
+    aria-label={t("一日精力曲线：最佳时段 {{hours}}，通常 {{sleep}} 入睡、{{wake}} 醒来", { hours: bestHours, sleep: hourClock(rhythm.sleep.from), wake: hourClock(rhythm.sleep.to) })}>
     {sleepSpans.map(([a, b]) => <rect key={a} x={x(a!)} y={plotTop} width={x(b!) - x(a!)} height={plotHeight} fill="#ECE5D8" />)}
-    <rect x={x(rhythm.peak.start)} y={plotTop} width={x(rhythm.peak.end) - x(rhythm.peak.start)} height={plotHeight} style={{ fill: "var(--group)" }} fillOpacity=".18" />
-    <text x={x((rhythm.peak.start + rhythm.peak.end) / 2)} y={plotTop - 8} textAnchor="middle" fontSize="12" fontWeight="700" fill={INK}>{t("最佳 {{start}}–{{end}}", { start: hourClock(rhythm.peak.start), end: hourClock(rhythm.peak.end) })}</text>
+    {rhythm.best.map((window) => <g key={window.start}>
+      <rect x={x(window.start)} y={plotTop} width={x(window.end) - x(window.start)} height={plotHeight} style={{ fill: "var(--group)" }} fillOpacity=".18" />
+      <text x={x((window.start + window.end) / 2)} y={plotTop - 8} textAnchor="middle" fontSize="12" fontWeight="700" fill={INK}>{t("最佳 {{start}}–{{end}}", { start: hourClock(window.start), end: hourClock(window.end) })}</text>
+    </g>)}
     {[rhythm.thresholds.low, rhythm.thresholds.high].map((value) => <line key={value} x1={x(0)} x2={x(24)} y1={y(value)} y2={y(value)} stroke={MUTED} strokeWidth="0.8" strokeDasharray="4 4" />)}
     {(["high", "medium", "low"] as const).map((level) => <text key={level} x={x(24) + 6} y={y(bandOf[level]!) + 4} fontSize="12" fill={MUTED}>{t(LEVEL_LABEL[level], { context: "level" })}</text>)}
     <path d={segments.join(" ")} fill="none" stroke={INK} strokeWidth="2.5" strokeLinejoin="round" />

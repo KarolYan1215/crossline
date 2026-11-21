@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { DATES_UNRECORDED_EVENT, persistFileDates, personTimeZone } from "./onboarding-persist";
+import { DATES_UNRECORDED_EVENT, persistFileDates, personTimeZone, withUnmentionedDays } from "./onboarding-persist";
 import { identityLines } from "./lines";
 
 let store: CrosslineStore;
@@ -44,4 +44,14 @@ test("with no device zone on record the person's zone is the server's configured
   } finally {
     if (before === undefined) delete process.env.CROSSLINE_TIME_ZONE; else process.env.CROSSLINE_TIME_ZONE = before;
   }
+});
+
+test("a new hours proposal keeps the stated days it neither covers nor names (W-268: weekday evenings lost, only Sun/Tue/Sat listed)", () => {
+  const before = { windows: [{ days: [1, 2, 3, 4, 5], start: "19:00", end: "22:00", energy: "medium" as const }, { days: [0, 6], start: "09:00", end: "18:00", energy: "high" as const }], why: "" };
+  const after = withUnmentionedDays(before, { windows: [{ days: [0, 2, 6], start: "09:00", end: "12:00", energy: "high" as const }], why: "上午最清醒" });
+  expect(after.windows).toEqual([{ days: [0, 2, 6], start: "09:00", end: "12:00", energy: "high" }, { days: [1, 3, 4, 5], start: "19:00", end: "22:00", energy: "medium" }]);
+  // A day the new proposal names in its note is its own: 「周五晚上不排」 drops Friday.
+  expect(withUnmentionedDays(before, { windows: [{ days: [0, 6], start: "10:00", end: "16:00", energy: "high" as const }], why: "周五晚上不排" }).windows
+    .flatMap((window) => window.days).sort()).toEqual([0, 1, 2, 3, 4, 6]);
+  expect(withUnmentionedDays(undefined, after)).toBe(after);
 });

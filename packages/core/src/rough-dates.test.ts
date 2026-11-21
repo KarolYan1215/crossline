@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { inRoughWindow, roughWindow } from "./rough-dates";
+import { inRoughWindow, roughWindow, settleRoughDay } from "./rough-dates";
 
 // 2026-11-14 is a Saturday.
 const today = "2026-11-14";
@@ -48,4 +48,20 @@ test("a day inside the window is supported by the words, one outside is not", ()
   expect(inRoughWindow("2027-02-06", plan, today)).toBe(false);
   expect(roughWindow("春节前", today)).toEqual({ from: "2026-11-14", to: "2027-02-05", precision: "term" });
   expect(roughWindow("一年前投过", today)).toBeUndefined();
+});
+
+test("a rough day settles on the window's first day for a start and its last for a deadline, 「年前」 before the Spring Festival (W-268)", () => {
+  const plan = "这周改简历，下周开始投，年前投出去";
+  // 「下周开始投递」 was kept as that week's Saturday: a start is the window's first day.
+  expect(settleRoughDay("2026-11-21", "下周开始投递", today)).toBe("2026-11-16");
+  expect(settleRoughDay("2026-11-21", plan, today)).toBe("2026-11-16");
+  // 「年前」 was kept as 12-31: a deadline is the window's last day, the day before the Spring Festival.
+  expect(settleRoughDay("2026-12-31", plan, today)).toBe("2027-02-05");
+  expect(settleRoughDay("2026-12-31", "年前投出去", today)).toBe("2027-02-05");
+  expect(settleRoughDay("2026-11-15", plan, today)).toBe("2026-11-15");
+  expect(settleRoughDay("2026-11-20", "11 月底前", today)).toBe("2026-11-30");
+  // The caller's role wins over the clause's words; a day no window holds is left alone.
+  expect(settleRoughDay("2026-11-20", "下周", today, "start")).toBe("2026-11-16");
+  expect(settleRoughDay("2027-03-01", "年前投出去", today)).toBeUndefined();
+  expect(settleRoughDay("2026-11-18", "下周三", today)).toBeUndefined();
 });

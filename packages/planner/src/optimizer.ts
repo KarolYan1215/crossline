@@ -88,6 +88,13 @@ const ceilGrid = (ms: number) => Math.ceil(ms / GRID) * GRID;
 const floorGrid = (ms: number) => Math.floor(ms / GRID) * GRID;
 const ceilMinutes = (minutes: number) => Math.ceil(minutes / GRID_MINUTES - 1e-9) * GRID_MINUTES;
 const MIN_SEGMENT = 15;
+/**
+ * The shortest piece a task is cut into when it does not fit in one go (2026-11-20, the owner: 「减少切换成本」). Each piece costs a switch
+ * — finding the place again, reopening the material — so a 1.5-hour step laid out as 60 + 60 + 35 + 35 + 5 minutes (W-255) costs more
+ * than its minutes say. A task shorter than this still goes in whole; a longer one is never cut into a piece below it, and never leaves
+ * a remainder below it for another slot. Free time shorter than this is still used, by short tasks only.
+ */
+export const MIN_SPLIT_MINUTES = 25;
 
 const durationOf = (task: PlannerTask) => reserveMinutes(task.estimate);
 const term = (coefficient: number, name: string) => `${coefficient < 0 ? "-" : "+"} ${Math.abs(coefficient)} ${name}`;
@@ -334,8 +341,14 @@ function greedyPass(input: PlanningInput, tasks: PlannerTask[], slots: Slot[], e
       const cap = sessionCap(task, short);
       const focusCap = task.interruptible !== false && params.focusCapMinutes ? params.focusCapMinutes : Infinity;
       const rest = Math.max(REST_MINUTES, gap);
-      const minutes = Math.min(need, fitting(Math.floor((until - start) / 60_000), cap, rest), remainingCap, focusCap);
-      if (minutes < (task.interruptible === false ? need : Math.min(need, MIN_SEGMENT))) continue;
+      const taken = Math.min(need, fitting(Math.floor((until - start) / 60_000), cap, rest), remainingCap, focusCap);
+      let minutes = taken;
+      if (minutes < (task.interruptible === false ? need : Math.min(need, MIN_SPLIT_MINUTES))) continue;
+      // Not a stub left over for later: a piece that would leave less than a whole minimum piece gives that back to the remainder.
+      if (minutes < need && need - minutes < MIN_SPLIT_MINUTES) {
+        minutes = need - MIN_SPLIT_MINUTES;
+        if (minutes < MIN_SPLIT_MINUTES) continue;
+      }
       let at = start;
       for (const length of sessions(minutes, cap)) {
         if (at > start) at += rest * 60_000;
@@ -440,7 +453,7 @@ async function optimize(original: PlanningInput, emergency = false, trySolver = 
       // slot and the rest goes to another.
       const cap = sessionCap(task, short);
       const maximum = Math.min(fitting(Math.floor((end - slot.start) / 60_000), cap, rest), split && params.focusCapMinutes ? params.focusCapMinutes : Infinity);
-      if (maximum < (split ? Math.min(wall, MIN_SEGMENT) : wall)) continue;
+      if (maximum < (split ? Math.min(wall, MIN_SPLIT_MINUTES) : wall)) continue;
       const presence = `x${i}_${s}`;
       binary.push(presence);
       if (split) {
@@ -456,7 +469,7 @@ async function optimize(original: PlanningInput, emergency = false, trySolver = 
         }
         bounds.push(`0 <= ${minutes} <= ${Math.min(wall, maximum)}`);
         rows.push(`link_hi_${i}_${s}: ${minutes} - ${Math.min(wall, maximum)} ${presence} <= 0`);
-        rows.push(`link_lo_${i}_${s}: ${minutes} - ${Math.min(wall, MIN_SEGMENT)} ${presence} >= 0`);
+        rows.push(`link_lo_${i}_${s}: ${minutes} - ${Math.min(wall, MIN_SPLIT_MINUTES)} ${presence} >= 0`);
       } else choices.push({ task: i, slot: s, presence, duration: wall, maximum, efficiency, short, cap });
     }
     const own = choices.filter((choice) => choice.task === i);

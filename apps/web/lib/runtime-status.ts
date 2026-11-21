@@ -1,7 +1,9 @@
+import { statSync } from "node:fs";
+import path from "node:path";
 import { localStamp, type AccessContext } from "@crossline/core";
 import { quotaFallbackOf } from "./background";
 import { requestCodexSupervisor } from "./codex-runtime";
-import { getStore, readSchedulePreferences } from "./crossline";
+import { dataDirectory, getStore, readSchedulePreferences } from "./crossline";
 import { devicePrimaryUrl } from "./device-mode";
 import { tOf } from "./locale";
 
@@ -9,12 +11,29 @@ import { tOf } from "./locale";
  * Why the AI cannot work at all right now, or null when it can. An error to show, not a decision: it is never one of the asks.
  * `sponsor_standin` is the one notice that is not an error: ChatGPT's quota is spent and the developer's model carries on.
  */
-export type RuntimeStatus = { code: "worker_down" | "signed_out" | "sponsor_waiting" | "sponsor_standin"; title: string; message: string };
+export type RuntimeStatus = { code: "worker_down" | "worker_restarting" | "signed_out" | "sponsor_waiting" | "sponsor_standin"; title: string; message: string };
 
 export type RuntimeCheck = { at: number; status: RuntimeStatus | null; misses: number };
 
 const WORKER_DOWN: RuntimeStatus = { code: "worker_down", title: "后台服务没有运行",
   message: "自动分析、倒推、材料准备、验收与提醒都已停止；已收集的内容不受影响。在运行 Crossline 的那台电脑上重新启动后恢复。" };
+const WORKER_RESTARTING: RuntimeStatus = { code: "worker_restarting", title: "后台服务正在重启",
+  message: "更新或自动恢复中，通常一两分钟；已收集的内容不受影响，排队的分析会在恢复后自动继续。" };
+/** How long a restart mark is believed: past this a worker that still does not answer is down, not restarting. */
+export const RESTART_GRACE_MS = 5 * 60_000;
+
+/**
+ * Whether a deploy or the watchdog is restarting the worker right now (`worker.restarting`, written by deploy/server/run.sh and
+ * watchdog.sh and removed by the worker once it serves). Every deploy used to put the red 「后台服务没有运行」 on every page for a minute.
+ */
+export function restartingAt(markMs: number | undefined, now: number): boolean {
+  return markMs !== undefined && now - markMs >= 0 && now - markMs < RESTART_GRACE_MS;
+}
+
+function restartMark(): number | undefined {
+  try { return statSync(path.join(dataDirectory(), "worker.restarting")).mtimeMs; } catch { return undefined; }
+}
+
 /** A check that reached the worker is kept a minute; a miss only a few seconds, so the next page asks again. */
 const CHECK_TTL_MS = 60_000;
 const MISS_TTL_MS = 10_000;
@@ -64,6 +83,7 @@ export async function runtimeStatus(ctx: AccessContext, now = Date.now()): Promi
   if (account === "timeout" || !account.ok) {
     const check = afterMiss(cached, now);
     checks.set(ctx.workspaceId, check);
+    if (restartingAt(restartMark(), now)) return worded(ctx, WORKER_RESTARTING);
     return worded(ctx, check.status);
   }
   const status: RuntimeStatus | null = !account.value.account && sponsorWait
@@ -82,7 +102,7 @@ export async function runtimeStatus(ctx: AccessContext, now = Date.now()): Promi
 function worded(ctx: AccessContext, status: RuntimeStatus | null): RuntimeStatus | null {
   if (!status) return null;
   const t = tOf(ctx);
-  const fixed = status.code === "worker_down" || status.code === "signed_out";
+  const fixed = status.code === "worker_down" || status.code === "worker_restarting" || status.code === "signed_out";
   return { ...status, title: t(status.title), message: fixed ? t(status.message) : status.message };
 }
 

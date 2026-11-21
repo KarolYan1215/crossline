@@ -42,7 +42,8 @@ export function recentlyDoneTasks(store: CrosslineStore, workspaceId: string, no
     .sort((a, b) => (acceptedAt.get(b.id) ?? "").localeCompare(acceptedAt.get(a.id) ?? ""));
 }
 
-export type Fold = { kind: "duplicate" | "extends" | "done"; keep: string; keepTitle: string; why: string };
+/** `part`: the candidate names a part of the kept task (`partOf`, W-194); its earlier due day stays a sub-deadline (`applyMerge`). */
+export type Fold = { kind: "duplicate" | "extends" | "done"; keep: string; keepTitle: string; why: string; part?: boolean };
 
 /**
  * Whether `candidate` should go into an open task instead of standing on its own: the Skill's `extendsTaskId` first, then the rules;
@@ -55,7 +56,7 @@ export function decideFold(open: readonly MergeTask[], candidate: MergeTask, ext
   if (target) return { kind: "extends", keep: target.id, keepTitle: target.title, why: t("「{{title}}」是「{{target}}」的补充", { title: candidate.title, target: target.title }) };
   // A piece of an open task (「作业 3 第 1、2 题」 beside 「作业 3」, W-194) goes into it as an addition, its own due day kept as pacing.
   const whole = others.find((task) => partOf(candidate, task));
-  if (whole) return { kind: "extends", keep: whole.id, keepTitle: whole.title, why: t("「{{title}}」是「{{target}}」的一部分", { title: candidate.title, target: whole.title }) };
+  if (whole) return { kind: "extends", part: true, keep: whole.id, keepTitle: whole.title, why: t("「{{title}}」是「{{target}}」的一部分", { title: candidate.title, target: whole.title }) };
   const same = duplicateOf(candidate, others);
   // The rule's own reason, in this language (`duplicateOf` and `doneDuplicateOf` give it in Chinese).
   const reason = (keep: MergeTask, why: string) => locale ? comparePair(candidate, keep, locale).why : why;
@@ -82,12 +83,10 @@ export function absorbParts(store: CrosslineStore, workspaceId: string, wholeId:
   if (!parts.length) return [];
   const t = tOfWorkspace(store, workspaceId);
   const why = t("「{{title}}」的一部分", { title: whole.title });
-  if (!applyMerge(store, workspaceId, { kind: "duplicate", keep: whole.id, absorb: parts.map((part) => part.id), reason: why, requests: {} }, now)) return [];
-  for (const part of parts) {
-    recordFold(store, workspaceId, { kind: "extends", keep: whole.id, keepTitle: whole.title, why },
-      // i18n-ignore: the part's own due day, for the next plan's brief (model-facing)
-      { id: part.id, title: part.dueDate ? `${part.title}（${part.dueDate} 前）` : part.title, intent: part.intent, source: "analysis" });
-  }
+  // `part`: the merge keeps each part's due day as a sub-deadline and tells the whole's next plan the part and its day.
+  if (!applyMerge(store, workspaceId, { kind: "duplicate", part: true, keep: whole.id, absorb: parts.map((part) => part.id), reason: why, requests: {} }, now)) return [];
+  for (const part of parts)
+    recordFold(store, workspaceId, { kind: "extends", part: true, keep: whole.id, keepTitle: whole.title, why }, { id: part.id, title: part.title, intent: part.intent, source: "analysis" });
   sayToPerson(store, workspaceId, t("「{{parts}}」是「{{keep}}」的一部分，已并入它的步骤。可在任务页「已归档」里撤销。", { parts: parts.map((part) => part.title).join("、"), keep: whole.title }),
     "task_duplicate_prevented", `absorbed:${wholeId}`, [{ label: t("查看", { context: "view" }), href: `/workbench/${encodeURIComponent(whole.id)}` }], now);
   return parts.map((part) => part.id);
@@ -114,7 +113,7 @@ export function foldNewTask(store: CrosslineStore, workspaceId: string, id: stri
   const t = tOfWorkspace(store, workspaceId);
   const fold = decideFold(open, candidate, extendsTaskId, [], localeOf(store, workspaceId));
   if (!fold) return undefined;
-  const merged = applyMerge(store, workspaceId, { kind: "duplicate", keep: fold.keep, absorb: [id], reason: fold.why, requests: {} }, now);
+  const merged = applyMerge(store, workspaceId, { kind: "duplicate", ...(fold.part ? { part: true } : {}), keep: fold.keep, absorb: [id], reason: fold.why, requests: {} }, now);
   if (!merged) return undefined;
   recordFold(store, workspaceId, fold, { id, title: candidate.title, intent: candidate.intent, source: "analysis" });
   const values = { title: candidate.title, keep: fold.keepTitle };

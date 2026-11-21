@@ -11,7 +11,7 @@ import { tFor } from "@crossline/core";
 const en = (node: React.ReactNode) => renderToStaticMarkup(<LocaleProvider locale="en">{node}</LocaleProvider>);
 
 test("the rhythm readings are English, with what is missing said in words", () => {
-  const base = { curve: [], sleep: { from: 23.5, to: 7.5 }, peak: { start: 9.5, end: 12.5 }, thresholds: { low: 9.5, high: 12.5 }, reports: [], nights: 0 };
+  const base = { curve: [], sleep: { from: 23.5, to: 7.5 }, peak: { start: 9.5, end: 12.5 }, best: [{ start: 9.5, end: 12.5 }], bestFrom: "model" as const, thresholds: { low: 9.5, high: 12.5 }, reports: [], nights: 0 };
   const empty = rhythmStats({ ...base, chronotype: null, debt: { perNight: 0, nights: 0 } }, "en");
   expect(empty.map((cell) => [cell.title, cell.value])).toEqual([["Best hours", "9:30–12:30"], ["Chronotype", "Pending"], ["Social jetlag", "Pending"], ["Sleep debt", "Pending"]]);
   const full = rhythmStats({ ...base, nights: 20, debt: { perNight: 0.6, nights: 14 },
@@ -33,7 +33,7 @@ test("the axes name each pole by its English word alone, and the radar names Sch
 });
 
 test("with no night recorded, the curve's line names the night told in the interview when there is one (W-244)", () => {
-  const base = { curve: [], peak: { start: 20, end: 23 }, thresholds: { low: 9.5, high: 12.5 }, reports: [], nights: 0, chronotype: null, debt: { perNight: 0, nights: 0 } };
+  const base = { curve: [], peak: { start: 20, end: 23 }, best: [{ start: 20, end: 23 }], bestFrom: "model" as const, thresholds: { low: 9.5, high: 12.5 }, reports: [], nights: 0, chronotype: null, debt: { perNight: 0, nights: 0 } };
   expect(rhythmBasis({ ...base, sleep: { from: 25, to: 8.5 } }, tFor("zh"))).toContain("按访谈里说的 1:00–8:30 作息画出");
   expect(rhythmBasis({ ...base, sleep: { from: 23.5, to: 7.5 } }, tFor("zh"))).toContain("23:30–7:30 的通用作息");
   expect(rhythmBasis({ ...base, sleep: { from: 25, to: 8.5 } }, tFor("en"))).toContain("the 1:00–8:30 night told in the interview");

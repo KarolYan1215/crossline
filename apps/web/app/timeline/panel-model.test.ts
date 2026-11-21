@@ -15,8 +15,8 @@ describe("the day panel", () => {
   ];
 
   test("the load on top counts scheduled, pencilled and fixed minutes of that day only", () => {
-    expect(dayLoad(items, "2026-10-12")).toEqual({ planned: 90, pencilled: 60, fixed: 90, allDay: [] });
-    expect(dayLoad(items, "2026-10-14")).toEqual({ planned: 60, pencilled: 0, fixed: 0, allDay: [] });
+    expect(dayLoad(items, "2026-10-12")).toEqual({ planned: 90, pencilled: 60, fixed: 90, allDay: [], past: 0 });
+    expect(dayLoad(items, "2026-10-14")).toEqual({ planned: 60, pencilled: 0, fixed: 0, allDay: [], past: 0 });
   });
 
   test("rest is not fixed schedule: an evening 「休息」 and lunch keep work off but are not counted (W-156)", () => {
@@ -26,7 +26,7 @@ describe("the day panel", () => {
       item("graph_calendar:class", { kind: "calendar", title: "ECE 548", day: "2026-10-29", start: "13:00", end: "14:15" }),
       item("graph_calendar:seminar", { kind: "calendar", title: "Lunch seminar", day: "2026-10-29", start: "14:15", end: "15:00" })
     ];
-    expect(dayLoad(day, "2026-10-29")).toEqual({ planned: 0, pencilled: 0, fixed: 120, allDay: [] });
+    expect(dayLoad(day, "2026-10-29")).toEqual({ planned: 0, pencilled: 0, fixed: 120, allDay: [], past: 0 });
   });
 
   test("an all-day item names the day instead of filling it, and overlapping fixed items count once (W-25)", () => {
@@ -35,7 +35,7 @@ describe("the day panel", () => {
       item("graph_calendar:x", { kind: "calendar", day: "2026-10-18", start: "10:00", end: "11:00" }),
       item("import:y:1", { kind: "import", day: "2026-10-18", start: "10:30", end: "11:30" })
     ];
-    expect(dayLoad(sunday, "2026-10-18")).toEqual({ planned: 0, pencilled: 0, fixed: 90, allDay: ["周日休息"] });
+    expect(dayLoad(sunday, "2026-10-18")).toEqual({ planned: 0, pencilled: 0, fixed: 90, allDay: ["周日休息"], past: 0 });
   });
 
   test("with nothing picked, the next block of work that has not ended; on another day, its first", () => {
@@ -98,4 +98,16 @@ test("a missed block is not counted as planned load: its work is placed again la
     item("scheduled:a:v1s7", { day: "2026-11-11", start: "15:40", end: "16:40" })
   ];
   expect(dayLoad(day, "2026-11-11").planned).toBe(60);
+});
+
+test("with the clock, today's load is what is still ahead — the same reading as 今日概览's 待办 — and what went by is said apart (W-172)", () => {
+  // 2026-11-20 18:58: a 17:00–18:00 block in its grace hour and 19:30–20:35 ahead read 「已排 4.1 小时」 beside 「待办 3 时 5 分」.
+  const day: TimelineItem[] = [
+    item("scheduled:a:s1", { day: "2026-11-20", start: "17:00", end: "18:00" }),
+    item("scheduled:a:s2", { day: "2026-11-20", start: "18:30", end: "19:30" }),
+    item("scheduled:a:s3", { day: "2026-11-20", start: "19:30", end: "20:35" })
+  ];
+  const now = 18 * 60 + 58;
+  expect(dayLoad(day, "2026-11-20", now)).toMatchObject({ planned: 32 + 65, past: 60 + 28 });
+  expect(dayLoad(day, "2026-11-20")).toMatchObject({ planned: 185, past: 0 });
 });

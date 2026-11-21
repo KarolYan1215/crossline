@@ -52,6 +52,21 @@ describe("energy-aware planning", () => {
       (Date.parse(block.end) - Date.parse(block.start)) / 60_000, 0)).toBe(90);
   });
 
+  test("a split task is never cut into a stub: every piece is at least 25 minutes and no 5-minute remainder is left for later (W-255)", async () => {
+    for (const solver of ["solver", "greedy"] as const) {
+      const result = await planSchedule({ now: start, horizonDays: 1, mode: "asap", params: { gapMinutes: 0, maxDailyShare: 1, focusCapMinutes: 0, deadlineBufferDays: 0 },
+        tasks: [{ id: "step", title: "推导", estimate: { p25Minutes: 70, p50Minutes: 70, p85Minutes: 70, confidence: "high" }, inputsReady: true,
+          deadlineTier: 2, interruptible: true }],
+        availability: [
+          { start: "2026-09-14T14:00:00.000Z", end: "2026-09-14T15:00:00.000Z", energy: "high" },
+          { start: "2026-09-14T16:00:00.000Z", end: "2026-09-14T17:00:00.000Z", energy: "high" }
+        ], frozenBlocks: [] }, solver === "greedy" ? { solver: "none" } : {});
+      const lengths = result.plan.blocks.map((block) => (Date.parse(block.end) - Date.parse(block.start)) / 60_000);
+      expect(lengths.reduce((sum, minutes) => sum + minutes, 0), solver).toBe(70);
+      expect(Math.min(...lengths), solver).toBeGreaterThanOrEqual(25);
+    }
+  });
+
   test("keeps a dependent step after its prerequisite", async () => {
     const estimate = { p25Minutes: 60, p50Minutes: 60, p85Minutes: 60, confidence: "high" as const };
     const result = await planSchedule({ now: start, horizonDays: 1, mode: "asap", tasks: [

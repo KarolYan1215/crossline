@@ -11,7 +11,7 @@ const fixture = JSON.parse(readFileSync(path.resolve(import.meta.dirname, "../..
 const report = { ...fixture };
 report.type = { ...report.type!, lines: 80 };
 
-const rhythm: EnergyRhythm = { curve: [], sleep: { from: 23.5, to: 7.5 }, peak: { start: 9, end: 12 }, thresholds: { low: 0, high: 1 }, reports: [],
+const rhythm: EnergyRhythm = { curve: [], sleep: { from: 23.5, to: 7.5 }, peak: { start: 9, end: 12 }, best: [{ start: 9, end: 12 }], bestFrom: "model", thresholds: { low: 0, high: 1 }, reports: [],
   chronotype: null, debt: { perNight: 0, nights: 0 }, nights: 0 };
 
 const input = (overrides: Partial<AgentKitInput> = {}): AgentKitInput => ({

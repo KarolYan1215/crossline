@@ -189,7 +189,9 @@ const TRAIT_END = /([力感性]强|扎实|过硬|出色|突出|严谨|高效|细
  */
 export function guessKind(text: string): AttributeKind {
   if (/^(能|会|可以|善于|擅长|懂得|具备|拥有.*能力)|能力|水平$|技能/.test(text)) return "ability";
-  if (/^[被受]|稳定|持续|长期|自由|从容|平衡|健康|有影响力|认可|信任|信赖|尊重|知名|领先|自洽|松弛|坚定|可靠|靠谱|独当一面|值得|欢迎|口碑|话语权|声望|权威/.test(text)) return "state";
+  // 「作息有序」「体面」 are states like 「情绪稳定」 (W-269: read as a field, 「…有序」 got its own 的, and the goal was saved as
+  // 「…有序的、情绪稳定的学生」 though the person had been shown 「…有序、情绪稳定的学生」).
+  if (/^[被受]|稳定|持续|长期|自由|从容|平衡|健康|有序|规律|体面|得体|平和|淡定|安稳|有影响力|认可|信任|信赖|尊重|知名|领先|自洽|松弛|坚定|可靠|靠谱|独当一面|值得|欢迎|口碑|话语权|声望|权威/.test(text)) return "state";
   // The same rule in English: "able to…", "good at…", "…skills" are abilities; a lasting condition is a state.
   if (/^(able to|can|good at|skilled (at|in)|capable of|knows? how)\b|\b(ability|abilities|skills?|skilled|proficien\w*|expertise)\b/i.test(text)) return "ability";
   if (/^(trusted|respected|recogni[sz]ed) by\b|\b(stable|steady|sustained|sustainable|long-term|free|independent|calm|balanced|healthy|influential|well-known|renowned|leading|confident|reliable|dependable|self-sufficient|at ease)\b/i.test(text)) return "state";

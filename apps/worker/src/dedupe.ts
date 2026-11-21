@@ -77,7 +77,8 @@ export function applyMerge(store: CrosslineStore, workspaceId: string, group: Me
   const beforePayload = keep.payload;
   const beforePlan = snapshotOf(store, workspaceId, keep.id);
   const payload = { ...((keep.payload ?? {}) as Record<string, unknown>) } as Record<string, unknown> & {
-    infoRequests?: InfoRequest[]; mergedFrom?: Array<{ id: string; title: string; kind: string; at: string }>; alsoServes?: string[]; dueDate?: string };
+    infoRequests?: InfoRequest[]; mergedFrom?: Array<{ id: string; title: string; kind: string; at: string }>; alsoServes?: string[]; dueDate?: string;
+    partDeadlines?: Array<{ title: string; dueDate: string }> };
   let plan = beforePlan ? { ...beforePlan, steps: [...beforePlan.steps] } : null;
   const fresh = (prefix: string) => `${prefix}${randomUUID().slice(0, 6)}`;
   for (const order of absorbed) {
@@ -86,6 +87,9 @@ export function applyMerge(store: CrosslineStore, workspaceId: string, group: Me
     const own = group.requests[order.id];
     if (own) requests.push(own);
     const otherPlan = snapshotOf(store, workspaceId, order.id);
+    // A part's steps keep its own due day (W-194): they must be done by then, whatever the whole's due day.
+    const partDue = group.part && other.dueDate ? other.dueDate : "";
+    if (otherPlan && partDue) for (const step of otherPlan.steps) if (!step.dueBy || step.dueBy > partDue) step.dueBy = partDue;
     if (plan) {
       const front = requests.flatMap((request) => infoRequestSteps(request, { draft: fresh("m-d"), send: fresh("m-s") }, [], locale));
       const titles = plan.steps.map((step) => normalizeTaskTitle(step.title));
@@ -101,8 +105,15 @@ export function applyMerge(store: CrosslineStore, workspaceId: string, group: Me
     }
     payload.mergedFrom = [...(payload.mergedFrom ?? []), { id: order.id, title: taskTitleOf(order), kind: group.kind, at: now.toISOString() }];
     if (order.milestoneId && order.milestoneId !== keep.milestoneId) payload.alsoServes = [...new Set([...(payload.alsoServes ?? []), order.milestoneId])];
-    // The earlier due day holds: the kept task now has to deliver what the absorbed one promised by then.
-    if (other.dueDate && (!payload.dueDate || other.dueDate < payload.dueDate)) payload.dueDate = other.dueDate;
+    if (group.part) {
+      // A part due earlier is a sub-deadline of the whole (「作业 3 的前两题」 by Thursday leaves 作业 3 due when it is), and the whole's
+      // next plan is told the part and its day (model-facing; `recordFold` writes the same key and then adds nothing).
+      if (partDue && (!payload.dueDate || partDue < payload.dueDate)) payload.partDeadlines = [...(payload.partDeadlines ?? []), { title: taskTitleOf(order), dueDate: partDue }];
+      store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `task.extended:${order.id}`, type: "task.steps_replan_requested", entityId: keep.id,
+        // i18n-ignore: the brief for the next plan (model-facing)
+        payload: { feedback: `并入本任务的一部分「${taskTitleOf(order)}」${partDue ? `，须在 ${partDue} 前完成（中间截止，本任务的截止日不变）` : ""}：${order.intent}`.slice(0, 600) } });
+    // Otherwise the earlier due day holds: the kept task now has to deliver what the absorbed one promised by then.
+    } else if (other.dueDate && (!payload.dueDate || other.dueDate < payload.dueDate)) payload.dueDate = other.dueDate;
     for (const material of store.listMaterials(workspaceId, order.id))
       store.saveMaterial({ ...material, id: `merged-${randomUUID()}`, workOrderId: keep.id });
   }

@@ -132,3 +132,16 @@ test("same-named tasks for different exams stay apart and get the exam in their 
   expect(store.getWorkOrder(ws, "a")!.state).toBe("approved");
   expect(renameByScope(store, ws)).toEqual([]);
 });
+
+test("the daily merge takes a part already on the board into its whole; the part's steps keep its day (W-194)", async () => {
+  store = new CrosslineStore(":memory:");
+  order("whole", "完成 ECE 555 作业 3", { projectId: "ece555", milestoneId: "hw", payload: { dueDate: "2026-10-20" } });
+  order("part", "作业 3 第 1、2 题", { projectId: "ece555", milestoneId: "hw", state: "ready_for_human", payload: { dueDate: "2026-10-17" } });
+  order("hw4", "作业 4 的前两题", { projectId: "ece555", milestoneId: "hw", payload: { dueDate: "2026-10-17" } });
+  store.saveStepPlan(ws, "part", { archetypeId: "problem_set", quantity: { basis: "", amount: 0, unit: "" }, rationale: "", steps: [step("p1", "解第 1、2 题")] }, "o", "t");
+  const done = await dedupePass(deps());
+  expect(done.map((item) => [item.keep, item.absorbed])).toEqual([["whole", ["part"]]]);
+  expect(store.getWorkOrder(ws, "whole")!.payload).toMatchObject({ dueDate: "2026-10-20", partDeadlines: [{ title: "ECE 555 作业 3 第 1、2 题", dueDate: "2026-10-17" }] });
+  expect(store.getStepPlan(ws, "whole")!.steps).toEqual([expect.objectContaining({ title: "解第 1、2 题", dueBy: "2026-10-17" })]);
+  expect(store.getWorkOrder(ws, "hw4")!.state).toBe("approved");
+});

@@ -140,6 +140,9 @@ test("handing in takes a low-energy hour and reading through a medium one, even 
   const blocks = (await loadCurrentPlan(TEST_CTX)).blocks.filter((block) => block.id.startsWith(`scheduled:${order.id}`));
   const at = (stepId: string) => blocks.find((block) => plannerIdOfBlock(block.id).endsWith(`#${stepId}`));
   expect(at("v1s1")?.start).toBe("08:00");
-  expect(at("v1s2")!.start < "09:00").toBe(true);
+  // The 30-minute solve does not fit whole after the reading in the high hour; it used to take the last 25 minutes there and leave a
+  // 5-minute stub for the evening. No stub is left any more (MIN_SPLIT_MINUTES, 2026-11-20): the solve goes to one window, whole.
+  const solve = blocks.filter((block) => plannerIdOfBlock(block.id).endsWith("#v1s2"));
+  expect(solve.every((block) => block.start >= "18:00") || solve.every((block) => block.end <= "09:00")).toBe(true);
   expect(at("v1s3")!.start >= "18:00").toBe(true);
 });

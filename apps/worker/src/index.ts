@@ -2033,6 +2033,8 @@ if (!capabilitySecret) {
     } : {})
   });
   console.info(JSON.stringify({ type: "codex.supervisor.ready", url: codexSupervisor.url, runtimeOwner: runtimeOwner(analysisStore) ?? null }));
+  // A deploy or the watchdog marks a restart (deploy/server/run.sh); serving again ends it, and the pages stop saying 「正在重启」.
+  rmSync(path.join(dataDir, "worker.restarting"), { force: true });
   // The developer's model is chosen by measurement: candidates without a current record are tested shortly after start, and again
   // whenever a record goes stale (a new runtime, a changed list, thirty days); a model already measured is not tested again.
   if (sponsorService && process.env.CROSSLINE_RUN_ONCE !== "1") {

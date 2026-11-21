@@ -33,6 +33,9 @@ say() { echo "$(date -u +%FT%TZ) $*"; }
 # The worker's heartbeat lock outlives a stopped worker and reads as fresh for 45 minutes, so a worker started over it exits
 # (worker.already_running) and restarts in a loop; run.sh removes it the same way once the old worker is stopped.
 drop_worker_lock() {
+  # The web reads worker.restarting as 「后台服务正在重启」 instead of the red 「没有运行」 until the worker answers again
+  # (apps/web/lib/runtime-status.ts; the worker removes it once its supervisor serves).
+  [ "$1" = crossline-worker ] && date -u +%Y-%m-%dT%H:%M:%SZ > /srv/crossline/data/worker.restarting
   [ "$1" = crossline-worker ] && rm -f /srv/crossline/data/worker.lock
   return 0
 }

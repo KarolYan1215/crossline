@@ -74,7 +74,7 @@ const knownZones = new Set<string>();
 /** The key the weekly availability lives under. One settings row, not a new table. */
 export { AVAILABILITY_SETTING } from "@crossline/core";
 import { FIRST_DRAFTS_SETTING, firstDraftsState, STEP_ENERGY_CEILING, learnedEfficiency, type EfficiencySample, type StepRole, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, BYPRODUCT_LAG_DAYS, RELATION_KIND_LABEL, isCancelledEvent, resolveAvailability, hoursFromText, type AvailabilitySource, type PortraitReport } from "@crossline/core";
-import { statedShares } from "./plan-stats";
+import { statedShares, type UnplacedKind } from "./plan-stats";
 import { milestonesBeingBackplanned } from "./backplan-status";
 import { nearestDueProposal } from "./urgent-proposal";
 import { attendedText, completionRule, onPersonsBoard, proposalReady, type CompletionMode, type CompletionOutcome } from "@crossline/core";
@@ -1985,6 +1985,8 @@ const UNPLACED_REASON: Record<string, string> = {
 /** One task as the scheduler saw it, and what it did with it: why it sits where it does on the plan page's 「排程依据」. */
 export type RankedTask = { id: string; title: string; line: string; milestoneId: string; tier: 1 | 2 | 3 | 4; weight: number;
   deadline: string | null; notBefore: string | null; firstDay: string | null; firstStart: string | null; weekMinutes: number; blocker: string | null;
+  /** Which kind of reason `blocker` is, so every count of unplaced work groups the same way (`unplacedBreakdown`). */
+  blockerKind: UnplacedKind | null;
   /** In the task library: the day it enters the schedule (`libraryUntil`). */
   libraryUntil: string | null;
   /** What is left of it (open steps only, where it has a step plan), usual and cautious. */
@@ -2031,6 +2033,10 @@ export function planRanking(ctx: AccessContext, plan: PersistedPlan): RankedTask
     // An event whose day has passed is not work waiting for room or material (2026-11-17 live walk: 「改截止日…才会重新排入」 and
     // 「在等：提供…日历邀请」 beside talks gone for days, while the task list said 「活动已过」).
     const passedEvent = Boolean(local(task.deadline) && local(task.deadline)! < today && attendedText(order));
+    const overdue = Boolean(local(task.deadline) && local(task.deadline)! < today);
+    const blockerKind: UnplacedKind | null = blocks.length ? null : passedEvent ? "passed_event" : blocker
+      ? (overdue ? "overdue" : blocker.code.startsWith("Q4_") ? "later" : blocker.code === "DEPENDENCY_NOT_READY" ? "waiting" : "room")
+      : own.length ? "room" : "waiting";
     return { id: order.id, title: taskTitleOf(order), line: order.identityId, milestoneId: order.milestoneId, tier: task.deadlineTier,
       weight: task.weight, deadline: local(task.deadline), notBefore: local(task.notBefore),
       firstDay: blocks[0]?.day ?? null, firstStart: blocks[0]?.start ?? null,
@@ -2040,6 +2046,7 @@ export function planRanking(ctx: AccessContext, plan: PersistedPlan): RankedTask
         ? (local(task.deadline) && local(task.deadline)! < today ? t("已过截止日；改截止日或标为不做后才会重新排入")
           : UNPLACED_REASON[blocker.code] ? t(UNPLACED_REASON[blocker.code]!) : blocker.message)
         : own.length ? null : waitingReason(order),
+      blockerKind,
       libraryUntil: libraryUntil(ctx, order, today),
       p50Minutes: own.reduce((sum, item) => sum + item.task.estimate.p50Minutes, 0),
       p85Minutes: own.reduce((sum, item) => sum + item.task.estimate.p85Minutes, 0) };

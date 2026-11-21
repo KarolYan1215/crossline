@@ -57,7 +57,7 @@ test("every character set in the poster's serif is in the self-hosted subset, so
 });
 
 test("the rhythm page's four readings: the best window as a clock range, signed social jetlag, and what is missing said instead of a number", () => {
-  const base = { curve: [], sleep: { from: 23.5, to: 7.5 }, peak: { start: 9.5, end: 12.5 }, thresholds: { low: 9.5, high: 12.5 }, reports: [], nights: 0 };
+  const base = { curve: [], sleep: { from: 23.5, to: 7.5 }, peak: { start: 9.5, end: 12.5 }, best: [{ start: 9.5, end: 12.5 }], bestFrom: "model" as const, thresholds: { low: 9.5, high: 12.5 }, reports: [], nights: 0 };
   expect(hourClock(25.25)).toBe("1:15");
   const empty = rhythmStats({ ...base, chronotype: null, debt: { perNight: 0, nights: 0 } });
   expect(empty.map((cell) => [cell.title, cell.value])).toEqual([["最佳时段", "9:30–12:30"], ["早晚型", "待定"], ["社会时差", "待定"], ["睡眠债", "待定"]]);
@@ -65,4 +65,8 @@ test("the rhythm page's four readings: the best window as a clock range, signed 
     chronotype: { sdWork: 7, sdFree: 8.5, sdWeek: 7.4, msw: 3.5, msf: 4.25, msfSc: 3.9, sjlRel: 0.75, sjl: 0.75, chronotype: "intermediate" } });
   expect(full.map((cell) => cell.value)).toEqual(["9:30–12:30", "中间型", "+0.8 小时", "每晚少 0.6 小时"]);
   expect(full[2]!.detail).toBe("休息日睡眠中点比工作日晚");
+  // What the person said gives the best hours (W-265): every window, and the detail says so.
+  const said = rhythmStats({ ...base, best: [{ start: 9.5, end: 12 }, { start: 16, end: 19.5 }], bestFrom: "self", chronotype: null, debt: { perNight: 0, nights: 0 } })[0]!;
+  expect(said.value).toBe("9:30–12:00、16:00–19:30");
+  expect(said.detail).toBe("按本人所述的精力时段与自评，其余按模型曲线");
 });

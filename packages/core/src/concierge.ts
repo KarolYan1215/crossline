@@ -9,6 +9,7 @@
  */
 import type { TaskOpType } from "./assistant-schema";
 import { SHIFT_MINUTES } from "./schedule-frozen";
+import { byWeekdayDays } from "./date-schema";
 import { tFor, type Locale } from "./i18n";
 import { recordProblem } from "./records";
 import { ACCOUNT_CLASSES, wealthProblem, type AccountClass } from "./wealth";
@@ -234,6 +235,8 @@ export type ConciergeRefs = {
   ops: Set<string>; lines: Set<string>; milestones: Set<string>; draftMilestones: Set<string>; proposals: Set<string>; agentResults: Set<string>;
   /** `YYYY-MM-DD` in the person's zone; an event before it is refused. */
   today?: string;
+  /** What the person typed this turn: a due day is checked against the weekday they named (「周四前」 is Thursday, W-192). */
+  heard?: string;
   /** The person's files and projects, for the file actions. */
   documents?: Set<string>; projects?: Set<string>;
   /** What a setting may be about: the person's automations, mailboxes, and the week's plan blocks. */
@@ -279,6 +282,18 @@ export function isImmediate(item: ProposedAction): boolean {
 }
 
 /* i18n-ignore-start: why an action cannot run, sent back to the model to repair against */
+/**
+ * A due day one day before the weekday the person said it is due by (W-192: 「周四前」 on Tuesday 11-03 became Wednesday 11-04): 「周X前」
+ * means by the end of that day, so the due day is that weekday. "" when the day is not that mistake.
+ */
+export function dueBeforeWeekdayProblem(date: string, refs: Pick<ConciergeRefs, "heard" | "today">): string {
+  if (!refs.heard || !refs.today || !DAY.test(date)) return "";
+  const named = byWeekdayDays(refs.heard, refs.today);
+  if (named.has(date)) return "";
+  const next = new Date(Date.parse(`${date}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  return named.has(next) ? `本人说的「周X前」指截止在那一天当天（${next}），不是前一天 ${date}；dueDate 写 ${next}` : "";
+}
+
 /** Why one proposed action cannot be carried out, in words the model can repair against; "" when it can. */
 export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string {
   const a = item.args as Record<string, unknown>;
@@ -288,6 +303,7 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
       const args = item.args;
       if (!args.title.trim()) return "新建任务缺少标题";
       if (args.dueDate && !DAY.test(args.dueDate)) return "dueDate 须为 YYYY-MM-DD 或空";
+      if (args.dueDate && dueBeforeWeekdayProblem(args.dueDate, refs)) return dueBeforeWeekdayProblem(args.dueDate, refs);
       if (args.lineId && !refs.lines.has(args.lineId)) return `主线 id「${args.lineId}」不存在`;
       if (args.milestoneId && !refs.milestones.has(args.milestoneId)) return `里程碑 id「${args.milestoneId}」不存在`;
       return "";
@@ -308,7 +324,8 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
       if (missing) return missing;
       const steps = refs.tasks.get(args.workOrderId)!;
       switch (args.type) {
-        case "due": case "defer": return DAY.test(args.date) ? "" : "日期须为 YYYY-MM-DD";
+        case "due": return DAY.test(args.date) ? dueBeforeWeekdayProblem(args.date, refs) : "日期须为 YYYY-MM-DD";
+        case "defer": return DAY.test(args.date) ? "" : "日期须为 YYYY-MM-DD";
         case "estimate": return Number.isFinite(args.minutes) && args.minutes >= 5 && args.minutes <= 480 && (!args.stepId || steps.has(args.stepId)) ? "" : "时长须在 5–480 分钟，stepId 须是该任务的步骤";
         case "step_done": return steps.has(args.stepId) ? "" : "stepId 须是该任务的步骤（用 get_task 查）";
         case "step_add": case "replan": case "note": case "progress": return args.text.trim() ? "" : "text 为空";

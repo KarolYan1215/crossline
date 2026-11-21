@@ -36,3 +36,13 @@ describe("afterMiss", () => {
     expect(later.status).toBeNull();
   });
 });
+
+it("a restart mark from a deploy or the watchdog reads as restarting for five minutes, not as the worker being down", async () => {
+  const { restartingAt, RESTART_GRACE_MS } = await import("./runtime-status");
+  const now = Date.parse("2026-11-20T20:00:00Z");
+  expect(restartingAt(undefined, now)).toBe(false);
+  expect(restartingAt(now - 30_000, now)).toBe(true);
+  expect(restartingAt(now - RESTART_GRACE_MS, now)).toBe(false);
+  // A mark from the future (clock skew between containers) is not trusted.
+  expect(restartingAt(now + 60_000, now)).toBe(false);
+});

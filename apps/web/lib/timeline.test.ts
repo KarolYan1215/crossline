@@ -97,4 +97,9 @@ test("a block whose time passed undone stays on its day as 「未完成」 after
   // Still there at 03:59 the next day, gone at 04:00.
   expect(missedItems(TEST_CTX, [], {}, at("2026-10-27T03:59:00")).map((item) => item.id)).toEqual(["missed:scheduled:open", "missed:scheduled:open:2"]);
   expect(missedItems(TEST_CTX, [], {}, at("2026-10-27T04:00:00"))).toEqual([]);
+  // Once the plan holds the same task again (a later block), the missed one is not drawn a second time (W-171); the wrap-up, which
+  // passes no current items, still sees it.
+  const later = { id: "scheduled:open:3", title: "open", day: "2026-10-26", start: "22:00", end: "22:45", kind: "scheduled" as const, workOrderId: "open",
+    source: "排程", readOnly: false };
+  expect(missedItems(TEST_CTX, [later], {}, at("2026-10-26T21:00:00"))).toEqual([]);
 });

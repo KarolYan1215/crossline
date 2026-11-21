@@ -16,6 +16,9 @@ test("the opening states the premise and the three parts, then asks the lines �
   expect(html).toContain("不限时长和轮数");
   expect(html).toContain("结束并出报告");
   expect(html).toContain("画像这一部分不能跳过");
+  // An observation comes when there is one to give, not every round: the promise matches what the dialogue does (W-269).
+  expect(html).not.toContain("每一轮都会给你一条");
+  expect(html).toContain("有把握的时候，会给你一条关于你自己的观察");
   // The tone is built in and the tiers are gone (decisions 10–11): neither is asked.
   expect(html).not.toContain("你希望我怎么跟你说话");
   expect(html).not.toContain("冷静客观");

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { interviewChecklist, interviewOwnedOpen, portraitFingerprint, readyToStart, type ChecklistInput } from "./index";
+import { interviewChecklist, interviewOwnedOpen, partsUncovered, portraitFingerprint, readyToStart, type ChecklistInput } from "./index";
 
 const full: ChecklistInput = {
   lines: [{ id: "research", label: "研究者", hard: true, goals: ["成为外推知识边界的研究者"] }],
@@ -95,6 +95,17 @@ test("固定日程的槽位里没有哪天、几点，也没说定不下来，�
   expect(done("有固定日程")).toBe(false);
   expect(done("工作日白天上课")).toBe(true);
   expect(done("课表记不清，之后补")).toBe(true);
+});
+
+test("「8–21 点之间不固定」 under any slot of the line closes the fixed-schedule item; the person's own 「不固定」 does not (W-268)", () => {
+  const undated = { ...full, dates: full.dates.filter((entry) => !entry.recurring) };
+  const fact = (identityId: string, slot: string, value: string) => ({ identityId, projectId: "", slot, status: "confirmed" as const, sourceRef: "reply-9", value });
+  const done = (extra: ReturnType<typeof fact>) => interviewChecklist({ ...undated, facts: [...undated.facts, extra] }).find((item) => item.id === "hard_schedule:research")?.done;
+  expect(done(fact("research", "course_hours", "8–21 点之间不固定"))).toBe(true);
+  expect(done(fact("person", "energy_pattern", "精力不固定，下午 3 点最困"))).toBe(false);
+  // A course whose class times the person said vary has its class times.
+  const course = { ...full, dates: full.dates.filter((entry) => !entry.recurring), facts: [...full.facts, { identityId: "research", projectId: "ece555", slot: "class_note", status: "confirmed", sourceRef: "reply-9", value: "上课在 8–21 点之间不固定" }] };
+  expect(interviewChecklist(course).find((item) => item.id === "project_course:ece555")?.done).toBe(true);
 });
 
 test("记在本人名下的课表算唯一那条硬线的固定日程；两条硬线时不替任何一条作数", () => {
@@ -194,4 +205,15 @@ test("做事方法 is its own part: the energy part is not finished until the pe
     const fact = { identityId: "person", projectId: "", slot, status: "confirmed", sourceRef: "reply-7", value: "先做一遍往年题，再回头看讲义" };
     expect(interviewChecklist({ ...without, facts: [...without.facts, fact] }).find((entry) => entry.id === "portrait_grounded")?.done).toBe(true);
   }
+});
+
+test("a deep part is owed until a round was in it and its portrait section rests on the person's words (W-269)", () => {
+  const order = ["narrative", "compass", "energy", "situation", "orientation", "lines"];
+  const items = interviewChecklist(full);
+  // Compass one round, energy two, situation none: situation is owed; orientation and lines never are.
+  expect(partsUncovered({ stageOrder: order, stagesSeen: ["narrative", "compass", "energy", "energy", "orientation", "lines"], items })).toEqual(["situation"]);
+  // A part walked whose section has nothing of the person's is still owed; energy is grounded by its method fact too.
+  const bare = { ...full, facts: full.facts.filter((fact) => fact.slot !== "work_view" && fact.slot !== "flow"), groundedSections: [] };
+  expect(partsUncovered({ stageOrder: order, stagesSeen: order, items: interviewChecklist(bare) })).toEqual(["compass"]);
+  expect(partsUncovered({ stageOrder: order, stagesSeen: order, items })).toEqual([]);
 });

@@ -85,7 +85,7 @@ export function buildAgentKit(input: AgentKitInput, t: Translate): AgentKit {
         score: axis.score, leaning: axis.label, percent: axis.percent, evidence: axis.evidence })) } : null,
     values: [...(report?.compass.values ?? [])].sort((a, b) => b.score - a.score).map((value) => ({ name: t(value.name),
       means: t(SCHWARTZ_VALUES.find((item) => item.name === value.name)?.means ?? ""), score: value.score, evidence: value.evidence })),
-    energy: { bestHours: `${clock(input.rhythm.peak.start)}–${clock(input.rhythm.peak.end)}`,
+    energy: { bestHours: input.rhythm.best.map((window) => `${clock(window.start)}–${clock(window.end)}`).join(t("、")),
       usualSleep: `${clock(input.rhythm.sleep.from)}–${clock(input.rhythm.sleep.to)}`, sleepAssumed: input.rhythm.nights === 0,
       midSleepFreeDays: chronotype ? clock(chronotype.msfSc ?? chronotype.msf) : "", socialJetlagHours: chronotype ? Math.round(chronotype.sjl * 10) / 10 : null,
       summary: report?.energy.summary ?? "", flow: report?.energy.flow ?? [],

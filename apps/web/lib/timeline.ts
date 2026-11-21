@@ -128,6 +128,11 @@ export function missedItems(ctx: AccessContext, current: TimelineItem[], meta: R
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).filter((order) => OPEN_STATES.has(order.state) && !order.tombstone).map((order) => [order.id, order]));
   const graceMs = COMMIT_GRACE_MINUTES * 60_000;
   const shown = new Set(current.map((item) => `${item.id}|${item.day}|${item.start}`));
+  // A missed block whose work the plan has already placed again (a later block of the same step — or of the same task, when either is a
+  // whole-task block) is not drawn a second time: the same step stood at 09:00 「未完成」 and again at 19:30 (W-171, 2026-11-20 live walk).
+  // The wrap-up still lists it (it reads with no `current`), so the person can still say it was done.
+  const placedAgain = (orderId: string, stepId: string | undefined) => current.some((item) => item.workOrderId === orderId && !item.missed
+    && (item.kind === "scheduled" || item.kind === "optional") && (!stepId || !item.stepId || item.stepId === stepId));
   type Seen = { id: string; orderId: string; stepId: string; title: string; step: string; start: string; end: string; began?: boolean };
   const out: TimelineItem[] = [];
   for (const day of days) {
@@ -135,6 +140,7 @@ export function missedItems(ctx: AccessContext, current: TimelineItem[], meta: R
     try { seen = JSON.parse(store.getSetting(ctx.workspaceId, `nudge.blocks:${day}`) ?? "{}") as Record<string, Seen>; } catch { continue; }
     for (const block of Object.values(seen)) {
       if (!block.began || !orders.has(block.orderId) || shown.has(`${block.id}|${day}|${block.start}`)) continue;
+      if (placedAgain(block.orderId, block.stepId || undefined)) continue;
       let end: number;
       try { end = Date.parse(toZonedInstant(day, block.end, zone)); } catch { continue; }
       if (end + graceMs > now.getTime()) continue;

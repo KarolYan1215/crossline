@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { hoursFromText } from "@crossline/core";
 import type { ForecastWeek } from "@crossline/planner";
-import { availabilityGrid, capacityWeeks, estimatePoints, goalRows, horizonFor, investment, lineShareRows, milestoneMarks, milestoneSummary, planKpis, rhythmGrid, statedShares,
+import { unplacedBreakdown, availabilityGrid, capacityWeeks, estimatePoints, goalRows, horizonFor, investment, lineShareRows, milestoneMarks, milestoneSummary, planKpis, rhythmGrid, statedShares,
   timelineMarks, unplacedItems, workedMinutes, type CapacityWeek, type GoalRow, type RankedLike } from "./plan-stats";
 
 describe("horizon", () => {
@@ -192,10 +192,22 @@ describe("the plan page's head", () => {
     expect(items.map((item) => [item.id, item.partial, item.reason])).toEqual([["part", true, null], ["none", false, "可用时段不足"]]);
   });
 
+  test("one count of unplaced work, split by kind, whose parts add up to the figure the page shows (2026-11-20 live walk)", () => {
+    const items = unplacedItems([ranked({ id: "part", deadline: "2026-11-02" }),
+      ranked({ id: "room", firstDay: null, blocker: "可用时段不足", blockerKind: "room" }),
+      ranked({ id: "wait", firstDay: null, blocker: "在等：题面", blockerKind: "waiting" }),
+      ranked({ id: "talk", firstDay: null, blocker: "活动已过", blockerKind: "passed_event" }),
+      ranked({ id: "late", firstDay: null, blocker: "已过截止日", blockerKind: "overdue" }),
+      ranked({ id: "q4", firstDay: null, blocker: "暂不排入", blockerKind: "later" })], new Set(["part"]));
+    expect(unplacedBreakdown(items)).toEqual({ total: 6, parts: [{ kind: "room", count: 1 }, { kind: "partial", count: 1 }, { kind: "overdue", count: 1 },
+      { kind: "waiting", count: 1 }, { kind: "passed_event", count: 1 }, { kind: "later", count: 1 }] });
+    expect(unplacedBreakdown([])).toEqual({ total: 0, parts: [] });
+  });
+
   test("the four figures: this week's usable and scheduled minutes, the unplaced count with its earliest deadline, and the median estimate bias", () => {
     const kpis = planKpis({ capacity: [week([["research", 120, 60], ["media", 30, 0]])],
-      unplaced: [{ id: "a", title: "", line: "research", deadline: "2026-11-03", notBefore: null, minutes: 90, partial: false, reason: null },
-        { id: "b", title: "", line: "media", deadline: null, notBefore: null, minutes: 30, partial: true, reason: null }],
+      unplaced: [{ id: "a", title: "", line: "research", deadline: "2026-11-03", notBefore: null, minutes: 90, partial: false, reason: null, kind: "room" },
+        { id: "b", title: "", line: "media", deadline: null, notBefore: null, minutes: 30, partial: true, reason: null, kind: "partial" }],
       estimates: [{ id: "1", line: "research", estimate: 60, p85: 90, actual: 60, covered: true }, { id: "2", line: "research", estimate: 60, p85: 90, actual: 90, covered: true },
         { id: "3", line: "research", estimate: 30, p85: 45, actual: 60, covered: false }] });
     expect(kpis).toEqual({ usableMinutes: 600, scheduledMinutes: 150, unplaced: { count: 2, minutes: 120, earliest: "2026-11-03" }, bias: { percent: 50, samples: 3 } });

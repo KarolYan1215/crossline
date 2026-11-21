@@ -39,5 +39,9 @@
   "去主线": "Go to Lines",
   "去访谈": "Go to the interview",
   "去周复盘": "Go to the weekly review",
-  "24 小时内可撤销": "undo within 24 hours"
+  "24 小时内可撤销": "undo within 24 hours",
+  "还剩 {{hours}}": "{{hours}} left",
+  "已过 {{hours}}": "{{hours}} gone by",
+  "后台服务正在重启": "The background service is restarting",
+  "更新或自动恢复中，通常一两分钟；已收集的内容不受影响，排队的分析会在恢复后自动继续。": "An update or automatic recovery, usually a minute or two; nothing collected is affected, and queued analysis continues once it is back."
 }

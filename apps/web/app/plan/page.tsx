@@ -60,7 +60,7 @@ export default async function PlanPage(props: { searchParams?: Promise<{ horizon
           </PlanActions>
         </header>
         <PlanKpiRow kpis={board.kpis} configuredWeekly={board.capacity.configuredWeekly} estimates={board.estimates} labels={board.labels} />
-        <ScheduleStatus plan={plan} />
+        <ScheduleStatus plan={plan} unplaced={board.unplaced} />
         <div className="pl-milestones" role="note">
           <Flag size={18} strokeWidth={1.6} aria-hidden />
           <span>{milestones.shown

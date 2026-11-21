@@ -39,6 +39,8 @@ export type ChecklistItem = {
    * in a details stage at the end of the interview. Shown, never counted against finishing.
    */
   deferred?: true;
+  /** `portrait_grounded` only: the portrait's parts (`situation`, `compass`, `energy`, `method`) with nothing of the person's on record yet. */
+  sections?: string[];
 };
 
 export type ChecklistInput = {
@@ -121,9 +123,12 @@ const VAGUE_SCHEDULE = /不固定|没有固定|没固定|记不清|说不准|随
  * read the opening card's 「有固定日程的主线：学生」 into `fixed_schedule` with no day or time in it, and the start standard stood at
  * round 8 while her timetable was asked only in round 12.
  */
-const statesSchedule = (fact: { slot: string; value?: string }) => {
+const statesSchedule = (fact: { slot: string; value?: string; identityId?: string }) => {
   const value = fact.value ?? "";
-  return SCHEDULE_SLOT.test(fact.slot) ? WEEKDAY.test(value) || CLOCK.test(value) || VAGUE_SCHEDULE.test(value) : WEEKDAY.test(value) && CLOCK.test(value);
+  if (SCHEDULE_SLOT.test(fact.slot)) return WEEKDAY.test(value) || CLOCK.test(value) || VAGUE_SCHEDULE.test(value);
+  // 「8–21 点之间不固定」 under a slot of another name (`course_hours`) is the answer too (W-268: the interview asked 「几点到几点」 again in
+  // round 10). Not for a fact of the person's own, whose 「不固定」 is about energy or sleep, not a fixed arrangement.
+  return WEEKDAY.test(value) && CLOCK.test(value) || (fact.identityId !== "person" && VAGUE_SCHEDULE.test(value) && (CLOCK.test(value) || WEEKDAY.test(value)));
 };
 /** What a line is about, said by the person: enough to stand for its description while the extraction has not written one. */
 const DESCRIBES_LINE = /^(description|what)$/;
@@ -151,7 +156,8 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
   const unbacked = PORTRAIT_PARTS.filter((part) => !sectioned.has(part.section) && !personFacts.some((fact) => part.slots.test(fact.slot))).map((part) => part.label);
   const assumedParts = PORTRAIT_PARTS.filter((part) => !sectioned.has(part.section) && !personFacts.some((fact) => confirmedFact(fact) && part.slots.test(fact.slot))).map((part) => part.label)
     .filter((label) => !unbacked.includes(label));
-  items.push({ id: "portrait_grounded", group: "画像", label: t("画像每部分都有本人原话或文件为据"), done: !unbacked.length,
+  const unbackedSections = PORTRAIT_PARTS.filter((part) => unbacked.includes(part.label)).map((part) => part.section);
+  items.push({ id: "portrait_grounded", group: "画像", label: t("画像每部分都有本人原话或文件为据"), done: !unbacked.length, sections: unbackedSections,
     detail: unbacked.length ? t("尚无本人依据：{{items}}", { items: list(unbacked) }) : assumedParts.length ? t("以假设代替：{{items}}", { items: list(assumedParts) }) : "", owner: "interview",
     ...(unbacked.length ? { ask: t(PORTRAIT_PARTS.find((part) => part.label === unbacked[0])!.ask) } : {}) });
   items.push({ id: "portrait_confirmed", group: "画像", label: t("本人确认画像符合自己"), done: input.portraitConfirmed,
@@ -228,7 +234,7 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
     if (course && !own.some((fact) => fact.slot === "grading")) courseMissing.push("评分占比");
     // A course meets: its weekly class times are the frame of the person's week (a course whose meetings nobody asked about left a hole).
     const meets = input.dates.some((entry) => entry.recurring && (entry.project === project.id || entry.project === project.name))
-      || own.some((fact) => MEETING_SLOTS.test(fact.slot));
+      || own.some((fact) => MEETING_SLOTS.test(fact.slot) || (VAGUE_SCHEDULE.test(fact.value ?? "") && statesSchedule(fact)));
     if (course && !meets) courseMissing.push("上课时间");
     const projectAsk = t("「{{project}}」要做成什么样，做到哪一步了？", { project: project.name });
     items.push({ id: `project:${project.id}`, group: "项目", label: t("「{{project}}」目标、截止与进展证据", { project: project.name }),
@@ -245,6 +251,23 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
   if (input.unfiledFiles !== null) items.push({ id: "files_filed", group: "文件", label: t("上传的文件都已归属项目"), done: input.unfiledFiles === 0,
     detail: input.unfiledFiles ? t("{{count}} 份文件待说明归属（见待决事项）", { count: input.unfiledFiles }) : "", owner: "person" });
   return items;
+}
+
+/** The portrait sections that ground each deep part of the interview: the part has its minimum once one of them rests on the person's words. */
+const PART_SECTIONS: Record<string, string[]> = { situation: ["situation"], compass: ["compass"], energy: ["energy", "method"] };
+/** The parts that collect the start items themselves: they need no minimum of their own. */
+const FRONT_PARTS = new Set(["orientation", "lines", "details"]);
+/**
+ * The deep parts of the interview without their minimum (W-269, 2026-11-14 walkthrough: compass had one round, energy two, situation
+ * none, and the interview said 「可以开始使用」 in round 10 and went back for them from round 14): a part no round has been in yet, or
+ * whose portrait section has nothing of the person's on record (`portrait_grounded`). Until each has its minimum the dialogue is told
+ * the start standard does not stand. `stagesSeen` are the stages of the rounds already written.
+ */
+export function partsUncovered(input: { stageOrder: readonly string[]; stagesSeen: readonly string[]; items: readonly ChecklistItem[] }): string[] {
+  const seen = new Set(input.stagesSeen);
+  const ungrounded = new Set(input.items.find((item) => item.id === "portrait_grounded")?.sections ?? []);
+  const grounded = (stage: string) => { const sections = PART_SECTIONS[stage] ?? []; return !sections.length || sections.some((section) => !ungrounded.has(section)); };
+  return input.stageOrder.filter((stage) => !FRONT_PARTS.has(stage) && (!seen.has(stage) || !grounded(stage)));
 }
 
 /** Whether the five start items all stand: the person may use the app. The portrait is not required. */

@@ -117,7 +117,7 @@ export function OpeningCard({ linesKnown, knownLines, busy, hasMaterials, needsC
       </details>
       <ol className="ob-opening-plan">
         {/* The profile module comes first and is not skipped (decided 2026-10-31, docs/profile-and-agent-kit.md §四). */}
-        <li><b>{t("先认识你这个人")}</b><span>{t("一路走来的经历、在意什么、精力怎么起落、现在的处境。中间穿插几张点选卡片，点一下就行，也可以写一句话代替。每一轮都会给你一条关于你自己的观察。")}</span></li>
+        <li><b>{t("先认识你这个人")}</b><span>{t("一路走来的经历、在意什么、精力怎么起落、现在的处境。中间穿插几张点选卡片，点一下就行，也可以写一句话代替。有把握的时候，会给你一条关于你自己的观察，你来判断准不准。")}</span></li>
         <li><b>{t("再排进日历")}</b><span>{t("你有哪些想成为的身份，各自正在做什么、大概什么时候截止；时间说个大概就行，材料里有的不再问。")}</span></li>
         <li><b>{t("拿到结果")}</b><span>{t("画像报告和一周的骨架草稿。具体项目的细节，到拆任务时再补。")}</span></li>
       </ol>

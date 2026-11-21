@@ -45,9 +45,9 @@ describe("plan charts", () => {
 
   test("排不下的原因: each task with its line, hours, deadline and the planner's reason; its one action is more hours, push or drop is the weekly commitment's", () => {
     const html = renderToStaticMarkup(<UnplacedCard labels={labels} today="2026-10-28" items={[
-      { id: "w1", title: "整理关注清单", line: "research", deadline: "2026-11-03", notBefore: null, minutes: 150, partial: false, reason: "截止前的「中」精力时段只剩 1.5h" },
-      { id: "w2", title: "可验证假设", line: "media", deadline: null, notBefore: "2026-10-30", minutes: 120, partial: false, reason: null },
-      { id: "w3", title: "期中复习", line: "research", deadline: null, notBefore: null, minutes: 60, partial: true, reason: null }]} />);
+      { id: "w1", title: "整理关注清单", line: "research", deadline: "2026-11-03", notBefore: null, minutes: 150, partial: false, reason: "截止前的「中」精力时段只剩 1.5h", kind: "room" },
+      { id: "w2", title: "可验证假设", line: "media", deadline: null, notBefore: "2026-10-30", minutes: 120, partial: false, reason: null, kind: "later" },
+      { id: "w3", title: "期中复习", line: "research", deadline: null, notBefore: null, minutes: 60, partial: true, reason: null, kind: "partial" }]} />);
     expect(html).toContain('id="why"');
     expect(html).toContain('href="/workbench/w1"');
     expect(html).toContain("截止前的「中」精力时段只剩 1.5h");

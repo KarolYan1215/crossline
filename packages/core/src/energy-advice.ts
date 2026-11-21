@@ -1,5 +1,7 @@
 import { mctqLite, CHRONOTYPE_LABEL } from "./assess";
 import { alertnessAt, priorPhase, shiftedDefaultNight, type PhaseSource, type SleepEpisode } from "./energy-model";
+import { WORKDAYS, dayLevels, reportBandsOf, settledReports, statedBands, type EnergyBand } from "./energy-best";
+import type { AvailabilityWindow } from "./availability";
 import type { EnergyLevel } from "./index";
 import { tFor, type Locale } from "./i18n";
 
@@ -7,9 +9,9 @@ import { tFor, type Locale } from "./i18n";
  * The weekly energy advice for the plan page (decided 2026-10-15): which of the person's available half hours should be marked high,
  * medium or low energy, worked out by rules from what is on record — the three-process model run on the person's usual sleep, with the
  * circadian phase taken from their sleep timing (MCTQ's MSF_sc when there are workday and free-day nights, else the median mid-sleep)
- * rather than from the hours they painted, so the advice never just echoes the current pattern; their own L/M/H reports override the
- * model wherever two or more agree on a two-hour band; and the timed record of the last eight weeks is set beside it, flagged where it
- * contradicts a low reading. A weekly Skill run then reviews it against published research (`ENERGY_ADVICE_REVIEW_SCHEMA`), and may move
+ * rather than from the hours they painted; the levels the person stated for their hours and their own L/M/H reports (wherever two or more
+ * agree on a two-hour band) override the model (`dayLevels`, the same function the portrait's best hours come from, W-265); and the
+ * timed record of the last eight weeks is set beside it, flagged where it contradicts a low reading. A weekly Skill run then reviews it against published research (`ENERGY_ADVICE_REVIEW_SCHEMA`), and may move
  * a band by one level at most, citing pages the worker opened. The advice is a suggestion: it is stored apart from the person's pattern
  * and only ever applied through the plan page's preview.
  *
@@ -69,14 +71,7 @@ export function workedRhythm(sessions: TimedSession[], zone: string, now: string
   return grid.map((row) => row.map((value) => Math.round(value)));
 }
 
-/** Self-reports with corrections folded in: a report followed by another within ten minutes was taken back by it. */
-export function settledReports(reports: Array<{ at: string; level: EnergyLevel }>): Array<{ at: string; level: EnergyLevel }> {
-  const sorted = [...reports].sort((a, b) => a.at.localeCompare(b.at));
-  return sorted.filter((report, index) => {
-    const next = sorted[index + 1];
-    return !next || Date.parse(next.at) - Date.parse(report.at) > 10 * 60_000;
-  });
-}
+export { settledReports };
 
 const median = (values: number[]) => { const s = [...values].sort((a, b) => a - b); const m = s.length / 2; return s.length % 2 ? s[Math.floor(m)]! : (s[m - 1]! + s[m]!) / 2; };
 const wrap24 = (hours: number) => ((hours % 24) + 24) % 24;
@@ -109,38 +104,8 @@ function usualDayCurve(night: UsualNight, phaseShift: number): Array<number | nu
   });
 }
 
-/**
- * Levels from a curve, by rank within the person's own waking day: the best quarter of the waking half hours high, the worst quarter
- * (inertia after waking, the hours before sleep, the afternoon dip when it is deep enough) low, the rest medium. By rank on purpose: the
- * model's curve is flat through most of a rested day, so a cut on its value marked twelve hours high; and the absolute cut points are
- * calibrated from reports, which a person with few of them does not have.
- */
-function levelsOf(curve: Array<number | null>): number[] {
-  const awake = curve.flatMap((value, slot) => value === null ? [] : [{ value, slot }]).sort((a, b) => b.value - a.value || a.slot - b.slot);
-  const levels = curve.map(() => 0);
-  const quarter = Math.round(awake.length * QUARTER_SHARE);
-  awake.forEach((item, rank) => { levels[item.slot] = rank < quarter ? 3 : rank >= awake.length - quarter ? 1 : 2; });
-  return levels;
-}
-const QUARTER_SHARE = 0.25;
 const PHASE_BASIS: Record<PhaseSource, string> = { chronotype: "按时型", sleep: "按睡眠中点", stated: "按本人所述高效时段", age: "按本人所填出生日期的同龄人平均",
   default: "无记录，按通用曲线" };
-
-/** A run shorter than an hour takes its neighbour's level, so the advice saves as a few windows rather than a scatter of half hours. */
-function smooth(levels: number[]): number[] {
-  const out = [...levels];
-  for (let slot = 0; slot < SLOTS;) {
-    let end = slot;
-    while (end < SLOTS && out[end] === out[slot]) end += 1;
-    if (out[slot]! > 0 && end - slot < 2) {
-      const before = slot > 0 ? out[slot - 1]! : 0, after = end < SLOTS ? out[end]! : 0;
-      const take = before > 0 ? before : after;
-      if (take > 0) for (let index = slot; index < end; index += 1) out[index] = take;
-    }
-    slot = end;
-  }
-  return out;
-}
 
 /** Runs of one level as 「10:00–13:00」. */
 export function levelRanges(row: number[], level: number): string[] {
@@ -183,6 +148,8 @@ export function energyAdviceRule(input: { now: string; zone: string; episodes: S
   statedPeak?: { start: number; end: number } | null;
   /** The age the person chose to give (`ageFromBirthYear`): the phase when neither a night nor best hours are known. */
   age?: number | undefined;
+  /** The windows whose levels the person stated (`statedEnergyWindows`): those levels outrank the model's. */
+  statedWindows?: AvailabilityWindow[];
   /** The language the summary and basis are written in (the plan page shows them). */
   locale?: Locale }): EnergyAdviceRule {
   const t = tFor(input.locale);
@@ -221,21 +188,12 @@ export function energyAdviceRule(input: { now: string; zone: string; episodes: S
   if (nights.length < ADVICE_MIN_NIGHTS && reports.length < ADVICE_MIN_REPORTS)
     return { insufficient: t("需要至少 {{nights}} 晚睡眠记录或 {{reports}} 次精力自评", { nights: ADVICE_MIN_NIGHTS, reports: ADVICE_MIN_REPORTS }), evidence: { ...evidenceBase, reportBands: [], workedInLow: [] } };
 
-  // The person's own word wins where it is consistent: a two-hour band with two or more reports, two thirds of them one level.
-  const reportBands: EnergyAdviceEvidence["reportBands"] = [];
-  for (let band = 0; band < 12; band += 1) {
-    const inBand = reports.filter((report) => Math.floor(clock.hour(report.at) / 2) === band);
-    if (inBand.length < 2) continue;
-    const counts = (["low", "medium", "high"] as const).map((level) => ({ level, n: inBand.filter((report) => report.level === level).length }));
-    const top = counts.sort((a, b) => b.n - a.n)[0]!;
-    if (top.n * 3 >= inBand.length * 2) reportBands.push({ from: band * 2, to: band * 2 + 2, level: top.level, count: inBand.length });
-  }
-  const profile = (night: UsualNight) => {
-    const levels = levelsOf(usualDayCurve(night, phaseShift));
-    for (const band of reportBands) for (let slot = band.from * 2; slot < band.to * 2; slot += 1) if (levels[slot]! > 0) levels[slot] = LEVEL_OF[band.level];
-    return smooth(levels);
-  };
-  const workRow = profile(workdays), freeRow = free ? profile(free) : workRow;
+  // The person's own word wins (`dayLevels`, shared with the portrait's best hours): the levels they stated for their hours, and two-hour
+  // bands where their reports agree; the model fills in only the rest.
+  const reportBands = reportBandsOf(reports, clock.hour, input.now);
+  const statedWork = statedBands(input.statedWindows ?? [], WORKDAYS), statedFree = statedBands(input.statedWindows ?? [], [0, 6]);
+  const profile = (night: UsualNight, stated: EnergyBand[]) => dayLevels(usualDayCurve(night, phaseShift), { stated, reports: reportBands });
+  const workRow = profile(workdays, statedWork), freeRow = free || input.statedWindows?.length ? profile(free ?? workdays, statedFree) : workRow;
   const levels = Array.from({ length: 7 }, (_, day) => [...(day === 0 || day === 6 ? freeRow : workRow)]);
 
   // Timed work in an hour the rule reads as low is a contradiction worth saying (the review weighs it); it does not raise the level by
@@ -252,6 +210,7 @@ export function energyAdviceRule(input: { now: string; zone: string; episodes: S
     : t("尚无睡眠记录，按通用作息（{{sleep}} 入睡、{{wake}} 醒）", { sleep: clockLabel(wrap24(workdays.from)), wake: clockLabel(wrap24(workdays.to)) });
   const high = levelRanges(workRow, 3), low = levelRanges(workRow, 1);
   const list = (items: string[]) => items.join(en ? ", " : "、");
+  const levelWord = (level: EnergyLevel) => en ? t(LEVEL_LABEL[LEVEL_OF[level]]!).toLowerCase() : t(LEVEL_LABEL[LEVEL_OF[level]]!);
   const summary = [
     lead,
     reports.length ? t("与 {{count}} 次自评", { count: reports.length }) : "",
@@ -267,7 +226,8 @@ export function energyAdviceRule(input: { now: string; zone: string; episodes: S
     chronotype ? t("时型：休息日睡眠中点（校正后）{{mid}}", { mid: clockLabel(chronotype.msfSc) }) + (chronotype.label ? t("，{{label}}", { label: t(chronotype.label) }) : "")
       : t("时型：工作日与休息日各满两晚后计算"),
     t("节律峰值相对通用曲线{{shift}}（{{basis}}）", { shift, basis: t(PHASE_BASIS[phaseSource]) }),
-    ...reportBands.map((band) => t("{{from}}–{{to}} 时按本人 {{count}} 次自评定为{{level}}精力", { from: band.from, to: band.to, count: band.count, level: en ? t(LEVEL_LABEL[LEVEL_OF[band.level]]!).toLowerCase() : t(LEVEL_LABEL[LEVEL_OF[band.level]]!) })),
+    ...(statedWork.length ? [t("工作日按本人所述精力：{{bands}}", { bands: list(statedWork.map((band) => `${clockLabel(band.from)}–${clockLabel(band.to)} ${levelWord(band.level)}`)) })] : []),
+    ...reportBands.map((band) => t("{{from}}–{{to}} 时按本人 {{count}} 次自评定为{{level}}精力", { from: band.from, to: band.to, count: band.count, level: levelWord(band.level) })),
     ...(workedInLow.length ? [t("近八周 {{hours}}常有计时工作，规则仍判为低精力", { hours: list(workedInLow.map((hour) => t("{{hour}} 时", { hour }))) })] : [])
   ];
   return { levels, summary, basis, evidence: { ...evidenceBase, reportBands, workedInLow } };

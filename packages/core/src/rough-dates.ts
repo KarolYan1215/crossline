@@ -104,6 +104,24 @@ export function roughWindow(text: string, today: string): RoughWindow | undefine
   return undefined;
 }
 
+/** Words that make what a clause dates a start, not a deadline: 「下周开始投」 begins in that week, it is not due at its end. */
+export const STARTS_WORDS = /开始|开工|动手|着手|启动|起步|开投|恢复|\bstart|\bbegin|kick ?off/iu; // i18n-ignore: matched against the reply
+
+/**
+ * The one day rough words stand for (W-268, 2026-11-14 walkthrough: 「下周开始投递」 was kept as that week's Saturday and 「年前」 as 12-31,
+ * because the check accepts any day inside the window and the model picked one). A start takes the window's first day, anything else — a
+ * deadline, 「年前投出去」 — its last; 「年前」 is the day before the Spring Festival (`roughWindow`), never 12-31. The clause whose window holds
+ * `date` decides, the narrowest when several do; `role` overrides the clause's own words. Undefined when no clause's window holds `date`.
+ */
+export function settleRoughDay(date: string, text: string, today: string, role?: "start" | "end"): string | undefined {
+  const parts = [...text.split(/[，,。；;、]/u).filter((part) => part.trim()), text];
+  const span = (found: RoughWindow) => Date.parse(found.to) - Date.parse(found.from);
+  const holding = parts.flatMap((part) => { const found = roughWindow(part, today); return found && date >= found.from && date <= found.to ? [{ part, found }] : []; })
+    .sort((a, b) => span(a.found) - span(b.found))[0];
+  if (!holding) return undefined;
+  return (role ?? (STARTS_WORDS.test(holding.part) ? "start" : "end")) === "start" ? holding.found.from : holding.found.to;
+}
+
 /**
  * Whether a day (YYYY-MM-DD) lies in the window rough words name. Each clause names its own (replay 14: in 「这周改简历，下周开始投，年前
  * 投出去」 only 「下周」 was read, and the day for 「这周改简历」 was refused).

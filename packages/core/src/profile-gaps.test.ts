@@ -163,6 +163,12 @@ test("an undated item is asked once whatever its wording, and not again once ans
     .some((gap) => gap.code === "DATE_UNDATED")).toBe(false);
 });
 
+test("a course whose class times the person said are not fixed is not asked when it meets again (W-268)", () => {
+  const input: ProfileGapInput = { ...base, projects: [...base.projects, { id: "ece548", identityId: "research", name: "ECE 548" }] };
+  const said = { identityId: "research", projectId: "ece548", slot: "class_note", value: "8–21 点之间不固定", status: "confirmed" };
+  expect(profileGaps({ ...input, facts: [...input.facts, said] }).some((gap) => gap.code === "COURSE_MEETINGS" && gap.projectId === "ece548")).toBe(false);
+});
+
 test("a course the calendar repeats every week is not asked when it meets, and the question never asks where", () => {
   const input: ProfileGapInput = { ...base, projects: [...base.projects, { id: "ece548", identityId: "research", name: "ECE 548" }] };
   expect(profileGaps(input).find((gap) => gap.code === "COURSE_MEETINGS")!.question.text).toBe("「ECE 548」每周什么时候上课？");

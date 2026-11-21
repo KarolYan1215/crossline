@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import {
   AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, INTERVIEW_SETTINGS, mergeInterviewSettings, readInterviewSettings, DEEP_SECTIONS, EMPTY_PROFILE_MODEL, PROFILE_SECTIONS, PROFILE_SECTIONS_SETTING, mergeProfileSections,
   type ProfileSection, type SectionRecord, GOAL_EDITS_SETTING, SECTION_EMPTY_RUNS_MAX, sectionClosed, citationWarnings, duplicateAttributes, ATTRIBUTE_CANDIDATES_MAX, mergeDateExtractions,
-  resolveAvailability, sanitizeDateExtraction, withContentIds, withoutDecidedDates, withoutOffHours,
-  type DateDrop, type DateExtraction, type OnboardingExtraction, type PendingGoalEdit, type ProfileModel, type StoredLineProfile,
+  resolveAvailability, sanitizeDateExtraction, settleRoughFactValue, withContentIds, withoutDecidedDates, withoutOffHours,
+  type AvailabilityProposal, type DateDrop, type DateExtraction, type OnboardingExtraction, type PendingGoalEdit, type ProfileModel, type StoredLineProfile,
   PROFILE_INSTRUMENTS_SETTING, mergeInstrumentAnswers, mergeProfileInsights, readInstrumentAnswers, applyPointChanges, readPoints, numberNewHypotheses
 } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
@@ -138,8 +138,11 @@ export function persistExtraction(store: CrosslineStore, workspaceId: string, ex
     store.setSetting(workspaceId, GOAL_EDITS_SETTING, JSON.stringify(edits));
   }
   // Available hours worked out from what the person said: a proposal, confirmed (or not) on the plan page.
-  if (extraction.availability?.windows.length) store.setSetting(workspaceId, AVAILABILITY_PROPOSED_SETTING,
-    JSON.stringify({ ...extraction.availability, at: now }));
+  if (extraction.availability?.windows.length) {
+    let previous: AvailabilityProposal | undefined;
+    try { previous = JSON.parse(store.getSetting(workspaceId, AVAILABILITY_PROPOSED_SETTING) ?? "null") ?? undefined; } catch { /* none on record */ }
+    store.setSetting(workspaceId, AVAILABILITY_PROPOSED_SETTING, JSON.stringify({ ...withUnmentionedDays(previous, extraction.availability), at: now }));
+  }
   // Settings the person stated: kept for them to apply in the start confirmation (or 待决事项), never applied here.
   if (extraction.settings?.length) store.setSetting(workspaceId, INTERVIEW_SETTINGS, JSON.stringify(mergeInterviewSettings(
     readInterviewSettings(store.getSetting(workspaceId, INTERVIEW_SETTINGS)), extraction.settings.map((item) => ({ ...item, quote: item.sourceQuote })), now,
@@ -151,8 +154,9 @@ export function persistExtraction(store: CrosslineStore, workspaceId: string, ex
       createdAt: existing?.createdAt ?? now, updatedAt: now });
   }
   for (const update of extraction.slotUpdates) {
+    // A deadline from rough words is the day they stand for: a start the window's first day, 「年前」 the day before the Spring Festival (W-268).
     store.upsertProfileFact({ workspaceId, identityId: update.identityId, projectId: update.projectId, slot: update.slot,
-      value: update.value, status: update.status, sourceRef: update.sourceRef, sourceQuote: update.sourceQuote, sourceSentences: update.sentences ?? [], updatedAt: now });
+      value: settleRoughFactValue(update, context.today), status: update.status, sourceRef: update.sourceRef, sourceQuote: update.sourceQuote, sourceSentences: update.sentences ?? [], updatedAt: now });
   }
   // A connection between lines is a guess until the person confirms it, so it is kept as an inferred fact
   // keyed by its two ends and kind, not as a milestone relation (there may not be milestones yet).
@@ -166,6 +170,25 @@ export function persistExtraction(store: CrosslineStore, workspaceId: string, ex
   if (warnings.length) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:citation-warned:${sessionId}:${randomUUID()}`,
     type: "onboarding.citation_warned", entityId: sessionId, payload: { facts: warnings } });
   persistFileDates(store, workspaceId, extraction, context);
+}
+
+const WEEKDAY_WORDS = [/周日|周天|星期日|星期天|礼拜天|周末|sunday|weekend/iu, /周一|星期一|礼拜一|工作日|monday|weekday/iu, /周二|星期二|礼拜二|工作日|tuesday|weekday/iu,
+  /周三|星期三|礼拜三|工作日|wednesday|weekday/iu, /周四|星期四|礼拜四|工作日|thursday|weekday/iu, /周五|星期五|礼拜五|工作日|friday|weekday/iu,
+  /周六|星期六|礼拜六|周末|saturday|weekend/iu]; // i18n-ignore: matched against the model's own note
+
+/**
+ * A new hours proposal keeps the days the one on record had and this one neither covers nor names (W-268: the start confirmation said
+ * 「每周可用约 39 小时」 and listed only Sunday, Tuesday and Saturday; the weekday evenings stated earlier were lost to a run that sent the
+ * week rebuilt from one reply). A day the new proposal covers, or names in its `why` (「周六不排」), is the new proposal's.
+ */
+export function withUnmentionedDays(previous: AvailabilityProposal | undefined, next: AvailabilityProposal): AvailabilityProposal {
+  const covered = new Set(next.windows.flatMap((window) => window.days));
+  const named = (day: number) => WEEKDAY_WORDS[day]!.test(next.why ?? "");
+  const kept = (previous?.windows ?? []).flatMap((window) => {
+    const days = window.days.filter((day) => !covered.has(day) && !named(day));
+    return days.length ? [{ ...window, days }] : [];
+  });
+  return kept.length ? { ...next, windows: [...next.windows, ...kept] } : next;
 }
 
 /**

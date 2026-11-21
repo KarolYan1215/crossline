@@ -242,6 +242,7 @@
   "，{{label}}": ", {{label}}",
   "时型：工作日与休息日各满两晚后计算": "Chronotype: worked out once there are two workday nights and two free-day nights",
   "节律峰值相对通用曲线{{shift}}（{{basis}}）": "Circadian peak {{shift}} relative to the default curve ({{basis}})",
+  "工作日按本人所述精力：{{bands}}": "Workdays at the energy you stated: {{bands}}",
   "{{from}}–{{to}} 时按本人 {{count}} 次自评定为{{level}}精力_one": "{{from}}:00–{{to}}:00 set to {{level}} energy from {{count}} self-report",
   "{{from}}–{{to}} 时按本人 {{count}} 次自评定为{{level}}精力_other": "{{from}}:00–{{to}}:00 set to {{level}} energy from {{count}} self-reports",
   "近八周 {{hours}}常有计时工作，规则仍判为低精力": "Over the last eight weeks there was often timed work at {{hours}}, which the rule still reads as low energy",

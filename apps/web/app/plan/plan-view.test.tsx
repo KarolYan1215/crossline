@@ -35,4 +35,14 @@ describe("the plan page's head", () => {
     expect(html).toContain("未证明最优");
     expect(renderToStaticMarkup(<ScheduleStatus plan={{ ...plan, schedule: { status: "feasible", blockers: [], solver: "empty" } }} />)).toBe("");
   });
+
+  test("with the page's unplaced list the line counts those same tasks by kind, not the solver's blockers alone", () => {
+    const row = (id: string, kind: "room" | "waiting" | "passed_event") => ({ id, title: id, line: "research", deadline: null, notBefore: null, minutes: 30,
+      partial: false, reason: null, kind });
+    const html = renderToStaticMarkup(<ScheduleStatus plan={{ ...plan,
+      schedule: { status: "partial", blockers: [{ taskId: "a", code: "NO_CAPACITY", message: "" }], solver: "fallback", simpleOnly: true }
+    }} unplaced={[row("a", "room"), row("b", "waiting"), row("c", "waiting"), row("d", "passed_event")]} />);
+    expect(html).toContain("4 项未排进：1 项时段不够，2 项在等材料或前一步，1 个活动已过，原因见「排不下的原因」");
+    expect(html).not.toContain("1 个任务未排入");
+  });
 });
