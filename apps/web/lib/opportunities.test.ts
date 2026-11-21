@@ -175,6 +175,8 @@ test("offers wait for the weekly review unless due within the week; news and pap
   save(store, { id: "paper", key: "paper", needId: undefined, lines: tag(["m1"]), type: "paper", kind: "event", deadlines: [], startsAt: undefined, url: "https://arxiv.org/abs/2611.1" });
   const asks = opportunityOfferAsks(TEST_CTX, NOW);
   expect(offer(asks, "opp:far").inReview).toBe(true);
+  // No watch, so no lead time: the deadline is said once, not again as the day to start preparing.
+  expect(offer(asks, "opp:far").why).not.toContain("开始准备");
   expect(offer(asks, "opp:near").inReview).toBeUndefined();
   expect(offer(asks, "opp:paper")).toMatchObject({ inReview: true });
   expect(offer(asks, "opp:paper").options.map((option) => option.id)).toEqual(["useful", "less_kind", "less"]);

@@ -146,7 +146,8 @@ export function opportunityOfferAsks(ctx: AccessContext, now = new Date()): Ask[
       row.reason ? t("为什么值得看：{{reason}}。", { reason: row.reason.replace(/[。.！!？?；;，,\s]+$/u, "") }) : "",
       watch ? t("来自监视项「{{title}}」。", { title: watch.title }) : isScoutFind(row) ? t("每周侦察发现。") : "",
       deadline ? t("截止 {{day}}（原文：{{quote}}）。", { day: deadline, quote: short(quote ?? "", 80) }) : t("页面没写截止。"),
-      start && start > today ? t("最晚 {{day}} 开始准备。", { day: start }) : "",
+      // A start on the deadline itself (no watch, so no lead time) says nothing the deadline sentence did not (found in the walkthrough).
+      start && start > today && start !== deadline ? t("最晚 {{day}} 开始准备。", { day: start }) : "",
       row.cost ? t("费用：{{amount}} {{currency}}。", { amount: row.cost.amount, currency: row.cost.currency }) : "",
       row.location && !row.place ? t("地点：{{place}}。", { place: row.location }) : "",
       ...spaceLines(row, verdict, locale),
