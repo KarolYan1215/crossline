@@ -13,6 +13,8 @@ import { localeFor, tOf } from "./locale";
 import { tFor } from "./i18n";
 import { preparedForEvents } from "./errands";
 import { readMerges, timedItemOf } from "./event-merges";
+import { decisionHorizon } from "./horizon";
+import { preparingProposalIds } from "./proposal-ready";
 
 export type TimelineData = {
   today: string; nowIso: string; timeZone: string;
@@ -216,8 +218,11 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
     today, nowIso, timeZone: zone, items, deadlines,
     labels: Object.fromEntries(identityLines(ctx).map((pack) => [pack.id, t(pack.label)])),
     quietByWeekday: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((weekday) => [weekday, quietRanges(windows, weekday)])),
-    proposals: store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "awaiting_plan_approval" && !(order.payload as { seeded?: boolean }).seeded
-      && onPersonsBoard(order))
+    // Counted as 待确认 counts them (`computePending`, lib/pending.ts): not one still being planned, nor one that enters the week later —
+    // Today said 「待批准任务 · 3」 beside 待确认's 「2 个任务提案待批准」 (W-294).
+    proposals: ((preparing, horizon) => store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "awaiting_plan_approval"
+      && !(order.payload as { seeded?: boolean }).seeded && onPersonsBoard(order) && !preparing.has(order.id) && !horizon.orderEntry(order)))(
+      preparingProposalIds(ctx), decisionHorizon(ctx))
       .map((order) => ({ id: order.id, title: order.intent }))
   };
 }

@@ -6,6 +6,7 @@ vi.mock("./codex-runtime", () => ({ requestCodexSupervisor: vi.fn(async () => ({
 import { requestCodexSupervisor } from "./codex-runtime";
 import { answerAsk, collectAsks, explainRisk, openAsks, snoozeAsk, writeAttentionSnapshot } from "./asks";
 import { countPending } from "./pending";
+import { loadTimeline } from "./timeline";
 import { TEST_CTX } from "./test-support";
 import { applyChange } from "./impact";
 
@@ -587,7 +588,7 @@ test("a preparation step the runtime lost is not asked about while the worker wi
   expect(assistantAsks()).toEqual(["t2"]);
 });
 
-test("only this week's decisions are counted and listed; one whose work starts later waits under 「以后再定」 and comes back by itself", () => {
+test("only this week's decisions are counted and listed; one whose work starts later waits under 「以后再定」 and comes back by itself", async () => {
   const store = setup();
   refusedWithMissing(store);
   // A second milestone due in seven weeks, with a proposal under it and a draft milestone due as far out.
@@ -608,6 +609,8 @@ test("only this week's decisions are counted and listed; one whose work starts l
   expect(counts.workOrders).toBe(2);
   expect(counts.milestoneDrafts).toBe(0);
   expect(counts.later).toMatchObject({ workOrders: 1, milestoneDrafts: 1 });
+  // Today's 「待批准任务 · N」 is the same number as 待确认's (W-294: Today said 3 beside 待确认's 2).
+  expect((await loadTimeline(TEST_CTX)).proposals.map((item) => item.id).sort()).toEqual(["get-data", "map"]);
   expect(counts.total).toBe(counts.workOrders + counts.asks + counts.research + counts.dates + counts.targets
     + counts.assistantKinds + counts.assistantQuestions + counts.assistantReviews + counts.questions);
   // Asks about the near milestone are this week's and carry its importance; nothing about the far one is asked yet.

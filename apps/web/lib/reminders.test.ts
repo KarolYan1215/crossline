@@ -82,3 +82,23 @@ test("the setup line names the recommended steps still undone, the phone only wh
   store.setSetting(ws, "calendar.subscriptions", JSON.stringify([{ id: "s1" }]));
   expect(setup()).toBeUndefined();
 });
+
+test("work due today or tomorrow the calendar cannot hold all of is said first, urgent; waiting on something or due later is not (W-293)", () => {
+  vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-10-15T15:00:00.000Z");
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  const order = (id: string, dueDate: string) => store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "",
+    intent: id, state: "approved", riskTier: "routine", estimate, payload: { dueDate } });
+  order("作业 4", "2026-10-15");
+  order("实验报告", "2026-10-16");
+  order("等材料", "2026-10-15");
+  order("下周的", "2026-10-22");
+  const plan = { blocks: [block("scheduled:作业 4:v1s4", "2026-10-15", "19:00", "21:00")], schedule: { blockers: [
+    { taskId: "作业 4#v1s4", code: "DEADLINE_PARTIAL", message: "" }, { taskId: "实验报告#v1s1", code: "DEADLINE_CAPACITY", message: "" },
+    { taskId: "等材料", code: "DEPENDENCY_NOT_READY", message: "" }, { taskId: "下周的", code: "DEADLINE_CAPACITY", message: "" }] } } as unknown as PersistedPlan;
+  // Said even when an ask is about the task: the ask is a decision, this is the evening's work.
+  const reminders = loadReminders(TEST_CTX, plan, [], [{ entityId: "作业 4" }] as Ask[]);
+  expect(reminders.slice(0, 2)).toEqual([
+    expect.objectContaining({ id: "due-short:作业 4", urgent: true, text: "「作业 4」今天截止，日历排不下剩下的部分", href: "/workbench/%E4%BD%9C%E4%B8%9A%204" }),
+    expect.objectContaining({ id: "due-short:实验报告", urgent: true, text: "「实验报告」明天截止，日历排不下剩下的部分" })]);
+  expect(reminders.filter((reminder) => reminder.urgent)).toHaveLength(2);
+});

@@ -97,3 +97,22 @@ test("a stuck run for an event whose day has passed recommends 不做了 and wai
   expect(ask).toMatchObject({ entityId: "talk-3", urgency: "later" });
   expect(ask!.options.find((option) => option.recommended)?.id).toBe("drop");
 });
+
+test("a stopped run for a step already done another way, or for a task done or archived, is not asked about (W-294)", () => {
+  const store = setup();
+  store.saveWorkOrder({ id: "hw4", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "", intent: "完成作业 4", state: "approved",
+    riskTier: "routine", estimate, payload: {} });
+  store.saveStepPlan(ws, "hw4", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "", steps: [
+    { id: "a", role: "gather", title: "提取题面约束", deliverable: "约束.md", doneCriterion: "完成", share: 1, estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 50 },
+      dependsOn: [], notBefore: "", dueBy: "", tickOutcome: "", schedulable: false, executor: "agent" }] }, owner, "planned");
+  const stepId = store.getStepPlan(ws, "hw4")!.steps[0]!.id;
+  run(store, "x1", { title: "完成作业 4 · 提取题面约束", workOrderId: "hw4", stepId }, { code: "AGENT_ARTIFACT_MISSING", message: "你说做了「约束.md」" });
+  expect(agentAsks()).toHaveLength(1);
+  store.updateStepProgress(ws, "hw4", stepId, { status: "done" }, owner, "person");
+  expect(agentAsks()).toEqual([]);
+  // A whole-task run for a task that was archived meanwhile.
+  run(store, "x2", { title: "完成作业 4", workOrderId: "hw4" }, { code: "AGENT_ARTIFACT_MISSING", message: "你说做了「a.md」" });
+  expect(agentAsks()).toHaveLength(1);
+  store.saveWorkOrder({ ...store.getWorkOrder(ws, "hw4")!, state: "archived" });
+  expect(agentAsks()).toEqual([]);
+});

@@ -34,10 +34,13 @@ export function needRows({ asks, reminders }: { asks: Ask[]; reminders: Reminder
   // A folded card stands for every block of yesterday's; split into one card each, they are counted on one row again.
   const batch = missed.find((ask) => ask.entityId === "batch") ?? missed[0];
   const count = batch?.entityId === "batch" ? batch.items?.length ?? missed.length : missed.length;
+  const reminderRow = (reminder: Reminder): NeedRow => ({ kind: "reminder", key: `reminder:${reminder.id}`, reminder });
+  // Work due today or tomorrow the calendar cannot hold all of comes first (W-293): it is what the evening must go to.
   return [
+    ...reminders.filter((reminder) => reminder.urgent).map(reminderRow),
     ...(batch ? [{ kind: "missed" as const, key: `missed:${batch.id}`, ask: batch, count }] : []),
     ...ordered.map((ask): NeedRow => ({ kind: "ask", key: `ask:${ask.id}`, ask })),
-    ...reminders.map((reminder): NeedRow => ({ kind: "reminder", key: `reminder:${reminder.id}`, reminder }))
+    ...reminders.filter((reminder) => !reminder.urgent).map(reminderRow)
   ];
 }
 
@@ -87,6 +90,7 @@ export function NeedsCard({ asks: initialAsks, reminders, labels, today, notes }
     {rows.length > 0 ? <ol className="nd-list">{rows.map((row) => row.kind === "reminder"
       ? <li key={row.key} className="nd-row" data-kind="reminder" {...(row.reminder.line ? { "data-line": row.reminder.line } : {})}>
         <div className="nd-line">
+          {row.reminder.urgent && <UrgentFlag label={t("今天要处理")} />}
           {row.reminder.line && labels[row.reminder.line] && <LineTag line={row.reminder.line}>{labels[row.reminder.line]}</LineTag>}
           <a className="nd-title" href={row.reminder.href} title={row.reminder.text}>{row.reminder.text}</a>
           <ChevronRight {...ICON} className="nd-go" />

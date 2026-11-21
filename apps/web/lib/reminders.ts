@@ -13,7 +13,9 @@ import { monthDay, tFor } from "./i18n";
  * 体现」). What can be answered in place is an ask and sits in Today's stack; what is only information is one line here, linking to the
  * page it comes from. Nothing that is already an ask is repeated: a task, milestone or block an open ask is about is left out.
  */
-export type Reminder = { id: string; text: string; href: string; line?: string };
+export type Reminder = { id: string; text: string; href: string; line?: string;
+  /** Due today or tomorrow with part of it not on the calendar (W-293): listed first on Today, above the week's decisions. */
+  urgent?: true };
 
 const OPEN = ["approved", "preparing", "ready_for_human", "active"];
 const DAY = 86_400_000;
@@ -21,7 +23,9 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T12:00:00Z`) + n * DAY).toISOString().slice(0, 10);
 const daysBetween = (from: string, to: string) => Math.round((Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / DAY);
 const mdZh = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
-const short = (text: string, length = 18) => text.length > length ? `${text.slice(0, length)}…` : text;
+const short18 = (text: string, length = 18) => text.length > length ? `${text.slice(0, length)}…` : text;
+/** The planner's reasons that mean the time is not there, as opposed to waiting on something or later on purpose. */
+const SHORT_CODES = new Set(["DEADLINE_CAPACITY", "DEADLINE_PARTIAL", "NO_CAPACITY", "NO_CONTINUOUS_SLOT"]);
 
 /** The plan page's 「部分任务未排入」, counted per task as that page counts it: wholly unplaced, and placed only in part. */
 export function unplacedTasks(plan: Pick<PersistedPlan, "blocks" | "schedule">): { none: number; partial: number } {
@@ -55,13 +59,23 @@ export function loadReminders(ctx: AccessContext, plan: PersistedPlan, calendarI
   const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
   const deadlineOf = (milestoneId: string) => readGoalSettings(ctx, milestoneId)?.confirmedDeadline || anchors.get(milestoneId)?.deadline || undefined;
 
+  const open = store.listWorkOrders(ctx.workspaceId).filter((order) => OPEN.includes(order.state) && !order.tombstone
+    && !(order.payload as { seeded?: boolean }).seeded).map((order) => ({ order,
+    due: [(order.payload as { dueDate?: string }).dueDate, deadlineOf(order.milestoneId)].filter((day): day is string => Boolean(day && DATE.test(day))).sort()[0] }));
+
+  // 计划页: work due today or tomorrow that the calendar cannot hold all of (W-293: a homework due that night had no time tonight and
+  // Today said nothing). First, one line each, whether or not an ask is about the task: this is the evening's work.
+  const short = new Set((plan.schedule?.blockers ?? []).filter((blocker) => SHORT_CODES.has(blocker.code)).map((blocker) => blocker.taskId.split("#")[0]!));
+  for (const { order, due } of open.filter((item) => item.due && item.due >= today && item.due <= addDays(today, 1) && short.has(item.order.id))
+    .sort((a, b) => a.due!.localeCompare(b.due!)))
+    out.push({ id: `due-short:${order.id}`, urgent: true, href: `/workbench/${encodeURIComponent(order.id)}`, line: order.identityId,
+      text: due === today ? t("「{{title}}」今天截止，日历排不下剩下的部分", { title: short18(taskTitleOf(order)) })
+        : t("「{{title}}」明天截止，日历排不下剩下的部分", { title: short18(taskTitleOf(order)) }) });
+
   // 任务页: work whose due day has passed (「已过 N 天」 on its card).
-  const overdue = store.listWorkOrders(ctx.workspaceId).filter((order) => OPEN.includes(order.state) && !order.tombstone
-    && !(order.payload as { seeded?: boolean }).seeded && !asked.has(order.id)).flatMap((order) => {
-    const due = [(order.payload as { dueDate?: string }).dueDate, deadlineOf(order.milestoneId)].filter((day): day is string => Boolean(day && DATE.test(day))).sort()[0];
-    return due && due < today ? [{ order, due }] : [];
-  }).sort((a, b) => a.due.localeCompare(b.due));
-  if (overdue.length === 1) out.push({ id: "overdue", text: t("「{{title}}」已过截止 {{count}} 天", { title: short(taskTitleOf(overdue[0]!.order)), count: daysBetween(overdue[0]!.due, today) }),
+  const overdue = open.filter((item): item is { order: typeof item.order; due: string } => Boolean(item.due && item.due < today && !asked.has(item.order.id)))
+    .sort((a, b) => a.due.localeCompare(b.due));
+  if (overdue.length === 1) out.push({ id: "overdue", text: t("「{{title}}」已过截止 {{count}} 天", { title: short18(taskTitleOf(overdue[0]!.order)), count: daysBetween(overdue[0]!.due, today) }),
     href: `/workbench/${encodeURIComponent(overdue[0]!.order.id)}`, line: overdue[0]!.order.identityId });
   else if (overdue.length > 1) out.push({ id: "overdue", text: t("{{count}} 个任务已过截止，最早 {{day}}", { count: overdue.length, day: md(overdue[0]!.due) }), href: "/workbench" });
 

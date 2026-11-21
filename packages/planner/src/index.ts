@@ -36,6 +36,11 @@ export type PlannerTask = {
    * under two days. With a weight of `PRIME_WEIGHT` or more such work is placed first, into the day's best hours (`isPrimeWork`).
    */
   atRisk?: boolean;
+  /**
+   * Set by the planner itself, never by a caller: deadline work due within `LAST_CHANCE_DAYS` that does not fit before its deadline whole.
+   * The greedy pass then places what does fit instead of nothing, and the plan says how much is still short (`DEADLINE_PARTIAL`).
+   */
+  bestEffort?: boolean;
 };
 
 /** Weight from which at-risk work takes the day's best hours first (the same line the web calls important). */

@@ -1976,6 +1976,7 @@ const UNPLACED_REASON: Record<string, string> = {
   Q4_BEYOND_FORECAST_HORIZON: "截止日在 8 周之后，暂不排入",
   Q4_WAITING_LATEST_START: "截止尚远，最迟开工日之前暂不排入",
   DEADLINE_CAPACITY: "截止日前的可用时段不足",
+  DEADLINE_PARTIAL: "截止前只排得下一部分，可能来不及",
   NO_CAPACITY: "本次排程范围内的可用时段已排满，之后的时段再排入",
   NO_CONTINUOUS_SLOT: "需要一段连续时间，现有最长空档不够",
   PROGRESS_ONLY: "本周只排入 45 分钟进度",

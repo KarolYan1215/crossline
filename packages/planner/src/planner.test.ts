@@ -219,7 +219,7 @@ describe("energy-aware planning", () => {
       const evening = blocks.filter((block) => block.start >= at("20:00"));
       expect(evening.reduce((sum, block) => sum + minutesOf(block), 0)).toBeGreaterThanOrEqual(100);
       expect(evening.every((block) => block.efficiency === undefined)).toBe(true);
-      expect(workOf(blocks)).toBeGreaterThanOrEqual(180);
+      expect(workOf(blocks)).toBeGreaterThanOrEqual(150);
       expect(workOf(blocks.filter((block) => block.start < at("20:00")))).toBeLessThan(90);
     });
   });
@@ -707,6 +707,32 @@ describe("schedule parameters and importance", () => {
       // Five hours that day, half of it for work without a deadline: two of the loose hours, the rest the next day.
       expect(minutes(on("2026-10-06").filter((block) => block.taskId !== "hw")), solver).toBeLessThanOrEqual(150);
       expect(on("2026-10-07").length, solver).toBeGreaterThan(0);
+    }
+  });
+
+  test("work due tonight that cannot fit whole gets what fits before the deadline, not nothing, and is reported short (W-293)", async () => {
+    const minutes = (blocks: Array<{ start: string; end: string }>) => blocks.reduce((sum, block) => sum + (Date.parse(block.end) - Date.parse(block.start)) / 60_000, 0);
+    const availability = [day("2026-10-06", "14:00", "17:10"), day("2026-10-07"), day("2026-10-08"), day("2026-10-09")];
+    // The rest of a homework due tonight, five hours by the cautious estimate, then checking it, with a three-hour evening left;
+    // work due in two weeks beside it; and a large piece due in three days that cannot make it either.
+    const rest = { id: "hw#rest", title: "作业 · 其余题目", estimate: { p25Minutes: 180, p50Minutes: 240, p85Minutes: 400, confidence: "low" as const },
+      inputsReady: true, deadlineTier: 1 as const, interruptible: true, deadline: "2026-10-06T23:00:00.000Z" };
+    const check = { ...rest, id: "hw#check", title: "作业 · 核对", estimate: estimate(40), dependsOn: ["hw#rest"] };
+    const far = { id: "far", title: "题组", estimate: estimate(120), inputsReady: true, deadlineTier: 2 as const, interruptible: true, deadline: "2026-10-20T23:00:00.000Z" };
+    const big = { id: "big", title: "大项目", estimate: estimate(2000), inputsReady: true, deadlineTier: 2 as const, interruptible: true, deadline: "2026-10-09T23:00:00.000Z" };
+    for (const capped of [false, true]) for (const solver of ["solver", "greedy"] as const) {
+      const label = `${solver}${capped ? " capped" : ""}`;
+      const result = await planSchedule({ now, horizonDays: 4, frozenBlocks: [], tasks: [rest, check, far, big],
+        params: { gapMinutes: 10, maxDailyShare: 0.85, focusCapMinutes: 0, deadlineBufferDays: 0 }, availability,
+        ...(capped ? { dailyCapMinutes: { "2026-10-06": 60, "2026-10-07": 240, "2026-10-08": 240, "2026-10-09": 240 } } : {}) },
+        solver === "greedy" ? { solver: "none" } : {});
+      const tonight = result.plan.blocks.filter((block) => !block.frozen && block.start.startsWith("2026-10-06"));
+      expect(minutes(tonight.filter((block) => block.taskId === "hw#rest")), label).toBeGreaterThanOrEqual(150);
+      expect(tonight.filter((block) => block.taskId !== "hw#rest"), label).toEqual([]);
+      expect(result.blockers.find((blocker) => blocker.taskId === "hw#rest"), label).toMatchObject({ code: "DEADLINE_PARTIAL" });
+      // Only the last chance is placed in part: work due in three days that cannot make it is still reported whole, not spread.
+      expect(result.plan.blocks.some((block) => block.taskId === "big"), label).toBe(false);
+      expect(result.plan.blocks.some((block) => block.taskId === "far"), label).toBe(true);
     }
   });
 

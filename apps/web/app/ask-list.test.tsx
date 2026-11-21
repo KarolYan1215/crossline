@@ -46,6 +46,9 @@ test("the order: yesterday's blocks as one row, then today's questions, then the
   expect(first.kind === "missed" && first.count).toBe(2);
   // 「逐个处理」 opens yesterday's wrap-up.
   if (first.kind === "missed") expect(openHref(first, "2026-10-08")).toBe("/wrap?day=2026-10-07");
+  // Work due today the calendar cannot hold all of comes before everything (W-293).
+  expect(needRows({ asks: [missed, ask("n", "今天")], reminders: [{ id: "r", text: "提醒", href: "/" }, { id: "due", text: "今天截止", href: "/", urgent: true }] })
+    .map((row) => row.key)).toEqual(["reminder:due", "missed:missed:batch:x", "ask:n", "reminder:r"]);
   expect(quickOption(ask("a", "x"))?.id).toBe("ask_first");
   expect(quickOption({ ...ask("a", "x"), select: "many" })).toBeUndefined();
   expect(quickOption({ ...ask("a", "x"), options: [{ id: "o", label: "写", recommended: true, needsNote: true }] })).toBeUndefined();

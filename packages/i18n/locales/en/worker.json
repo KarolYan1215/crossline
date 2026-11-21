@@ -411,6 +411,7 @@
   "{{title}}需要连续 {{minutes}} 分钟，但最长的连续空档只有 {{longest}} 分钟；可以补充更长的可用时间，或确认它其实可以分几次做": "{{title}} needs {{minutes}} min in one stretch, but the longest free stretch is {{longest}} min; add longer available time, or confirm it can be done in several sittings",
   "{{title}}需要连续 {{minutes}} 分钟": "{{title}} needs {{minutes}} min in one stretch",
   "{{title}}无法在已确认截止时间前排入": "{{title}} cannot be scheduled before its confirmed deadline",
+  "{{title}}截止前只排得下 {{placed}} 分钟，按保守估计还差 {{short}} 分钟": "Only {{placed}} minutes of {{title}} fit before the deadline; {{short}} minutes short by the cautious estimate",
   "{{title}}在排程窗口内没有可用容量": "{{title}} has no available capacity within the scheduling window",
   "{{title}}的截止日期超出 8 周预测窗口，暂不唤醒": "{{title}} is due beyond the 8-week forecast window, so it is not scheduled yet",
   "{{title}}暂缓；按剩余可用时间计算，最迟 {{at}} 开工": "{{title}} is on hold; given the time available, it must start by {{at}}",

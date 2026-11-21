@@ -97,6 +97,8 @@ const MIN_SEGMENT = 15;
 export const MIN_SPLIT_MINUTES = 25;
 
 const durationOf = (task: PlannerTask) => reserveMinutes(task.estimate);
+/** How near a deadline must be for work that cannot make it whole to be placed in part (`PlannerTask.bestEffort`): today and tomorrow. */
+export const LAST_CHANCE_DAYS = 2;
 const term = (coefficient: number, name: string) => `${coefficient < 0 ? "-" : "+"} ${Math.abs(coefficient)} ${name}`;
 const expression = (terms: Array<[number, string]>) => terms.map(([value, name]) => term(value, name)).join(" ") || "0";
 const valueOf = (columns: Record<string, { Primal?: number }>, name: string) => columns[name]?.Primal ?? 0;
@@ -363,7 +365,7 @@ function greedyPass(input: PlanningInput, tasks: PlannerTask[], slots: Slot[], e
       left -= minutes * efficiency;
       if (task.interruptible === false) break;
     }
-    return left <= 1e-9 ? { staged, candidate, nextUsed, nextSoft, nextCap } : undefined;
+    return left <= 1e-9 || (task.bestEffort && staged.length) ? { staged, candidate, nextUsed, nextSoft, nextCap } : undefined;
   };
   for (const task of ordered) {
     if ((task.dependsOn ?? []).some((id) => tasks.some((item) => item.id === id) &&
@@ -732,8 +734,9 @@ async function schedule(input: PlanningInput, options: SolveOptions): Promise<Pl
   const first = await optimize(buffered, false, options.solver !== "none", options);
   let result = first;
   const relaxable = params.gapMinutes > 0 || params.maxDailyShare < 1 || anyBuffer || Boolean(input.dailyCapMinutes);
-  if (relaxable && first.blockers.some((blocker) => eligible.tasks.some((task) =>
-    task.id === blocker.taskId && task.deadline))) {
+  const soon = (task: PlannerTask) => Boolean(task.deadline && Date.parse(task.deadline) <= input.now.getTime() + LAST_CHANCE_DAYS * 86_400_000);
+  if (first.blockers.some((blocker) => eligible.tasks.some((task) =>
+    task.id === blocker.taskId && task.deadline && (relaxable || soon(task))))) {
     // The relaxation is for the work with a deadline only (and what it waits on): that is placed first without the gap and the daily
     // share, then everything else is placed around it on the person's own packing rules. Relaxing the whole plan packed a day from
     // 09:00 to 22:50 without a break with undated work, because one homework needed the room.
@@ -755,7 +758,12 @@ async function schedule(input: PlanningInput, options: SolveOptions): Promise<Pl
     // urgent work it waits on, so the order of dependencies still holds. Its own blocks carry `overCapacity`; the rest of the urgent work is
     // then placed under the cap in what is left, and everything else around both.
     const left = new Set(pressed.blockers.map((blocker) => blocker.taskId).filter((id) => urgent.has(id)));
-    if (eligible.dailyCapMinutes && left.size) {
+    // Deadline work due within `LAST_CHANCE_DAYS` that does not fit whole even so: what fits before the deadline is placed, first. All or
+    // nothing, a homework due that night with more left than the evening holds got no time at all, and the evening went to work due in
+    // two weeks (W-293, 2026-11-20).
+    const lastChance = new Set([...left].filter((id) => { const task = eligible.tasks.find((item) => item.id === id);
+      return Boolean(task && task.interruptible !== false && soon(task)); }));
+    if (left.size && (eligible.dailyCapMinutes || lastChance.size)) {
       const overSet = new Set(left);
       for (let grew = true; grew;) {
         grew = false;
@@ -763,12 +771,24 @@ async function schedule(input: PlanningInput, options: SolveOptions): Promise<Pl
           if (urgent.has(id) && !overSet.has(id)) { overSet.add(id); grew = true; }
       }
       const { dailyCapMinutes: _cap, ...uncapped } = eligible;
-      const over = await optimize({ ...uncapped, tasks: eligible.tasks.filter((task) => overSet.has(task.id)) }, true, solverFits, options);
-      const overBlocks = over.plan.blocks.filter((block) => !block.frozen).map((block) => left.has(block.taskId) ? { ...block, overCapacity: true } : block);
+      // The greedy pass only when some of it is placed in part: the solver's model places a task whole or not at all.
+      const over = await optimize({ ...uncapped, tasks: eligible.tasks.filter((task) => overSet.has(task.id))
+        .map((task) => lastChance.has(task.id) ? { ...task, bestEffort: true } : task) }, true, solverFits && !lastChance.size, options);
+      const overBlocks = over.plan.blocks.filter((block) => !block.frozen)
+        .map((block) => eligible.dailyCapMinutes && left.has(block.taskId) ? { ...block, overCapacity: true } : block);
       const rest = await optimize({ ...eligible, tasks: eligible.tasks.filter((task) => urgent.has(task.id) && !overSet.has(task.id)),
         frozenBlocks: [...eligible.frozenBlocks, ...overBlocks.map(({ taskId, start, end }) => ({ taskId, start, end }))] }, true, solverFits, options);
       placedFirst = [...overBlocks, ...rest.plan.blocks.filter((block) => !block.frozen)];
-      pressedBlockers = [...over.blockers, ...rest.blockers];
+      // What was placed only in part stays reported, with how much is still short of the cautious estimate.
+      const short = [...lastChance].flatMap((id): PlanBlocker[] => {
+        const task = eligible.tasks.find((item) => item.id === id)!;
+        const placed = Math.round(overBlocks.filter((block) => block.taskId === id)
+          .reduce((sum, block) => sum + (Date.parse(block.end) - Date.parse(block.start)) / 60_000 * (block.efficiency ?? 1), 0));
+        const need = durationOf(task);
+        return placed > 0 && placed < need - 1 ? [{ taskId: id, code: "DEADLINE_PARTIAL", message: tFor(input.locale)(
+          "{{title}}截止前只排得下 {{placed}} 分钟，按保守估计还差 {{short}} 分钟", { title: task.title, placed, short: need - placed }) }] : [];
+      });
+      pressedBlockers = [...over.blockers, ...short, ...rest.blockers];
       solverUsed = rest.solver;
     }
     const around = await optimize({ ...buffered, tasks: buffered.tasks.filter((task) => !urgent.has(task.id)),
