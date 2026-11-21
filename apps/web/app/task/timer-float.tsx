@@ -18,7 +18,8 @@ const FIRST_ACTION_SECONDS = 5 * 60;
 /**
  * The floating countdown for a running session, on every page. It counts down from the current step's usual duration; at zero it
  * notifies once and keeps counting (shown as overtime). Closing it ends the session — the minutes are recorded as worked — and then
- * asks whether the step is done, or offers to finish the whole task (evidence and the timed minutes are handed in on the task's page;
+ * offers 完成 / 还没 for the step (optional since 2026-11-20, 「可选，不拦」: closed without a tap, the step is left to what the signals
+ * infer, never asked again), or to finish the whole task (evidence and the timed minutes are handed in on the task's page;
  * without that way out a finished task kept a paused session open and nothing was ever recorded). The session itself lives in the ledger, so a reload or another device shows the same timer.
  */
 export function TimerFloat() {
@@ -94,13 +95,14 @@ export function TimerFloat() {
       <p><b>{t("计时已到")}</b> · {overdue.stepTitle ?? overdue.intent}</p><small>{t("计时继续，超出部分照常记录。")}</small>
       <button type="button" onClick={() => setOverdue(null)}>{t("知道了")}</button>
     </div>}
-    {closing && <div className="timer-alert" role="alertdialog" aria-label={t("本次计时已结束")}>
-      <p><b>{t("本次计时已结束")}</b>{closing.stepTitle ? ` · ${closing.stepTitle}` : ""}</p>
-      {closing.stepId ? <><small>{t("该步骤是否已完成？")}</small>
+    {closing && <div className="timer-alert" role="status" aria-label={t("本次计时已结束")}>
+      <p><b>{t("本次计时已结束")}</b>{closing.stepTitle ? ` · ${closing.stepTitle}` : ""}
+        {closing.stepId && <button type="button" className="text-button" onClick={() => { setResume(""); setClosing(null); }} aria-label={t("不选，按推断")}>×</button>}</p>
+      {closing.stepId ? <><small>{t("这步完成了吗？不选也行，按计时推断。")}</small>
         <VoiceField kind="note"><input type="text" className="timer-resume" maxLength={80} value={resume} onChange={(event) => setResume(event.target.value)}
           placeholder={t("没做完的话，下次从哪接（可不填）")} aria-label={t("下次从哪接")} /></VoiceField>
-        <span><button type="button" className="primary-button" onClick={() => void answer(true)}>{t("已完成")}</button>
-          <button type="button" onClick={() => void answer(false)}>{t("未完成")}</button></span></>
+        <span><button type="button" className="primary-button" onClick={() => void answer(true)}>{t("完成")}</button>
+          <button type="button" onClick={() => void answer(false)}>{t("还没")}</button></span></>
         : <button type="button" onClick={() => void answer(false)}>{t("关闭")}</button>}
       <a href={`/workbench/${encodeURIComponent(closing.workOrderId)}#complete`}>{t("整个任务已完成，去提交")}</a>
     </div>}

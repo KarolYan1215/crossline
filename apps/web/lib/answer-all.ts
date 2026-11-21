@@ -1,6 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { answerAllSteps, onPersonsBoard, safeAssistantResult, staleProposal, taskTitleOf, tidySentenceEnds, type AccessContext, type AnswerAllStep, type Ask, type AskKind } from "@crossline/core";
+import { answerAllSteps, DO_THEN_TELL_KINDS, DO_THEN_TELL_REVERT_AFTER, onPersonsBoard, safeAssistantResult, staleProposal, taskTitleOf, tidySentenceEnds,
+  type AccessContext, type AnswerAllStep, type Ask, type AskKind } from "@crossline/core";
 import { resultsAwaitingReview, reviewAgentTask } from "@crossline/db";
 import { appNow, archiveWorkOrder, getStore, milestoneDeadline, planToday } from "./crossline";
 import { answerAsk, listed, openAsks, snoozeAsk, thisWeek } from "./asks";
@@ -13,7 +14,7 @@ import { tOf } from "./locale";
  * has a safe, undoable default, settled in one step and taken back by one undo. Which kinds is `ANSWER_ALL_KINDS` in core; beside the
  * asks, the assistant's clean results are accepted and proposals whose day passed or that waited fourteen days are put away.
  */
-export type AnswerAllGroup = "risk" | "missed" | "relation" | "assistant" | "proposal";
+export type AnswerAllGroup = "risk" | "missed" | "relation" | "assistant" | "proposal" | "upkeep";
 export type AnswerAllPlan = {
   asks: AnswerAllStep[];
   results: Array<{ taskId: string; title: string }>;
@@ -23,7 +24,8 @@ export type AnswerAllPlan = {
   total: number;
 };
 
-const GROUP_OF: Partial<Record<AskKind, AnswerAllGroup>> = { risk_digest: "risk", milestone_risk_review: "risk", missed_block: "missed", relation_check: "relation" };
+const GROUP_OF: Partial<Record<AskKind, AnswerAllGroup>> = { risk_digest: "risk", milestone_risk_review: "risk", missed_block: "missed", relation_check: "relation",
+  event_merge: "upkeep", calendar_line_unclear: "upkeep", source_project: "upkeep", travel_minutes: "upkeep", ledger_duplicate: "upkeep" };
 
 export function answerAllPlan(ctx: AccessContext, now = appNow()): AnswerAllPlan {
   const store = getStore();
@@ -59,6 +61,26 @@ export async function runAnswerAll(ctx: AccessContext, now = appNow()): Promise<
 export const AUTO_ANSWER_AFTER_MS = 48 * 3_600_000;
 /** The asks (id and fingerprint) and proposals once settled by `autoAnswerDue`; the last 500. */
 export const AUTO_ANSWERED_SETTING = "asks.autoAnswered";
+/** Each settling by `autoAnswerDue`: its undo operation and the kinds it settled, so an undo can be read as 「ask me about this kind」. */
+export const AUTO_ANSWERED_EVENT = "ask.auto_answered";
+
+/**
+ * Kinds the person no longer wants settled for them: their settling was undone `DO_THEN_TELL_REVERT_AFTER` times in the last thirty days.
+ * They wait the 48 hours again (A3, and attention-ledger §四.4: 「从撤销里学」).
+ */
+export function revertedKinds(ctx: AccessContext, now = appNow()): Set<AskKind> {
+  const store = getStore();
+  const since = new Date(now.getTime() - 30 * 86_400_000).toISOString();
+  const undone = new Set(store.listEvents(ctx.workspaceId, { type: "op.undone" }).filter((event) => event.createdAt >= since).map((event) => event.entityId));
+  const counts = new Map<AskKind, number>();
+  for (const event of store.listEvents(ctx.workspaceId, { type: AUTO_ANSWERED_EVENT }).filter((item) => item.createdAt >= since)) {
+    const payload = event.payload as { opId?: string; kinds?: AskKind[] };
+    if (!payload.opId || !undone.has(payload.opId)) continue;
+    for (const kind of new Set(payload.kinds ?? [])) counts.set(kind, (counts.get(kind) ?? 0) + 1);
+  }
+  return new Set([...counts].filter(([, count]) => count >= DO_THEN_TELL_REVERT_AFTER).map(([kind]) => kind));
+}
+
 /** When each open ask with a safe default was first seen by `autoAnswerDue`, for asks that carry no time of their own. */
 export const AUTO_ANSWER_SEEN_SETTING = "asks.autoAnswerSeen";
 const readSeen = (raw: string | undefined): Record<string, string> => {
@@ -85,20 +107,29 @@ export async function autoAnswerDue(ctx: AccessContext, now = appNow()): Promise
   const seen: Record<string, string> = {};
   for (const step of plan.asks) seen[keyOf(step.askId)] = seenBefore[keyOf(step.askId)] ?? now.toISOString();
   store.setSetting(ctx.workspaceId, AUTO_ANSWER_SEEN_SETTING, JSON.stringify(seen));
-  const due = (id: string) => {
-    const raised = Date.parse(open.get(id)?.raisedAt ?? "");
-    const at = Number.isFinite(raised) ? raised : Date.parse(seen[keyOf(id)] ?? "");
-    return Number.isFinite(at) && now.getTime() - at >= AUTO_ANSWER_AFTER_MS && !before.has(keyOf(id));
+  // Upkeep and risk kinds are settled at once and told (A3), unless the person's undos sent the kind back to waiting.
+  const reverted = revertedKinds(ctx, now);
+  const atOnce = (kind: AskKind) => DO_THEN_TELL_KINDS.has(kind) && !reverted.has(kind);
+  const due = (step: AnswerAllStep) => {
+    if (before.has(keyOf(step.askId))) return false;
+    if (atOnce(step.kind)) return true;
+    const raised = Date.parse(open.get(step.askId)?.raisedAt ?? "");
+    const at = Number.isFinite(raised) ? raised : Date.parse(seen[keyOf(step.askId)] ?? "");
+    return Number.isFinite(at) && now.getTime() - at >= AUTO_ANSWER_AFTER_MS;
   };
-  const asks = plan.asks.filter((step) => due(step.askId));
+  const asks = plan.asks.filter(due);
+  const waited = asks.every((step) => !atOnce(step.kind));
   const proposals = plan.proposals.filter((item) => !before.has(`proposal:${item.id}`));
   const total = asks.length + proposals.length;
   if (!total) return { done: 0 };
   const keys = [...before, ...asks.map((step) => keyOf(step.askId)), ...proposals.map((item) => `proposal:${item.id}`)];
   store.setSetting(ctx.workspaceId, AUTO_ANSWERED_SETTING, JSON.stringify(keys.slice(-500)));
   const t = tOf(ctx);
-  const result = await carryOut(ctx, { ...plan, asks, results: [], proposals, total }, t("没有回应 48 小时，已按推荐处理 {{count}} 项", { count: total }), now);
+  const result = await carryOut(ctx, { ...plan, asks, results: [], proposals, total },
+    waited ? t("没有回应 48 小时，已按推荐处理 {{count}} 项", { count: total }) : t("已按推荐处理 {{count}} 项", { count: total }), now);
   if (result.done && result.op) {
+    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `${AUTO_ANSWERED_EVENT}:${result.op.id}`, type: AUTO_ANSWERED_EVENT,
+      entityId: result.op.id, payload: { opId: result.op.id, kinds: [...new Set(asks.filter((step) => result.settled.includes(step.askId)).map((step) => step.kind))] } });
     // What each settled thing was, what was done to it, and where it can be seen (and changed) now: the bare 「已按推荐处理」 said none of it.
     const settled = new Set(result.settled);
     // An ask about one task or milestone is named by it: its own title is a sentence that already quotes it (「昨天 09:00 排的「X」没开始」).
@@ -109,7 +140,7 @@ export async function autoAnswerDue(ctx: AccessContext, now = appNow()): Promise
       ...asks.filter((step) => settled.has(step.askId)).map((step) => describeStep(t, step, open.get(step.askId), subjectOf)),
       ...proposals.filter((item) => settled.has(item.id)).map((item) => ({ title: item.title, did: t("提议过期没人批准，已归档（任务页可恢复）"),
         href: `/workbench/${encodeURIComponent(item.id)}` }))];
-    say(ctx, autoAnsweredNotice(t, items), result.op.id, now);
+    say(ctx, autoAnsweredNotice(t, items, waited), result.op.id, now);
   }
   return { done: result.done, ...(result.op ? { op: result.op } : {}) };
 }
@@ -129,13 +160,17 @@ function describeStep(t: ReturnType<typeof tOf>, step: AnswerAllStep, ask: Ask |
 const shortTitle = (title: string) => title.length > 14 ? `${title.slice(0, 13)}…` : title;
 
 /** The message and its links: each thing by name with what was done, at most three named, and a link to each (at most three pages). */
-export function autoAnsweredNotice(t: ReturnType<typeof tOf>, items: AutoAnswered[]): { text: string; links: Array<{ label: string; href: string }> } {
+export function autoAnsweredNotice(t: ReturnType<typeof tOf>, items: AutoAnswered[], waited = true): { text: string; links: Array<{ label: string; href: string }> } {
   const name = (item: AutoAnswered) => t("「{{title}}」", { title: item.title });
-  const text = items.length === 1
+  const list = () => items.slice(0, 3).map((item) => t("{{name}}{{did}}", { name: name(item), did: item.did })).join(t("；"))
+    + (items.length > 3 ? t("；另有 {{count}} 项", { count: items.length - 3 }) : "");
+  // Settled at once (A3): said without the wait, which there was none of.
+  const text = !waited ? (items.length === 1
+    ? t("{{name}}已按推荐处理：{{did}}。24 小时内可撤销。", { name: name(items[0]!), did: items[0]!.did })
+    : t("{{count}} 项已按推荐处理：{{list}}。24 小时内可撤销。", { count: items.length, list: list() }))
+    : items.length === 1
     ? t("{{name}}等了 48 小时没有回应，已按推荐处理：{{did}}。24 小时内可撤销。", { name: name(items[0]!), did: items[0]!.did })
-    : t("{{count}} 项等了 48 小时没有回应，已按推荐处理：{{list}}。24 小时内可撤销。", { count: items.length,
-      list: items.slice(0, 3).map((item) => t("{{name}}{{did}}", { name: name(item), did: item.did })).join(t("；"))
-        + (items.length > 3 ? t("；另有 {{count}} 项", { count: items.length - 3 }) : "") });
+    : t("{{count}} 项等了 48 小时没有回应，已按推荐处理：{{list}}。24 小时内可撤销。", { count: items.length, list: list() });
   const pages = [...new Map(items.map((item) => [item.href, item])).values()].slice(0, 3);
   const links = pages.map((item) => ({ label: pages.length === 1 ? t("去看看") : t("看{{name}}", { name: t("「{{title}}」", { title: shortTitle(item.title) }) }), href: item.href }));
   return { text, links };

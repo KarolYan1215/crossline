@@ -40,7 +40,9 @@ export function absenceSummary(view: ReturnView, locale?: Locale): string[] {
   const lines = [view.hoursAway >= 24 ? t("离开了 {{count}} 天（上次操作 {{day}}）。", { count: view.daysAway, day: md(view.sinceDay) })
     : view.hoursAway >= 1 ? t("上次操作在 {{count}} 小时前（{{day}}）。", { count: view.hoursAway, day: md(view.sinceDay) })
     : t("上次操作在不到 1 小时前（{{day}}）。", { day: md(view.sinceDay) })];
-  if (view.items.length) lines.push(t("期间有 {{count}} 个步骤排了时间或到了截止，下面逐项点一下，或用自己的话说。", { count: view.items.length }));
+  if (view.items.length) lines.push(t("期间有 {{count}} 个关系到里程碑或截止的步骤排了时间，下面逐项点一下，或用自己的话说。", { count: view.items.length }));
+  // Only what bears on a milestone or a deadline is listed (2026-11-20); the rest already has new times, said in one line.
+  if (view.happened.rolled) lines.push(t("另有 {{count}} 项与里程碑和截止无关，已自动顺延。", { count: view.happened.rolled }));
   // The count and the first day in a line; the items themselves are a short list below it (`DueSoon`), not one run-on sentence.
   if (view.happened.deadlinesSoon.length) lines.push(t("未来 7 天有 {{count}} 项到期，最早 {{day}}：", { count: view.happened.deadlinesSoon.length, day: md(dueSoon(view)[0]!.deadline) }));
   if (view.happened.assistantDone) lines.push(t("助手期间做完 {{count}} 项准备。", { count: view.happened.assistantDone }));

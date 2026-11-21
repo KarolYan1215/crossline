@@ -3,7 +3,7 @@ import { tOf } from "../../../../../lib/locale";
 import { titleOf, withUndo } from "../../../../../lib/undo";
 import { rejectUnsafeRequest } from "../guard";
 
-const REASONS = new Set<PostponeReason>(["waiting", "energy", "conflict", "time", "other"]);
+const REASONS = new Set<PostponeReason>(["none", "waiting", "energy", "conflict", "time", "other"]);
 
 /** `{reason, date, who, what, text}`: 推迟 with why; the reason decides what else changes (see `postponeTask`). */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -11,7 +11,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const guard = await rejectUnsafeRequest(request, id);
   if ("response" in guard) return guard.response;
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-  const reason = String(body.reason ?? "") as PostponeReason;
+  // The reason is optional (2026-11-20): none given is 「none」.
+  const reason = String(body.reason || "none") as PostponeReason;
   if (!REASONS.has(reason)) return Response.json({ ok: false, code: "POSTPONE_REASON_INVALID" }, { status: 400 });
   const result = await withUndo(guard.ctx, tOf(guard.ctx)("推迟：{{title}}", { title: titleOf(guard.ctx, id) }), () => postponeTask(guard.ctx, id, { reason, date: String(body.date ?? ""),
     who: String(body.who ?? "").slice(0, 60), what: String(body.what ?? "").slice(0, 200), text: String(body.text ?? "").slice(0, 500) }));

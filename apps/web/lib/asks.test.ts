@@ -296,6 +296,52 @@ test("「全部按推荐」 settles only kinds with a safe default, under one un
   expect(readRiskDecisions(TEST_CTX).mos2).toBeUndefined();
 });
 
+/** Two settlings of `kind` the person undid: the kind waits the 48 hours again. */
+function undoneTwice(store: ReturnType<typeof setup>, kind: string) {
+  for (const n of [1, 2]) {
+    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `aa-${kind}-${n}`, type: "ask.auto_answered", entityId: `op-${kind}-${n}`, payload: { opId: `op-${kind}-${n}`, kinds: [kind] } });
+    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `undone-${kind}-${n}`, type: "op.undone", entityId: `op-${kind}-${n}`, payload: { label: "x" } });
+  }
+}
+
+test("a risk the person can undo is settled by its recommendation at once and told, not left 48 hours (A3)", async () => {
+  const store = setup();
+  const { MILESTONE_RISKS_SETTING, milestoneRiskFingerprint } = await import("@crossline/core");
+  const { autoAnswerDue } = await import("./answer-all");
+  const { planToday, readRiskDecisions } = await import("./crossline");
+  const { undoOp } = await import("./undo");
+  store.saveMilestoneAnchor({ workspaceId: ws, milestoneId: "mos2", stage: 1, deadline: "2026-11-30", baseline: "", target: "", stakeholders: [],
+    sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
+  store.setSetting(ws, MILESTONE_RISKS_SETTING, JSON.stringify({ mos2: { fingerprint: milestoneRiskFingerprint({ title: "实测 MoS₂ 参数已可直接驱动 NeuroSim",
+    deadline: "2026-11-30", criteria: [], dependsOn: [] }), at: "2026-10-06T00:00:00Z", source: "model", risks: [{ level: "medium", kind: "capacity", note: "同月还有三个截止" }] } }));
+  const result = await autoAnswerDue(TEST_CTX, NOW);
+  expect(result.done).toBe(1);
+  expect(readRiskDecisions(TEST_CTX).mos2).toMatchObject({ how: "accept" });
+  const said = store.listConversationMessages(ws, store.conversationFor(ws, planToday(TEST_CTX, NOW)).id).filter((message) => message.role === "nudge");
+  const question = (said[0]!.payload as { card: { clarify: { question: string } } }).card.clarify.question;
+  expect(question).toMatch(/^「本周 1 个里程碑有风险」已按推荐处理：全部接受/);
+  expect(question).not.toContain("48 小时");
+  // The settling is recorded with its kinds, so an undo can be read as the person's 「ask me」.
+  expect(store.listEvents(ws, { type: "ask.auto_answered" }).map((event) => event.payload)).toEqual([{ opId: result.op!.id, kinds: ["risk_digest"] }]);
+  expect(undoOp(TEST_CTX, result.op!.id)).toMatchObject({ ok: true });
+  expect(await autoAnswerDue(TEST_CTX, NOW)).toEqual({ done: 0 });
+});
+
+test("a kind whose settling the person undid twice this month goes back to waiting 48 hours", async () => {
+  const store = setup();
+  const { MILESTONE_RISKS_SETTING, milestoneRiskFingerprint } = await import("@crossline/core");
+  const { autoAnswerDue, revertedKinds } = await import("./answer-all");
+  const { readRiskDecisions } = await import("./crossline");
+  undoneTwice(store, "risk_digest");
+  expect([...revertedKinds(TEST_CTX, NOW)]).toEqual(["risk_digest"]);
+  store.saveMilestoneAnchor({ workspaceId: ws, milestoneId: "mos2", stage: 1, deadline: "2026-11-30", baseline: "", target: "", stakeholders: [],
+    sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
+  store.setSetting(ws, MILESTONE_RISKS_SETTING, JSON.stringify({ mos2: { fingerprint: milestoneRiskFingerprint({ title: "实测 MoS₂ 参数已可直接驱动 NeuroSim",
+    deadline: "2026-11-30", criteria: [], dependsOn: [] }), at: "2026-10-06T00:00:00Z", source: "model", risks: [{ level: "medium", kind: "capacity", note: "同月还有三个截止" }] } }));
+  expect(await autoAnswerDue(TEST_CTX, NOW)).toEqual({ done: 0 });
+  expect(readRiskDecisions(TEST_CTX).mos2).toBeUndefined();
+});
+
 test("a safe decision left 48 hours takes its recommendation by itself, said once and undoable", async () => {
   const store = setup();
   const { MILESTONE_RISKS_SETTING, milestoneRiskFingerprint } = await import("@crossline/core");
@@ -304,7 +350,8 @@ test("a safe decision left 48 hours takes its recommendation by itself, said onc
   const { undoOp } = await import("./undo");
   store.saveMilestoneAnchor({ workspaceId: ws, milestoneId: "mos2", stage: 1, deadline: "2026-11-30", baseline: "", target: "", stakeholders: [],
     sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
-  // Raised 39 hours before NOW.
+  // The person sent risks back to waiting; raised 39 hours before NOW.
+  undoneTwice(store, "risk_digest");
   store.setSetting(ws, MILESTONE_RISKS_SETTING, JSON.stringify({ mos2: { fingerprint: milestoneRiskFingerprint({ title: "实测 MoS₂ 参数已可直接驱动 NeuroSim",
     deadline: "2026-11-30", criteria: [], dependsOn: [] }), at: "2026-10-06T00:00:00Z", source: "model", risks: [{ level: "medium", kind: "capacity", note: "同月还有三个截止" }] } }));
   expect(await autoAnswerDue(TEST_CTX, NOW)).toEqual({ done: 0 });
@@ -354,14 +401,14 @@ test("an ask about one milestone settled by itself is named by the milestone, no
   const { MILESTONE_RISKS_SETTING, milestoneRiskFingerprint } = await import("@crossline/core");
   const { autoAnswerDue } = await import("./answer-all");
   const { planToday } = await import("./crossline");
-  // Due in two days: its own card (not the weekly one), raised more than 48 hours ago.
+  // Due in two days: its own card (not the weekly one); settled at once (A3).
   store.setSetting(ws, MILESTONE_RISKS_SETTING, JSON.stringify({ mos2: { fingerprint: milestoneRiskFingerprint({ title: "实测 MoS₂ 参数已可直接驱动 NeuroSim",
     deadline: "2026-10-09", criteria: [], dependsOn: [] }), at: "2026-10-05T00:00:00Z", source: "model", risks: [{ level: "medium", kind: "capacity", note: "同月还有三个截止" }] } }));
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "milestone_risk_review")).toBe(true);
   expect((await autoAnswerDue(TEST_CTX, NOW)).done).toBe(1);
   const said = store.listConversationMessages(ws, store.conversationFor(ws, planToday(TEST_CTX, NOW)).id).filter((message) => message.role === "nudge");
   const card = (said[0]!.payload as { card: { clarify: { question: string; options: Array<{ kind?: string; href?: string }> } } }).card;
-  expect(card.clarify.question).toMatch(/^「实测 MoS₂ 参数已可直接驱动 NeuroSim」等了 48 小时没有回应，已按推荐处理：接受，按风险提前安排（/);
+  expect(card.clarify.question).toMatch(/^「实测 MoS₂ 参数已可直接驱动 NeuroSim」已按推荐处理：接受，按风险提前安排（/);
   expect(card.clarify.options.find((option) => option.kind === "href")?.href).toBe("/milestones?open=mos2");
 });
 
@@ -381,6 +428,7 @@ test("several things settled by themselves are each named with what was done, th
 
 test("an ask with no time of its own is settled 48 hours after it was first seen", async () => {
   const store = setup();
+  undoneTwice(store, "risk_digest");
   const { MILESTONE_RISKS_SETTING, milestoneRiskFingerprint } = await import("@crossline/core");
   const { autoAnswerDue } = await import("./answer-all");
   const { readRiskDecisions } = await import("./crossline");
@@ -464,7 +512,7 @@ test("a block not started stays asked about past the next morning, as its earlie
   expect(missed()).toEqual([]);
 });
 
-test("a block not started that nobody answers is rolled forward after 48 hours and the notice says so, linking to the task", async () => {
+test("a block not started is rolled forward at once and the notice says so, linking to the task", async () => {
   const store = setup();
   const { autoAnswerDue } = await import("./answer-all");
   const { planToday } = await import("./crossline");
@@ -476,7 +524,7 @@ test("a block not started that nobody answers is rolled forward after 48 hours a
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "missed_block")).toBe(false);
   const said = store.listConversationMessages(ws, store.conversationFor(ws, planToday(TEST_CTX, NOW)).id).filter((message) => message.role === "nudge");
   const card = (said[0]!.payload as { card: { clarify: { question: string; options: Array<{ kind?: string; href?: string }> } } }).card;
-  expect(card.clarify.question).toBe("「任务 x」等了 48 小时没有回应，已按推荐处理：顺延就好（按重新排的时间做）。24 小时内可撤销。");
+  expect(card.clarify.question).toBe("「任务 x」已按推荐处理：顺延就好（按重新排的时间做）。24 小时内可撤销。");
   expect(card.clarify.options.find((option) => option.kind === "href")?.href).toBe("/workbench/x");
 });
 
@@ -635,6 +683,20 @@ test("background work the worker paused is told to the person, with where to loo
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "background_paused")).toBe(false);
   store.setSetting(ws, "background.blocker", "");
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "background_paused")).toBe(false);
+});
+
+test("a state that recovers by itself is a line under the header, not a decision: off 待确认, out of the badge (P4)", async () => {
+  const store = setup();
+  const { listed, statusNotices } = await import("./asks");
+  store.setSetting(ws, "background.blocker", JSON.stringify({ code: "BUDGET_EXHAUSTED", message: "模型额度已用 97%。", at: NOW.toISOString() }));
+  // A calendar that failed to read names its calendars; a signed-out account names none and stays a question.
+  store.setSetting(ws, "calendar.sync.failure", JSON.stringify({ code: "ICS_FETCH_FAILED", message: "", sources: ["课表"], at: NOW.toISOString() }));
+  const open = collectAsks(TEST_CTX, NOW);
+  expect(open.some((ask) => ask.kind === "background_paused")).toBe(true);
+  expect(listed(open).some((ask) => ask.kind === "background_paused" || ask.kind === "calendar_sync_failed")).toBe(false);
+  expect(statusNotices(TEST_CTX, NOW).map((notice) => notice.title)).toEqual(expect.arrayContaining(["模型额度用完了：排程照常，AI 生成暂停", "读不到日历：课表"]));
+  store.setSetting(ws, "calendar.sync.failure", JSON.stringify({ code: "GRAPH_LOGIN_REQUIRED", message: "需要重新登录", sources: [], at: NOW.toISOString() }));
+  expect(listed(collectAsks(TEST_CTX, NOW)).some((ask) => ask.kind === "calendar_sync_failed")).toBe(true);
 });
 
 

@@ -85,8 +85,9 @@ export function snoozeBlock(ctx: AccessContext, workOrderId: string, blockId: st
   return { ok: true };
 }
 
-export type PostponeReason = "waiting" | "energy" | "conflict" | "time" | "other";
-const REASON_LABEL: Record<PostponeReason, string> = { waiting: "等待他人提供", energy: "精力不足", conflict: "与其他事项冲突", time: "时间不够", other: "其他" };
+/** `none`: no reason given — the reason is optional and never blocks the postponement (the owner's answer of 2026-11-20, round 4). */
+export type PostponeReason = "none" | "waiting" | "energy" | "conflict" | "time" | "other";
+const REASON_LABEL: Record<Exclude<PostponeReason, "none">, string> = { waiting: "等待他人提供", energy: "精力不足", conflict: "与其他事项冲突", time: "时间不够", other: "其他" };
 
 /**
  * 推迟, with why: the reason decides what else changes. Waiting for someone becomes a waiting item (the task stays off the schedule until
@@ -111,7 +112,9 @@ export function postponeTask(ctx: AccessContext, workOrderId: string, input: { r
     type: "task.postponed", entityId: workOrderId, payload: { reason: input.reason, until: date, text: input.text.trim().slice(0, 300) } });
   const t = tOf(ctx);
   const detail = input.reason === "waiting" ? `${input.who ? `${input.who} · ` : ""}${input.what}` : input.text.trim();
-  recordTaskNote(ctx, workOrderId, detail ? t("推迟至 {{day}} · {{reason}}：{{detail}}", { day: date, reason: t(REASON_LABEL[input.reason]), detail })
-    : t("推迟至 {{day}} · {{reason}}", { day: date, reason: t(REASON_LABEL[input.reason]) }), "postpone");
+  const reason = input.reason === "none" ? "" : t(REASON_LABEL[input.reason]);
+  recordTaskNote(ctx, workOrderId, !reason ? (detail ? t("推迟至 {{day}}：{{detail}}", { day: date, detail }) : t("推迟至 {{day}}", { day: date }))
+    : detail ? t("推迟至 {{day}} · {{reason}}：{{detail}}", { day: date, reason, detail })
+    : t("推迟至 {{day}} · {{reason}}", { day: date, reason }), "postpone");
   return { ok: true };
 }

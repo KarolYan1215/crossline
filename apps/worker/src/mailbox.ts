@@ -475,7 +475,7 @@ export function createMailService(deps: MailDeps & { cwd: string; client: (works
         if (checkSent) sentCheckedAt.set(workspaceId, now);
         followUp = await followUpReplies(replyDeps(workspaceId), workspaceId, { checkSent });
       }
-      if (fresh.length || sorted || drafts || followUp?.closed || followUp?.told || followUp?.reminded) {
+      if (fresh.length || sorted || drafts || followUp?.closed || followUp?.told) {
         deps.log?.({ type: "mail.pass", workspaceId, read: fresh.length, ...(sorted ?? {}), ...(sorted?.state === "done" ? { needsReply: sorted.needsReply.length } : {}),
           ...(drafts ? { drafts: { drafted: drafts.drafted, notNeeded: drafts.notNeeded, skipped: drafts.skipped.length } } : {}), ...(followUp ? { followUp } : {}) });
       }

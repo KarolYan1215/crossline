@@ -32,6 +32,13 @@ test("推迟 because someone owes something opens a waiting item; low energy is 
     .toEqual(["推迟至 2026-10-12 · 等待他人提供：师兄 · 实测数据", "推迟至 2026-10-10 · 精力不足：熬夜后注意力差"]);
 });
 
+test("推迟 needs no reason: it moves the task at once and says only the day (2026-11-20, 「可选，不拦」)", () => {
+  const store = setup();
+  expect(postponeTask(TEST_CTX, "w1", { reason: "none", date: "2026-10-12", who: "", what: "", text: "" })).toEqual({ ok: true });
+  expect(store.listWorkOrders(ws)[0]?.payload).toMatchObject({ notBefore: "2026-10-12" });
+  expect(store.listEvents(ws, { type: "task.note", entityId: "w1" }).map((event) => (event.payload as { text: string }).text)).toEqual(["推迟至 2026-10-12"]);
+});
+
 test("a note from the task's record is kept in the person's words", async () => {
   const store = setup();
   expect(await applyTaskOp(TEST_CTX, "w1", { type: "note", date: "", minutes: 0, stepId: "", text: "跑通了第一组数据", who: "", energy: "", summary: "记录" })).toEqual({ ok: true });

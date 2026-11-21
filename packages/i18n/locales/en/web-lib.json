@@ -478,6 +478,8 @@
   "{{when}} 前后自评精力低{{note}}，此时段宜安排低强度任务": "Low energy reported around {{when}}{{note}}; this time suits light work",
   "推迟至 {{day}} · {{reason}}：{{detail}}": "Postponed to {{day}} · {{reason}}: {{detail}}",
   "推迟至 {{day}} · {{reason}}": "Postponed to {{day}} · {{reason}}",
+  "推迟至 {{day}}": "Postponed to {{day}}",
+  "推迟至 {{day}}：{{detail}}": "Postponed to {{day}}: {{detail}}",
   "撤销恢复": "Restore undone",
   "撤销批准": "Approval undone",
   "里程碑批准已撤销": "Milestone approval undone",

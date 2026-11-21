@@ -155,17 +155,11 @@ test("the person's answer in the sent folder closes the draft and its message; �
   expect(closeMailReply(store, workspaceId, second!.id, "dismissed", "person", now)).toBe(true);
   expect(closeMailReply(store, workspaceId, second!.id, "replied", "person", now)).toBe(false);
   expect(openReplyDrafts(store, workspaceId).map((draft) => draft.id)).toEqual([third!.id]);
-  // 47 hours on: nothing; 48: the third (a day asked for) once; then never again.
-  now = new Date("2026-10-21T14:00:00Z");
-  expect(await followUpReplies(deps, workspaceId, { checkSent: false })).toMatchObject({ reminded: 0 });
-  now = new Date("2026-10-21T15:00:00Z");
-  expect(await followUpReplies(deps, workspaceId, { checkSent: false })).toMatchObject({ reminded: 1 });
+  // Said once only (P10, 2026-11-20): two days on, nothing more about the third.
   now = new Date("2026-10-22T15:00:00Z");
-  expect(await followUpReplies(deps, workspaceId, { checkSent: false })).toMatchObject({ reminded: 0 });
-  const reminder = nudges(store, workspaceId).at(-1)!;
-  expect((reminder.payload.card as { clarify: { question: string } }).clarify.question).toContain("还没有回复");
-  expect((reminder.payload.card as { mailReplyId: string }).mailReplyId).toBe(third!.id);
-  expect(readReplyDrafts(store, workspaceId).find((draft) => draft.id === third!.id)!.messageIds).toHaveLength(2);
+  const before = nudges(store, workspaceId).length;
+  await followUpReplies(deps, workspaceId, { checkSent: false });
+  expect(nudges(store, workspaceId)).toHaveLength(before);
 });
 
 test("a mailbox with no sent folder is recorded on the account (for the self-check), and cleared once one is found", async () => {

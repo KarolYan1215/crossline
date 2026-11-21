@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   MAIL_ACCOUNTS_SETTING, MAIL_DRAFTS_PER_ACCOUNT_DAY, MAIL_REPLIES_KEEP, readMailAccounts, MAIL_REPLIES_SETTING, MAIL_REPLY_DRAFT_SCHEMA, MAIL_REPLY_NUDGE_KIND, draftFileText, mailReplyQuiet,
-  replyReminderDue, validateMailReplyDraft, monthDay, tFor, type Locale, type MailReplyDraft, type MailReplyDraftAnswer
+  validateMailReplyDraft, monthDay, tFor, type Locale, type MailReplyDraft, type MailReplyDraftAnswer
 } from "@crossline/core";
 import { localeOf } from "./locale";
 import type { ImapMail, MailHeader } from "@crossline/connectors";
@@ -155,13 +155,13 @@ const buttons = (id: string, locale?: Locale): SayButton[] => {
 
 /**
  * The follow-up, every mail pass: drafts the person has since answered (their answer found in the sent folder) are closed; drafts not yet
- * told about are said once the moment is not quiet; a draft told about 48 hours ago whose mail named a day to answer by is mentioned once
- * more. No model is called here.
+ * told about are said once the moment is not quiet. Said once only (2026-11-20, P10: no second reminder — the draft stays in the bell
+ * list until answered or dismissed). No model is called here.
  */
 export async function followUpReplies(deps: ReplyDeps, workspaceId: string, options: { checkSent: boolean } = { checkSent: true }):
-  Promise<{ closed: number; told: number; reminded: number }> {
+  Promise<{ closed: number; told: number }> {
   const now = deps.now?.() ?? new Date();
-  let closed = 0, told = 0, reminded = 0;
+  let closed = 0, told = 0;
   const byAccount = new Map<string, MailReplyDraft[]>();
   if (options.checkSent) for (const draft of openReplyDrafts(deps.store, workspaceId)) byAccount.set(draft.accountId, [...(byAccount.get(draft.accountId) ?? []), draft]);
   for (const [accountId, drafts] of byAccount) {
@@ -176,7 +176,7 @@ export async function followUpReplies(deps: ReplyDeps, workspaceId: string, opti
     }
   }
   const open = openReplyDrafts(deps.store, workspaceId);
-  if (!open.some((draft) => !draft.notifiedAt || replyReminderDue(draft, now)) || quietReason(deps.store, workspaceId, now)) return { closed, told, reminded };
+  if (!open.some((draft) => !draft.notifiedAt) || quietReason(deps.store, workspaceId, now)) return { closed, told };
   const locale = localeOf(deps.store, workspaceId);
   const t = tFor(locale);
   for (const draft of open) {
@@ -190,13 +190,7 @@ export async function followUpReplies(deps: ReplyDeps, workspaceId: string, opti
         { ack: false, card: { mailReplyId: draft.id } });
       patch(deps.store, workspaceId, draft.id, { notifiedAt: now.toISOString(), messageIds: [...(draft.messageIds ?? []), messageId] });
       told += 1;
-    } else if (replyReminderDue(draft, now)) {
-      const text = t("{{sender}} 的邮件「{{subject}}」还没有回复。{{by}}草稿仍在，要点：{{points}}。", { sender: senderName(draft.from), subject, by, points });
-      const messageId = sayToPerson(deps.store, workspaceId, text, MAIL_REPLY_NUDGE_KIND, `mail-reply-again:${draft.id}`, buttons(draft.id, locale), now,
-        { ack: false, card: { mailReplyId: draft.id } });
-      patch(deps.store, workspaceId, draft.id, { remindedAt: now.toISOString(), messageIds: [...(draft.messageIds ?? []), messageId] });
-      reminded += 1;
     }
   }
-  return { closed, told, reminded };
+  return { closed, told };
 }

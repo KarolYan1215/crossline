@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import {
-  MAIL_DRAFT_NOTE, draftBodyOf, isMailReminderTitle, draftFileText, mailReplyQuiet, replyDraftsOn, replyReminderDue, validateMailReplyDraft, validateMailTriage, type MailReplyDraft
+  MAIL_DRAFT_NOTE, draftBodyOf, isMailReminderTitle, draftFileText, mailReplyQuiet, replyDraftsOn, validateMailReplyDraft, validateMailTriage, type MailReplyDraft
 } from "./mail";
 
 test("a reply with no wait behind it is a message that needs the person's answer; a named wait must still be open", () => {
@@ -41,15 +41,6 @@ test("messages about drafts follow the nudges' quiet rules", () => {
   expect(mailReplyQuiet({ ...base, level: "off" })).toBe("notify_off");
   expect(replyDraftsOn(undefined)).toBe(true);
   expect(replyDraftsOn("off")).toBe(false);
-});
-
-test("one reminder, 48 hours after the person was told, only when the mail named a day to answer by", () => {
-  const draft = { notifiedAt: "2026-10-19T10:00:00Z", replyBy: "2026-10-23" } as MailReplyDraft;
-  expect(replyReminderDue(draft, new Date("2026-10-21T09:59:00Z"))).toBe(false);
-  expect(replyReminderDue(draft, new Date("2026-10-21T10:00:00Z"))).toBe(true);
-  expect(replyReminderDue({ ...draft, remindedAt: "2026-10-21T10:00:00Z" }, new Date("2026-10-22T10:00:00Z"))).toBe(false);
-  expect(replyReminderDue({ ...draft, replyBy: "" }, new Date("2026-10-22T10:00:00Z"))).toBe(false);
-  expect(replyReminderDue({ ...draft, notifiedAt: undefined } as unknown as MailReplyDraft, new Date("2026-10-22T10:00:00Z"))).toBe(false);
 });
 
 test("a mail to-do that only asks to look at something is a reminder", () => {

@@ -180,8 +180,6 @@ export const MAIL_REPLIES_SETTING = "mail.replies";
 export const MAIL_REPLIES_KEEP = 60;
 /** At most this many drafts a day for each mailbox: a flood of mail must not become a flood of drafts and messages. */
 export const MAIL_DRAFTS_PER_ACCOUNT_DAY = 5;
-/** A draft still unanswered this long after the person was told, whose mail names a day to answer by, is mentioned once more. */
-export const MAIL_REPLY_REMIND_HOURS = 48;
 /** The nudge kind of these messages: 「少问这类」 mutes it for a week, like any other kind. */
 export const MAIL_REPLY_NUDGE_KIND = "mail_reply";
 /** The line every draft starts with (and the reason a copy of the body leaves it out), in the draft's language (`draftNote`). */
@@ -276,12 +274,6 @@ export function mailReplyQuiet(input: { clock: string; timerRunning: boolean; in
   if (input.clock < "08:00" || input.clock >= "23:00") return "night";
   if (input.timerRunning || input.inMeeting || input.answeredRecently) return "busy";
   return undefined;
-}
-
-/** The one reminder: told at least 48 hours ago, not reminded yet, and the sender named a day to answer by. */
-export function replyReminderDue(draft: MailReplyDraft, now: Date): boolean {
-  return Boolean(draft.notifiedAt && !draft.remindedAt && draft.replyBy
-    && now.getTime() - Date.parse(draft.notifiedAt) >= MAIL_REPLY_REMIND_HOURS * 3_600_000);
 }
 
 /**

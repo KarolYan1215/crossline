@@ -5,25 +5,23 @@ import { notifyPass, planNotifications, unconfirmedLastNight, type NotifyInput }
 
 const windows = [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "12:00", energy: "high" as const }, { days: [1, 2, 3, 4, 5], start: "14:00", end: "18:00", energy: "medium" as const }];
 const base: NotifyInput = { today: "2026-10-08", clock: "09:05", weekday: 4, level: "normal", windows, sent: new Set(), urgentSentToday: 0,
-  pending: 4, waitingDue: [{ id: "wait-1", who: "师兄", title: "真实测量数据" }],
+  pending: 4,
   dueSoon: [{ id: "m1", title: "实测 MoS₂ 参数可驱动 NeuroSim", deadline: "2026-10-09", daysLeft: 1 }], gateRefusals: [] };
 
 test("one morning brief at the first working hour, then one message for what would be missed today", () => {
   const planned = planNotifications(base);
   expect(planned[0]).toMatchObject({ kind: "brief", title: "今天的 Crossline" });
-  expect(planned[0]!.body).toContain("今天该到：师兄的真实测量数据");
   expect(planned[0]!.body).toContain("4 项待决定");
-  // Two at once go out as one, listing both and opening 待确认; it stands for both and counts once against the day's cap.
+  // 「到了吗」 is a decision on 待确认 (P10): counted in 「N 项待决定」, never said on its own.
+  expect(planned[0]!.body).not.toContain("今天该到");
   const urgent = planned.filter((item) => item.kind === "urgent");
-  expect(urgent).toHaveLength(1);
-  expect(urgent[0]).toMatchObject({ title: "2 件事等着决定", path: "/approvals", body: "师兄的真实测量数据到了吗？；明天到期：实测 MoS₂ 参数可驱动 NeuroSim",
-    covers: ["waiting:wait-1:2026-10-08", "due:m1:2026-10-08"] });
-  // One left is sent as itself.
-  expect(planNotifications({ ...base, sent: new Set(["brief:2026-10-08", "waiting:wait-1:2026-10-08"]) }).map((item) => item.title))
-    .toEqual(["明天到期：实测 MoS₂ 参数可驱动 NeuroSim"]);
+  expect(urgent.map((item) => item.title)).toEqual(["明天到期：实测 MoS₂ 参数可驱动 NeuroSim"]);
+  // Two at once go out as one, opening 待确认; it stands for both and counts once against the day's cap.
+  const two = planNotifications({ ...base, dueSoon: [...base.dueSoon, { id: "m2", title: "周报", deadline: "2026-10-08", daysLeft: 0 }], sent: new Set(["brief:2026-10-08"]) });
+  expect(two).toEqual([expect.objectContaining({ title: "2 件事等着决定", path: "/approvals", covers: ["due:m1:2026-10-08", "due:m2:2026-10-08"] })]);
   // More than three: the first three and how many more.
-  const many = planNotifications({ ...base, waitingDue: ["a", "b", "c", "d"].map((id) => ({ id, who: "", title: id })), dueSoon: [], sent: new Set(["brief:2026-10-08"]) });
-  expect(many).toEqual([expect.objectContaining({ title: "4 件事等着决定", body: "a到了吗？；b到了吗？；c到了吗？；还有 1 件" })]);
+  const many = planNotifications({ ...base, dueSoon: ["a", "b", "c", "d"].map((id) => ({ id, title: id, deadline: "2026-10-08", daysLeft: 0 })), sent: new Set(["brief:2026-10-08"]) });
+  expect(many).toEqual([expect.objectContaining({ title: "4 件事等着决定", body: "今天到期：a；今天到期：b；今天到期：c；还有 1 件" })]);
 });
 
 test("nothing before the day starts, nothing twice, a daily cap, and nothing at all when off", () => {
@@ -40,29 +38,34 @@ test("nothing before the day starts, nothing twice, a daily cap, and nothing at 
   expect(planNotifications({ ...base, clock: "21:00", sent: new Set(["brief:2026-10-08"]) })).toEqual([]);
 });
 
-test("a pass delivers and records each message once", async () => {
+const gateBlocked = (store: CrosslineStore, id: string) => store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: `gate-${id}`, type: "milestone_gate.blocked",
+  entityId: id, payload: { message: "SKILL_UNAUTHENTICATED" } });
+
+test("a pass delivers and records each message once; something awaited that is due is counted in the brief, not pushed", async () => {
   const store = new CrosslineStore(":memory:");
   store.setSetting("w", "schedule.availability", JSON.stringify(windows));
   store.saveWaitingItem({ id: "wait-1", ownerId: "o", workspaceId: "w", title: "真实测量数据", who: "师兄", expectedAt: "2026-10-08",
     approximate: true, followUpAt: "2026-10-08", state: "open", blocks: [], source: "analysis" });
+  gateBlocked(store, "g1");
   const shown: string[] = [];
-  const deliver = async (title: string) => { shown.push(title); return true; };
+  const bodies: string[] = [];
+  const deliver = async (title: string, body: string) => { shown.push(title); bodies.push(body); return true; };
   const now = new Date("2026-10-08T14:10:00Z"); // 09:10 in Chicago
-  expect(await notifyPass(store, "w", now, deliver)).toEqual(["brief:2026-10-08", "waiting:wait-1:2026-10-08"]);
+  expect(await notifyPass(store, "w", now, deliver)).toHaveLength(2);
   expect(await notifyPass(store, "w", now, deliver)).toEqual([]);
-  expect(shown).toEqual(["今天的 Crossline", "师兄的真实测量数据到了吗？"]);
+  expect(shown).toEqual(["今天的 Crossline", "验收没跑成：一项作业"]);
+  expect(bodies[0]).toContain("1 项待决定");
   store.close();
 });
 
 test("a batched message records every item it stood for, so none is sent again alone", async () => {
   const store = new CrosslineStore(":memory:");
   store.setSetting("w", "schedule.availability", JSON.stringify(windows));
-  for (const id of ["wait-1", "wait-2"]) store.saveWaitingItem({ id, ownerId: "o", workspaceId: "w", title: `数据 ${id}`, who: "", expectedAt: "2026-10-08",
-    approximate: true, followUpAt: "2026-10-08", state: "open", blocks: [], source: "analysis" });
+  for (const id of ["g1", "g2"]) gateBlocked(store, id);
   const shown: string[] = [];
   const deliver = async (title: string) => { shown.push(title); return true; };
   const now = new Date("2026-10-08T14:10:00Z");
-  expect(await notifyPass(store, "w", now, deliver)).toEqual(["brief:2026-10-08", "urgent:2026-10-08:2:waiting:wait-1:2026-10-08"]);
+  expect((await notifyPass(store, "w", now, deliver))[1]).toMatch(/^urgent:2026-10-08:2:gate:/);
   expect(await notifyPass(store, "w", new Date("2026-10-08T15:10:00Z"), deliver)).toEqual([]);
   expect(shown).toEqual(["今天的 Crossline", "2 件事等着决定"]);
   store.close();
@@ -77,7 +80,7 @@ test("with the web's asks, only those two days from a deadline interrupt, and th
   expect(planned[0]!.body).toContain("待决：「MoS₂」还缺：实测数据");
   expect(planned.filter((item) => item.kind === "urgent").map((item) => item.body))
     .toEqual(["「MoS₂」还缺：实测数据；明天到期：实测 MoS₂ 参数可驱动 NeuroSim"]);
-  expect(planNotifications({ ...base, waitingDue: [], dueSoon: [], gateRefusals: [{ id: "g", title: "仿真", message: "SKILL_UNAUTHENTICATED" }] })
+  expect(planNotifications({ ...base, dueSoon: [], gateRefusals: [{ id: "g", title: "仿真", message: "SKILL_UNAUTHENTICATED" }] })
     .filter((item) => item.kind === "urgent").map((item) => item.title)).toEqual(["验收没跑成：仿真"]);
 });
 
@@ -288,10 +291,10 @@ test("the person's quiet hours hold back single messages, and the brief goes at 
 test("new opportunities ride in the brief; one closing today is never pushed (2026-11-20)", () => {
   const opportunities = { fresh: [{ id: "o1", title: "暑期研究实习", deadline: "2026-12-01" }, { id: "o2", title: "黑客松", deadline: "2026-10-08" }],
     prepToday: [{ id: "need:x", title: "研究实习" }], closingToday: [{ id: "o2", title: "黑客松" }] };
-  const planned = planNotifications({ ...base, waitingDue: [], dueSoon: [], opportunities });
+  const planned = planNotifications({ ...base, dueSoon: [], opportunities });
   expect(planned[0]!.body).toContain("2 个新机会：暑期研究实习、黑客松");
   expect(planned[0]!.body).toContain("今天该开始准备：研究实习");
   expect(planned.some((item) => item.key === "opportunity:o2")).toBe(false);
   expect(planned.filter((item) => item.kind === "urgent")).toEqual([]);
-  expect(planNotifications({ ...base, waitingDue: [], dueSoon: [], opportunities, clock: "10:30", quiet: { from: "10:00", to: "11:00" }, sent: new Set(["brief:2026-10-08"]) })).toEqual([]);
+  expect(planNotifications({ ...base, dueSoon: [], opportunities, clock: "10:30", quiet: { from: "10:00", to: "11:00" }, sent: new Set(["brief:2026-10-08"]) })).toEqual([]);
 });

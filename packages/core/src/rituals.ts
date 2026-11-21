@@ -190,8 +190,25 @@ export const QUIET_UNTIL = "08:00";
  * accepting it unread would silence the one warning that still has time to matter.
  */
 export const ANSWER_ALL_KINDS: Partial<Record<AskKind, "recommended" | "snooze">> = {
-  risk_digest: "recommended", milestone_risk_review: "recommended", missed_block: "recommended", relation_check: "snooze"
+  risk_digest: "recommended", milestone_risk_review: "recommended", missed_block: "recommended", relation_check: "snooze",
+  // Calendar and data upkeep (docs/plans/attention-ledger-1120.md P9): each has a recommended answer, and what it writes the undo puts back
+  // (`schedule.*` and `calendar.lines` settings, a file's project, a record's fields).
+  event_merge: "recommended", calendar_line_unclear: "recommended", source_project: "recommended", travel_minutes: "recommended",
+  ledger_duplicate: "recommended",
+  // The week's commitment when nothing due this week is pushed (2026-11-20): later work to next week, stale work archived. The overload
+  // question (「砍哪件」) has no recommendation and stays the person's.
+  weekly_commit: "recommended"
 };
+
+/**
+ * Kinds settled by their recommendation as soon as they are raised, then told with an undo, instead of waiting 48 hours for the person
+ * (the owner's answer of 2026-11-20, A3: 「确认可撤销后直接做，做完之后在小帮手和 notification 汇报，附一键撤销」). Each is in
+ * `ANSWER_ALL_KINDS` with a recommended answer the snapshot undo reverses. A kind whose settling the person undid twice in a month goes
+ * back to waiting (`DO_THEN_TELL_REVERT_AFTER`): their undo says they want to be asked. `relation_check` has no safe answer and stays.
+ */
+export const DO_THEN_TELL_KINDS: ReadonlySet<AskKind> = new Set<AskKind>(["risk_digest", "milestone_risk_review", "missed_block",
+  "event_merge", "calendar_line_unclear", "source_project", "travel_minutes", "ledger_duplicate", "weekly_commit"]);
+export const DO_THEN_TELL_REVERT_AFTER = 2;
 
 export type AnswerAllStep = { askId: string; kind: AskKind; title: string } & ({ optionId: string } | { snooze: "week" });
 

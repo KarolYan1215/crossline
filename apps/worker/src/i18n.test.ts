@@ -14,22 +14,20 @@ import { isCheckNeeded, isLoginNeeded } from "./site-reader";
  */
 const windows = [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "12:00", energy: "high" as const }];
 const base: NotifyInput = { today: "2026-10-08", clock: "09:05", weekday: 4, level: "normal", windows, sent: new Set(), urgentSentToday: 0,
-  pending: 4, waitingDue: [{ id: "wait-1", who: "Alex", title: "the measured data" }],
+  pending: 4,
   dueSoon: [{ id: "m1", title: "Paper draft", deadline: "2026-10-09", daysLeft: 1 }], gateRefusals: [] };
 
 test("the morning brief and the urgent messages are written in the workspace's language", () => {
   const chinese = planNotifications(base);
   expect(chinese[0]).toMatchObject({ title: "今天的 Crossline" });
-  expect(chinese[0]!.body).toBe("今天该到：Alex的the measured data；1 天后到期：Paper draft；4 项待决定");
+  expect(chinese[0]!.body).toBe("1 天后到期：Paper draft；4 项待决定");
   const english = planNotifications({ ...base, locale: "en" });
   expect(english[0]).toMatchObject({ kind: "brief", title: "Crossline today" });
-  expect(english[0]!.body).toBe("Due to arrive today: the measured data from Alex; Due in 1 day: Paper draft; 4 decisions waiting");
+  expect(english[0]!.body).toBe("Due in 1 day: Paper draft; 4 decisions waiting");
+  expect(english.filter((item) => item.kind === "urgent").map((item) => item.title)).toEqual(["Due tomorrow: Paper draft"]);
   // Two at once go out as one message listing both.
-  expect(english.filter((item) => item.kind === "urgent").map((item) => [item.title, item.body])).toEqual([
-    ["2 things waiting for a decision", "Has the measured data from Alex arrived?; Due tomorrow: Paper draft"]]);
-  // One alone is sent as itself, in English.
-  expect(planNotifications({ ...base, locale: "en", dueSoon: [] }).filter((item) => item.kind === "urgent").map((item) => [item.title, item.body])).toEqual([
-    ["Has the measured data from Alex arrived?", "Once it arrives, press \"It has arrived\" so the work that depends on it can go on the calendar."]]);
+  const two = planNotifications({ ...base, locale: "en", dueSoon: [...base.dueSoon, { id: "m2", title: "Report", deadline: "2026-10-08", daysLeft: 0 }] });
+  expect(two.filter((item) => item.kind === "urgent").map((item) => item.title)).toEqual(["2 things waiting for a decision"]);
 });
 
 test("a pass for an English workspace sends English to the desktop and the phone", async () => {

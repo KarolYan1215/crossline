@@ -7,7 +7,7 @@ import { PENDING_CHANGED } from "../pending-badge";
 import type { Translate } from "../../lib/i18n";
 import "./answer-all.css";
 
-type Group = { group: "risk" | "missed" | "relation" | "assistant" | "proposal"; count: number };
+type Group = { group: "risk" | "missed" | "relation" | "assistant" | "proposal" | "upkeep"; count: number };
 type Plan = { total: number; groups: Group[] };
 
 /** Each kind as the confirmation names it; exported for its test. */
@@ -18,6 +18,7 @@ export function groupText(t: Translate, group: Group): string {
     case "relation": return t("关系兑现检查下周再问 {{count}} 项", { count: group.count });
     case "assistant": return t("助手成果采纳 {{count}} 项", { count: group.count });
     case "proposal": return t("过期提议归档 {{count}} 项", { count: group.count });
+    case "upkeep": return t("日历与数据整理按推荐 {{count}} 项", { count: group.count });
   }
 }
 

@@ -37,9 +37,34 @@ test("the week's work is what is due by Sunday, started or placed this week; wha
   expect(view.demandMinutes).toBe(2760);
   expect(Object.fromEntries(view.rows.map((row) => [row.id, row.suggestion.group]))).toEqual({ first: "keep", second: "defer", stale: "drop" });
   expect(view.rows.find((row) => row.id === "stale")).toMatchObject({ overdueDays: 11, suggestion: { reason: "stale" } });
+  // 「second」 is due this week and does not fit: pushing it would move its due day, so the week asks once 「砍哪件」 (2026-11-20), the
+  // work due this week not yet begun as the choices, no recommendation (it is never settled by itself).
   const ask = collectAsks(TEST_CTX, MONDAY).find((item) => item.kind === "weekly_commit")!;
-  expect(ask.options.map((option) => option.id)).toEqual(["suggested", "review", "keep"]);
-  expect(ask.why).toContain("推 1 项");
+  expect(ask.title).toContain("砍哪件");
+  expect(ask.select).toBe("many");
+  expect(ask.options.map((option) => option.id)).toEqual(["drop:second", "drop:first", "keep"]);
+  expect(ask.options.some((option) => option.recommended)).toBe(false);
+});
+
+test("「砍哪件」: what is picked is archived, work due this week that was not picked keeps its due day, stale work is cut as suggested", async () => {
+  const store = setup();
+  const ask = collectAsks(TEST_CTX, MONDAY).find((item) => item.kind === "weekly_commit")!;
+  expect(await answerAsk(TEST_CTX, ask.id, { optionIds: ["drop:first"] }, {}, MONDAY)).toMatchObject({ ok: true });
+  const byId = (id: string) => store.listWorkOrders(ws).find((order) => order.id === id)!;
+  expect(byId("first").state).toBe("archived");
+  expect(byId("second").payload).toEqual({ dueDate: "2026-10-16" });
+  expect(byId("stale").state).toBe("archived");
+});
+
+test("a week where nothing due in it is pushed is decided by the system: one recommendation, settled at once and told", async () => {
+  const store = setup();
+  // Without 「second」 the week holds its due work; the stale task is still cut and the undated one fits.
+  store.saveWorkOrder({ ...store.listWorkOrders(ws).find((order) => order.id === "second")!, payload: { dueDate: "2026-11-30" } });
+  const ask = collectAsks(TEST_CTX, MONDAY).find((item) => item.kind === "weekly_commit")!;
+  expect(ask.options.map((option) => option.id)).toEqual(["suggested"]);
+  const { autoAnswerDue } = await import("./answer-all");
+  expect((await autoAnswerDue(TEST_CTX, MONDAY)).done).toBe(1);
+  expect(store.listWorkOrders(ws).find((order) => order.id === "stale")!.state).toBe("archived");
 });
 
 test("measured capacity: the week is judged against what the person actually worked, so a week the stated hours call light is overloaded (closed-loop-1030 §1)", () => {
@@ -74,7 +99,7 @@ test("「确认本周」 pushes, cuts and records in one undo; the week is not a
   expect(store.getSetting(ws, WEEKLY_COMMIT_SETTING)).toBeFalsy();
 });
 
-test("「按建议确认」 on the card applies the suggestion; 「这周不调整」 keeps everything and counts the week as committed", async () => {
+test("「都不砍」 keeps everything and counts the week as committed", async () => {
   const store = setup();
   const ask = collectAsks(TEST_CTX, MONDAY).find((item) => item.kind === "weekly_commit")!;
   expect(await answerAsk(TEST_CTX, ask.id, "keep", {}, MONDAY)).toMatchObject({ ok: true });

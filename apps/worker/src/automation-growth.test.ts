@@ -16,8 +16,8 @@ function setup() {
   const store = new CrosslineStore(":memory:");
   const { workspace, principal } = store.createPrincipalWithWorkspace("user-1", "w");
   store.setSetting(workspace.id, "lines.custom", JSON.stringify([{ id: "research", label: "研究者" }, { id: "media", label: "创作者" }]));
-  const order = (id: string, identityId: string, intent: string) => store.saveWorkOrder({ id, ownerId: principal.id, workspaceId: workspace.id, identityId,
-    projectId: "", milestoneId: "", intent, state: "approved", riskTier: "routine", estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 60, source: "llm_prior", observationCount: 0, confidence: "low" },
+  const order = (id: string, identityId: string, intent: string, milestoneId = "m-course") => store.saveWorkOrder({ id, ownerId: principal.id, workspaceId: workspace.id, identityId,
+    projectId: "", milestoneId, intent, state: "approved", riskTier: "routine", estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 60, source: "llm_prior", observationCount: 0, confidence: "low" },
     payload: {} } as never);
   const errand = (taskId: string, workOrderId: string, title: string, category = "read_research_organize") => {
     store.appendEvent({ ownerId: principal.id, workspaceId: workspace.id, idempotencyKey: `req-${taskId}`, type: "agent.task.requested", entityId: taskId,
@@ -27,6 +27,13 @@ function setup() {
   };
   return { store, workspaceId: workspace.id, ownerId: principal.id, order, errand };
 }
+
+test("errands that serve no milestone are not offered as an automation, however often they repeat (the attention gate, 2026-11-20)", () => {
+  const { store, workspaceId, order, errand } = setup();
+  for (const n of [1, 2, 3]) { order(`wo-${n}`, "research", `整理收藏夹 ${n}`, ""); errand(`t${n}`, `wo-${n}`, `整理收藏夹成清单 ${n}`); }
+  expect(growCandidates(store, workspaceId, NOW).some((item) => item.origin.kind === "repeated")).toBe(true);
+  expect(suggestFromRepeats(store, workspaceId, growCandidates(store, workspaceId, NOW), NOW)).toBe(0);
+});
 
 test("accepted errands of one kind on one line for three pieces of work are offered as an automation once, and its button builds one on that line", async () => {
   const { store, workspaceId, ownerId, order, errand } = setup();

@@ -137,7 +137,7 @@ describe("answerAllSteps", () => {
       ask("step_question", [{ id: "a", label: "a", recommended: true }]),
       ask("milestone_overdue", [{ id: "makeup", label: "补做", recommended: true }]),
       ask("milestone_risk", [{ id: "accept", label: "接受" }]),
-      ask("weekly_commit", [{ id: "suggested", label: "按建议", recommended: true }]),
+      ask("weekly_commit", [{ id: "drop:a", label: "砍 a" }, { id: "keep", label: "都不砍" }]),
       ask("missed_block", [{ id: "x", label: "x", recommended: true, href: "/" }]),
       ask("milestone_risk_review", [{ id: "x", label: "x", recommended: true, fields: [{ id: "d", label: "d", kind: "date", required: true }] }]),
       ask("risk_digest", [{ id: "x", label: "x", recommended: true, needsNote: true }])

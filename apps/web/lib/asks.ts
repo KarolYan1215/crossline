@@ -649,23 +649,47 @@ function weeklyCommitAsks({ ctx, now, t, locale }: Source): Ask[] {
   // §0). The page stays open by hand from Today's day panel.
   if (!defer && !drop) return [];
   const hours = (minutes: number) => Math.round(minutes / 6) / 10;
-  return [{ id: `commit:${view.week}:${view.due}`, kind: "weekly_commit", entityId: view.week, urgency: "soon", important: true, raisedAt: "",
-    fingerprint: `${view.week}|${view.due}|${keep}/${defer}/${drop}`, preview: { kind: "plan", href: "/commit", label: t("逐项看") },
-    title: view.due === "overload"
-      ? t("本周的工作已超出可用时间：可用 {{usable}} 小时，排了 {{demand}} 小时", { usable: hours(view.capacityMinutes), demand: hours(view.demandMinutes) })
-      : t("定下 {{day}} 起这一周：可用 {{usable}} 小时，排了 {{demand}} 小时", { day: format(view.week, locale), usable: hours(view.capacityMinutes), demand: hours(view.demandMinutes) }),
-    why: t("按截止、里程碑重要性、逾期天数和是否已开始，建议保 {{keep}} 项、推 {{defer}} 项到下周、砍 {{drop}} 项（归档，可恢复）。", { keep, defer, drop })
-      + (locale === "en" ? " " : "") + t("可在本周承诺页逐项改；确认后一次生效，可撤销。"),
-    options: [
-      { id: "suggested", label: t("按建议确认"), recommended: true, detail: t("推的从下周一起排，砍的进已归档") },
-      { id: "review", label: t("逐项看"), href: "/commit" },
-      { id: "keep", label: t("这周不调整"), detail: t("都留在本周，排程照旧") }
-    ] }];
+  const base = { kind: "weekly_commit" as const, entityId: view.week, urgency: "soon" as const, important: true, raisedAt: "",
+    preview: { kind: "plan" as const, href: "/commit", label: t("看本周") } };
+  // Work due this week that the week's hours cannot hold: pushing it would move its due day, which only the person can decide.
+  const atRisk = view.rows.filter((row) => row.suggestion.group === "defer" && row.dueDay && row.dueDay <= view.weekEnd && !row.passedEvent);
+  if (!atRisk.length) {
+    // Nothing due this week is pushed (2026-11-20, round 2: 「系统按排程直接定」): work with later or no due days goes to next week, stale
+    // work and passed events are archived. One recommendation, settled at once by `autoAnswerDue` and told with an undo (A3).
+    return [{ ...base, id: `commit:${view.week}:${view.due}`, fingerprint: `${view.week}|${view.due}|${keep}/${defer}/${drop}`,
+      title: t("定下 {{day}} 起这一周：可用 {{usable}} 小时，排了 {{demand}} 小时", { day: format(view.week, locale), usable: hours(view.capacityMinutes), demand: hours(view.demandMinutes) }),
+      why: t("按截止、里程碑重要性、逾期天数和是否已开始，建议保 {{keep}} 项、推 {{defer}} 项到下周、砍 {{drop}} 项（归档，可恢复）。", { keep, defer, drop }),
+      options: [{ id: "suggested", label: t("按建议确认"), recommended: true, detail: t("推的从下周一起排，砍的进已归档") }] }];
+  }
+  // Over the week's hours with work due in it: asked once, 「砍哪件」 — the work due this week not yet begun, least important first. What
+  // is not picked stays this week with its due day; the rest of the suggestion (later work to next week) is carried out with it.
+  const candidates = view.rows.filter((row) => row.dueDay && row.dueDay <= view.weekEnd && !row.started && row.suggestion.group !== "drop")
+    .sort((a, b) => a.weight - b.weight || (b.dueDay ?? "").localeCompare(a.dueDay ?? "")).slice(0, 6);
+  return [{ ...base, id: `commit:${view.week}:cut`, fingerprint: `${view.week}|cut|${atRisk.map((row) => row.id).sort().join(",")}`, select: "many",
+    title: t("本周排不下：可用 {{usable}} 小时，排了 {{demand}} 小时。砍哪件？", { usable: hours(view.capacityMinutes), demand: hours(view.demandMinutes) }),
+    why: t("{{count}} 项本周截止的工作放不进本周的时间。选要砍的（归档，可恢复）；没选的留在本周，截止日不变，排程尽量挤。", { count: atRisk.length }),
+    options: [...candidates.map((row) => ({ id: `drop:${row.id}`, label: t("砍「{{title}}」", { title: row.title }),
+      detail: t("{{day}} 截止，约 {{hours}} 小时", { day: format(row.dueDay!, locale), hours: hours(row.minutes) }) })),
+      { id: "keep", label: t("都不砍"), detail: t("都留在本周，排不下的部分照样显示") }] }];
 }
 
-function answerWeeklyCommitAsk(ctx: AccessContext, ask: Ask, optionId: string): AskResult {
-  if (optionId !== "suggested" && optionId !== "keep") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
-  const result = applyWeeklyCommit(ctx, {}, { keepAll: optionId === "keep" });
+function answerWeeklyCommitAsk(ctx: AccessContext, ask: Ask, optionIds: string[]): AskResult {
+  if (optionIds.includes("keep")) {
+    const result = applyWeeklyCommit(ctx, {}, { keepAll: true });
+    return result.ok ? { ok: true } : result;
+  }
+  if (optionIds.length === 1 && optionIds[0] === "suggested") {
+    const result = applyWeeklyCommit(ctx, {});
+    return result.ok ? { ok: true } : result;
+  }
+  const cut = optionIds.filter((id) => id.startsWith("drop:")).map((id) => id.slice("drop:".length));
+  if (!cut.length || cut.length !== optionIds.length || !cut.every((id) => ask.options.some((option) => option.id === `drop:${id}`))) return { ok: false, code: "ASK_OPTION_UNKNOWN" };
+  // What was picked is cut; work due this week that was not picked stays (its due day is not moved); everything else as suggested.
+  const view = loadWeeklyCommit(ctx);
+  const chosen: Record<string, string> = {};
+  for (const row of view.rows) chosen[row.id] = cut.includes(row.id) ? "drop"
+    : row.suggestion.group === "defer" && row.dueDay && row.dueDay <= view.weekEnd ? "keep" : row.suggestion.group;
+  const result = applyWeeklyCommit(ctx, chosen);
   return result.ok ? { ok: true } : result;
 }
 
@@ -1342,7 +1366,26 @@ export async function loadAsks(ctx: AccessContext, now?: Date): Promise<Ask[]> {
  * shows one line 「访谈还有 N 题 → 继续访谈」 from `PendingCounts.questions`, and an `iq:` answer typed into the box still goes through.
  */
 const UNLISTED = new Set<Ask["kind"]>(["outcome_check", "progress_check", "interview_question", "interview_open"]);
-export const listed = (asks: Ask[]) => asks.filter((ask) => !UNLISTED.has(ask.kind));
+export const listed = (asks: Ask[]) => asks.filter((ask) => !UNLISTED.has(ask.kind) && !statusOnly(ask));
+
+/**
+ * A state with nothing for the person to decide (docs/plans/attention-ledger-1120.md P4, 2026-11-20): background work paused on the
+ * quota, or a calendar that failed to read while its account is still signed in (a failed read names the calendars; a signed-out
+ * account names none and stays an ask, since only the person can sign in again). Both recover by themselves. They are a line under
+ * the header (`statusNotices`, the runtime banner), not a decision: not on 待确认, not in the badge, never pushed.
+ */
+export const statusOnly = (ask: Ask): boolean => ask.kind === "background_paused"
+  || (ask.kind === "calendar_sync_failed" && !ask.id.endsWith(":"));
+
+export type StatusNotice = { id: string; title: string; message: string; href?: string; label?: string };
+
+/** The status lines the runtime banner shows (P4). */
+export function statusNotices(ctx: AccessContext, now?: Date): StatusNotice[] {
+  return openAsks(ctx, now).filter(statusOnly).map((ask) => {
+    const link = ask.options.find((option) => option.href);
+    return { id: ask.id, title: ask.title, message: ask.why ?? "", ...(link?.href ? { href: link.href, label: link.label } : {}) };
+  });
+}
 
 /** `op`: the operation the answer was recorded as (its 撤销), when there is one — the card's receipt offers it (2026-11-10). */
 export type AskResult = { ok: true; op?: { id: string; label: string } } | { ok: false; code: string };
@@ -1637,7 +1680,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
     case "outcome_check": return answerOutcome(ctx, ask, optionId, values, choice.note);
     case "progress_check": return answerProgress(ctx, ask, optionId, choice.note);
     case "risk_digest": return answerRiskDigest(ctx, optionId);
-    case "weekly_commit": return answerWeeklyCommitAsk(ctx, ask, optionId);
+    case "weekly_commit": return answerWeeklyCommitAsk(ctx, ask, choice.optionIds);
     case "milestone_risk_review": {
       const how: RiskDecision["how"] | undefined = optionId === "accept" ? "accept" : optionId === "extend" ? "extend" : optionId === "ignore" ? "ignore" : undefined;
       if (!how) return { ok: false, code: "ASK_OPTION_UNKNOWN" };

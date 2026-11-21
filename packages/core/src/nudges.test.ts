@@ -23,8 +23,8 @@ test("fifteen minutes before a block that bears on a deadline, it says so with �
   expect(planNudges(base({ sent: new Set(["start:scheduled:hw2:v1s1:2026-10-10"]) }))).toEqual([]);
 });
 
-test("every block of the day is asked about once within half an hour of its end, with a button that opens the confirm page", () => {
-  const ending = [{ id: "scheduled:read:v2s1", orderId: "read", stepId: "v2s1", title: "读 ECE 548 第 5 讲", step: "", day: "2026-10-10", start: "15:00", end: "15:30", endedTimerAt: "" }];
+test("a block due within three days is asked about once within half an hour of its end, with a button that opens the confirm page", () => {
+  const ending = [{ id: "scheduled:read:v2s1", orderId: "read", stepId: "v2s1", title: "读 ECE 548 第 5 讲", step: "", day: "2026-10-10", start: "15:00", end: "15:30", endedTimerAt: "", dueDay: "2026-10-13" }];
   const [nudge] = planNudges(base({ blocks: [], ending, clock: "15:40", now: "2026-10-10T20:40:00.000Z" }));
   expect(nudge).toMatchObject({ kind: "block_confirm", urgent: true, counted: true, fingerprint: "confirm:scheduled:read:v2s1:2026-10-10", block: ending[0] });
   expect(nudge!.buttons[0]).toEqual({ kind: "href", label: "确认", href: "/confirm/{message}" });
@@ -33,7 +33,7 @@ test("every block of the day is asked about once within half an hour of its end,
 });
 
 test("no question for a block whose timer the person already stopped, one whose timer still runs, or at night", () => {
-  const block = { id: "scheduled:read:v2s1", orderId: "read", stepId: "v2s1", title: "读 ECE 548 第 5 讲", step: "", day: "2026-10-10", start: "15:00", end: "15:30", endedTimerAt: "" };
+  const block = { id: "scheduled:read:v2s1", orderId: "read", stepId: "v2s1", title: "读 ECE 548 第 5 讲", step: "", day: "2026-10-10", start: "15:00", end: "15:30", endedTimerAt: "", dueDay: "2026-10-11" };
   expect(planNudges(base({ blocks: [], ending: [{ ...block, endedTimerAt: "15:25" }], clock: "15:40" }))).toEqual([]);
   const timer = { orderId: "read", title: "读", stepId: "v2s1", stepTitle: "", startedAt: "2026-10-10T20:00:00.000Z", usualMinutes: 300 };
   expect(planNudges(base({ blocks: [], ending: [block], clock: "15:40", timer })).map((item) => item.kind)).not.toContain("block_confirm");
@@ -41,13 +41,17 @@ test("no question for a block whose timer the person already stopped, one whose 
   expect(planNudges(base({ blocks: [], ending: [late], clock: "23:40", night: true }))).toEqual([]);
 });
 
-test("with the evening wrap-up on, a block is asked about alone only when its task is due by tomorrow; the rest wait for one wrap-up message", () => {
+test("a block is asked about only when the signals cannot settle it and its task is due within three days (A2); the wrap-up waits for the rest", () => {
   const block = { id: "scheduled:read:v2s1", orderId: "read", stepId: "v2s1", title: "读 ECE 548 第 5 讲", step: "", day: "2026-10-10", start: "15:00", end: "15:30", endedTimerAt: "" };
   const at = { blocks: [], clock: "15:40", now: "2026-10-10T20:40:00.000Z" };
   const wrap = { at: "21:00", open: 2, done: false };
   expect(planNudges(base({ ...at, ending: [block], wrap }))).toEqual([]);
   expect(planNudges(base({ ...at, ending: [{ ...block, dueDay: "2026-10-20" }], wrap }))).toEqual([]);
   expect(planNudges(base({ ...at, ending: [{ ...block, dueDay: "2026-10-11" }], wrap })).map((item) => item.kind)).toEqual(["block_confirm"]);
+  // Three days out is still asked; four is not. The same holds without the wrap-up.
+  expect(planNudges(base({ ...at, ending: [{ ...block, dueDay: "2026-10-13" }] })).map((item) => item.kind)).toEqual(["block_confirm"]);
+  expect(planNudges(base({ ...at, ending: [{ ...block, dueDay: "2026-10-14" }] }))).toEqual([]);
+  expect(planNudges(base({ ...at, ending: [{ ...block, dueDay: "2026-10-11", inferred: "done" as const }] }))).toEqual([]);
   // The passive signals say it was done or partly done: not asked during the day, it waits for the wrap-up (closed-loop-1030 §2).
   expect(planNudges(base({ ...at, ending: [{ ...block, dueDay: "2026-10-11", inferred: "done" as const }], wrap }))).toEqual([]);
   expect(planNudges(base({ ...at, ending: [{ ...block, dueDay: "2026-10-11", inferred: "partial" as const }], wrap }))).toEqual([]);
@@ -84,13 +88,13 @@ test("several short of time are said as one message, one slot of the cap, urgent
     .toMatchObject([{ fingerprint: "latest:d:2026-10-27:tight" }]);
 });
 
-test("under two days' measured worth to spare is said early; a self-set due day offers 推迟截止, every one 去本周承诺 (closed-loop-1030 §4–5)", () => {
+test("under two days' measured worth to spare is said early; a self-set due day offers 推迟截止 (closed-loop-1030 §4–5)", () => {
   const item = { orderId: "o", title: "周报", dueDay: "2026-10-27", remainingMinutes: 60, freeMinutes: 800, dailyMinutes: 420 };
   const [early] = planNudges(base({ blocks: [], slack: [item] }));
   expect(early).toMatchObject({ kind: "latest_start", urgent: false, fingerprint: "latest:o:2026-10-27:margin" });
-  expect(early!.buttons.map((button) => button.label)).toEqual(["现在开始", "去本周承诺", "调整计划", "少问这类"]);
+  expect(early!.buttons.map((button) => button.label)).toEqual(["现在开始", "调整计划", "少问这类"]);
   const [own] = planNudges(base({ blocks: [], slack: [{ ...item, selfSet: true, deferDue: "2026-10-29" }] }));
-  expect(own!.buttons.map((button) => button.label)).toEqual(["现在开始", "推迟截止", "去本周承诺", "调整计划", "少问这类"]);
+  expect(own!.buttons.map((button) => button.label)).toEqual(["现在开始", "推迟截止", "调整计划", "少问这类"]);
   expect(own!.buttons[1]).toMatchObject({ kind: "action", action: { action: "task.op", args: { workOrderId: "o", type: "due", date: "2026-10-29" } } });
 });
 

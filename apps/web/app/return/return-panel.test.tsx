@@ -6,14 +6,16 @@ const steps = [{ id: "v1s1", title: "推导第 1–2 题", done: false }, { id: 
 const item = { key: "hw3#v1s1", orderId: "hw3", stepId: "v1s1", title: "ECE 555 完成作业 3", step: "推导第 1–2 题", line: "research", lineLabel: "研究者",
   plannedDays: ["2026-10-11", "2026-10-12"], dueDay: "2026-10-14", p50Minutes: 60, lastStep: false, steps };
 const view = { since: "2026-10-10T07:49:00.000Z", sinceDay: "2026-10-10", daysAway: 3, hoursAway: 75, items: [item],
-  happened: { assistantDone: 2, proposals: 4, calendarChanges: 1, deadlinesSoon: [{ title: "ECE 548 期中 85 分", deadline: "2026-10-27" }] },
+  happened: { assistantDone: 2, proposals: 4, calendarChanges: 1, deadlinesSoon: [{ title: "ECE 548 期中 85 分", deadline: "2026-10-27" }], rolled: 0 },
   stale: { orders: [], milestones: [] } };
 
 test("it says how long the person was away and what happened, before anything else", () => {
-  expect(absenceSummary(view)).toEqual(["离开了 3 天（上次操作 10/10）。", "期间有 1 个步骤排了时间或到了截止，下面逐项点一下，或用自己的话说。",
+  expect(absenceSummary(view)).toEqual(["离开了 3 天（上次操作 10/10）。", "期间有 1 个关系到里程碑或截止的步骤排了时间，下面逐项点一下，或用自己的话说。",
     "未来 7 天有 1 项到期，最早 10/27：", "助手期间做完 2 项准备。", "日历变化 1 次，排程已跟着调整。"]);
-  expect(absenceSummary({ ...view, items: [], happened: { assistantDone: 0, proposals: 0, calendarChanges: 0, deadlinesSoon: [] } }))
+  expect(absenceSummary({ ...view, items: [], happened: { assistantDone: 0, proposals: 0, calendarChanges: 0, deadlinesSoon: [], rolled: 0 } }))
     .toEqual(["离开了 3 天（上次操作 10/10）。"]);
+  expect(absenceSummary({ ...view, items: [], happened: { assistantDone: 0, proposals: 0, calendarChanges: 0, deadlinesSoon: [], rolled: 2 } })[1])
+    .toBe("另有 2 项与里程碑和截止无关，已自动顺延。");
 });
 
 test("the coming deadlines are a short list under the summary, soonest first, the rest counted", () => {

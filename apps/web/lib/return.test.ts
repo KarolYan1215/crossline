@@ -19,7 +19,7 @@ function setup() {
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
   saveSchedulePreferences(TEST_CTX, { timeZone: "America/Chicago", mode: "buffered", windows: [{ days: [0, 1, 2, 3, 4, 5, 6], start: "08:00", end: "20:00", energy: "high" }], importance: {} });
   const order = (id: string, intent: string, payload: Record<string, unknown> = {}, state = "approved") => store.saveWorkOrder({ id, ownerId: TEST_CTX.principalId, workspaceId: ws,
-    identityId: "research", projectId: "ece555", milestoneId: "", intent, state, riskTier: "routine", estimate, payload: { family: "deep_work", materialContract: [], ...payload } });
+    identityId: "research", projectId: "ece555", milestoneId: "ece555-grade", intent, state, riskTier: "routine", estimate, payload: { family: "deep_work", materialContract: [], ...payload } });
   return { store, order };
 }
 // The person's last own action: something said in the input box.
@@ -57,6 +57,19 @@ test("coming back by answering something elsewhere first keeps the absence's pag
   // Settled — or skipped — it is gone.
   expect(answerReturn(TEST_CTX, "hw3", "rolled", {}, now)).toEqual({ ok: true });
   expect(returnDue(TEST_CTX, now)).toBeUndefined();
+});
+
+test("work that serves no milestone and has no due day is not listed: it already has new times, and the page counts it in one line", () => {
+  const { store } = setup();
+  const now = new Date();
+  said(store, new Date(now.getTime() - 4 * DAY));
+  store.saveWorkOrder({ id: "tidy", ownerId: TEST_CTX.principalId, workspaceId: ws, identityId: "research", projectId: "ece555", milestoneId: "", intent: "整理书桌",
+    state: "approved", riskTier: "routine", estimate, payload: { family: "deep_work", materialContract: [] } });
+  const day = new Date(now.getTime() - 2 * DAY).toLocaleDateString("en-CA", { timeZone: "America/Chicago" });
+  store.setSetting(ws, `schedule.day:${day}`, JSON.stringify({ tidy: "09:00" }));
+  const view = returnView(TEST_CTX, new Date(now.getTime() - 4 * DAY).toISOString(), now);
+  expect(view.items).toEqual([]);
+  expect(view.happened.rolled).toBe(1);
 });
 
 test("the work that had a time while away or whose due day passed is listed; what is done or untouched is not", () => {

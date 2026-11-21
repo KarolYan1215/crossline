@@ -470,6 +470,12 @@ export function createAutomationService(deps: AutomationDeps & { afterRequest?: 
 const SUGGEST_GAP_MS = 7 * 86_400_000;
 /** A pattern is worth automating only when it served this many different pieces of work, not one task's retries. */
 const SUGGEST_MIN_ORDERS = 3;
+/**
+ * And only when that work serves a milestone (the attention gate, the owner's answer of 2026-11-20: 「只为和里程碑相关、且重复出现的事建议
+ * 自动化」): a suggestion costs the person a decision, worth it where the errand bears on something they are working towards.
+ */
+const servesMilestone = (store: CrosslineStore, workspaceId: string, orderIds: Iterable<string>) =>
+  [...orderIds].some((id) => Boolean(store.getWorkOrder(workspaceId, id)?.milestoneId));
 
 export function suggestFromRepeats(store: CrosslineStore, workspaceId: string, candidates: Array<{ lineId: string; text: string; origin: { kind: string; taskIds?: string[] } }>, now = new Date()): number {
   const events = store.listEvents(workspaceId, { type: "automation.suggested" });
@@ -486,7 +492,7 @@ export function suggestFromRepeats(store: CrosslineStore, workspaceId: string, c
     if (candidate.origin.kind !== "repeated" || !candidate.origin.taskIds?.length) continue;
     if (candidate.origin.taskIds.some((id) => offered.has(id))) continue;
     const orders = new Set(candidate.origin.taskIds.map((id) => orderOf.get(id) ?? id));
-    if (orders.size < SUGGEST_MIN_ORDERS) continue;
+    if (orders.size < SUGGEST_MIN_ORDERS || !servesMilestone(store, workspaceId, orders)) continue;
     const key = `sugg-${createHash("sha256").update([...candidate.origin.taskIds].sort().join(",")).digest("hex").slice(0, 12)}`;
     if (suggested.has(key)) continue;
     store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `automation.suggested:${key}`, type: "automation.suggested", entityId: key,

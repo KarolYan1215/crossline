@@ -149,3 +149,16 @@
   - The evening wrap-up is not pushed.
   - An opportunity closing today is no longer pushed; the brief still names new ones.
   - The bell pops up only for `always` kinds; everything else waits behind the red dot.
+
+**Decisions that are not worth the person's attention (2026-11-20, batch 2 of `docs/plans/attention-ledger-1120.md`).**
+
+- **Do first, then tell (A3).** `DO_THEN_TELL_KINDS` (`packages/core/src/rituals.ts`): risk digests and reviews, missed blocks, event merges, unclear calendar lines, a file's project, travel minutes, ledger duplicates, and the weekly commitment when nothing due that week is pushed. `autoAnswerDue` (`apps/web/lib/answer-all.ts`, every 10 min) settles them by their recommendation as soon as they are raised. It says so once, with 撤销, and records `ask.auto_answered {opId, kinds}`. A kind undone twice in 30 days (`revertedKinds`, matched against `op.undone`) waits the old 48 hours again. Not here: anything that writes outside (`event_propose`), and anything without a recommendation.
+- **States are not questions (P4).** `statusOnly` (`apps/web/lib/asks.ts`) covers background work paused on the quota, and a calendar that failed to read while its account is still signed in (the failure names calendars). These leave `listed()`, so they are not on 待确认, not in the badge, and never in the urgent snapshot. `/api/runtime` returns them as `notices` and the runtime banner shows one quiet line each. A signed-out calendar (no calendars named) stays a question.
+- **Block confirmation (A2).** `block_confirm` is asked only when the passive signals cannot settle the block (they saw no work) and the task is due within `CONFIRM_DUE_WITHIN_DAYS` (3). Done or partly done is counted; nothing seen rolls forward.
+- **Return page.** Only work that serves a milestone or has a due day is listed. The rest is counted in `happened.rolled` and said in one line. Stale proposals are still archived on load, undoably.
+- **Weekly commitment.** The 保/推/砍 rows are no longer a decision.
+  - When no work due this week has to be pushed, the system applies its suggestion (do-then-tell).
+  - When it would have to be pushed, the ask is 「砍哪件」: multi-select, the week's due work not yet begun, no recommendation, so it is never settled by itself. What is not picked stays this week with its due day.
+  - The latest-start nudge no longer links to /commit.
+- **Optional, never blocking.** 推迟 moves the task at once; the reason is a one-tap tag (`none` by default). Closing a timer shows 完成 / 还没 as a status, and closing it without a tap leaves the step to inference.
+- **One home per thing (P10; general rule in `CLAUDE.md`).** 「到了吗」 lives on 待确认 only: the brief no longer lists 「今天该到」 and the worker no longer pushes it; it is counted in 「N 项待决定」. A reply draft is told once, with no 48-hour reminder. An automation is suggested only for repeated errands where at least one of the work orders serves a milestone.

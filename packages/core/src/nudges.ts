@@ -5,6 +5,7 @@
  * button is the answer, carried out at once and undoable) or by typing.
  */
 import { OVERRUN_RATIO } from "./session-time";
+import { addDays } from "./date-advance";
 import type { ProposedAction } from "./concierge";
 import { tFor, type Locale, type Translate } from "./i18n";
 
@@ -150,6 +151,11 @@ const START_LEAD_MINUTES = 15;
 const START_LATE_MINUTES = 10;
 /** A block is asked about within this many minutes of its end; after that the next day's `missed_block` question covers it. */
 const CONFIRM_WINDOW_MINUTES = 30;
+/**
+ * A block is asked about on its own only when its task is due within this many days (A2, the owner's answer of 2026-11-20): further
+ * out, a wrong guess costs one re-plan, and the block is rolled forward or counted by what the passive signals say.
+ */
+export const CONFIRM_DUE_WITHIN_DAYS = 3;
 /** 「推迟 10 分钟」 (2026-11-11 §3): the block is said again after this long; after `MAX_SNOOZES` it is not said again. */
 export const SNOOZE_MINUTES = 10;
 export const MAX_SNOOZES = 2;
@@ -200,13 +206,16 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
           { kind: "action", label: t("推到明天"), action: op(block.orderId, "defer", t("{{label}}推到明天", { label }), { date: input.tomorrow }), more: true }, mute] });
     }
   }
-  // The completion check (docs/loop-and-scout.md §3): every block of the day, once it ends, is asked about once — one tap records
-  // what happened. Not one whose timer the person already stopped, nor one whose timer still runs (the overrun question covers that).
+  // The completion check (docs/loop-and-scout.md §3). Since 2026-11-20 (A2: 「默认推断，少数才问」) a block is asked about only when the
+  // passive signals cannot settle it (they saw no work, or there are none) and its task is due within three days, where a wrong guess
+  // would cost the deadline. Everything else is inferred: done or partly done is counted, nothing seen rolls forward by itself. Not one
+  // whose timer the person already stopped, nor one whose timer still runs (the overrun question covers that).
   for (const block of input.ending) {
     const start = minutesOf(block.start), end = minutesOf(block.end);
     const stopped = block.endedTimerAt && minutesOf(block.endedTimerAt) >= start;
     if (now < end || now >= end + CONFIRM_WINDOW_MINUTES || stopped || input.timer?.orderId === block.orderId) continue;
-    if (input.wrap && !(block.dueDay && block.dueDay <= input.tomorrow && (block.inferred === undefined || block.inferred === "not_done"))) continue;
+    const settled = block.inferred === "done" || block.inferred === "partial";
+    if (settled || !block.dueDay || block.dueDay > addDays(input.today, CONFIRM_DUE_WITHIN_DAYS)) continue;
     const label = quoted(t, block.title, block.step);
     out.push({ kind: "block_confirm", fingerprint: `confirm:${block.id}:${input.today}`, urgent: true, counted: true, block,
       text: t("{{start}}–{{end}} 的{{label}}做得怎么样？", { start: block.start, end: block.end, label }),
@@ -234,7 +243,6 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
       buttons: [{ kind: "action", label: t("现在开始"), action: op(item.orderId, "start", t("开始{{label}}", { label: quoted(t, item.title) })) },
         ...(item.selfSet && item.deferDue ? [{ kind: "action" as const, label: t("推迟截止"),
           action: op(item.orderId, "due", t("{{label}}截止推到 {{day}}", { label: quoted(t, item.title), day: md(item.deferDue) }), { date: item.deferDue }) }] : []),
-        { kind: "href", label: t("去本周承诺"), href: "/commit" },
         { kind: "href", label: t("调整计划"), href: "/plan" }, mute] });
   }
   const fresh = latest.filter((item) => !input.sent.has(item.fingerprint)).sort((a, b) => Number(b.urgent) - Number(a.urgent));

@@ -60,7 +60,12 @@ export type ReturnView = {
   since: string; sinceDay: string; daysAway: number; hoursAway: number; items: ReturnItem[];
   /** When the absence ended, for one the person already came back from (the page reads its items again by `since` and this). */
   until?: string;
-  happened: { assistantDone: number; proposals: number; calendarChanges: number; deadlinesSoon: Array<{ title: string; deadline: string }> };
+  happened: { assistantDone: number; proposals: number; calendarChanges: number; deadlinesSoon: Array<{ title: string; deadline: string }>;
+    /**
+     * Work that had a time while away but serves no milestone and has no due day (P12 round 3, 2026-11-20: 「只列要紧的」): not listed,
+     * left to the scheduler, which already gave it new times; only counted, so the page can say so in one line.
+     */
+    rolled: number };
   stale: { orders: Array<{ id: string; title: string }>; milestones: Array<{ id: string; title: string }> };
 };
 
@@ -125,7 +130,7 @@ export function returnView(ctx: AccessContext, since: string, now: Date, until?:
     .map((event) => ({ orderId: event.entityId, stepId: (event.payload as { stepId?: string }).stepId ?? "" }));
   const answeredOrders = new Set(answers.filter((answer) => !answer.stepId).map((answer) => answer.orderId));
   const answeredSteps = new Set(answers.filter((answer) => answer.stepId).map((answer) => `${answer.orderId}#${answer.stepId}`));
-  const items = store.listWorkOrders(ctx.workspaceId).flatMap((order): ReturnItem[] => {
+  const all = store.listWorkOrders(ctx.workspaceId).flatMap((order): ReturnItem[] => {
     if (!OPEN.includes(order.state) || order.tombstone || answeredOrders.has(order.id) || (order.payload as { seeded?: boolean }).seeded || !onPersonsBoard(order)) return [];
     const dueDay = (order.payload as { dueDate?: string }).dueDate || anchors.get(order.milestoneId) || "";
     const plannedDays = planned.get(order.id) ?? [];
@@ -151,6 +156,10 @@ export function returnView(ctx: AccessContext, since: string, now: Date, until?:
     if (own.length && !open.length) return own.some((step) => step.status !== "done") ? [] : [itemOf(undefined, plannedDays)];
     return [itemOf(open[0], plannedDays)];
   }).sort((a, b) => (a.dueDay || "9999").localeCompare(b.dueDay || "9999") || (a.plannedDays[0] ?? "9999").localeCompare(b.plannedDays[0] ?? "9999"));
+  // Only what bears on something (round 3, 2026-11-20): a milestone's work, or work with a due day. The rest already has new times.
+  const milestoneOf = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order.milestoneId]));
+  const matters = (item: ReturnItem) => Boolean(item.dueDay || milestoneOf.get(item.orderId));
+  const items = all.filter(matters);
   const approvedDeadlines = store.listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "approved")
     .flatMap((milestone) => { const deadline = anchors.get(milestone.id); return deadline && deadline >= today && deadline <= addDays(today, 7) ? [{ title: milestone.title, deadline }] : []; })
     .sort((a, b) => a.deadline.localeCompare(b.deadline));
@@ -162,7 +171,8 @@ export function returnView(ctx: AccessContext, since: string, now: Date, until?:
       assistantDone: listAgentTasks(store, ctx.workspaceId).filter((task) => ["needs_review", "accepted"].includes(task.status) && finishedAt(task) >= since).length,
       proposals: store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "awaiting_plan_approval" && onPersonsBoard(order)).length,
       calendarChanges: store.listEvents(ctx.workspaceId, { type: "plan.reality_changed" }).filter((event) => event.createdAt >= since).length,
-      deadlinesSoon: approvedDeadlines
+      deadlinesSoon: approvedDeadlines,
+      rolled: new Set(all.filter((item) => !matters(item)).map((item) => item.orderId)).size
     },
     stale: staleItems(ctx, now)
   };

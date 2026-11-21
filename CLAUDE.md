@@ -122,6 +122,17 @@ These constraints are enforced in code, not just docs — read the relevant sour
 
 If a change would add or enable a real external write path (Graph OAuth, publishing, trading, outreach) or would let raw camera/media data leave the browser, flag it explicitly — these are deliberate, currently-unimplemented boundaries per the project README, not oversights.
 
+## Attention: one home per thing
+
+The system exists to spend the person's limited attention where it is worth it (owner's rule of 2026-11-20, `docs/plans/attention-ledger-1120.md`). Every new reminder, question, push, badge count or Today line must say which home it belongs to, what it duplicates, and what attention it saves — compare "with it vs without it":
+
+- **A decision** lives on 待确认 (Today shows the first few); the header badge counts only these.
+- **Something to know** lives in the morning brief *or* one Today line — never both.
+- **Something the system did** lives in the bell list and the 小帮手, with an undo; the brief counts it in one line. It is never pushed.
+- **Details** live on their own page, shown only when the person opens it.
+- A push interrupts only for what needs the person to act now (`packages/core/src/push-policy.ts`). An action with a safe, undoable recommendation is done first and told, not asked (`DO_THEN_TELL_KINDS`).
+- Attention is worth spending where it bears on a milestone, has external consequences, only the person can decide, or cannot be undone.
+
 ## Notes
 
 - Before walking the live beta as a tester (app.crossline.lol / test.crossline.lol), read `docs/walkthrough-ledger.md`: walk only paths it does not list or that changed since, and record paths and findings there in the same change.

@@ -37,7 +37,6 @@ export type NotifyInput = {
   /** Single (non-brief) messages already sent today: the daily cap counts them. */
   urgentSentToday: number;
   pending: number;
-  waitingDue: Array<{ id: string; who: string; title: string }>;
   dueSoon: Array<{ id: string; title: string; deadline: string; daysLeft: number }>;
   gateRefusals: Array<{ id: string; title: string; message: string }>;
   /** Work blocks that ended last night after the quiet hours began and were never confirmed (the brief says how many). */
@@ -84,8 +83,8 @@ export function planNotifications(input: NotifyInput): PlannedNotification[] {
   const [h, m] = (start ?? "00:00").split(":").map(Number);
   const briefEnd = `${String(Math.min(23, h! + 4)).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
   if (start && input.clock >= start && input.clock < briefEnd && !input.sent.has(briefKey)) {
+    // 「到了吗」 is a decision, and a decision's one home is 待确认 (P10, 2026-11-20): counted in 「N 项待决定」, not said again here.
     const lines = [
-      ...input.waitingDue.map((item) => item.who ? t("今天该到：{{who}}的{{title}}", { who: item.who, title: item.title }) : t("今天该到：{{title}}", { title: item.title })),
       ...input.dueSoon.map((item) => item.daysLeft === 0 ? t("今天到期：{{title}}", { title: item.title })
         : t("{{count}} 天后到期：{{title}}", { count: item.daysLeft, title: item.title })),
       ...(input.asks ?? []).filter((ask) => ask.urgency === "now" && !ask.id.startsWith("wait:")).map((ask) => t("待决：{{title}}", { title: ask.title }))
@@ -108,9 +107,6 @@ export function planNotifications(input: NotifyInput): PlannedNotification[] {
     ? [...input.asks.filter((ask) => ask.urgency === "now").map((ask) => ({ key: `ask:${ask.id}:${input.today}`, kind: "urgent" as const, path: ask.path,
       title: ask.title, body: t("关系到两天内的截止。打开 Crossline 选一个答案，或者让它明天再问。") })), ...due]
     : [
-      ...input.waitingDue.map((item) => ({ key: `waiting:${item.id}:${input.today}`, kind: "urgent" as const, path: "/",
-        title: item.who ? t("{{who}}的{{title}}到了吗？", { who: item.who, title: item.title }) : t("{{title}}到了吗？", { title: item.title }),
-        body: t("到了就点「到了」，依赖它的工作才会排进日历。") })),
       ...due,
       // A gate *run* that did not happen (logged out, quota): not a verdict on the work, and no longer titled as one.
       ...input.gateRefusals.map((item) => ({ key: `gate:${item.id}`, kind: "urgent" as const, path: "/approvals",
@@ -211,10 +207,11 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
   const planned = planNotifications({ today, clock, weekday, level, windows, sent, urgentSentToday, locale,
     quiet: quietHoursOf(store.getSetting(workspaceId, QUIET_HOURS_SETTING)), ...(isClock(briefAt) ? { briefAt } : {}),
     ...(attention ? { asks: attention.asks } : {}),
+    // Without the web's view, what waits on the person counted here: proposals, drafts, and things awaited that are due (「到了吗」, whose
+    // one home is 待确认 — P10, 2026-11-20 — so it is counted, not said on its own or pushed).
     pending: attention?.pending ?? store.listWorkOrders(workspaceId).filter((order) => order.state === "awaiting_plan_approval").length
-      + store.listMilestones(workspaceId).filter((milestone) => milestone.status === "draft").length,
-    waitingDue: store.listWaitingItems(workspaceId, { state: "open" }).filter((item) => item.followUpAt <= today)
-      .map((item) => ({ id: item.id, who: item.who, title: item.title })),
+      + store.listMilestones(workspaceId).filter((milestone) => milestone.status === "draft").length
+      + store.listWaitingItems(workspaceId, { state: "open" }).filter((item) => item.followUpAt <= today).length,
     dueSoon: store.listMilestones(workspaceId).filter((milestone) => milestone.status === "approved" && anchors.get(milestone.id) && !accepted.has(milestone.id))
       .map((milestone) => ({ id: milestone.id, title: milestone.title, deadline: anchors.get(milestone.id)!, daysLeft: daysLeft(anchors.get(milestone.id)!) }))
       .filter((item) => item.daysLeft >= 0 && item.daysLeft <= 3).sort((a, b) => a.daysLeft - b.daysLeft),
