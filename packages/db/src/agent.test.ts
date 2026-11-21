@@ -111,9 +111,11 @@ test("a result is no longer a decision once its task is finished or archived, or
     run("dead", "gone", "别的", "2026-10-11T00:00:00Z");
     run("flow-a", "", "每周整理收藏夹", "2026-10-16T00:00:00Z");
     run("flow-b", "", "每周整理收藏夹", "2026-10-20T00:00:00Z");
+    // The weekly scout's finds go to the weekly review by code; the run itself is no decision.
+    run("scout-2026-10-21-abc123", "", "每周机会侦察", "2026-10-21T00:00:00Z");
     expect(resultsAwaitingReview(store, ws).map((task) => task.taskId).sort()).toEqual(["flow-b", "new", "other-step"]);
     // The replaced and the dead keep their own status: their files are still shown with the task.
-    expect(listAgentTasks(store, ws).filter((task) => task.status === "needs_review")).toHaveLength(6);
+    expect(listAgentTasks(store, ws).filter((task) => task.status === "needs_review")).toHaveLength(7);
     // Steps of one task whose titles have no step part (「任务 · 」) are different work, each still the person's to look at.
     run("s4", "live", "两个案例 · ", "2026-10-17T00:00:00Z");
     event("agent.task.requested", "s5", { title: "两个案例 · ", category: "read_research_organize", workOrderId: "live", stepId: "v1s5" });

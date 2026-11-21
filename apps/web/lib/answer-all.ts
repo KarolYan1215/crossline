@@ -125,17 +125,17 @@ export async function autoAnswerDue(ctx: AccessContext, now = appNow()): Promise
   const keys = [...before, ...asks.map((step) => keyOf(step.askId)), ...proposals.map((item) => `proposal:${item.id}`)];
   store.setSetting(ctx.workspaceId, AUTO_ANSWERED_SETTING, JSON.stringify(keys.slice(-500)));
   const t = tOf(ctx);
-  const result = await carryOut(ctx, { ...plan, asks, results: [], proposals, total },
-    waited ? t("没有回应 48 小时，已按推荐处理 {{count}} 项", { count: total }) : t("已按推荐处理 {{count}} 项", { count: total }), now);
+  // An ask about one task or milestone is named by it: its own title is a sentence that already quotes it (「昨天 09:00 排的「X」没开始」).
+  const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, taskTitleOf(order)]));
+  const milestones = new Map(store.listMilestones(ctx.workspaceId).map((milestone) => [milestone.id, milestone.title]));
+  const subjectOf = (ask: Ask) => orders.get(ask.entityId) ?? milestones.get(ask.entityId);
+  const result = await carryOut(ctx, { ...plan, asks, results: [], proposals, total }, autoAnsweredLabel(t, total, waited,
+    asks[0] ? (open.get(asks[0].askId) && subjectOf(open.get(asks[0].askId)!)) || asks[0].title : proposals[0]!.title), now);
   if (result.done && result.op) {
     store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `${AUTO_ANSWERED_EVENT}:${result.op.id}`, type: AUTO_ANSWERED_EVENT,
       entityId: result.op.id, payload: { opId: result.op.id, kinds: [...new Set(asks.filter((step) => result.settled.includes(step.askId)).map((step) => step.kind))] } });
     // What each settled thing was, what was done to it, and where it can be seen (and changed) now: the bare 「已按推荐处理」 said none of it.
     const settled = new Set(result.settled);
-    // An ask about one task or milestone is named by it: its own title is a sentence that already quotes it (「昨天 09:00 排的「X」没开始」).
-    const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, taskTitleOf(order)]));
-    const milestones = new Map(store.listMilestones(ctx.workspaceId).map((milestone) => [milestone.id, milestone.title]));
-    const subjectOf = (ask: Ask) => orders.get(ask.entityId) ?? milestones.get(ask.entityId);
     const items: AutoAnswered[] = [
       ...asks.filter((step) => settled.has(step.askId)).map((step) => describeStep(t, step, open.get(step.askId), subjectOf)),
       ...proposals.filter((item) => settled.has(item.id)).map((item) => ({ title: item.title, did: t("提议过期没人批准，已归档（任务页可恢复）"),
@@ -158,6 +158,18 @@ function describeStep(t: ReturnType<typeof tOf>, step: AnswerAllStep, ask: Ask |
 }
 
 const shortTitle = (title: string) => title.length > 14 ? `${title.slice(0, 13)}…` : title;
+
+/**
+ * The undo menu's line for one pass: what is undone, named (walking the hosted account, 2026-11-21: 「已按推荐处理 1 项」 left the person
+ * unable to tell whether to undo it without opening the bell).
+ */
+export function autoAnsweredLabel(t: ReturnType<typeof tOf>, total: number, waited: boolean, first: string): string {
+  // The menu has a line to itself: a longer name than a link label's.
+  const title = first.length > 24 ? `${first.slice(0, 23)}…` : first;
+  if (total === 1) return waited ? t("没有回应 48 小时，已按推荐处理「{{title}}」", { title }) : t("已按推荐处理「{{title}}」", { title });
+  return waited ? t("没有回应 48 小时，已按推荐处理「{{title}}」等 {{count}} 项", { title, count: total })
+    : t("已按推荐处理「{{title}}」等 {{count}} 项", { title, count: total });
+}
 
 /** The message and its links: each thing by name with what was done, at most three named, and a link to each (at most three pages). */
 export function autoAnsweredNotice(t: ReturnType<typeof tOf>, items: AutoAnswered[], waited = true): { text: string; links: Array<{ label: string; href: string }> } {

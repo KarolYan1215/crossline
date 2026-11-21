@@ -19,10 +19,8 @@
   "{{names}}本人的步骤都做完了，已按完成交上；剩下的助手或等待步骤不再占本人时间。24 小时内可撤销。": "{{names}}: every step of the person's is done, so it was handed in as finished; the assistant's or waiting steps left take none of the person's time. Undo within 24 hours.",
   "撤销自动交上": "Undo handing in by itself",
   "撤销自动处理": "Undo settling by itself",
-  "没有回应 48 小时，已按推荐处理 {{count}} 项": "No answer in 48 hours: {{count}} settled as recommended",
   "{{name}}等了 48 小时没有回应，已按推荐处理：{{did}}。24 小时内可撤销。": "{{name}} waited 48 hours without an answer and was settled as recommended: {{did}}. This can be undone within 24 hours.",
   "{{count}} 项等了 48 小时没有回应，已按推荐处理：{{list}}。24 小时内可撤销。": "{{count}} items waited 48 hours without an answer and were settled as recommended: {{list}}. This can be undone within 24 hours.",
-  "已按推荐处理 {{count}} 项": "{{count}} settled as recommended",
   "{{name}}已按推荐处理：{{did}}。24 小时内可撤销。": "{{name}} was settled as recommended: {{did}}. This can be undone within 24 hours.",
   "{{count}} 项已按推荐处理：{{list}}。24 小时内可撤销。": "{{count}} items were settled as recommended: {{list}}. This can be undone within 24 hours.",
   "{{name}}{{did}}": "{{name}}: {{did}}",
@@ -69,5 +67,9 @@
   "不算工作": "Not work",
   "以后这类都算这件": "Always count this kind as this task",
   "按拟计时记 {{minutes}} 分": "Record {{minutes}} min from the draft",
-  "已按拟计时记 {{minutes}} 分": "Recorded {{minutes}} min from the draft"
+  "已按拟计时记 {{minutes}} 分": "Recorded {{minutes}} min from the draft",
+  "没有回应 48 小时，已按推荐处理「{{title}}」": "No answer in 48 hours: “{{title}}” settled as recommended",
+  "已按推荐处理「{{title}}」": "“{{title}}” settled as recommended",
+  "没有回应 48 小时，已按推荐处理「{{title}}」等 {{count}} 项": "No answer in 48 hours: “{{title}}” and others, {{count}} settled as recommended",
+  "已按推荐处理「{{title}}」等 {{count}} 项": "“{{title}}” and others, {{count}} settled as recommended"
 }

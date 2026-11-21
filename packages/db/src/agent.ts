@@ -197,12 +197,15 @@ export function listAgentTasks(store: CrosslineStore, workspaceId: string, now =
  * walking the real account: 35 results waited, the oldest from 10-08) — a result for a task since accepted or archived, and an older run
  * of the same piece of work (same task and deliverable, or the same grown workflow) that a later finished run replaced. Those keep their
  * status and their files; they are only no longer a decision. 待确认, its count and the input box read this.
+ * The weekly opportunity scout (`scout-<day>-…`, apps/worker/src/opportunity-scout.ts) is not one either: code reads its file and puts
+ * each checked find in the weekly review, so 批准 / 退回 on the run itself decided nothing (walking the hosted account, 2026-11-21).
  */
 export function resultsAwaitingReview(store: CrosslineStore, workspaceId: string, rows: AgentTaskRow[] = listAgentTasks(store, workspaceId)): AgentTaskRow[] {
   const gone = new Set(store.listWorkOrders(workspaceId).filter((order) => order.state === "accepted" || order.state === "archived").map((order) => order.id));
   // Same work = same order and step, or the same deliverable after a replan re-ided the step (`sameWork` in core).
   const replaced = supersededResults(rows.filter((row) => !row.settled));
-  return rows.filter((row) => row.status === "needs_review" && !row.settled && !(row.workOrderId && gone.has(row.workOrderId)) && !replaced.has(row.taskId));
+  return rows.filter((row) => row.status === "needs_review" && !row.settled && !(row.workOrderId && gone.has(row.workOrderId)) && !replaced.has(row.taskId)
+    && !row.taskId.startsWith("scout-"));
 }
 
 /**

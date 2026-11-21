@@ -392,6 +392,9 @@ test("a proposal put away by itself says it was archived and links to its task p
   const said = store.listConversationMessages(ws, store.conversationFor(ws, planToday(TEST_CTX, NOW)).id).filter((message) => message.role === "nudge");
   const card = (said[0]!.payload as { card: { clarify: { question: string; options: Array<{ kind?: string; href?: string }> } } }).card;
   expect(card.clarify.question).toBe("「注册 ECE 541 候补课程」等了 48 小时没有回应，已按推荐处理：提议过期没人批准，已归档（任务页可恢复）。24 小时内可撤销。");
+  // The undo menu names what it would undo, too.
+  const { recentOps } = await import("./undo");
+  expect(recentOps(TEST_CTX, NOW).map((op) => op.label)).toContain("没有回应 48 小时，已按推荐处理「注册 ECE 541 候补课程」");
   expect(card.clarify.options.find((option) => option.kind === "href")?.href).toBe("/workbench/ece541");
   expect(said[0]!.payload.nudge).toMatchObject({ href: "/workbench/ece541" });
 });
@@ -424,6 +427,15 @@ test("several things settled by themselves are each named with what was done, th
   const en = autoAnsweredNotice(tFor("en"), [{ title: "Old proposal", did: "Ask next week", href: "/approvals" }, item(2)]);
   expect(en.text).toContain("Ask next week");
   expect(en.text).not.toMatch(/等了|已按推荐/);
+});
+
+test("the undo menu's line for a pass names the first thing it settled and how many", async () => {
+  const { autoAnsweredLabel } = await import("./answer-all");
+  const { tFor } = await import("./i18n");
+  const t = tFor(undefined);
+  expect(autoAnsweredLabel(t, 1, false, "本周 1 个里程碑有风险")).toBe("已按推荐处理「本周 1 个里程碑有风险」");
+  expect(autoAnsweredLabel(t, 3, true, "完成 ECE 555 Milestone-2 的神经元版图与仿真")).toBe("没有回应 48 小时，已按推荐处理「完成 ECE 555 Milestone-2 …」等 3 项");
+  expect(autoAnsweredLabel(tFor("en"), 2, false, "Old proposal")).toBe("“Old proposal” and others, 2 settled as recommended");
 });
 
 test("an ask with no time of its own is settled 48 hours after it was first seen", async () => {
