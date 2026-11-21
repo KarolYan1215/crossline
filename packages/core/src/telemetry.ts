@@ -59,7 +59,7 @@ const EVENT_TYPES = new Set<string>([...LEDGER_EVENT_TYPES, ...DERIVED_EVENT_TYP
 
 const WORK_ORDER_STATES = ["captured", "analyzing", "awaiting_plan_approval", "approved", "preparing", "ready_for_human", "active",
   "evidence_review", "accepted", "blocked", "archived"];
-const ASK_KINDS = ["backplan_input", "waiting_due", "capture_blocked", "materials_blocked", "gate_insufficient", "gate_failed", "evidence_manual",
+const ASK_KINDS = ["backplan_input", "waiting_due", "capture_blocked", "materials_blocked", "gate_insufficient", "gate_failed", "acceptance_gap",
   "milestone_risk", "agent_blocked", "calendar_publish_failed", "calendar_sync_failed", "codex_signed_out", "missed_block", "source_project",
   "calendar_line_unclear", "interview_open", "interview_question", "event_propose", "step_question", "relation_check", "background_paused",
   "locked_conflict", "event_merge", "mail_event", "exam_time"];

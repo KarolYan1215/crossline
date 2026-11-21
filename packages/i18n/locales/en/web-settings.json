@@ -1226,5 +1226,10 @@
   "愿意填写出生日期吗？": "Would you like to give your date of birth?",
   "之前只填了年份 {{year}}，补上月日即可": "Only the year {{year}} is on file; add the month and day",
   "只存在本账号里，用于按年龄校准精力": "Kept in this account only, to tune energy by age",
-  "不填": "Skip"
+  "不填": "Skip",
+  "成果文件夹": "Results folder",
+  "{{folder}} 放哪个项目的成果": "Which project's results go in {{folder}}",
+  "不限项目": "Any project",
+  "新文件只对照这个项目的任务检查": "New files are checked against this project's tasks only",
+  "新文件会对照所有未完成任务检查，符合完成标准就记为完成，可撤销": "New files are checked against all open tasks; one that meets a task's done criteria marks it done, undoably"
 }

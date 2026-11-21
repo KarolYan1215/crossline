@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { tOf } from "../../../../lib/locale";
 import type { Translate } from "../../../../lib/i18n";
-import { SOURCE_FOLDERS_SETTING, cleanFolderNames, cleanFolderRules, readSourceFolders } from "@crossline/core";
+import { RESULT_FOLDERS_SETTING, SOURCE_FOLDERS_SETTING, cleanFolderNames, cleanFolderRules, readSourceFolders } from "@crossline/core";
 import { assistantAvailable } from "@crossline/db";
 import { getStore } from "../../../../lib/crossline";
 import { identityLines } from "../../../../lib/lines";
@@ -14,8 +14,13 @@ import { isCrossSiteWrite } from "../../../../lib/same-origin";
  * Authorized folders (docs/onboarding-v3.md 「文件夹授权」). The list is read here from the ledger; the walking and reading happen in the
  * worker, which checks every path itself: `preview` says what would be read before anything is, `add` keeps the folder and reads it in
  * the background with what the preview left out, `lines` sets which lines it serves (the person's choice, kept as theirs), `exclusions`
- * replaces what is left out (what is now excluded leaves `sources`), DELETE stops reading it — with `purge=1`, deleting what was read too.
+ * replaces what is left out (what is now excluded leaves `sources`), `results` marks it as where one project's results are put (the
+ * deliverable check then matches its new files against that project only; kept here, the worker only reads it), DELETE stops reading
+ * it — with `purge=1`, deleting what was read too.
  */
+const readResultFolders = (workspaceId: string): Record<string, string> => {
+  try { return JSON.parse(getStore().getSetting(workspaceId, RESULT_FOLDERS_SETTING) ?? "{}") as Record<string, string>; } catch { return {}; }
+};
 export async function GET(request: Request) {
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
@@ -23,7 +28,9 @@ export async function GET(request: Request) {
     folders: readSourceFolders(getStore().getSetting(access.ctx.workspaceId, SOURCE_FOLDERS_SETTING)),
     // The worker refuses a guest's folder (`FOLDER_OWNER_ONLY`); the card is not shown to one at all.
     available: assistantAvailable(getStore(), access.ctx.workspaceId),
-    lines: identityLines(access.ctx).map((line) => ({ id: line.id, label: line.label }))
+    lines: identityLines(access.ctx).map((line) => ({ id: line.id, label: line.label })),
+    projects: getStore().listProjects(access.ctx.workspaceId).map((project) => ({ id: project.id, name: project.name })),
+    results: readResultFolders(access.ctx.workspaceId)
   }, { headers: { "cache-control": "no-store" } });
 }
 
@@ -40,7 +47,19 @@ export async function POST(request: Request) {
   if (isCrossSiteWrite(request)) return NextResponse.json({ state: "blocked", code: "REQUEST_FORBIDDEN" }, { status: 403 });
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
-  const body = await request.json().catch(() => null) as { action?: unknown; path?: unknown; id?: unknown; lines?: unknown; exclude?: unknown; include?: unknown } | null;
+  const body = await request.json().catch(() => null) as { action?: unknown; path?: unknown; id?: unknown; lines?: unknown; exclude?: unknown; include?: unknown; projectId?: unknown } | null;
+  if (body?.action === "results" && typeof body.id === "string" && typeof body.projectId === "string") {
+    const store = getStore();
+    const folderId = body.id, projectId = body.projectId;
+    if (!readSourceFolders(store.getSetting(access.ctx.workspaceId, SOURCE_FOLDERS_SETTING)).some((folder) => folder.id === folderId))
+      return NextResponse.json({ state: "blocked", code: "FOLDER_ID_INVALID" }, { status: 400 });
+    if (projectId && !store.listProjects(access.ctx.workspaceId).some((project) => project.id === projectId))
+      return NextResponse.json({ state: "blocked", code: "PROJECT_NOT_FOUND" }, { status: 400 });
+    const results = readResultFolders(access.ctx.workspaceId);
+    if (projectId) results[folderId] = projectId; else delete results[folderId];
+    store.setSetting(access.ctx.workspaceId, RESULT_FOLDERS_SETTING, JSON.stringify(results));
+    return NextResponse.json({ state: "saved", results });
+  }
   const rules = cleanFolderRules({ exclude: body?.exclude, include: body?.include });
   const names = body?.action === "preview" || body?.action === "add" || body?.action === "exclusions" ? await accountNames(request) : [];
   try {

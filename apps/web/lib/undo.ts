@@ -64,11 +64,12 @@ export type Op = { id: string; label: string; at: string; inverse: Inverse };
 const WINDOW_MS = 24 * 3_600_000;
 
 /** Records an operation that has just happened. Returns the op so a route can hand its id to the toast. */
-export function recordOp(ctx: AccessContext, label: string, inverse: Inverse): Op {
+/** `bySystem`: the system did it by itself, so undoing it is a lesson (`learnFromUndo`). */
+export function recordOp(ctx: AccessContext, label: string, inverse: Inverse, extra: { bySystem?: boolean } = {}): Op {
   const id = `op-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const at = new Date().toISOString();
   getStore().appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `op.applied:${id}`,
-    type: "op.applied", entityId: id, payload: { label: label.slice(0, 160), inverse } });
+    type: "op.applied", entityId: id, payload: { label: label.slice(0, 160), inverse, ...(extra.bySystem ? { bySystem: true } : {}) } });
   return { id, label, at, inverse };
 }
 
@@ -135,7 +136,12 @@ function learnFromUndo(ctx: AccessContext, opId: string, payload: { label?: stri
     text: tOf(ctx)("本人撤销了系统自动做的「{{label}}」：同类的事以后不要自动做，先问本人。", { label: payload.label }) });
 }
 
-function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok: false; code: string } {
+/** Finished work back to open, as an undo of an automatic close does it; `reason` is what the task's history says. */
+export function reopenWorkOrders(ctx: AccessContext, ids: string[], reason?: string): { ok: true } | { ok: false; code: string } {
+  return applyInverse(ctx, { kind: "work_order.reopen", ids }, reason);
+}
+
+function applyInverse(ctx: AccessContext, inverse: Inverse, reopenReason?: string): { ok: true } | { ok: false; code: string } {
   const store = getStore();
   try {
     switch (inverse.kind) {
@@ -206,7 +212,7 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
         for (const id of inverse.ids) {
           if (orders.get(id)?.state !== "accepted") continue;
           const attempt = store.listEvents(ctx.workspaceId, { type: "work_order.reopened", entityId: id }).length;
-          const reason = tOf(ctx)("撤销自动交上");
+          const reason = reopenReason ?? tOf(ctx)("撤销自动交上");
           store.transitionWorkOrder(ctx.workspaceId, id, { type: "acceptance.revoked", reason }, `undo-auto-close:${id}:${attempt}:revoke`);
           store.transitionWorkOrder(ctx.workspaceId, id, { type: "blocked", reason }, `undo-auto-close:${id}:${attempt}:hold`);
           store.transitionWorkOrder(ctx.workspaceId, id, { type: "plan.approved", approvalId: ctx.principalId }, `undo-auto-close:${id}:${attempt}:open`);

@@ -16,7 +16,7 @@ const OUTCOMES: Record<AskKind, { answered: string; unanswered: string }> = {
   materials_blocked: { answered: "重新准备材料，或不等材料直接开始。", unanswered: "任务停在准备材料阶段，不会开始。" },
   gate_insufficient: { answered: "重新排上补做，补交后重新判定。", unanswered: "任务保持未通过，不计入里程碑进度。" },
   gate_failed: { answered: "重新运行验收判定。", unanswered: "已提交的证据保持待判定。" },
-  evidence_manual: { answered: "任务记为已验收。", unanswered: "任务停在待验收。" },
+  acceptance_gap: { answered: "按回答结束、补做或记进偏好。", unanswered: "任务按已完成算，缺口留在记录里。" },
   milestone_risk: { answered: "按所选方式调整时间、截止或标准；接受风险后 7 天内不再问。", unanswered: "排程不变，预测完成日仍贴近或晚于截止。" },
   agent_blocked: { answered: "任务转为本人处理，或带着补充的信息重试。", unanswered: "助手的这部分工作保持中断。" },
   calendar_publish_failed: { answered: "重新写入 Crossline 日历。", unanswered: "Crossline 日历停在上次写入的排程。" },
@@ -65,7 +65,7 @@ export function askOutcome(ask: Pick<Ask, "kind" | "options">, locale?: Locale):
 
 export type AskSource = { label: string; href: string };
 
-const WORK_ORDER_KINDS = new Set<AskKind>(["materials_blocked", "gate_insufficient", "gate_failed", "evidence_manual", "missed_block", "locked_conflict", "step_question"]);
+const WORK_ORDER_KINDS = new Set<AskKind>(["materials_blocked", "gate_insufficient", "gate_failed", "acceptance_gap", "missed_block", "locked_conflict", "step_question"]);
 const MILESTONE_KINDS = new Set<AskKind>(["backplan_input", "milestone_risk", "milestone_risk_review", "milestone_overdue"]);
 
 /**

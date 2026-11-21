@@ -382,8 +382,6 @@
   "任务保持未通过，不计入里程碑进度。": "The task stays marked as not passed and does not count toward the milestone's progress.",
   "重新运行验收判定。": "The acceptance check runs again.",
   "已提交的证据保持待判定。": "The submitted evidence remains unjudged.",
-  "任务记为已验收。": "The task is recorded as accepted.",
-  "任务停在待验收。": "The task remains awaiting acceptance.",
   "按所选方式调整时间、截止或标准；接受风险后 7 天内不再问。": "Time, deadline or standard is adjusted as you choose; if you accept the risk, you are not asked again for 7 days.",
   "排程不变，预测完成日仍贴近或晚于截止。": "The schedule stays as it is, and the forecast finish stays close to or past the deadline.",
   "任务转为本人处理，或带着补充的信息重试。": "The task passes to you, or is retried with what you add.",
@@ -634,5 +632,7 @@
   "按 30 分钟留出路上时间。": "30 minutes of travel time are kept.",
   "等本人 · {{what}}": "Waiting on you · {{what}}",
   "直接写答案或想法": "Write an answer or a thought",
-  "没有发出去，稍后再试": "Not sent, try again later"
+  "没有发出去，稍后再试": "Not sent, try again later",
+  "按回答结束、补做或记进偏好。": "Ended, reopened to finish, or kept as a preference, as answered.",
+  "任务按已完成算，缺口留在记录里。": "The task counts as finished; the gap stays on record."
 }

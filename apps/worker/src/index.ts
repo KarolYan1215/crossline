@@ -57,6 +57,7 @@ import { assumeAtNeededDay, requestGranularityReplans, createProgressJudge, crea
 import { createArchetypeCurator, curationDue } from "./archetype-curator";
 import { energyAdvicePass } from "./energy-advice";
 import { dedupePass } from "./dedupe";
+import { deliverableCheckPass, newFolderFiles } from "./deliverable-check";
 import { guestCodexHomes, importCodexMemories } from "./codex-memory-import";
 import { createTaskTitler, untitledTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
@@ -398,6 +399,25 @@ async function goalSplitPass(workspaceId: string, checkedAt = new Date().toISOSt
     const outcome = await createGoalSplitter(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))().catch(() => undefined);
     if (outcome) console.info(JSON.stringify({ type: "lines.goals_split", checkedAt, workspaceId, ...outcome }));
   } finally { splittingGoals.delete(workspaceId); }
+}
+
+/**
+ * The system's acceptance (deliverable-check.ts, attention ledger §7.2): new files in the authorized folders read against the open and
+ * recently finished tasks. Acceptance is part of the core loop now that 完成 takes effect at once, so it runs while core work is allowed.
+ */
+const checkingDeliverables = new Set<string>();
+async function deliverablePass(workspaceId: string, checkedAt = new Date().toISOString()): Promise<void> {
+  if (paused(workspaceId, "planning") || checkingDeliverables.has(workspaceId) || !codexSupervisor) return;
+  if (!newFolderFiles(analysisStore, workspaceId).length) return;
+  const client = accountClient(workspaceId);
+  if (!client || !spendAllows(await spendFor(workspaceId), "core")) return;
+  checkingDeliverables.add(workspaceId);
+  try {
+    enterUsageWorkspace(workspaceId);
+    const judged = await deliverableCheckPass(analysisStore, workspaceId, client, repoRoot).catch((error) => {
+      console.warn(JSON.stringify({ type: "deliverables.check_failed", workspaceId, error: String(error), checkedAt })); return 0; });
+    if (judged) console.info(JSON.stringify({ type: "deliverables.judged", workspaceId, judged, checkedAt }));
+  } finally { checkingDeliverables.delete(workspaceId); }
 }
 
 /**
@@ -986,6 +1006,7 @@ async function workspaceTick(workspace: { id: string }, checkedAt: string): Prom
   await titlePass(workspace.id, checkedAt);
   await goalSplitPass(workspace.id, checkedAt);
   await milestoneRiskPass(workspace.id, checkedAt);
+  await deliverablePass(workspace.id, checkedAt);
   void firstDraftsPass(workspace.id, checkedAt).catch(() => undefined);
   void methodResearchPass(workspace.id, checkedAt).catch(() => undefined);
   // The milestone gate. Without this it existed only inside `scripts/gate-loop-check.ts`, so on the

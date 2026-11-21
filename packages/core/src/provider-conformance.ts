@@ -37,6 +37,7 @@ import { ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA } from "./onboard
 import { PLAN_EXPLAINER_OUTPUT_SCHEMA } from "./plan-explainer-schema";
 import { PORTRAIT_GAP_SCHEMA, PORTRAIT_SCHEMA } from "./portrait";
 import { PROGRESS_ASSESSMENT_SCHEMA, STEP_PLAN_SCHEMA, VALIDATION_REVIEW_SCHEMA } from "./steps";
+import { DELIVERABLE_CHECK_SCHEMA } from "./deliverables";
 import { TASK_TITLES_SCHEMA } from "./task-title";
 import { DICTATION_CORRECTION_SCHEMA } from "./dictation";
 import { TASK_MERGE_REVIEW_SCHEMA } from "./task-merge";
@@ -93,6 +94,7 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-archetype-curator": { label: "任务类型整理", schemas: ["ARCHETYPE_CURATION_SCHEMA"], webSearch: true },
   "crossline-validation-reviewer": { label: "复核", schemas: ["VALIDATION_REVIEW_SCHEMA", "PUBLIC_SKILL_REVIEW_SCHEMA", "PUBLIC_SKILL_BATCH_REVIEW_SCHEMA", "TASK_MERGE_REVIEW_SCHEMA"] },
   "crossline-progress-judge": { label: "进度判断", schemas: ["PROGRESS_ASSESSMENT_SCHEMA"] },
+  "crossline-deliverable-check": { label: "交付物验收", schemas: ["DELIVERABLE_CHECK_SCHEMA"] },
   "crossline-concierge": { label: "输入框", schemas: ["CONCIERGE_SCHEMA"], tools: true },
   "crossline-task-titler": { label: "任务命名", schemas: ["TASK_TITLES_SCHEMA"] },
   "crossline-dictation-corrector": { label: "语音输入纠错", schemas: ["DICTATION_CORRECTION_SCHEMA"] },
@@ -212,7 +214,7 @@ const CONFORMANCE_SCHEMAS: Record<string, Record<string, unknown>> = {
   OPPORTUNITY_WATCHES_SCHEMA, OPPORTUNITY_READING_SCHEMA, VISA_READING_SCHEMA, QUOTE_READING_SCHEMA,
   FORM_FILL_SCHEMA, FORM_CHECK_SCHEMA, FORM_OBSERVE_SCHEMA, DICTATION_CORRECTION_SCHEMA, WORKFLOW_TURN_SCHEMA, TIME_ATTRIBUTION_SCHEMA,
   // Appended, not sorted in: a case's position is its id's order in the conformance run, which recorded fixtures index by.
-  METHOD_RESEARCH_SCHEMA
+  METHOD_RESEARCH_SCHEMA, DELIVERABLE_CHECK_SCHEMA
 } as unknown as Record<string, Record<string, unknown>>;
 
 /** How many times a critical Skill's schema is run: at 3 runs, "repair rate ≤ 5%" means no repair at all. */

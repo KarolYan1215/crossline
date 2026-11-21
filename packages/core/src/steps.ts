@@ -136,6 +136,12 @@ export type StepPlan = {
    * judgement yet (one from a course's dates, or written before the field). Optional for plans stored before it; the schema requires it.
    */
   completion?: ModelCompletion;
+  /**
+   * The deliverable has no electronic form (a paper hand-in, an exam sat, an interview, a talk; 2026-11-21, §7.2 point 5): the system does
+   * not check its content and waits for the outside result instead. Kept on the work order (`payload.offline`). Optional for plans stored
+   * before it; the schema requires it.
+   */
+  offline?: boolean;
   units: StepUnit[];
   questions: StepQuestion[];
   /** Optional for plans stored before it; the schema requires it. */
@@ -171,6 +177,7 @@ export const stepPlanSchema = (extraIds: readonly string[] = []) => object({
   rationale: str,
   importance: object({ longTerm: { type: "boolean" }, why: str }),
   completion: COMPLETION_FIELD,
+  offline: { type: "boolean" },
   units: { type: "array", items: object({ id: str, title: str, docId: str, quote: str }) },
   questions: { type: "array", items: object({ id: str, text: str, why: str, options: { type: "array", items: str }, assume: str, neededBy: str,
     ask: { type: "boolean" }, ifWrong: object({ waste: num, harm: { type: "string", enum: [...QUESTION_HARMS] }, fixable: { type: "string", enum: [...QUESTION_FIXABLE] } }) }) },

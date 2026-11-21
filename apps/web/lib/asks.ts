@@ -13,7 +13,7 @@ import { applyWeeklyCommit, loadWeeklyCommit } from "./weekly-commit";
 import { acceptOwnCompletion, listAgentTasks, courseProjectIds, overdueStartedTasks, OVERDUE_TASK_RESOLVED, ownCompletion, SILENT_TASK_SHIFTS_MAX, resolvePossibleDuplicate, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import {
-  acceptWorkOrderEvidence, answerWaiting, appNow, approveWorkOrderProposal, archiveWorkOrder, discardCapture, effectiveSchedulePreferences, effectiveWeight, getStore, IMPORTANT_WEIGHT, loadGoalForecast,
+  answerWaiting, appNow, approveWorkOrderProposal, archiveWorkOrder, discardCapture, effectiveSchedulePreferences, effectiveWeight, getStore, IMPORTANT_WEIGHT, loadGoalForecast,
   markMaterialsReady, planToday, plannerIdOfBlock, readFrozen, readGoalSettings, retryMaterialPreparation, saveGoalSettings, saveMilestoneEdit, TASK_LIBRARY_WINDOW_DAYS,
   heldConflicts, unlockBlock, writeFrozen, readRiskDecisions, RISK_DECISIONS_SETTING, riskHorizonDays, type RiskDecision
 } from "./crossline";
@@ -38,6 +38,7 @@ import { answerApplicationResult, answerOpportunityApplyReady, answerOpportunity
 import { agentBlockedAsks, answerAgentAsk } from "./agent-ask";
 import { foldAsks, foldFingerprint, foldId, isFolded, splitFold } from "./ask-fold";
 import { answerOutcome, outcomeAsks } from "./outcome-check";
+import { answerGap, gapAsks } from "./deliverables";
 import { answerProgress, progressAsks } from "./progress-check";
 import { memoByLedger } from "./ledger-memo";
 import { localeFor, tOf } from "./locale";
@@ -293,12 +294,8 @@ function gateAsks({ store, ctx, today, t }: Source): Ask[] {
           why: t("判定过程中断，并非未通过：{{reason}}。处理后重新判定。", { reason: clause(detail.message || detail.code) }),
           options: [{ id: "rejudge", label: t("现在重新判定"), recommended: true },
             { id: "look", label: t("去看看"), href: `/workbench/${encodeURIComponent(order.id)}` }] });
-      } else if (!order.milestoneId) {
-        asks.push({ id: `accept:${order.id}`, kind: "evidence_manual", entityId: order.id, ...timing, raisedAt: "", fingerprint: order.state,
-          title: t("「{{title}}」待验收", { title: short(order.intent) }), why: t("未关联里程碑，不经自动验收，由本人验收。"),
-          options: [{ id: "accept", label: t("算数，验收"), recommended: true },
-            { id: "look", label: t("先看看交付"), href: `/workbench/${encodeURIComponent(order.id)}` }] });
       }
+      // Without a milestone the system accepts it on the attention timer, undoable (lib/deliverables.ts `settleDeliverables`, 2026-11-21).
     }
   }
   return asks;
@@ -1209,7 +1206,7 @@ export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
   const locale = localeFor(ctx);
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now, t: tFor(locale), locale };
   return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskDigestAsks, weeklyCommitAsks, overdueFoldAsks, missedAsks, ledgerDuplicateAsks, wealthBalanceAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, interviewSettingAsks, mergeAsks, eventAsks, mailEventCards, examTimeAsks, travelAsks, stepQuestionAsks,
-    ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks, ({ ctx: context, now: at }: Source) => outcomeAsks(context, at),
+    ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks, ({ ctx: context, now: at }: Source) => outcomeAsks(context, at), ({ ctx: context }: Source) => gapAsks(context),
     ({ ctx: context, now: at }: Source) => progressAsks(context, at), ({ ctx: context, now: at }: Source) => opportunityNeedAsks(context, at),
     ({ ctx: context, now: at }: Source) => opportunityOfferAsks(context, at), ({ ctx: context, now: at }: Source) => opportunityApplyReadyAsks(context, at)]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } })
@@ -1498,7 +1495,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
         signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
       return { ok: true };
     }
-    case "evidence_manual": return acceptWorkOrderEvidence(ctx, ask.entityId);
+    case "acceptance_gap": return answerGap(ctx, ask, optionId);
     case "milestone_risk": {
       if (optionId === "extend") {
         // Only the date: passing an importance here demoted every milestone moved this way to 「ordinary」 (2026-10-18 walkthrough).

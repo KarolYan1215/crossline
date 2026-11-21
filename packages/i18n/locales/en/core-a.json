@@ -517,5 +517,6 @@
   "其他收入": "Other income",
   "早停了：算到 {{at}}": "Stopped earlier: count until {{at}}",
   "{{what}}计时算到 {{at}}": "{{what}} timed until {{at}}",
-  "做事方法研究": "Work-method research"
+  "做事方法研究": "Work-method research",
+  "交付物验收": "Deliverable check"
 }

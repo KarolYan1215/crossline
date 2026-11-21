@@ -32,6 +32,8 @@ export function SourceFolders({ onChanged }: { onChanged?: () => void }) {
   const en = useLocale() === "en";
   const [folders, setFolders] = useState<SourceFolder[] | undefined>();
   const [lines, setLines] = useState<Array<{ id: string; label: string }>>([]);
+  const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([]);
+  const [results, setResults] = useState<Record<string, string>>({});
   const [draft, setDraft] = useState("");
   const [preview, setPreview] = useState<Preview | undefined>();
   const [offGroups, setOffGroups] = useState<Set<string>>(new Set());
@@ -50,10 +52,13 @@ export function SourceFolders({ onChanged }: { onChanged?: () => void }) {
 
   const load = useCallback(async () => {
     const response = await fetch("/api/sources/folders", { cache: "no-store" }).catch(() => undefined);
-    const body = await response?.json().catch(() => undefined) as { folders?: SourceFolder[]; lines?: Array<{ id: string; label: string }>; available?: boolean } | undefined;
+    const body = await response?.json().catch(() => undefined) as { folders?: SourceFolder[]; lines?: Array<{ id: string; label: string }>; available?: boolean;
+      projects?: Array<{ id: string; name: string }>; results?: Record<string, string> } | undefined;
     setAvailable(body?.available !== false);
     setFolders(body?.folders ?? []);
     setLines(body?.lines ?? []);
+    setProjects(body?.projects ?? []);
+    setResults(body?.results ?? {});
   }, []);
   useEffect(() => { void load(); }, [load]);
   // While a folder is being read for the first time, look again every few seconds.
@@ -116,6 +121,11 @@ export function SourceFolders({ onChanged }: { onChanged?: () => void }) {
     await post({ action: "lines", id: folder.id, lines: next });
     await load();
   };
+  // Where one project's results go (attention ledger §7.2): new files here are checked against that project's tasks only.
+  const setResultProject = async (folder: SourceFolder, projectId: string) => {
+    setResults((all) => { const next = { ...all }; if (projectId) next[folder.id] = projectId; else delete next[folder.id]; return next; });
+    await post({ action: "results", id: folder.id, projectId });
+  };
   const revoke = async (id: string, purge: boolean) => {
     setBusy(true);
     const response = await fetch(`/api/sources/folders?id=${encodeURIComponent(id)}${purge ? "&purge=1" : ""}`, { method: "DELETE" }).catch(() => undefined);
@@ -155,6 +165,15 @@ export function SourceFolders({ onChanged }: { onChanged?: () => void }) {
           onClick={() => void toggleLine(folder, line.id)}>{line.label}</button>)}
         {folder.linesBy === "model" && folder.linesWhy && <small className="gen">{folder.linesWhy}</small>}
       </div>}
+      {projects.length > 0 && folder.lastScanAt && <label className="source-folder-results">
+        <small>{t("成果文件夹")}</small>
+        <select value={results[folder.id] ?? ""} disabled={busy} onChange={(event) => void setResultProject(folder, event.target.value)}
+          aria-label={t("{{folder}} 放哪个项目的成果", { folder: folder.label })}>
+          <option value="">{t("不限项目")}</option>
+          {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+        </select>
+        <small className="muted">{results[folder.id] ? t("新文件只对照这个项目的任务检查") : t("新文件会对照所有未完成任务检查，符合完成标准就记为完成，可撤销")}</small>
+      </label>}
       <FolderRules folder={folder} busy={busy} onSave={(exclude, include) => void saveRules(folder, exclude, include)} />
     </div>)}
     <form className="source-folders-form" onSubmit={(event) => { event.preventDefault(); if (draft.trim()) void look(); }}>

@@ -23,7 +23,7 @@ import type { MilestoneRisk } from "./milestone-risk";
  */
 export type AskKind =
   | "backplan_input" | "waiting_due" | "capture_blocked" | "materials_blocked" | "gate_insufficient" | "gate_failed"
-  | "evidence_manual" | "milestone_risk" | "agent_blocked" | "calendar_publish_failed" | "calendar_sync_failed" | "codex_signed_out"
+  | "acceptance_gap" | "milestone_risk" | "agent_blocked" | "calendar_publish_failed" | "calendar_sync_failed" | "codex_signed_out"
   | "missed_block" | "source_project" | "calendar_line_unclear" | "interview_open" | "interview_question" | "event_propose" | "step_question"
   /** Something in the person's mail they could go to (`mail-events.ts`, 2026-11-10): 去 makes it a fixed event on every calendar path, 不去 drops it. */
   | "mail_event"

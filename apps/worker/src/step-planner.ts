@@ -464,6 +464,11 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     const current = store.listWorkOrders(workspaceId).find((item) => item.id === workOrderId);
     if (completion && current && !readModelCompletion((current.payload as { completion?: unknown } | undefined)?.completion))
       store.saveWorkOrder({ ...current, payload: { ...((current.payload ?? {}) as object), completion } });
+    // A deliverable with no electronic form is not read for acceptance (deliverable-check.ts); the outside result settles it.
+    const offline = result.output.offline;
+    const latest = store.listWorkOrders(workspaceId).find((item) => item.id === workOrderId);
+    if (typeof offline === "boolean" && latest && (latest.payload as { offline?: boolean } | undefined)?.offline !== offline)
+      store.saveWorkOrder({ ...latest, payload: { ...((latest.payload ?? {}) as object), offline } });
     // Which questions reach the person is the model's call (docs/plans/attention-ledger-1120.md §7.1, 2026-11-20): each says what a
     // wrong assumption costs and whether it is worth asking (`ask`). The rest are settled as their assumption at once. No per-task cap and
     // no importance rule any more (the cap of two and the weight-60 rule asked about the wrong things and hid the costly ones), and a

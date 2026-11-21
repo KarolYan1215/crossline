@@ -14,7 +14,7 @@ One task already exists (from a capture, a milestone's backplan or a course's da
 
 So a person's step is one focused session the person can begin from its `firstAction` without thinking about what to do, and its result is something they could show.
 
-Return raw JSON only: `{archetypeId, quantity, rationale, importance, completion, units, questions, needs, steps, usedRefs}`.
+Return raw JSON only: `{archetypeId, quantity, rationale, importance, completion, offline, units, questions, needs, steps, usedRefs}`.
 
 ## Input `crossline.step-plan.v1`
 
@@ -153,6 +153,7 @@ Only the steps that need the answer depend on the send step; everything else pro
 - `rationale` — what the plan rests on, for the person to read in three to five short sentences: what the material contains in numbers (「讲义 12 讲，作业 4 题」; with no material, say what is missing, not that zero units were counted), the sources found by name, the assumptions made and which steps change with an open question. Name things as the person knows them (课程大纲, 第 2 个问题, 第 5 步), never the input's keys or ids.
 - `importance` — `{longTerm, why}`: true when the task moves something the person cares about over months (a graded part of a course with a target, a deliverable others will see, a step a milestone's outcome depends on), false for upkeep and errands; `why` names that milestone, grade or deliverable. It is recorded with the plan; whether a question reaches the person is each question's own `ask`.
 - `completion` — how finishing the task is taken, judged with the material in hand; the app keeps it only for a task that has none yet. `{mode, reason, why, question, askAfterHours}`: `result_pending` (a result decided later by someone else: an exam sat, a submission, a review, a competition round; `needs_assessment`, `question` asks whether the result is out, `askAfterHours` 24 or more), `quality` (quality not judged at a glance: a draft, a design, a persuasive post; about 2 hours), `exploration` (no definite product; about 2 hours); everything else (handing in, homework, sending, attending, solving, practising, preparing for an exam) is `self_evident` with `reason` "", `question` "", `askAfterHours` 0. `why` is one sentence.
+- `offline` — true when the task leaves no electronic product in the person's folders (a sport session, a meeting attended, a paper form handed in, an errand); false when it produces a file (homework, a draft, slides, code, an export). The system checks new files in the person's folders against open tasks to accept them; an offline task is never looked for there.
 
 Never invent facts about the person, the course or the material: mark an assumption in `rationale` and ask when it matters. Do not set goals, deadlines or importance weights. External sending, publishing, payment or trading is only ever the person's own step.
 
