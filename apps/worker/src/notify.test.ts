@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
+import { BRIEF_TIME_SETTING } from "@crossline/core";
 import { notifyPass, planNotifications, unconfirmedLastNight, type NotifyInput } from "./notify";
 
 const windows = [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "12:00", energy: "high" as const }, { days: [1, 2, 3, 4, 5], start: "14:00", end: "18:00", energy: "medium" as const }];
@@ -172,7 +173,7 @@ test("a block's start after 「少问这类」 goes to the desktop only, not the
   store.close();
 });
 
-test("a decision settled by itself opens the thing it settled, on the desktop and the phone (its nudge's own href)", async () => {
+test("a decision settled by itself is listed, not pushed: it waits in the bell and is counted into the next brief's one line (A3–A4)", async () => {
   const store = new CrosslineStore(":memory:");
   store.setSetting("w", "notify.level", "off");
   const conversation = store.conversationFor("w", "2026-10-12");
@@ -184,8 +185,16 @@ test("a decision settled by itself opens the thing it settled, on the desktop an
   const pushed: Array<{ path: string }> = [];
   await notifyPass(store, "w", new Date("2026-10-12T13:52:00.000Z"), async (_title, _body, url) => { desktop.push(url); return true; }, "http://127.0.0.1:3210",
     async (_ws, message) => { pushed.push(message); return true; });
-  expect(desktop).toEqual(["http://127.0.0.1:3210/workbench/wo-9"]);
-  expect(pushed).toMatchObject([{ path: "/workbench/wo-9" }]);
+  expect(desktop).toEqual([]);
+  expect(pushed).toEqual([]);
+  const [said] = store.listRecentNudges("w", "2026-10-12T00:00:00.000Z");
+  expect((said!.payload.nudge as { delivery?: string }).delivery).toBe("listed");
+  // The next morning's brief says it in one line.
+  store.setSetting("w", "notify.level", "normal");
+  store.setSetting("w", BRIEF_TIME_SETTING, "07:30");
+  const briefs: string[] = [];
+  await notifyPass(store, "w", new Date("2026-10-13T13:00:00.000Z"), async (title, body) => { briefs.push(`${title}|${body}`); return true; });
+  expect(briefs.some((text) => text.includes("系统做了 1 件事"))).toBe(true);
   store.close();
 });
 
@@ -276,13 +285,13 @@ test("the person's quiet hours hold back single messages, and the brief goes at 
   expect(planNotifications({ ...base, clock: "09:41", briefAt: "09:40" }).filter((item) => item.kind === "brief")).toHaveLength(1);
 });
 
-test("new opportunities ride in the brief; one closing today is a single message under the same cap", () => {
+test("new opportunities ride in the brief; one closing today is never pushed (2026-11-20)", () => {
   const opportunities = { fresh: [{ id: "o1", title: "暑期研究实习", deadline: "2026-12-01" }, { id: "o2", title: "黑客松", deadline: "2026-10-08" }],
     prepToday: [{ id: "need:x", title: "研究实习" }], closingToday: [{ id: "o2", title: "黑客松" }] };
   const planned = planNotifications({ ...base, waitingDue: [], dueSoon: [], opportunities });
   expect(planned[0]!.body).toContain("2 个新机会：暑期研究实习、黑客松");
   expect(planned[0]!.body).toContain("今天该开始准备：研究实习");
-  expect(planned.some((item) => item.key === "opportunity:o2" && item.title === "今天截止的机会：黑客松")).toBe(true);
-  expect(planNotifications({ ...base, opportunities, urgentSentToday: 2 }).some((item) => item.key === "opportunity:o2")).toBe(false);
+  expect(planned.some((item) => item.key === "opportunity:o2")).toBe(false);
+  expect(planned.filter((item) => item.kind === "urgent")).toEqual([]);
   expect(planNotifications({ ...base, waitingDue: [], dueSoon: [], opportunities, clock: "10:30", quiet: { from: "10:00", to: "11:00" }, sent: new Set(["brief:2026-10-08"]) })).toEqual([]);
 });

@@ -20,6 +20,7 @@ import { loadWrap } from "./wrap";
 import { outcomeNudgeInputs } from "./outcome-check";
 import { progressNudgeInputs } from "./progress-check";
 import { systemContext } from "./auto-publish";
+import { calendarRemindsBlocks } from "./calendar-write";
 import type { Card } from "./conversation";
 import { localeFor } from "./locale";
 import { monthDay, tFor, type Locale } from "./i18n";
@@ -39,7 +40,11 @@ const DAY = 86_400_000;
 const addDays = (day: string, days: number) => new Date(Date.parse(`${day}T12:00:00Z`) + days * DAY).toISOString().slice(0, 10);
 const minutesOf = (clock: string) => { const [h, m] = clock.split(":").map(Number); return (h ?? 0) * 60 + (m ?? 0); };
 
-export type NudgePayload = { kind: NudgeKind | "opener"; fingerprint: string; covers?: string[]; counted: boolean; urgent: boolean; delivery: "page" | "pending" | "pushed";
+export type NudgePayload = { kind: NudgeKind | "opener"; fingerprint: string; covers?: string[]; counted: boolean; urgent: boolean;
+  /** `listed`: the worker passed it over for a push by the push policy (`pushPolicyOf`, 2026-11-20); it stays in the bell and the 小帮手. */
+  delivery: "page" | "pending" | "pushed" | "listed";
+  /** Never pushed: a block the calendar app reminds about, or a start past the day's cap (A1). */
+  listOnly?: true;
   /** `block_confirm`: the block as it stood when asked; the confirm page writes against these times. */
   block?: NudgeEnding;
   /** `timer_overrun`: the step that ran over, read by the worker's adaptive granularity. */
@@ -111,6 +116,13 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
 
   // 「推迟 10 分钟」 pressed today, per block (`snoozeBlock`, lib/task-ops.ts): how many times and until when on the person's clock.
   const snoozed = snoozesOn(ctx, today, local);
+  // The calendar app rings before every block written to it (2026-11-20, A1): a start is then only listed, except the day's first block
+  // and one moved since this pass first saw it today — the two the person may not have in mind.
+  const covered = calendarRemindsBlocks(ctx, now);
+  let seenToday: Record<string, { start: string; firstStart?: string }> = {};
+  try { seenToday = JSON.parse(store.getSetting(ctx.workspaceId, seenBlocksKey(today)) ?? "{}"); } catch { /* none seen yet */ }
+  const firstBlockId = todays.filter((block) => block.id.startsWith("scheduled:")).sort((a, b) => a.start.localeCompare(b.start))[0]?.id;
+  const moved = (id: string, start: string) => { const seen = seenToday[id]; return Boolean(seen) && (seen!.firstStart ?? seen!.start) !== start; };
   const blocks: NudgeBlock[] = todays.filter((block) => block.id.startsWith("scheduled:")).flatMap((block) => {
     const order = byId.get(block.id.split(":")[1]!);
     const due = order ? dueOf(order) : "";
@@ -122,7 +134,8 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
     const firstAction = stepId ? store.getStepPlan(ctx.workspaceId, order.id)?.steps.find((step) => step.id === stepId)?.firstAction : undefined;
     return [{ id: block.id, orderId: order.id, stepId, title: taskTitleOf(order), step: block.step ?? "", start: block.start, end: block.end, dueDay,
       ...(prepared?.length ? { prepared } : {}), ...(firstAction ? { firstAction } : {}), ...(block.tag === OVER_CAPACITY_TAG ? { overCapacity: true } : {}),
-      ...(snoozed.has(block.id) ? { snoozed: snoozed.get(block.id)! } : {}) }];
+      ...(snoozed.has(block.id) ? { snoozed: snoozed.get(block.id)! } : {}),
+      ...(covered && block.id !== firstBlockId && !moved(block.id, block.start) ? { listOnly: true } : {}) }];
   });
   // Every work block of today, deadline or not, for the completion check.
   const ending = rememberBlocks(ctx, today, clock, todays.filter((block) => block.id.startsWith("scheduled:")).flatMap((block) => {
@@ -230,7 +243,8 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
   });
   for (const nudge of planned) say(ctx, nudge.text, nudge.buttons, { kind: nudge.kind, fingerprint: nudge.fingerprint, counted: nudge.counted, urgent: nudge.urgent,
     ...(nudge.covers ? { covers: nudge.covers } : {}), ...(nudge.block ? { block: nudge.block } : {}), ...(nudge.step ? { step: nudge.step } : {}),
-    ...(nudge.replaces ? { replaces: nudge.replaces } : {}), ...(nudge.kind === "block_start" && startsDesktopOnly ? { desktopOnly: true as const } : {}) }, now);
+    ...(nudge.replaces ? { replaces: nudge.replaces } : {}), ...(nudge.kind === "block_start" && startsDesktopOnly ? { desktopOnly: true as const } : {}),
+    ...(nudge.listOnly ? { listOnly: true as const } : {}) }, now);
   return planned;
 }
 
@@ -261,7 +275,7 @@ export const seenBlocksKey = (day: string) => `nudge.blocks:${day}`;
  */
 function rememberBlocks(ctx: AccessContext, today: string, clock: string, blocks: NudgeEnding[]): NudgeEnding[] {
   const store = getStore();
-  type Seen = NudgeEnding & { began: boolean };
+  type Seen = NudgeEnding & { began: boolean; firstStart?: string };
   let seen: Record<string, Seen> = {};
   try { seen = JSON.parse(store.getSetting(ctx.workspaceId, seenBlocksKey(today)) ?? "{}") as Record<string, Seen>; } catch { /* starts afresh */ }
   let changed = false;
@@ -269,10 +283,13 @@ function rememberBlocks(ctx: AccessContext, today: string, clock: string, blocks
     if (seen[block.id]?.began) continue;
     const began = block.start <= clock && clock < block.end;
     const before = seen[block.id];
-    if (!before || before.start !== block.start || before.end !== block.end || began) { seen[block.id] = { ...block, began }; changed = true; }
+    // `firstStart`: where the block was when first seen today, so a block moved later in the day is told apart (A1).
+    if (!before || before.start !== block.start || before.end !== block.end || began) {
+      seen[block.id] = { ...block, began, firstStart: before?.firstStart ?? before?.start ?? block.start }; changed = true;
+    }
   }
   if (changed) store.setSetting(ctx.workspaceId, seenBlocksKey(today), JSON.stringify(seen));
-  return Object.values(seen).filter((block) => block.began).map(({ began: _began, ...block }) => block);
+  return Object.values(seen).filter((block) => block.began).map(({ began: _began, firstStart: _first, ...block }) => block);
 }
 
 /** Background work that finished in the last six hours and is waiting for the person: assistant results, preparation, new proposals. */

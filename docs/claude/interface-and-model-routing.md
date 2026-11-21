@@ -131,3 +131,21 @@
 **Every model has the web and the person's files, local first (2026-11-18, the owner: 「给所有模型都配上网络搜索工具，按需使用，但是优先检索本地的文件，没找到相关资源再搜索网络」).** `withSourceDefaults` in `packages/codex/src/skill-runner.ts`, applied to every fresh run and every continued turn (not the assistant's agent threads, which had the web already): a run that does not set `allowWebSearch` gets it whenever the route can search — Codex when `webResearchBlocker()` finds the search host (`setWebAvailableProvider`), a provider when Crossline's stand-in `web_search`/`web_fetch` exists — and `allowWebSearch: false` still keeps a run off. Where the route calls functions, the person's own files are offered as `search_my_files`/`read_my_file_passage` (`apps/worker/src/local-lookups.ts`, over `doc_chunks`, about 30k characters a run; not beside the step planner's own `search_material`). Either adds `SOURCE_ORDER_INSTRUCTION` to the developer instructions: own material first, the web only for an outside fact their material lacks, and never a name, address, account number or private passage in a search query. Neither is a blocker: a route without them runs as before, and `SKILL_NEEDS.webSearch` (provider admission) is unchanged.
 
 **Routing a wish to the part that owns it (2026-11-18, the owner: 「确保用户可以通过和小帮手对话修改系统对应部分的提示词，做好 routing」).** 小帮手's lookup `find_system_part` (`packages/core/src/concierge.ts`) returns each Skill a note can go to with its label, what it does (its SKILL.md description, generated into `packages/core/src/skill-catalogue.ts` by `scripts/skill-catalogue.ts`; `apps/worker/src/skill-catalogue.test.ts` fails while it is stale or a Skill lacks a description), the person's note on it and the note's last five versions; a query matching nothing lists every part. The concierge Skill routes by reading the descriptions: one `design.change` per part a wish spans, `instructions.set` for a wish about everything, each action's summary naming the part and why. Every change of a Skill note writes `design.note_set` `{before, after}` (`apps/web/lib/personal-design.ts`), its card shows a line diff as 「给 Crossline 的话」's does, and a note may be 2000 characters (was 600).
+
+**What may interrupt the person (2026-11-20, the owner's answers A1–A4; `docs/plans/attention-ledger-1120.md`).**
+
+- **One policy decides what interrupts.** `packages/core/src/push-policy.ts` `pushPolicyOf(kind)` sorts every message kind:
+  - `interrupt`: a block's start, a block's completion check, a latest start, an overrunning timer, and the person's own reminders (errand, departure, reminder-only automation);
+  - `always`: account-security mail `mail_check`;
+  - `list`: everything else.
+- **Listed messages are not pushed.** The worker's `notifyPass` marks them `delivery: "listed"` and does not push them. They stay in the bell and the 小帮手.
+- **The brief carries one collected line.** It says 「系统做了 N 件事，在提醒里可看、可撤销」 (`isSystemReport`, last 24 h). This is the collected push the owner chose, once a day: Fitz et al. 2019 found hourly batching no better than none.
+- **Block starts are left to the calendar app.** Every block is written with its own alarm. `calendarRemindsBlocks` checks that a write path or feed went through in the last 36 h with no newer failure. When it does, a block's start is only listed (`listOnly`), except:
+  - the day's first block;
+  - a block moved since the nudge pass first saw it that day (`firstStart` in `nudge.blocks:<day>`).
+- **Pushed block starts count against the day's cap.** Once the cap is spent, a start is still said on the page but only listed. A start said again after the person's own 「推迟 10 分钟」 is pushed and not counted.
+- **Other changes:**
+  - The energy question is asked at most once a day (`energy:<day>`) and is never pushed.
+  - The evening wrap-up is not pushed.
+  - An opportunity closing today is no longer pushed; the brief still names new ones.
+  - The bell pops up only for `always` kinds; everything else waits behind the red dot.

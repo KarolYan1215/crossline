@@ -8,9 +8,10 @@ const base = (over: Partial<NudgeInput> = {}): NudgeInput => ({
   ending: [], slack: [], finished: [], ...over
 });
 
-test("fifteen minutes before a block that bears on a deadline, it says so with 开始计时 and 推到明天; not counted against the cap", () => {
+test("fifteen minutes before a block that bears on a deadline, it says so with 开始计时 and 推到明天; a pushed start counts against the cap", () => {
   const [nudge] = planNudges(base());
-  expect(nudge).toMatchObject({ kind: "block_start", urgent: true, counted: false, fingerprint: "start:scheduled:hw2:v1s1:2026-10-10" });
+  expect(nudge).toMatchObject({ kind: "block_start", urgent: true, counted: true, fingerprint: "start:scheduled:hw2:v1s1:2026-10-10" });
+  expect(nudge!.listOnly).toBeUndefined();
   expect(nudge!.text).toContain("关系到 10/12 的截止");
   expect(nudge!.buttons.map((button) => button.label)).toEqual(["开始计时", "推迟 10 分钟", "推到明天", "少问这类"]);
   // 推到明天 sits behind the card's 「更多」 fold, not beside 开始计时 at the moment of starting (2026-10-30).
@@ -121,8 +122,8 @@ test("busy, muted, capped: only the urgent get through while busy, a muted kind 
   expect(planNudges(base({ quiet: { timerRunning: false, inMeeting: false, answeredRecently: false, focused: true } }))).toHaveLength(1);
   expect(planNudges(base({ muted: new Set(["block_start"]) }))).toEqual([]);
   expect(planNudges(base({ blocks: [], finished, countedToday: 6 }))).toEqual([]);
-  // The block's start is not counted: it is said even with the cap reached.
-  expect(planNudges(base({ countedToday: 6 }))).toHaveLength(1);
+  // A block's start is still said with the cap reached, but only on the page and in the bell (A1, 2026-11-20).
+  expect(planNudges(base({ countedToday: 6 }))).toMatchObject([{ kind: "block_start", counted: false, listOnly: true }]);
   expect(planNudges(base({ level: "off" }))).toEqual([]);
   expect(nudgeCandidates(base({ level: "off" }))).toHaveLength(1);
 });
@@ -211,4 +212,20 @@ test("「推迟 10 分钟」 says the block again when the snooze runs out, in t
   expect(snoozed("15:30", 1, "15:30")).toEqual([]);
   // Snoozed twice: not said again (the wrap-up notes it instead).
   expect(snoozed("15:10", 2, "15:10")).toEqual([]);
+});
+
+test("a block the calendar app reminds about is listed, not pushed, and costs none of the cap; the person's own snooze is pushed (A1)", () => {
+  const listed = { ...base().blocks[0]!, listOnly: true };
+  expect(planNudges(base({ blocks: [listed] }))).toMatchObject([{ kind: "block_start", counted: false, listOnly: true }]);
+  const snoozed = { ...listed, snoozed: { count: 1, until: "14:50" } };
+  const [again] = planNudges(base({ blocks: [snoozed], clock: "15:05", now: "2026-10-10T20:05:00.000Z" }));
+  expect(again).toMatchObject({ kind: "block_start", counted: false, replaces: "start:scheduled:hw2:v1s1:2026-10-10" });
+  expect(again!.listOnly).toBeUndefined();
+});
+
+test("the energy question is asked at most once a day (2026-11-20)", () => {
+  const energyCheck = { nextBlock: "15:00「作业」", why: "" };
+  const [first] = planNudges(base({ blocks: [], energyCheck }));
+  expect(first).toMatchObject({ kind: "energy_check", fingerprint: "energy:2026-10-10" });
+  expect(planNudges(base({ blocks: [], energyCheck, clock: "18:50", sent: new Set(["energy:2026-10-10"]) }))).toEqual([]);
 });

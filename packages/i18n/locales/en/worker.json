@@ -895,5 +895,6 @@
   "日期": "Date",
   "每周安排": "Weekly arrangements",
   "没写日期的项": "Items with no date",
-  "关于日期的问题": "Questions about dates"
+  "关于日期的问题": "Questions about dates",
+  "系统做了 {{count}} 件事，在提醒里可看、可撤销": "The system did {{count}} things; see or undo them under reminders"
 }

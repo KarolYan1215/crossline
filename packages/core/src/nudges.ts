@@ -54,6 +54,8 @@ export type PlannedNudge = {
    * push `tag` is reused, so the prompt replaces the earlier one instead of stacking beside it.
    */
   replaces?: string;
+  /** Said on the page and in the bell only, never pushed: a block the calendar app reminds about, or one past the day's cap (A1). */
+  listOnly?: boolean;
 };
 
 /** The page a confirm question opens; `{message}` is replaced by the id of the message the question is written into. */
@@ -71,6 +73,11 @@ export type NudgeBlock = {
   overCapacity?: boolean;
   /** 「推迟 10 分钟」 pressed on this block today: how many times, and until when (`HH:mm`, the last one). */
   snoozed?: { count: number; until: string };
+  /**
+   * The person's calendar app already reminds about this block (it is written there with its own alarm, and it is neither the day's
+   * first block nor one moved since the morning): said on the page and in the bell, never pushed (the owner's answer of 2026-11-20, A1).
+   */
+  listOnly?: boolean;
 };
 /**
  * Any of today's scheduled blocks, for the completion check (docs/loop-and-scout.md §3). `endedTimerAt`: when this order's timer was
@@ -111,7 +118,8 @@ export type NudgeInput = {
   finished: Array<{ key: string; text: string; label: string; href: string }>;
   /**
    * Asked when the next hours' work depends on energy, the model is not sure of it, and the person last said how they are over three
-   * hours ago (docs/one-input.md §5.3). Unlimited, as the person chose, but never while they are busy or at night.
+   * hours ago (docs/one-input.md §5.3). At most once a day (the owner's answer of 2026-11-20), never while they are busy or at night,
+   * and never pushed: it waits in the 小帮手 for the person's next look.
    */
   energyCheck?: { nextBlock: string; why: string };
   /**
@@ -180,7 +188,11 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
           : t("已备好：{{items}}。", { items: prepared })
       ].filter(Boolean).join(en ? " " : "");
       const first = `start:${block.id}:${input.today}`;
-      out.push({ kind: "block_start", fingerprint: snoozes ? `${first}:${snoozes}` : first, ...(snoozes ? { replaces: first } : {}), urgent: true, counted: false, text,
+      // Pushed starts count against the day's cap (A1); one the calendar app reminds about is only listed, and costs nothing. A start said
+      // again after the person's own 「推迟 10 分钟」 is the reminder they asked for: pushed, and not counted twice.
+      const quiet = Boolean(block.listOnly) && !snoozes;
+      out.push({ kind: "block_start", fingerprint: snoozes ? `${first}:${snoozes}` : first, ...(snoozes ? { replaces: first } : {}), urgent: true,
+        counted: !quiet && !snoozes, ...(quiet ? { listOnly: true } : {}), text,
         buttons: [{ kind: "action", label: t("开始计时"), action: op(block.orderId, "start", t("开始{{label}}", { label }), block.stepId ? { stepId: block.stepId } : {}) },
           // The block's id rides in `text`: a snooze is about this block, not the whole task.
           { kind: "action", label: t("推迟 10 分钟"), action: op(block.orderId, "snooze", t("{{label}}推迟 10 分钟", { label }),
@@ -263,7 +275,7 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
   if (input.energyCheck) {
     const report = (level: "low" | "medium" | "high", word: string): NudgeButton => ({ kind: "action", label: t(word),
       action: { action: "energy.report", summary: t("精力{{level}}", { level: t(word) }), args: { level, note: "" } } });
-    out.push({ kind: "energy_check", fingerprint: `energy:${input.today}:${Math.floor(now / 180)}`, urgent: false, counted: false,
+    out.push({ kind: "energy_check", fingerprint: `energy:${input.today}`, urgent: false, counted: false,
       text: [t("现在精力怎么样？接下来是{{next}}。", { next: input.energyCheck.nextBlock }), input.energyCheck.why].filter(Boolean).join(en ? " " : ""),
       buttons: [report("low", "低"), report("medium", "中"), report("high", "高"), mute] });
   }
@@ -294,10 +306,11 @@ export function planNudges(input: NudgeInput): PlannedNudge[] {
     && (!input.night || item.kind === "block_start" || item.kind === "timer_overrun"))
     .sort((a, b) => Number(b.urgent) - Number(a.urgent));
   let left = DAILY_CAP[input.level] - input.countedToday;
-  return candidates.filter((item) => {
-    if (!item.counted) return true;
-    if (left <= 0) return false;
+  return candidates.flatMap((item) => {
+    if (!item.counted) return [item];
+    // A block's start past the cap is still said on the page (it must reliably appear, 2026-11-11), only no longer pushed.
+    if (left <= 0) return item.kind === "block_start" ? [{ ...item, counted: false, listOnly: true }] : [];
     left -= 1;
-    return true;
+    return [item];
   });
 }

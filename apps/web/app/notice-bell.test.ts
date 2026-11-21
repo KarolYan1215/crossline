@@ -18,11 +18,13 @@ test("what asks for an answer stays with the helper; everything else is a remind
   expect(isReminderKind(undefined)).toBe(true);
 });
 
-test("the newest unread reminder pops once", () => {
+test("only account-security mail pops up, once; everything else waits behind the red dot (2026-11-20)", () => {
   const body = { readAt: "2026-10-27T08:00:00.000Z", unread: 1, items: [
     { id: "b", kind: "mail_check", text: "核实一笔交易", at: "2026-10-27T09:00:00.000Z", links: [], actionable: true },
     { id: "a", kind: "date_advance", text: "整理", at: "2026-10-27T07:00:00.000Z", links: [], actionable: false }] };
   expect(toastCandidate(body, "")?.id).toBe("b");
   expect(toastCandidate(body, "b")).toBeUndefined();
   expect(toastCandidate({ ...body, readAt: "2026-10-27T10:00:00.000Z" }, "")).toBeUndefined();
+  const report = { ...body, items: [{ ...body.items[1]!, id: "c", at: "2026-10-27T09:30:00.000Z" }] };
+  expect(toastCandidate(report, "")).toBeUndefined();
 });

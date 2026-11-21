@@ -232,6 +232,15 @@ export function recordPathFailure(workspaceId: string, path: CalendarWritePath, 
 
 export type PathStatus = { path: CalendarWritePath; on: boolean; last?: { at: string; text: string }; failure?: { at: string; code: string; message: string } };
 
+/**
+ * Whether the person's calendar app reminds about the work blocks by itself: every block is written with its own alarm
+ * (`BLOCK_REMINDER_MINUTES`), so a write path that went through (or a feed a calendar app read) in the last day and a half, with no newer
+ * failure, means the app already rings before each block. The nudge pass then lists a block's start instead of pushing it (2026-11-20, A1).
+ */
+export function calendarRemindsBlocks(ctx: AccessContext, now = new Date()): boolean {
+  return writePathStatuses(ctx).some((status) => status.on && status.last && !status.failure && now.getTime() - Date.parse(status.last.at) < 36 * 3_600_000);
+}
+
 /** Per path: on or off, the last good write in words, and the last failure (`calendar.publish.failure[.<path>]`) if it is newer. */
 export function writePathStatuses(ctx: AccessContext): PathStatus[] {
   const store = getStore();

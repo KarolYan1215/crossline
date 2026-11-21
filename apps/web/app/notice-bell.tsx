@@ -9,6 +9,7 @@ import { intlLocale, tFor, type Locale } from "../lib/i18n";
 import "./notice-bell.css";
 import { Bell } from "lucide-react";
 import { ICON } from "./ui/icon-button";
+import { pushPolicyOf } from "@crossline/core";
 
 /** The last reminder that popped up, so one reminder pops once, not again on every page while it is unread. */
 const TOASTED_KEY = "crossline.notice.toasted";
@@ -29,10 +30,13 @@ export function noticeTime(at: string, now = new Date(), locale?: Locale): strin
   return `${when.getMonth() + 1}/${when.getDate()} ${clock}`;
 }
 
-/** The newest unread reminder that has not popped yet, if any. Exported for its test. */
+/**
+ * The newest unread reminder that has not popped yet, if it is one that may interrupt whatever the person is doing — account-security mail
+ * (`pushPolicyOf` 「always」). Everything else waits behind the red dot (2026-11-20, A4: 「铃铛不弹出」). Exported for its test.
+ */
 export function toastCandidate(body: NoticesBody, toasted: string): NoticeView | undefined {
   const newest = body.items[0];
-  return newest && newest.at > body.readAt && newest.id !== toasted ? newest : undefined;
+  return newest && newest.at > body.readAt && newest.id !== toasted && pushPolicyOf(newest.kind) === "always" ? newest : undefined;
 }
 
 /** Today's messages, then earlier ones (this browser's day), each newest first; an empty group is left out. Exported for its test. */
@@ -61,8 +65,8 @@ function NoticeItem({ item, onDone }: { item: NoticeView; onDone: () => void }) 
 /**
  * The bell at the top right (2026-10-27, the owner: 「不需要用户输入的提醒放到右上角一个提醒按钮，有新来的提醒弹窗，有未读的红点」): every
  * message the system says to the person that asks nothing — a mail to check in the bank's app, an errand's departure reminder, work that
- * finished, the day's tidy-up. A red dot while anything is unread; a new one pops up under the bell once for eight seconds; opening the
- * bell marks everything read. What asks for an answer stays with the 小帮手 and 待决事项.
+ * finished, the day's tidy-up. A red dot while anything is unread; only account-security mail pops up under the bell (2026-11-20); opening
+ * the bell marks everything read. What asks for an answer stays with the 小帮手 and 待决事项.
  */
 export function NoticeBell() {
   const t = useT();

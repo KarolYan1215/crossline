@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { ATTENTION_SNAPSHOT, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, BRIEF_TIME_SETTING, QUIET_HOURS_SETTING, inQuiet, inferWorkState, isClock, quietHoursOf, monthDay, resolveAvailability, tFor, type ActivitySegment, type AvailabilityWindow, type Locale } from "@crossline/core";
+import { ATTENTION_SNAPSHOT, isSystemReport, pushPolicyOf, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, BRIEF_TIME_SETTING, QUIET_HOURS_SETTING, inQuiet, inferWorkState, isClock, quietHoursOf, monthDay, resolveAvailability, tFor, type ActivitySegment, type AvailabilityWindow, type Locale } from "@crossline/core";
 import { readWatchList, surfacedOpportunities, type CrosslineStore } from "@crossline/db";
 import { opportunityAgentOn } from "./opportunities";
 import { ownerOf } from "./owner";
@@ -45,6 +45,11 @@ export type NotifyInput = {
   /** Yesterday's 拟计时 drafts not yet decided (the brief says only how many; no message of their own). */
   unconfirmedWork?: number;
   /**
+   * What the system did or found since the last brief and only listed, never pushed (`isSystemReport`): the brief's one line is the
+   * collected push of all of them (the owner's answers of 2026-11-20, A3–A4).
+   */
+  reports?: number;
+  /**
    * The web's open asks (`lib/asks.ts`), when its snapshot is fresh. They then replace the three lists above as the
    * source of urgent messages — one definition of "needs you" for the badge, the brief and the desktop — and only an
    * ask that would cost a deadline within two days (`urgency: "now"`) interrupts.
@@ -53,8 +58,9 @@ export type NotifyInput = {
   /** The workspace's language: every message is written in it (omitted = Chinese). */
   locale?: Locale;
   /**
-   * The opportunity agent (docs/opportunity-agent.md §7): offers found since yesterday that wait on the person, needs whose preparation
-   * starts today, and offers that close today — before the next brief, so they go out at once (inside the quiet hours and the daily cap).
+   * The opportunity agent (docs/opportunity-agent.md §7): offers found since yesterday that wait on the person and needs whose preparation
+   * starts today, said in the brief. `closingToday` is no longer pushed (2026-11-20: opportunities are never pushed; one the person chose
+   * to do is a task, and its own schedule reminds).
    */
   opportunities?: { fresh: Array<{ id: string; title: string; deadline?: string | undefined }>; prepToday: Array<{ id: string; title: string }>;
     closingToday: Array<{ id: string; title: string }> };
@@ -91,22 +97,21 @@ export function planNotifications(input: NotifyInput): PlannedNotification[] {
     out.push({ key: briefKey, kind: "brief", path: "/", title: t("今天的 Crossline"),
       body: [...lines, ...offers, ...prep, input.unconfirmedLastNight ? t("昨晚 {{count}} 块待确认", { count: input.unconfirmedLastNight }) : "",
         input.unconfirmedWork ? t("昨天有 {{count}} 段没确认的工作时间", { count: input.unconfirmedWork }) : "",
-        input.pending ? t("{{count}} 项待决定", { count: input.pending }) : ""].filter(Boolean).join(sep) || t("今日无到期事项。") });
+        input.pending ? t("{{count}} 项待决定", { count: input.pending }) : "",
+        input.reports ? t("系统做了 {{count}} 件事，在提醒里可看、可撤销", { count: input.reports }) : ""].filter(Boolean).join(sep) || t("今日无到期事项。") });
   }
   if (!inWindow(input) || (input.quiet && inQuiet(input.clock, input.quiet))) return out;
   const due = input.dueSoon.filter((item) => item.daysLeft <= 1).map((item) => ({ key: `due:${item.id}:${input.today}`, kind: "urgent" as const, path: "/milestones",
     title: item.daysLeft === 0 ? t("今天到期：{{title}}", { title: item.title }) : t("明天到期：{{title}}", { title: item.title }),
     body: t("截止 {{deadline}}。", { deadline: input.locale === "en" ? monthDay("en", item.deadline) : item.deadline }) }));
-  const closing = (input.opportunities?.closingToday ?? []).map((item) => ({ key: `opportunity:${item.id}`, kind: "urgent" as const, path: "/approvals",
-    title: t("今天截止的机会：{{title}}", { title: item.title }), body: t("报名或申请今天截止，等不到明天的早报。打开 Crossline 决定要不要。") }));
   const urgent: PlannedNotification[] = (input.asks
     ? [...input.asks.filter((ask) => ask.urgency === "now").map((ask) => ({ key: `ask:${ask.id}:${input.today}`, kind: "urgent" as const, path: ask.path,
-      title: ask.title, body: t("关系到两天内的截止。打开 Crossline 选一个答案，或者让它明天再问。") })), ...due, ...closing]
+      title: ask.title, body: t("关系到两天内的截止。打开 Crossline 选一个答案，或者让它明天再问。") })), ...due]
     : [
       ...input.waitingDue.map((item) => ({ key: `waiting:${item.id}:${input.today}`, kind: "urgent" as const, path: "/",
         title: item.who ? t("{{who}}的{{title}}到了吗？", { who: item.who, title: item.title }) : t("{{title}}到了吗？", { title: item.title }),
         body: t("到了就点「到了」，依赖它的工作才会排进日历。") })),
-      ...due, ...closing,
+      ...due,
       // A gate *run* that did not happen (logged out, quota): not a verdict on the work, and no longer titled as one.
       ...input.gateRefusals.map((item) => ({ key: `gate:${item.id}`, kind: "urgent" as const, path: "/approvals",
         title: t("验收没跑成：{{title}}", { title: item.title }), body: item.message.slice(0, 120) }))
@@ -217,6 +222,8 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
       .map((event) => ({ id: event.eventId, title: orders.get(event.entityId) ?? tFor(locale)("一项作业"), message: String((event.payload as { message?: string }).message ?? "") })),
     unconfirmedLastNight: unconfirmedLastNight(store, workspaceId, today),
     unconfirmedWork: unconfirmedWorkYesterday(store, workspaceId, today, zone),
+    reports: store.listRecentNudges(workspaceId, new Date(now.getTime() - 24 * 3_600_000).toISOString())
+      .filter((message) => isSystemReport((message.payload.nudge as { kind?: string } | undefined)?.kind)).length,
     ...(opportunityAgentOn(store, workspaceId) ? { opportunities: opportunityNotices(store, workspaceId, today, now) } : {})
   });
   const delivered: string[] = [];
@@ -235,9 +242,16 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
   const visibleAt = store.getSetting(workspaceId, "presence.visibleAt");
   const pageShown = Boolean(visibleAt) && now.getTime() - Date.parse(visibleAt!) <= PRESENCE_FRESH_MS;
   for (const message of store.listRecentNudges(workspaceId, new Date(now.getTime() - 3_600_000).toISOString())) {
-    const nudge = message.payload.nudge as { delivery?: string; fingerprint?: string; kind?: string; replaces?: string; desktopOnly?: boolean; href?: string } | undefined;
+    const nudge = message.payload.nudge as { delivery?: string; fingerprint?: string; kind?: string; replaces?: string; desktopOnly?: boolean; href?: string;
+      listOnly?: boolean } | undefined;
     const text = (message.payload.card as { clarify?: { question?: string } } | undefined)?.clarify?.question ?? "";
     if (nudge?.delivery !== "pending" || !text) continue;
+    // Only what needs the person now interrupts them (2026-11-20, A1–A4): the rest stays in the bell and the 小帮手, counted into the
+    // brief's one line. `listOnly`: a block the calendar app already reminds about.
+    if (pushPolicyOf(nudge.kind) === "list" || nudge.listOnly) {
+      store.updateConversationPayload(workspaceId, message.id, { ...message.payload, nudge: { ...nudge, delivery: "listed" } });
+      continue;
+    }
     const confirm = nudge.kind === "block_confirm";
     if (pageShown && !confirm) continue;
     const body = text.split("\n").slice(0, 3).join(" ").slice(0, 200);

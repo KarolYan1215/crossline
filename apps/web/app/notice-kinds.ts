@@ -1,12 +1,12 @@
+import { INPUT_NUDGE_KINDS } from "@crossline/core";
+
 /**
  * Which of the system's own messages ask the person something (2026-10-27, the owner: 「区分提醒和任务，不需要用户输入的提醒放到右上角一个提醒按钮」).
  * These stay with the 小帮手 and 待决事项, where they are answered; every other message is a reminder (提醒): read once in the bell at the
- * top right and needs nothing more. The day's opener is neither: it is Today's head.
+ * top right and needs nothing more. The day's opener is neither: it is Today's head. The set lives in core (`push-policy.ts`), where the
+ * worker's brief reads it too.
  */
-export const INPUT_NUDGE_KINDS: ReadonlySet<string> = new Set([
-  "block_confirm", "day_wrap", "energy_check", "outcome_check", "progress_check", "agent_question", "opener"
-]);
-
+export { INPUT_NUDGE_KINDS };
 export const isReminderKind = (kind: string | undefined): boolean => !INPUT_NUDGE_KINDS.has(kind ?? "");
 
 export type NoticeView = {
@@ -18,3 +18,4 @@ export type NoticeView = {
 };
 
 export type NoticesBody = { items: NoticeView[]; unread: number; readAt: string };
+
