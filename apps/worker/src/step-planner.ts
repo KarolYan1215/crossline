@@ -4,15 +4,17 @@ import {
   ARCHETYPES, AVAILABILITY_PROPOSED_SETTING, aiToolBrief, stepTypesBrief, AVAILABILITY_SETTING, resolveAvailability, VALIDATION_REVIEW_SCHEMA, archetypeBrief, archetypeById, stepPlanSchema, goalSettingKey,
   normalizeStepPlan, readableFromMaterial, STEP_ANSWER_SLOT, stepAnswerSlot, stepPlanWarnings, unverifiedUnits, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
   PROGRESS_ASSESSMENT_SCHEMA, validateProgressAssessment, type ProgressAssessment, type StepPlan, type StepWarning, type ValidationReview,
-  FINER_SPLIT_FEEDBACK, FAMILIARITY_INSTRUCTIONS, stepsNeedingFinerSplit, readModelCompletion, onPersonsBoard, preparesOf, type FinerSplit, type StepTrouble, type SuccessCriterion
+  FINER_SPLIT_FEEDBACK, FAMILIARITY_INSTRUCTIONS, stepsNeedingFinerSplit, readModelCompletion, onPersonsBoard, preparesOf, type FinerSplit, type StepTrouble, type SuccessCriterion,
+  assumedAnswer, questionNeededDay, taskTitleOf, carryOverSteps, remapFrozenSteps, parseFrozen, FROZEN_SETTING
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import { aiToolsFor, createRefBook, designKnob, familiarityBook, familiarityFor, lessonsFor, listAgentTasks, ownerPreferencesFor, projectAgentOutputs, withRef, type CrosslineStore, type RefBook, type StoredWorkOrder } from "@crossline/db";
+import { aiToolsFor, createRefBook, familiarityBook, familiarityFor, lessonsFor, listAgentTasks, ownerPreferencesFor, projectAgentOutputs, withRef, type CrosslineStore, type RefBook, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { learnedArchetypes } from "./archetype-curator";
 import { ownerOf } from "./owner";
 import { localeOf, tOfWorkspace } from "./locale";
-import { startingWithin } from "./schedule-window";
+import { ORDER_STARTS_SETTING, startingWithin } from "./schedule-window";
+import { sayToPerson } from "./workflow-smith";
 import { factLedger, relevantFacts, selectMaterial } from "./material-context";
 import { mergeTools, READ_LEDGER_INSTRUCTIONS } from "./ledger-index";
 
@@ -243,13 +245,65 @@ export function requestOutdatedReplans(store: CrosslineStore, workspaceId: strin
   return out;
 }
 
+/**
+ * What a replan carries over from the open steps it replaced (`carryOverSteps`): a block the person locked or started moves to the new
+ * step (it would otherwise be dropped silently: the schedule keeps a frozen block only while its step exists), and the progress they
+ * reported on an old step is kept on the new one (the larger of the two). Timed minutes are the task's (executions), so they stay.
+ */
+function carryOver(store: CrosslineStore, workspaceId: string, workOrderId: string, replaced: ReadonlyArray<{ id: string; title: string; progressQuarter: number }>,
+  next: ReadonlyArray<{ id: string; title: string; executor: string; status: string; progressQuarter: number }>): void {
+  if (!replaced.length) return;
+  const rename = carryOverSteps(replaced, next);
+  if (!rename.size) return;
+  const raw = store.getSetting(workspaceId, FROZEN_SETTING);
+  if (raw) {
+    const list = parseFrozen(raw, new Date(0));
+    const moved = remapFrozenSteps(list, workOrderId, rename);
+    if (moved.some((item, index) => item.blockId !== list[index]!.blockId)) store.setSetting(workspaceId, FROZEN_SETTING, JSON.stringify(moved));
+  }
+  const best = new Map<string, number>();
+  for (const step of replaced) {
+    const target = rename.get(step.id);
+    if (target && step.progressQuarter > 0) best.set(target, Math.max(best.get(target) ?? 0, step.progressQuarter));
+  }
+  for (const [stepId, quarter] of best) {
+    const step = next.find((item) => item.id === stepId);
+    // Four quarters would mean done: a merged step is not done because one of the parts it absorbed was.
+    if (step && step.status === "planned" && quarter > step.progressQuarter)
+      store.updateStepProgress(workspaceId, workOrderId, stepId, { progressQuarter: Math.min(3, quarter) }, ownerOf(store, workspaceId), "replan_carry");
+  }
+}
+
+/**
+ * The one replan of every open task to the person's granularity (2026-11-20, near-term doc §3.3 and R2: 「全部按新粒度重规划」): plans
+ * with two or more open person's steps are planned again, once, with `GRANULARITY_FEEDBACK`; the task pass picks the requests up a few at
+ * a time like any replan, and `carryOver` keeps locked blocks and progress. Marked done for the workspace (`GRANULARITY_REPLAN`).
+ */
+export const GRANULARITY_REPLAN = "repair.steps-granularity.v1";
+// i18n-ignore: the brief for the next plan (model-facing)
+export const GRANULARITY_FEEDBACK = "按交付物粒度重排：本人一件交付物一步（如「完成 ECE 555 作业 4」），带首个动作和量化完成标准，提交并入完成标准；只有本人会分开做的部分才拆开。助手的整理收集照做。已完成的步骤保留。";
+export function requestGranularityReplans(store: CrosslineStore, workspaceId: string): string[] {
+  if (store.getSetting(workspaceId, GRANULARITY_REPLAN)) return [];
+  const live = new Set(store.listWorkOrders(workspaceId).filter((order) => PLANNABLE.includes(order.state)).map((order) => order.id));
+  const out: string[] = [];
+  for (const plan of store.listStepPlans(workspaceId)) {
+    if (!live.has(plan.workOrderId)) continue;
+    if (plan.steps.filter((step) => step.status === "planned" && step.executor !== "agent").length < 2) continue;
+    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `task.steps_granularity:${plan.workOrderId}:${plan.version}`,
+      type: "task.steps_replan_requested", entityId: plan.workOrderId, payload: { feedback: GRANULARITY_FEEDBACK, reason: "granularity", version: plan.version } });
+    out.push(plan.workOrderId);
+  }
+  store.setSetting(workspaceId, GRANULARITY_REPLAN, new Date().toISOString());
+  return out;
+}
+
 /** A milestone this important or more makes its tasks important (the scheduler's own line for 「重要」). */
 export const IMPORTANT_WEIGHT = 60;
 
 /**
- * Whether a task is important by rule (docs/review-2026-10-13.md §11, the person's decision): graded coursework read from the course's
- * own files (a homework or exam date pair), or work for a milestone the scheduler weighs at 60 or more (the web records the weights in
- * `milestone.weights`). The planner's own judgement of the long-term plan is the other half (`importance.longTerm`).
+ * Whether a task is important by rule (docs/review-2026-10-13.md §11): graded coursework read from the course's own files (a homework or
+ * exam date pair), or work for a milestone the scheduler weighs at 60 or more (the web records the weights in `milestone.weights`). Since
+ * 2026-11-20 it decides only whether the plan is researched on the web first; which questions reach the person is the model's `ask`.
  */
 export function importantByRule(store: CrosslineStore, workspaceId: string, order: { milestoneId: string; payload?: unknown }): boolean {
   if ((order.payload as { datePair?: unknown } | undefined)?.datePair) return true;
@@ -335,18 +389,27 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
           + "`person.facts` is an index of the person's facts for this task: an id, the slot, the value's opening. " + READ_LEDGER_INSTRUCTIONS,
         withoutTools: (value) => ({ ...(value as object), materials: grounding.material.fallback(),
           person: { ...(value as { person: object }).person, facts: grounding.person } }) },
+      /* i18n-ignore-start: model instructions */
       developerInstructions: "Write this task's steps as the crossline-step-planner Skill describes and return only the requested JSON. The steps are "
         + "what the person sees on the task and what the scheduler puts on the calendar. Read `materials` first and count the units from them, each quoting "
-        + "its file verbatim. The person's steps are only the intellectual core (solving, deriving, deciding, writing, rehearsing), each one focused "
-        + "session with a quantified done criterion, a why naming what it trains or decides, and a firstAction of five minutes or less; collecting, "
+        + "its file verbatim. The person's steps are whole deliverables: one step per thing the person hands in or finishes (「完成 ECE 555 作业 4」), "
+        + "split only where the person would do the parts apart (two different deliverables, or two stretches with someone's feedback between them); "
+        + "handing in is part of the done criterion (「4 题写完并已在 Gradescope 提交」), never a step of its own. Each person's step has a quantified done "
+        + "criterion, a why naming what it trains or decides, and a firstAction of five minutes or less; the estimate still counts every part. Collecting, "
         + "compiling, listing and filing are the assistant's steps (owner assistant), and what needs one fact only the person holds is owner ask with "
         + "that question in questions. Every step names its product from stepTypes (material, output, ability, action): who does it follows from "
         + "that, and only ability steps get a tutorial. needs lists only material the person's files and folders do not cover and that something on "
         + "record says the person has (basis: the fact, file or task wording); the app looks for it on the web first and asks the person last. "
         + "No step only reviews the assistant's output, writes an acceptance checklist or defines scope. "
         + "The rationale is a few short sentences for the person: what the plan rests on, never the input's keys, ids or how units were counted. "
-        + "Ask only what neither the material nor person.facts settles, with the likeliest option first. " + FAMILIARITY_INSTRUCTIONS + " "
+        + "Questions: write one only for what neither the material nor person.facts settles, with 2–6 concrete options, the likeliest first, "
+        + "assume (the option the plan follows meanwhile), neededBy (the step that needs the answer) and ifWrong (minutes redone, harm: none, "
+        + "quality, deadline or external, and fixable: before_step, after_submit or never). Set ask true only where a wrong assumption matters: "
+        + "it bears on a milestone, has consequences outside (a submission, someone else), only the person can decide it, or cannot be undone; "
+        + "otherwise ask false and the plan goes on with assume. There is no limit on how many; the person answers them in the weekly review. "
+        + FAMILIARITY_INSTRUCTIONS + " "
         + "usedRefs lists the bracketed ids ([f3], [p1], [l2]) of the facts, preferences and lessons the plan really rests on, [] when none.",
+      /* i18n-ignore-end */
       // The prompt cache (docs/token-economy.md §2.5): what every plan of this workspace shares first, then the line's and the project's,
       // then this task; what only this run is told comes after the input instead of in the developer instructions.
       stableKeys: ["version", "archetypes", "stepTypes", "aiTools", "person", "personalPreferences", "lessons", "projectDates", "milestone"],
@@ -392,6 +455,7 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     // only the rest goes to the reviewer.
     const warnings = [...fixed.filter((warning) => !AUTO_FIXED.has(warning.code)), ...stepPlanWarnings(normalized, window, learned)];
     const saved = store.saveStepPlan(workspaceId, workOrderId, normalized, ownerOf(store, workspaceId), feedback ? "revised" : "planned");
+    carryOver(store, workspaceId, workOrderId, (previous?.steps ?? []).filter((step) => step.status === "planned"), saved.steps);
     // A saved plan is an answer that took effect: what it cited counts as used.
     store.markUsed(workspaceId, book.resolve(result.output.usedRefs));
     // A task nobody judged the completion of yet (one from a course's dates, or written before the field) takes the planner's judgement;
@@ -400,20 +464,14 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     const current = store.listWorkOrders(workspaceId).find((item) => item.id === workOrderId);
     if (completion && current && !readModelCompletion((current.payload as { completion?: unknown } | undefined)?.completion))
       store.saveWorkOrder({ ...current, payload: { ...((current.payload ?? {}) as object), completion } });
-    // Only an important task's questions go to the person; a minor task's are settled as assumptions the next plan reads (and the
-    // person can still correct on the task), so they never become a decision to make. A task's questions are put to the person once, on
-    // its first plan: a replan (after answers, a progress report or a reviewer's note) settles what it still wonders about as assumptions
-    // — answering three questions about 「核验排班价值指标」 brought three reworded ones back, every round (2026-10-18 walkthrough).
-    // Important means important by rule only: the planner's own `importance.longTerm` was true for nearly everything, and approving 19
-    // milestones put about 60 questions in front of the person in one afternoon (2026-10-18 evaluation). Even an important task puts only
-    // its first `PERSON_QUESTIONS_PER_TASK` to the person; the rest are assumptions, shown on the task and changeable there.
-    if (feedback || !importantByRule(store, workspaceId, order)) assumeAnswers(store, workspaceId, order, normalized.questions);
-    else {
-      // What the task's own files settle (the problem set, how it is handed in, the AI rule) is read from them, not asked.
-      const readable = materialQuestions(store, workspaceId, order, normalized.questions);
-      assumeAnswers(store, workspaceId, order, readable, true);
-      assumeAnswers(store, workspaceId, order, beyondPersonShare(normalized.questions.filter((question) => !readable.includes(question)), designKnob(store, workspaceId, "stepQuestions.perTask")));
-    }
+    // Which questions reach the person is the model's call (docs/plans/attention-ledger-1120.md §7.1, 2026-11-20): each says what a
+    // wrong assumption costs and whether it is worth asking (`ask`). The rest are settled as their assumption at once. No per-task cap and
+    // no importance rule any more (the cap of two and the weight-60 rule asked about the wrong things and hid the costly ones), and a
+    // replan no longer assumes every new question: one already answered or settled has its slot fact and is not asked again; a new
+    // critical one is asked like any other. What the task's own files settle is read from them, never asked.
+    const readable = materialQuestions(store, workspaceId, order, normalized.questions);
+    assumeAnswers(store, workspaceId, order, readable, true);
+    assumeAnswers(store, workspaceId, order, normalized.questions.filter((question) => !readable.includes(question) && question.ask !== true));
     if (warnings.length) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
       idempotencyKey: `validation.warned:task_steps:${workOrderId}:${saved.version}`, type: "validation.warned", entityId: workOrderId,
       payload: { subject: "task_steps", version: saved.version, warnings, revised: Boolean(feedback) } });
@@ -422,9 +480,8 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
 }
 
 /**
- * Questions already stored are filtered by the same rule as new ones (the person's decision, 2026-10-13, tightened 2026-10-18): a task
- * important by rule keeps its first `PERSON_QUESTIONS_PER_TASK` for the person; the rest, and every question of another task, are
- * settled as assumptions. Runs on the task pass.
+ * Questions already stored are settled by the same rule as new ones (2026-11-20): one the files answer is read from them; one the model
+ * did not mark worth asking — every question of a plan written before `ask` existed — is settled as its assumption. Runs on the task pass.
  */
 export function settleOldQuestions(store: CrosslineStore, workspaceId: string): string[] {
   const orders = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order]));
@@ -433,20 +490,50 @@ export function settleOldQuestions(store: CrosslineStore, workspaceId: string): 
     const order = orders.get(plan.workOrderId);
     if (!order || !plan.questions.length) continue;
     const readable = materialQuestions(store, workspaceId, order, plan.questions);
+    const assumed = plan.questions.filter((question) => !readable.includes(question) && question.ask !== true);
+    const fresh = unanswered(store, workspaceId, order, [...readable, ...assumed]);
     if (readable.length) assumeAnswers(store, workspaceId, order, readable, true);
-    const rest = plan.questions.filter((question) => !readable.includes(question));
-    const assumed = importantByRule(store, workspaceId, order) ? beyondPersonShare(rest, designKnob(store, workspaceId, "stepQuestions.perTask")) : rest;
     if (assumed.length) assumeAnswers(store, workspaceId, order, assumed);
-    if (readable.length || assumed.length) settled.push(plan.workOrderId);
+    if (fresh.length) settled.push(plan.workOrderId);
   }
   return settled;
 }
 
-/** How many of an important task's questions go to the person; the planner lists the ones that change the plan most first. */
-export const PERSON_QUESTIONS_PER_TASK = 2;
-// Questions of the kind the task's files answer do not count: they leave as soon as a file arrives.
-const beyondPersonShare = (questions: StepPlan["questions"], share = PERSON_QUESTIONS_PER_TASK) =>
-  questions.filter((question) => !readableFromMaterial(question.text)).slice(share);
+/**
+ * An asked question nobody answered by the day its answer is needed (`questionNeededDay`) is settled as its assumption, and the person
+ * is told once in the bell with the task to change it on (§7.1 point 5: 「到 neededBy 还没答，就按 assume 做，并在铃铛里说一声」). The
+ * answer stays changeable on the task, which replans it. Returns the work order ids settled.
+ */
+export function assumeAtNeededDay(store: CrosslineStore, workspaceId: string, today: string, now = new Date()): string[] {
+  const t = tOfWorkspace(store, workspaceId);
+  const open = new Set(["approved", "preparing", "ready_for_human", "active"]);
+  const orders = new Map(store.listWorkOrders(workspaceId).filter((order) => open.has(order.state)).map((order) => [order.id, order]));
+  let starts: Record<string, string> = {};
+  try { starts = JSON.parse(store.getSetting(workspaceId, ORDER_STARTS_SETTING) ?? "{}") as Record<string, string>; } catch { /* none recorded */ }
+  const said: string[] = [];
+  const settled: string[] = [];
+  for (const plan of store.listStepPlans(workspaceId)) {
+    const order = orders.get(plan.workOrderId);
+    if (!order) continue;
+    const due = (order.payload as { dueDate?: string } | undefined)?.dueDate;
+    const late = unanswered(store, workspaceId, order, plan.questions.filter((question) => question.ask === true && question.options.length > 0))
+      .filter((question) => { const day = questionNeededDay(question, plan.steps, starts[order.id], due); return Boolean(day) && day <= today; });
+    if (!late.length) continue;
+    assumeAnswers(store, workspaceId, order, late);
+    settled.push(order.id);
+    for (const question of late) said.push(`- ${t("「{{task}}」{{question}} → {{answer}}", { task: taskTitleOf(order), question: question.text, answer: assumedAnswer(question) })}`);
+  }
+  if (said.length) sayToPerson(store, workspaceId, [t("这些问题到了要用答案的时候还没回答，已按建议的假设先做："), ...said.slice(0, 8),
+    t("答案不对的话，在任务详情里改，任务会按新答案重排。")].join("\n"), "step_question_assumed", `assumed:${settled.join(",")}:${today}`,
+    settled.slice(0, 1).map((id) => ({ label: t("打开任务"), href: `/workbench/${encodeURIComponent(id)}` })), now);
+  return settled;
+}
+
+/** The questions of a task with no answer or assumption recorded yet (an answer is per project and question). */
+function unanswered(store: CrosslineStore, workspaceId: string, order: { projectId: string }, questions: StepPlan["questions"]): StepPlan["questions"] {
+  const answered = new Set(store.listProfileFacts(workspaceId).filter((fact) => fact.projectId === order.projectId && fact.slot.startsWith(STEP_ANSWER_SLOT)).map((fact) => fact.slot));
+  return questions.filter((question) => !answered.has(stepAnswerSlot(question.text)));
+}
 
 /** The questions the task's own files answer (`readableFromMaterial`), when the task's project has files at all. */
 function materialQuestions(store: CrosslineStore, workspaceId: string, order: { projectId: string }, questions: StepPlan["questions"]): StepPlan["questions"] {
@@ -455,17 +542,18 @@ function materialQuestions(store: CrosslineStore, workspaceId: string, order: { 
 }
 
 /**
- * Records each question's first option as an assumption under the question's answer slot: `假设：【question】option`. One the files
- * answer says so: the files rule, the option only where they say nothing.
+ * Records each question's assumption (`assume`, else its first option) under the question's answer slot: `假设：【question】option`. One
+ * the files answer says so: the files rule, the option only where they say nothing.
  */
 function assumeAnswers(store: CrosslineStore, workspaceId: string, order: { identityId: string; projectId: string }, questions: StepPlan["questions"],
   fromMaterial = false): void {
   const answered = new Set(store.listProfileFacts(workspaceId).filter((fact) => fact.slot.startsWith(STEP_ANSWER_SLOT)).map((fact) => `${fact.projectId}|${fact.slot}`));
   for (const question of questions) {
     const slot = stepAnswerSlot(question.text);
-    if (answered.has(`${order.projectId}|${slot}`) || (!question.options[0] && !fromMaterial)) continue;
+    const assumed = assumedAnswer(question);
+    if (answered.has(`${order.projectId}|${slot}`) || (!assumed && !fromMaterial)) continue;
     // i18n-ignore: the stored assumption form, read back by code and by the next plan
-    const value = fromMaterial ? `假设：【${question.text}】以任务材料为准${question.options[0] ? `；材料未写明时按「${question.options[0]}」` : ""}` : `假设：【${question.text}】${question.options[0]}`;
+    const value = fromMaterial ? `假设：【${question.text}】以任务材料为准${assumed ? `；材料未写明时按「${assumed}」` : ""}` : `假设：【${question.text}】${assumed}`;
     store.upsertProfileFact({ workspaceId, identityId: order.identityId, projectId: order.projectId, slot, value,
       status: "inferred", sourceRef: "", sourceQuote: "", updatedAt: new Date().toISOString() });
   }

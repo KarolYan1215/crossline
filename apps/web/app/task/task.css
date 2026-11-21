@@ -229,6 +229,8 @@
 .steps-meta small{font-size:12px;color:var(--graphite)}
 .steps-meta .text-button{min-height:32px;padding:4px 10px;font-size:13px}
 .steps-list .step-row{grid-template-columns:22px auto minmax(0,1fr)}
+.steps-assistant{margin-top:6px}
+.steps-assistant>summary{cursor:pointer;color:var(--graphite);font-size:.85em;padding:4px 0}
 .steps-list .step-row[data-kind="current"]{border-color:var(--ink);border-left:3px solid var(--lc,var(--ink))}
 .step-row[data-kind="done"] .step-title{color:var(--graphite)}
 .step-row[data-kind="agent"]{border-style:dashed}

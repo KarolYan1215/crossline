@@ -84,8 +84,40 @@ export type StepNeed = { id: string; what: string; why: string; basis: string;
  * plan that counted 「3 个知识点」 for a course with a dozen lectures before the exam was worse than no plan).
  */
 export type StepUnit = { id: string; title: string; docId: string; quote: string };
-/** What only the person can tell the planner (which lectures the exam covers, what they already know): asked on 待决事项, then replanned. */
-export type StepQuestion = { id: string; text: string; why: string; options: string[] };
+/** What a wrong assumption costs (docs/plans/attention-ledger-1120.md §7.1): minutes redone, what harm, and until when it can still be put right. */
+export type QuestionHarm = "none" | "quality" | "deadline" | "external";
+export type QuestionFixable = "before_step" | "after_submit" | "never";
+export type StepQuestionCost = { waste: number; harm: QuestionHarm; fixable: QuestionFixable };
+/**
+ * What only the person can tell the planner (which lectures the exam covers, what they already know). Since 2026-11-20 each carries what
+ * the plan assumes meanwhile (`assume`, one of `options`), the step that needs the answer (`neededBy`), what a wrong assumption costs
+ * (`ifWrong`), and the model's own call whether it is worth the person's attention (`ask`). Code only checks the shape: an unasked
+ * question is settled as its assumption; an asked one waits for the weekly review, or is put forward one or two days before its step.
+ * The four fields are optional for plans stored before them.
+ */
+export type StepQuestion = { id: string; text: string; why: string; options: string[];
+  assume?: string; neededBy?: string; ask?: boolean; ifWrong?: StepQuestionCost };
+export const QUESTION_HARMS: readonly QuestionHarm[] = ["none", "quality", "deadline", "external"];
+export const QUESTION_FIXABLE: readonly QuestionFixable[] = ["before_step", "after_submit", "never"];
+/** A question the person must see now, not in the weekly review: a wrong guess does real harm and can never be put right. */
+export const questionCannotWait = (question: Pick<StepQuestion, "ask" | "ifWrong">) =>
+  question.ask === true && question.ifWrong?.fixable === "never" && (question.ifWrong.harm ?? "none") !== "none";
+/**
+ * The day a question's answer is needed (`YYYY-MM-DD`, "" when nothing dates it): its step's own earliest day, else the task's first
+ * block (`schedule.orderStarts`, the web's record), else the task's due day. Two days before it the question leaves the weekly review
+ * for 待确认; on it, unanswered, it is settled as its assumption.
+ */
+export function questionNeededDay(question: Pick<StepQuestion, "neededBy">, steps: ReadonlyArray<{ id: string; notBefore: string }>,
+  orderStart: string | undefined, due: string | undefined): string {
+  const step = question.neededBy ? steps.find((item) => item.id === question.neededBy) : undefined;
+  const day = step?.notBefore || orderStart?.slice(0, 10) || due || "";
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : "";
+}
+/** How many days before its needed day an asked question comes to 待确认 (the person's choice, 2026-11-20: 开始前一两天提醒). */
+export const QUESTION_LEAD_DAYS = 2;
+/** The answer a question is settled with when nobody answers it. */
+export const assumedAnswer = (question: Pick<StepQuestion, "assume" | "options">) =>
+  question.assume && question.options.includes(question.assume) ? question.assume : question.options[0] ?? "";
 /** The person's answer to a plan question is a confirmed fact under this slot prefix (plus a hash of the question), read by every later plan. */
 export const STEP_ANSWER_SLOT = "step_answer_";
 export const stepAnswerSlot = (question: string) => `${STEP_ANSWER_SLOT}${[...question].reduce((hash, char) => (hash * 31 + char.codePointAt(0)!) >>> 0, 7).toString(36)}`;
@@ -140,7 +172,8 @@ export const stepPlanSchema = (extraIds: readonly string[] = []) => object({
   importance: object({ longTerm: { type: "boolean" }, why: str }),
   completion: COMPLETION_FIELD,
   units: { type: "array", items: object({ id: str, title: str, docId: str, quote: str }) },
-  questions: { type: "array", items: object({ id: str, text: str, why: str, options: { type: "array", items: str } }) },
+  questions: { type: "array", items: object({ id: str, text: str, why: str, options: { type: "array", items: str }, assume: str, neededBy: str,
+    ask: { type: "boolean" }, ifWrong: object({ waste: num, harm: { type: "string", enum: [...QUESTION_HARMS] }, fixable: { type: "string", enum: [...QUESTION_FIXABLE] } }) }) },
   needs: { type: "array", items: object({ id: str, what: str, why: str, basis: str, kind: { type: "string", enum: ["personal", "reference"] } }) },
   steps: { type: "array", items: object({
     id: str, role: { type: "string", enum: Object.keys(STEP_ROLES) }, title: str, deliverable: str, doneCriterion: str, share: num,
@@ -209,15 +242,22 @@ export function validateStepPlanShape(value: unknown, extra: readonly Archetype[
     if (!step || typeof step.id !== "string" || !step.id.trim() || !isStepRole(step.role) || typeof step.title !== "string" || !step.title.trim())
       throw new Error("STEP_PLAN_STEP_INVALID");
   }
+  // The questions' shape (2026-11-20, §7.1): code checks, never rewrites; a wrong one goes back to the model with the reason.
+  const ids = new Set(plan.steps.map((step) => step.id));
+  const problems: string[] = [];
+  for (const question of Array.isArray(plan.questions) ? plan.questions : []) {
+    if (!question?.text) continue;
+    const options = Array.isArray(question.options) ? question.options : [];
+    // i18n-ignore-start: repair messages to the model
+    if (options.length && question.assume !== undefined && !options.includes(question.assume)) problems.push(`问题「${question.text}」的 assume 必须是 options 之一`);
+    if (question.neededBy && !ids.has(question.neededBy)) problems.push(`问题「${question.text}」的 neededBy「${question.neededBy}」不是本计划里的步骤 id`);
+    if (question.ask === true && question.ifWrong && question.ifWrong.harm === "none" && !(question.ifWrong.waste > 0))
+      problems.push(`问题「${question.text}」要问本人，ifWrong 却是没有代价（waste 0、harm none）：没有代价的就按 assume 做，ask 写 false`);
+    // i18n-ignore-end
+  }
+  if (problems.length) throw Object.assign(new Error("STEP_QUESTION_INVALID"), { detail: problems.slice(0, 6).join("；") });
   return plan;
 }
-
-/**
- * Preparation that is not the person's to do (decided 2026-10-09: the person's attention goes to the intellectual core; the assistant
- * does the rest and puts the result in front of them). A step of the person's whose title is only collecting, listing, sorting or
- * filing material is handed to the assistant by normalization, whatever the model said.
- */
-export const TRIVIAL_STEP = /^(清点|整理(材料|资料|文件|课程材料)|收集|汇总|列出|归档|登记|下载|查找资料|检索|建立(材料|资料)?清单|准备材料|标注课程|核对(文件|材料)归属)|^(collect|gather|compile|list|archive|download|look up (materials|sources|references)|search for (materials|sources|references)|(build|make) (a |the )?(materials?|reading|file|source) list|prepare (the )?materials|organi[sz]e (the )?(materials|files|documents|notes|course materials)|sort (the )?(files|materials|documents))\b/i;
 
 /** A unit's quote must be in the document it names (letters and digits in order, ignoring spacing and punctuation). */
 export function unverifiedUnits(units: StepUnit[], documents: Array<{ id: string; text: string }>): StepUnit[] {
@@ -303,10 +343,17 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
     if (!step.dependsOn.includes(provide.id)) step.dependsOn.push(provide.id);
   }
   steps.unshift(...provides);
-  const questions = drill.questions.filter((question) => question && question.text)
-    .map((question, index) => ({ id: String(question.id || `q${index + 1}`).slice(0, 40), text: String(question.text).trim().slice(0, 200),
-      why: String(question.why ?? "").trim().slice(0, 300), options: (Array.isArray(question.options) ? question.options : list(question.options))
-        .map((option) => String(option).trim().slice(0, 80)).filter(Boolean).slice(0, 8) }));
+  const questions: StepQuestion[] = drill.questions.filter((question) => question && question.text).map((question, index) => {
+    const options = (Array.isArray(question.options) ? question.options : list(question.options)).map((option) => String(option).trim().slice(0, 80)).filter(Boolean).slice(0, 8);
+    const assume = typeof question.assume === "string" ? question.assume.trim().slice(0, 80) : undefined;
+    const neededBy = typeof question.neededBy === "string" && question.neededBy ? idMap.get(question.neededBy) : undefined;
+    const cost = question.ifWrong;
+    return { id: String(question.id || `q${index + 1}`).slice(0, 40), text: String(question.text).trim().slice(0, 200), why: String(question.why ?? "").trim().slice(0, 300), options,
+      ...(assume !== undefined ? { assume: options.includes(assume) ? assume : options[0] ?? "" } : {}), ...(neededBy ? { neededBy } : {}),
+      ...(typeof question.ask === "boolean" ? { ask: question.ask } : {}),
+      ...(cost ? { ifWrong: { waste: Math.max(0, Math.round(Number(cost.waste) || 0)), harm: QUESTION_HARMS.includes(cost.harm) ? cost.harm : "none",
+        fixable: QUESTION_FIXABLE.includes(cost.fixable) ? cost.fixable : "before_step" } } : {}) };
+  });
   const reviews = assignStepOwners(steps, questions, warnings, { assistant, locale: options.locale, ...(options.ownerPreferences ? { ownerPreferences: options.ownerPreferences } : {}) });
   // Dependencies: known ids only, then any edge that closes a cycle is dropped (the latest-listed edge first).
   for (const step of steps) {
@@ -346,10 +393,12 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
   for (const step of steps) step.covers = step.covers.filter((id) => unitIds.has(id));
   // A drill form was cut and nothing on record says how the person works: ask them, first, instead of guessing a method.
   if (drill.changed && !options.methodKnown && !questions.some((question) => asksMethod(question.text)))
-    questions.unshift(methodQuestion([options.taskText ?? "", ...steps.map((step) => step.title)].join(" "), options.locale));
+    // Only the person knows how they work (§7.1): asked, with the neutral answer assumed meanwhile.
+    { const method = methodQuestion([options.taskText ?? "", ...steps.map((step) => step.title)].join(" "), options.locale);
+      questions.unshift({ ...method, assume: method.options[0] ?? "", ask: true, ifWrong: { waste: 0, harm: "quality", fixable: "before_step" } }); }
   return { plan: { archetypeId: plan.archetypeId, rationale: stripDrillSentences(text(plan.rationale).trim(), drill.backed).slice(0, 600),
     quantity: { basis: text(plan.quantity?.basis).slice(0, 60), amount, unit: text(plan.quantity?.unit).slice(0, 12) }, units,
-    questions: questions.slice(0, 5), needs, steps }, warnings };
+    questions, needs, steps }, warnings };
 }
 
 /**
@@ -438,8 +487,9 @@ export function assignStepOwners(steps: PlannedStep[], questions: StepQuestion[]
         detail: `「${step.title}」${owner === "ask" ? "改为问本人一句后由助手完成" : preferred ? "按本人的选择交给助手" : "产出是材料，改由助手完成"}` }); // i18n-ignore
       if (owner === "ask") {
         const question = verdict.question ?? t("「{{title}}」需本人提供哪些信息？", { title: step.title });
-        if (questions.length < 5 && !questions.some((item) => item.text === question))
-          questions.push({ id: `q${questions.length + 1}`, text: question, why: t("「{{title}}」需要本人持有的信息，答完由助手接着做", { title: step.title }), options: [] });
+        if (!questions.some((item) => item.text === question))
+          questions.push({ id: `q${questions.length + 1}`, text: question, why: t("「{{title}}」需要本人持有的信息，答完由助手接着做", { title: step.title }), options: [],
+            ask: true, neededBy: step.id, ifWrong: { waste: 0, harm: "quality", fixable: "before_step" } });
       }
       step.owner = owner;
     } else if (step.role !== "wait") {
@@ -464,7 +514,9 @@ export function assignStepOwners(steps: PlannedStep[], questions: StepQuestion[]
       }
       // The older, narrower rule still holds where the new one has nothing to say; so does the plan's own role: a step it calls
       // gathering (「汇集候选人联系底稿」「取得小测3正式范围」) is the assistant's unless something about it is the person's.
-      const owner = verdict.code === "model" && verdict.owner === "person" && (TRIVIAL_STEP.test(step.title) || step.role === "gather") ? "assistant" : verdict.owner;
+      // A step the plan itself calls gathering is the assistant's unless something about it is the person's. The title list that used to
+      // hand 「整理…」「收集…」 to the assistant by its verb is gone (2026-11-20): the model names the step's product and owner.
+      const owner = verdict.code === "model" && verdict.owner === "person" && step.role === "gather" ? "assistant" : verdict.owner;
       if (owner === "person" && step.executor === "agent") {
         step.executor = "human";
         step.schedulable = true;
@@ -477,8 +529,9 @@ export function assignStepOwners(steps: PlannedStep[], questions: StepQuestion[]
       } else if (owner === "ask") {
         step.executor = "agent";
         const question = verdict.question ?? t("「{{title}}」需本人提供哪些信息？", { title: step.title });
-        if (questions.length < 5 && !questions.some((item) => item.text === question))
-          questions.push({ id: `q${questions.length + 1}`, text: question, why: t("「{{title}}」需要本人持有的信息，答完由助手接着做", { title: step.title }), options: [] });
+        if (!questions.some((item) => item.text === question))
+          questions.push({ id: `q${questions.length + 1}`, text: question, why: t("「{{title}}」需要本人持有的信息，答完由助手接着做", { title: step.title }), options: [],
+            ask: true, neededBy: step.id, ifWrong: { waste: 0, harm: "quality", fixable: "before_step" } });
         warnings.push({ code: "STEP_OWNER_ASK", detail: `「${step.title}」改为问本人一句后由助手完成` }); // i18n-ignore: a warning for the log and the reviewer
       }
       step.owner = step.executor === "agent" ? (owner === "ask" ? "ask" : "assistant") : "person";
@@ -586,20 +639,15 @@ export function stepPlanWarnings(plan: StepPlan, window: { notBefore?: string; d
   const archetype = archetypeById(plan.archetypeId, extra);
   if (!archetype) return [{ code: "STEP_ARCHETYPE_UNKNOWN", detail: plan.archetypeId }];
   const warnings: StepWarning[] = [];
-  const roles = plan.steps.map((step) => step.role);
   for (const step of plan.steps) {
     // A request for a fact is a quarter of an hour by design (info-request.ts), not a step too short to schedule.
     if (step.schedulable && step.estimate.p50Minutes < 15 && !(step.estimate.p50Minutes <= INFO_REQUEST_PERSON_MINUTES && infoRequestTraits({ title: step.title }).match)) warnings.push({ code: "STEP_TOO_SHORT", detail: `「${step.title}」只有 ${step.estimate.p50Minutes} 分钟，不足一个工作时段` }); // i18n-ignore
     if (!archetype.roles.includes(step.role)) warnings.push({ code: "STEP_ROLE_OUTSIDE_ARCHETYPE", detail: `「${step.title}」的类型「${STEP_ROLES[step.role]}」不在「${archetype.label}」的常见步骤中` }); // i18n-ignore
     if (!step.doneCriterion) warnings.push({ code: "STEP_DONE_CRITERION_MISSING", detail: `「${step.title}」没有完成标准` }); // i18n-ignore
   }
-  for (const role of archetype.requires) if (!roles.includes(role)) warnings.push({ code: "STEP_REQUIRED_ROLE_MISSING", detail: `缺少「${STEP_ROLES[role]}」步骤` }); // i18n-ignore
-  for (const [before, after] of archetype.firstBefore) {
-    const a = roles.indexOf(before), b = roles.indexOf(after);
-    if (a >= 0 && b >= 0 && a > b) warnings.push({ code: "STEP_ORDER_RULE", detail: `首个「${STEP_ROLES[before]}」应在首个「${STEP_ROLES[after]}」之前` }); // i18n-ignore
-  }
-  if (archetype.endsWith?.length && !archetype.endsWith.includes(roles.at(-1)!))
-    warnings.push({ code: "STEP_END_RULE", detail: `最后一步通常是${archetype.endsWith.map((role) => `「${STEP_ROLES[role]}」`).join("或")}` }); // i18n-ignore
+  // The archetype's required roles, its order (「先解后查」) and its usual last step are no longer warnings (2026-11-20, near-term doc §3.3):
+  // the person's work is one step per deliverable with 提交 folded into its done criterion, so 「完成作业 4」 alone is a whole plan. The
+  // archetypes still describe the usual parts to the model (`archetypeBrief`), as guidance.
   const p50 = plan.steps.filter((step) => step.schedulable).reduce((sum, step) => sum + step.estimate.p50Minutes, 0);
   if (plan.quantity.amount > 0) {
     const [low, high] = archetype.quantify.minutesPerUnit;

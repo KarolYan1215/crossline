@@ -14,7 +14,6 @@ export const DESIGN_KNOBS = {
   "tutorial.leadDays": { label: "教程提前天数", unit: "天", min: 1, max: 14, default: 3, consequence: "工作开始前这么多天才写教程；越早写，越可能因计划变动重写" },
   "assistant.prepHours": { label: "助手提前准备", unit: "小时", min: 6, max: 168, default: 48, consequence: "助手在本人步骤开始前这么久内才开始准备材料" },
   "results.reviewDays": { label: "助手成果代为采纳", unit: "天", min: 1, max: 30, default: 1, consequence: "自检通过、不涉及对外的助手成果，这么多天无人审就由系统采纳" },
-  "stepQuestions.perTask": { label: "每个重要任务问本人的问题数", unit: "个", min: 0, max: 6, default: 2, consequence: "超出的问题按假设处理，任务页上可改" },
 } as const satisfies Record<string, DesignKnob>;
 
 export type DesignKnobId = keyof typeof DESIGN_KNOBS;

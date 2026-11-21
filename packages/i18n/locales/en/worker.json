@@ -911,5 +911,9 @@
   "全部撤销": "Undo all",
   "与日历上的「{{title}}」是同一件": "The same as “{{title}}” on the calendar",
   "归档任务：「{{task}}」已在日历上（{{calendar}}）": "Archived task: “{{task}}” is already on the calendar ({{calendar}})",
-  "访谈里本人说近期要做完的事：「{{quote}}」": "Said in the interview as near-term work: “{{quote}}”"
+  "访谈里本人说近期要做完的事：「{{quote}}」": "Said in the interview as near-term work: “{{quote}}”",
+  "这些问题到了要用答案的时候还没回答，已按建议的假设先做：": "These questions were still open when their answer was needed, so the plan went ahead with the suggested assumption:",
+  "答案不对的话，在任务详情里改，任务会按新答案重排。": "If an answer is wrong, change it on the task; the task is replanned with the new answer.",
+  "「{{task}}」{{question}} → {{answer}}": "“{{task}}” {{question}} → {{answer}}",
+  "打开任务": "Open task"
 }

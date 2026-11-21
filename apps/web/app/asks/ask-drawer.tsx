@@ -14,11 +14,11 @@ import { Receipt } from "../ui/vanish";
  * resolve or raise others (handing over a missing input re-plans the milestone). `keep` picks which of them this view shows.
  * Where it stood, a one-line receipt 「已执行 · 撤销」 says so for a moment (`receipts`, one-shot cards vanish, 2026-11-10).
  */
-export function useAskList(initial: Ask[], keep: (ask: Ask) => boolean) {
+export function useAskList(initial: Ask[], keep: (ask: Ask) => boolean, source = "/api/asks") {
   const t = useT();
   const [asks, setAsks] = useState(() => uniqueAsks(initial.filter(keep)));
   const reload = async () => {
-    const response = await fetch("/api/asks", { cache: "no-store" }).catch(() => null);
+    const response = await fetch(source, { cache: "no-store" }).catch(() => null);
     const body = await response?.json().catch(() => null) as { asks?: Ask[] } | null;
     if (body?.asks) setAsks(uniqueAsks(body.asks.filter(keep)));
   };

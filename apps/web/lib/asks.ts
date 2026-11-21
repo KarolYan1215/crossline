@@ -6,7 +6,8 @@ import {
   validateAskChoice, withFrozen, type AccessContext, type Ask, type AskField, type AskItem, type AskOption, type AskPreview, type AskSnooze,
   attendedName, attendedText, isPreparationOnlyMilestone, onPersonsBoard, outcomeCriteriaVerdict, preparesOf, workOwner, decisionFor, similarTitles, type TimedItem,
   MILESTONE_RISK_KIND_LABEL, MILESTONE_RISK_LEVEL_LABEL, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskBufferDays, riskCriteriaKeys, riskLevelOf,
-  parseRiskDigestSeen, RISK_DIGEST_SETTING, riskDigestShows, weekStartOf, type MilestoneRisk, type RiskDigestSeen
+  parseRiskDigestSeen, RISK_DIGEST_SETTING, riskDigestShows, weekStartOf, type MilestoneRisk, type RiskDigestSeen,
+  assumedAnswer, QUESTION_LEAD_DAYS, questionCannotWait, questionNeededDay, type StepQuestion
 } from "@crossline/core";
 import { applyWeeklyCommit, loadWeeklyCommit } from "./weekly-commit";
 import { acceptOwnCompletion, listAgentTasks, courseProjectIds, overdueStartedTasks, OVERDUE_TASK_RESOLVED, ownCompletion, SILENT_TASK_SHIFTS_MAX, resolvePossibleDuplicate, type StoredWorkOrder } from "@crossline/db";
@@ -17,7 +18,7 @@ import {
   heldConflicts, unlockBlock, writeFrozen, readRiskDecisions, RISK_DECISIONS_SETTING, riskHorizonDays, type RiskDecision
 } from "./crossline";
 import { requestAutoBackplan } from "./approvals";
-import { readScheduledDay } from "./schedule-memory";
+import { ORDER_STARTS_SETTING, readScheduledDay } from "./schedule-memory";
 import { requestCodexSupervisor } from "./codex-runtime";
 import { autoPublishPass, forgetPublishedHash, publishWorkspace } from "./auto-publish";
 import { calendarFiling } from "./timeline";
@@ -1225,9 +1226,15 @@ export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
  * card each): 「都按建议」 settles them all in one tap, 「逐条改」 opens one line per question where an empty line keeps the suggestion.
  * Batching interruptions is what the notification evidence supports (Fitz et al. 2019); each answer stays changeable on the task.
  */
-type StepQuestionEntry = { order: StoredWorkOrder; plannedAt: string; version: number; question: { text: string; why?: string; options: string[] } };
+type StepQuestionEntry = { order: StoredWorkOrder; plannedAt: string; version: number; question: StepQuestion;
+  /** Waits for the weekly review (`Ask.inReview`): neither urgent (`questionCannotWait`) nor needed within `QUESTION_LEAD_DAYS`. */
+  review: boolean };
 
-/** The open step questions, one entry per question, the same question from two tasks of one project once (the answer is per project). */
+/**
+ * The open step questions, one entry per question, the same question from two tasks of one project once (the answer is per project).
+ * Only the ones the planner marked worth asking (`ask`, docs/plans/attention-ledger-1120.md §7.1); the rest are settled as assumptions by
+ * the worker (`settleOldQuestions`), and every question of a plan written before `ask` existed with them.
+ */
 function openStepQuestions({ store, ctx, today }: Source): StepQuestionEntry[] {
   // An event whose day has passed has nothing left to plan (2026-11-17 live walk: 「参加 CoE 校友职业奖座谈会」 still asked for its
   // start and end time eleven days after it).
@@ -1242,14 +1249,24 @@ function openStepQuestions({ store, ctx, today }: Source): StepQuestionEntry[] {
   // What a task's own files answer (the problem set, how it is handed in, the AI rule) is read from them, never asked: the worker's task
   // pass writes it as an assumption, and it is left out here already so it never shows meanwhile.
   const withFiles = new Set(store.listSourceDocuments(ctx.workspaceId).map((doc) => doc.projectId).filter(Boolean));
+  let starts: Record<string, string> = {};
+  try { starts = JSON.parse(store.getSetting(ctx.workspaceId, ORDER_STARTS_SETTING) ?? "{}") as Record<string, string>; } catch { /* none recorded */ }
+  const soon = new Date(Date.parse(`${today}T00:00:00Z`) + QUESTION_LEAD_DAYS * 86_400_000).toISOString().slice(0, 10);
   return store.listStepPlans(ctx.workspaceId).flatMap((plan) => {
     const order = orders.get(plan.workOrderId);
     if (!order) return [];
     return plan.questions.filter((question) => {
+      if (question.ask !== true) return false;
       const key = `${order.projectId}|${stepAnswerSlot(question.text)}`;
       if (withFiles.has(order.projectId) && readableFromMaterial(question.text)) return false;
       return !answered.has(key) && !asked.has(key) && Boolean(asked.add(key));
-    }).map((question) => ({ order, plannedAt: plan.plannedAt, version: plan.version, question }));
+    }).map((question) => {
+      // Asked questions are answered together in the weekly review, and come forward one or two days before the step that needs them
+      // (the person's choice, 2026-11-20); one whose wrong guess does real harm and cannot be put right comes at once.
+      const day = questionNeededDay(question, plan.steps, starts[order.id], (order.payload as { dueDate?: string } | undefined)?.dueDate);
+      const review = !questionCannotWait(question) && !(day && day <= soon);
+      return { order, plannedAt: plan.plannedAt, version: plan.version, question, review };
+    });
   });
 }
 
@@ -1261,7 +1278,7 @@ function stepQuestionGroups(source: Source): { groups: Map<string, StepQuestionE
   const byProject = new Map<string, StepQuestionEntry[]>();
   const single: StepQuestionEntry[] = [];
   for (const entry of openStepQuestions(source)) {
-    if (!entry.order.projectId || !entry.question.options[0]) { single.push(entry); continue; }
+    if (!entry.order.projectId || !assumedAnswer(entry.question)) { single.push(entry); continue; }
     byProject.set(entry.order.projectId, [...(byProject.get(entry.order.projectId) ?? []), entry]);
   }
   const groups = new Map<string, StepQuestionEntry[]>();
@@ -1286,30 +1303,31 @@ function stepQuestionAsks(source: Source): Ask[] {
       id: `stepq:p:${projectId}`, kind: "step_question", entityId: projectId, line: entries[0]!.order.identityId,
       urgency, ...(dueDay ? { dueDay } : {}), raisedAt: entries.map((entry) => entry.plannedAt).sort().at(-1)!,
       fingerprint: entries.map((entry) => `${entry.version}:${stepAnswerSlot(entry.question.text)}`).join("|"),
-      important: true, preview: taskPreview(t, entries[0]!.order.id),
+      important: true, preview: taskPreview(t, entries[0]!.order.id), ...(entries.every((entry) => entry.review) ? { inReview: true as const } : {}),
       title: t("「{{name}}」有 {{count}} 个问题只有本人知道", { name: short(name, 20), count: entries.length }),
       why: t("{{list}}。", { list: entries.map((entry, index) => t("{{n}}. 「{{task}}」{{question}} → 建议：{{option}}", { n: index + 1,
-        task: short(taskTitleOf(entry.order), 16), question: clause(entry.question.text), option: entry.question.options[0] })).join(locale === "en" ? "; " : "；") })
+        task: short(taskTitleOf(entry.order), 16), question: clause(entry.question.text), option: assumedAnswer(entry.question) })).join(locale === "en" ? "; " : "；") })
         + (locale === "en" ? " " : "") + t("可以都按建议处理，之后在任务详情里随时改；也可以逐条写自己的答案，留空的按建议。"),
       options: [
         { id: "accept", label: t("都按建议"), detail: t("每个任务按回答重排一次步骤；之后可在任务详情里改"), recommended: true },
         { id: "edit", label: t("逐条改"), fields: entries.map((entry, index) => ({ id: `q${index}`, label: `${index + 1}. ${short(entry.question.text, 40)}`,
-          kind: "text" as const, required: false, placeholder: t("留空按建议：{{option}}", { option: entry.question.options[0] }) })) }
+          kind: "text" as const, required: false, placeholder: t("留空按建议：{{option}}", { option: assumedAnswer(entry.question) }) })) }
       ]
     };
   });
-  const one = single.map(({ order, plannedAt, version, question }): Ask => {
+  const one = single.map(({ order, plannedAt, version, question, review }): Ask => {
     const due = dueOf(order);
+    const suggested = assumedAnswer(question);
     return {
       id: `stepq:${order.id}:${stepAnswerSlot(question.text)}`, kind: "step_question", entityId: order.id, line: order.identityId,
       urgency: urgencyFor(due, today), ...(due ? { dueDay: due } : {}), raisedAt: plannedAt, fingerprint: `${version}:${question.text}`,
       // The step planner asks only for important work and only what it cannot read from the material: its plan waits on the answer.
-      important: true, preview: taskPreview(t, order.id),
-      freeText: { placeholder: question.options[0] ? t("例如：{{option}}，或用自己的话说", { option: question.options[0] }) : t("用自己的话回答") },
+      important: true, preview: taskPreview(t, order.id), ...(review ? { inReview: true as const } : {}),
+      freeText: { placeholder: suggested ? t("例如：{{option}}，或用自己的话说", { option: suggested }) : t("用自己的话回答") },
       title: t("「{{task}}」：{{question}}", { task: short(taskTitleOf(order), 24), question: question.text }),
       why: (question.why ? t("{{reason}}。", { reason: clause(question.why) }) + (locale === "en" ? " " : "") : "")
         + t("回答后，这个任务的步骤会按回答重新安排；材料里已有的信息不会再问。"),
-      options: [...question.options.map((option, index) => ({ id: `o${index}`, label: option,
+      options: [...question.options.map((option, index) => ({ id: `o${index}`, label: option, ...(option === suggested ? { recommended: true } : {}),
         fields: [{ id: "other", label: t("补充"), kind: "text" as const, required: false, placeholder: t("可不填") }] })),
         { id: "free", label: t("都不是，我来写"), fields: [{ id: "other", label: t("回答"), kind: "text" as const, required: true }] }]
     };
@@ -1325,7 +1343,7 @@ function answerStepQuestionBatch(ctx: AccessContext, ask: Ask, optionId: string,
   const byOrder = new Map<string, string[]>();
   entries.forEach((entry, index) => {
     const own = optionId === "edit" ? (values[`q${index}`] ?? "").trim() : "";
-    const answer = own || entry.question.options[0]!;
+    const answer = own || assumedAnswer(entry.question);
     /* i18n-ignore-start: the fact's quote and the replan note are read by the step planner (model context) */
     recordStepAnswer(ctx, entry.order, entry.question.text, answer, own || `按建议：${answer}`);
     byOrder.set(entry.order.id, [...(byOrder.get(entry.order.id) ?? []), `「${entry.question.text}」：${answer}`]);
@@ -1366,7 +1384,15 @@ export async function loadAsks(ctx: AccessContext, now?: Date): Promise<Ask[]> {
  * shows one line 「访谈还有 N 题 → 继续访谈」 from `PendingCounts.questions`, and an `iq:` answer typed into the box still goes through.
  */
 const UNLISTED = new Set<Ask["kind"]>(["outcome_check", "progress_check", "interview_question", "interview_open"]);
-export const listed = (asks: Ask[]) => asks.filter((ask) => !UNLISTED.has(ask.kind) && !statusOnly(ask));
+export const listed = (asks: Ask[]) => asks.filter((ask) => !UNLISTED.has(ask.kind) && !statusOnly(ask) && !ask.inReview);
+
+/**
+ * The questions that wait for the weekly review (`Ask.inReview`, 2026-11-20): answered there together, not on 待确认 and not in the badge.
+ * Each comes forward to 待确认 by itself one or two days before the step that needs it.
+ */
+export function reviewAsks(ctx: AccessContext, now?: Date): Ask[] {
+  return openAsks(ctx, now).filter((ask) => ask.inReview);
+}
 
 /**
  * A state with nothing for the person to decide (docs/plans/attention-ledger-1120.md P4, 2026-11-20): background work paused on the

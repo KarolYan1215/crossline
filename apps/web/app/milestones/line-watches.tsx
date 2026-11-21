@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useT } from "../locale-context";
+import { VoiceField } from "../ui/voice/voice-input";
 
 /**
  * A line's watches on its card (docs/opportunity-agent.md §17.9): what the opportunity agent keeps looking at for this line, how often and
@@ -32,7 +33,7 @@ function WatchEditor({ watch, onDone }: { watch: WatchView; onDone: () => void }
   };
   return <div className="lw-edit">
     <label>{t("名称")}<input value={title} maxLength={120} onChange={(event) => setTitle(event.target.value)} /></label>
-    <label>{t("看什么、在哪看")}<textarea rows={2} value={query} maxLength={600} onChange={(event) => setQuery(event.target.value)} /></label>
+    <label>{t("看什么、在哪看")}<VoiceField kind="note"><textarea rows={2} value={query} maxLength={600} onChange={(event) => setQuery(event.target.value)} /></VoiceField></label>
     <label>{t("每几天看一次")}<input type="number" min={1} max={180} value={everyDays} onChange={(event) => setEveryDays(Number(event.target.value) || 1)} /></label>
     <small className="muted">{t("改过的监视项归本人，系统不会自动关闭。写进网址会按网页变化来看。")}</small>
     <p className="lw-actions"><button type="button" className="btn-primary" onClick={() => void save()}>{t("保存")}</button>
@@ -74,7 +75,7 @@ export function LineWatches({ lineId, watches }: { lineId: string; watches: Watc
     </ul>
     {adding ? <div className="lw-edit">
       <label>{t("名称")}<input value={title} maxLength={120} placeholder={t("例：城市播客线下活动")} onChange={(event) => setTitle(event.target.value)} /></label>
-      <label>{t("看什么、在哪看")}<textarea rows={2} value={query} maxLength={600} placeholder={t("一句话，或一个网址")} onChange={(event) => setQuery(event.target.value)} /></label>
+      <label>{t("看什么、在哪看")}<VoiceField kind="note"><textarea rows={2} value={query} maxLength={600} placeholder={t("一句话，或一个网址")} onChange={(event) => setQuery(event.target.value)} /></VoiceField></label>
       <p className="lw-actions"><button type="button" className="btn-primary" disabled={!title.trim() || !query.trim()}
         onClick={() => void act({ action: "add", lineId, title, query })}>{t("添加")}</button>
         <button type="button" onClick={() => setAdding(false)}>{t("取消")}</button></p>

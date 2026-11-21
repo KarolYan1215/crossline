@@ -48,7 +48,7 @@ export const SKILL_CATALOGUE: Record<string, string> = {
   "crossline-quote-reader": "Read the last price of each listed brokerage symbol with the Longbridge connector's quote tool and return the numbers exactly as the tool gave them — market data only, no other tool, no advice.",
   "crossline-recording-digest": "Read transcripts of the person's own phone recordings, decide which are worth keeping, and for those write a summary and pull out the person's commitments, facts about them and their work, and the days named — every item quoting the transcript.",
   "crossline-skill-scout": "Search the web for published Agent Skills (SKILL.md directories) that would help the person's lines and the tasks they are doing, and name each one by its GitHub repository and directory.",
-  "crossline-step-planner": "Plan one Crossline task as the few intellectual steps only the person can do, grounded in their own material and situation, with the preparation handed to the assistant and what is unknown asked of the person.",
+  "crossline-step-planner": "Plan one Crossline task as the few deliverable-level steps only the person can do, grounded in their own material and situation, with the preparation handed to the assistant and what is unknown asked of the person.",
   "crossline-task-titler": "Give each Crossline task a short name — an action that starts with its verb — keeping its full sentence as the description.",
   "crossline-time-attributor": "Say which of the person's open Crossline tasks (and step) each stretch of untimed screen work was for, from its app and window titles, or none.",
   "crossline-validation-reviewer": "Second check on a mechanical warning — decide whether the flagged output is fine as it is or needs to be redone, and say what to change.",

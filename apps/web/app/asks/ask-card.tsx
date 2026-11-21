@@ -252,8 +252,11 @@ function FieldInput({ field, value, onChange }: { field: AskField; value: string
   return <label>{label}
     {field.kind === "longtext"
       ? <VoiceField kind="note"><textarea rows={2} required={field.required} value={value} placeholder={field.placeholder} onChange={(event) => onChange(event.target.value)} /></VoiceField>
-      : <input type={field.kind === "date" ? "date" : "text"} required={field.required} value={value} placeholder={field.placeholder}
-        onChange={(event) => onChange(event.target.value)} />}
+      : field.kind === "date"
+        ? <input type="date" required={field.required} value={value} onChange={(event) => onChange(event.target.value)} />
+        // Every box the person writes in can be spoken into (2026-11-20, round 5: 每个输入框都可说).
+        : <VoiceField kind="form"><input type="text" required={field.required} value={value} placeholder={field.placeholder}
+          onChange={(event) => onChange(event.target.value)} /></VoiceField>}
   </label>;
 }
 

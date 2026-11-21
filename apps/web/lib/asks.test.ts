@@ -4,7 +4,7 @@ import { askQuadrant } from "@crossline/core";
 vi.mock("server-only", () => ({}));
 vi.mock("./codex-runtime", () => ({ requestCodexSupervisor: vi.fn(async () => ({})), CodexSupervisorRequestError: class extends Error {} }));
 import { requestCodexSupervisor } from "./codex-runtime";
-import { answerAsk, collectAsks, explainRisk, openAsks, snoozeAsk, writeAttentionSnapshot } from "./asks";
+import { answerAsk, collectAsks, explainRisk, listed, openAsks, reviewAsks, snoozeAsk, writeAttentionSnapshot } from "./asks";
 import { countPending } from "./pending";
 import { loadTimeline } from "./timeline";
 import { TEST_CTX } from "./test-support";
@@ -797,7 +797,7 @@ test("a step question the task's own files answer is not asked; the same questio
   for (const id of ["hw3", "hw4"]) store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research", projectId: "ece555", milestoneId: "", intent: id,
     state: "approved", riskTier: "routine", estimate, payload: {} });
   const plan = { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "", steps: [],
-    questions: [{ id: "q1", text: "作业提交方式？", why: "", options: ["Canvas"] }, { id: "q2", text: "当前完成状态？", why: "", options: ["未开始", "一半"] }] };
+    questions: [{ id: "q1", text: "作业提交方式？", why: "", options: ["Canvas"], ask: true }, { id: "q2", text: "当前完成状态？", why: "", options: ["未开始", "一半"], ask: true }] };
   for (const id of ["hw3", "hw4"]) store.saveStepPlan(ws, id, plan as never, owner, "t");
   const cards = () => collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "step_question");
   // Two questions of one project are one card, each a line of 「逐条改」.
@@ -816,7 +816,7 @@ test("an event whose day has passed asks no step question (2026-11-17 live walk:
   event("gone-prefixed", "通过 Zoom 参加第 13 期 Biolog 线上活动", "2026-10-05", "参加第 13 期 Biolog");
   event("coming", "参加 ECE 研究系列讲座", "2026-10-09");
   const plan = { archetypeId: "event", quantity: { basis: "次", amount: 1, unit: "次" }, rationale: "", steps: [],
-    questions: [{ id: "q1", text: "补充活动起止时间", why: "", options: [] }] };
+    questions: [{ id: "q1", text: "补充活动起止时间", why: "", options: [], ask: true }] };
   for (const id of ["gone", "gone-prefixed", "coming"]) store.saveStepPlan(ws, id, plan as never, owner, "t");
   expect(collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "step_question").map((ask) => ask.entityId)).toEqual(["coming"]);
 });
@@ -826,7 +826,7 @@ test("a project's questions are settled on one card: 都按建议 in one tap, or
   for (const id of ["a", "b"]) store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "startup", projectId: "mvp", milestoneId: "", intent: `任务 ${id}`,
     state: "approved", riskTier: "routine", estimate, payload: {} });
   const plan = (texts: string[]) => ({ archetypeId: "problem_set", quantity: { basis: "x", amount: 1, unit: "个" }, rationale: "", steps: [],
-    questions: texts.map((text, index) => ({ id: `q${index}`, text, why: "", options: [`${text}-建议`, "其他"] })) });
+    questions: texts.map((text, index) => ({ id: `q${index}`, text, why: "", options: [`${text}-建议`, "其他"], ask: true })) });
   store.saveStepPlan(ws, "a", plan(["用户怎么联系？", "定价多少？"]) as never, owner, "t");
   store.saveStepPlan(ws, "b", plan(["首批几家店？"]) as never, owner, "t");
   const card = collectAsks(TEST_CTX, NOW).find((ask) => ask.id === "stepq:p:mvp")!;
@@ -838,6 +838,31 @@ test("a project's questions are settled on one card: 都按建议 in one tap, or
   const replans = store.listEvents(ws, { type: "task.steps_replan_requested" });
   expect(replans.map((event) => event.entityId).sort()).toEqual(["a", "b"]);
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "step_question")).toBe(false);
+});
+
+test("asked plan questions wait for the weekly review unless needed within two days or impossible to put right; unasked ones are never shown", async () => {
+  const store = setup();
+  for (const id of ["near", "far", "never", "quiet"]) store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research", projectId: `p-${id}`, milestoneId: "",
+    intent: `任务 ${id}`, state: "approved", riskTier: "routine", estimate, payload: {} });
+  const cost = (harm: string, fixable: string) => ({ waste: 60, harm, fixable });
+  const plan = (text: string, notBefore: string, extra: Record<string, unknown>) => ({ archetypeId: "problem_set", quantity: { basis: "x", amount: 1, unit: "个" }, rationale: "",
+    steps: [{ id: "s1", role: "solve", title: "做题", deliverable: "", doneCriterion: "", share: 1, estimate: { p25Minutes: 30, p50Minutes: 60, p85Minutes: 90 },
+      dependsOn: [], notBefore, dueBy: "", schedulable: true, executor: "human", tickOutcome: "" }], questions: [{ id: "q1", text, why: "", options: ["甲", "乙"], assume: "乙", neededBy: "s1", ask: true, ifWrong: cost("quality", "before_step"), ...extra }] });
+  // NOW is 2026-10-07: a step on the 9th is within two days; one on the 20th is not.
+  store.saveStepPlan(ws, "near", plan("近的问题？", "2026-10-09", {}) as never, owner, "t");
+  store.saveStepPlan(ws, "far", plan("远的问题？", "2026-10-20", {}) as never, owner, "t");
+  store.saveStepPlan(ws, "never", plan("交给系主任的版本？", "2026-10-20", { ifWrong: cost("external", "never") }) as never, owner, "t");
+  store.saveStepPlan(ws, "quiet", plan("不用问的？", "2026-10-09", { ask: false }) as never, owner, "t");
+  const onBoard = listed(openAsks(TEST_CTX, NOW)).filter((ask) => ask.kind === "step_question").map((ask) => ask.entityId).sort();
+  expect(onBoard).toEqual(["near", "never"]);
+  expect(reviewAsks(TEST_CTX, NOW).map((ask) => ask.entityId)).toEqual(["far"]);
+  // The suggestion shown is the plan's assumption, marked on its option.
+  const near = collectAsks(TEST_CTX, NOW).find((ask) => ask.entityId === "near")!;
+  expect(near.options.find((option) => option.recommended)?.label).toBe("乙");
+  // Answered from the review like anywhere else.
+  const far = reviewAsks(TEST_CTX, NOW)[0]!;
+  expect(await answerAsk(TEST_CTX, far.id, { optionIds: ["o0"] }, {}, NOW)).toMatchObject({ ok: true });
+  expect(reviewAsks(TEST_CTX, NOW)).toEqual([]);
 });
 
 test("待决事项 are in the question ledger: listed on the timer, answered with the chosen option, dropped when their cause goes", async () => {

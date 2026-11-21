@@ -136,7 +136,9 @@ export type StepPlanInput = {
   needs?: Array<{ id: string; what: string; why: string; basis?: string; kind?: "personal" | "reference" }>;
   /** The content units read from the person's material, and what only the person can answer (packages/core/src/steps.ts). */
   units?: Array<{ id: string; title: string; docId: string; quote: string }>;
-  questions?: Array<{ id: string; text: string; why: string; options: string[] }>;
+  /** `assume`/`neededBy`/`ask`/`ifWrong` since 2026-11-20 (core `StepQuestion`); absent on plans stored before. */
+  questions?: Array<{ id: string; text: string; why: string; options: string[]; assume?: string; neededBy?: string; ask?: boolean;
+    ifWrong?: { waste: number; harm: "none" | "quality" | "deadline" | "external"; fixable: "before_step" | "after_submit" | "never" } }>;
   /** The planner's judgement of the task's long-term importance; absent on plans made before it was asked for. */
   importance?: { longTerm: boolean; why: string };
 };
@@ -3163,19 +3165,21 @@ export class CrosslineStore {
       const kept = (previous?.steps ?? []).filter((step) => step.status !== "planned");
       const keptIds = new Set(kept.map((step) => step.id));
       this.#prepare("DELETE FROM task_steps WHERE workspace_id = ? AND work_order_id = ? AND status = 'planned'").run(workspaceId, workOrderId);
+      const rename = new Map(plan.steps.map((step, index) => [step.id, keptIds.has(step.id) ? step.id : `v${version}s${index + 1}`]));
+      // A question names the step that needs its answer (`neededBy`); it follows the step's stored id.
+      const questions = (plan.questions ?? []).map((question) => question.neededBy && rename.has(question.neededBy) ? { ...question, neededBy: rename.get(question.neededBy)! } : question);
       this.#prepare(`INSERT INTO task_step_plans (workspace_id, work_order_id, version, archetype_id, quantity_json, rationale, planned_at, detail_json)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, work_order_id) DO UPDATE SET version = excluded.version,
         archetype_id = excluded.archetype_id, quantity_json = excluded.quantity_json, rationale = excluded.rationale, planned_at = excluded.planned_at,
         detail_json = excluded.detail_json`)
         .run(workspaceId, workOrderId, version, plan.archetypeId, JSON.stringify(plan.quantity), plan.rationale, now,
-          JSON.stringify({ units: plan.units ?? [], questions: plan.questions ?? [], ...(plan.importance ? { importance: plan.importance } : {}),
+          JSON.stringify({ units: plan.units ?? [], questions, ...(plan.importance ? { importance: plan.importance } : {}),
             ...(plan.needs?.length ? { needs: plan.needs } : {}) }));
       // New ids continue after the kept ones so a dependency on a done step still points at it.
       const offset = kept.length;
       const insert = this.#prepare(`INSERT INTO task_steps (workspace_id, work_order_id, id, seq, role, title, deliverable, done_criterion, share,
         p25_minutes, p50_minutes, p85_minutes, depends_on_json, not_before, due_by, schedulable, executor, tick_outcome, status, progress_quarter, updated_at, detail_json)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned', 0, ?, ?)`);
-      const rename = new Map(plan.steps.map((step, index) => [step.id, keptIds.has(step.id) ? step.id : `v${version}s${index + 1}`]));
       plan.steps.forEach((step, index) => {
         if (keptIds.has(step.id)) return;
         insert.run(workspaceId, workOrderId, rename.get(step.id)!, offset + index, step.role, step.title, step.deliverable, step.doneCriterion,

@@ -22,9 +22,9 @@ test("a committed task gets a step plan; warnings are recorded, not refused, and
   const store = new CrosslineStore(":memory:");
   seed(store);
   expect(tasksAwaitingStepPlan(store, workspaceId)).toEqual(["wo"]);
-  // Breaks the archetype's order (solve before read is fine; check before solve is not) and leaves out the hand-in.
+  // A step the archetype does not usually have (the archetype's order and required parts are guidance since 2026-11-20, not warnings).
   const first = { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "",
-    steps: [step("c", "check"), step("s", "solve", { dependsOn: ["c"] })] };
+    steps: [step("c", "compare"), step("s", "solve", { dependsOn: ["c"] })] };
   const second = { ...first, steps: [step("s", "solve"), step("c", "check", { dependsOn: ["s"] }), step("u", "submit", { dependsOn: ["c"] })] };
   const answers = [JSON.stringify(first), JSON.stringify({ verdict: "redo", notes: "把检查放在解题之后，并加提交" }), JSON.stringify(second)];
   const runtime = scriptedRuntime(["crossline:crossline-step-planner", "crossline:crossline-validation-reviewer"], (prompt) => prompt.includes("validation-review") ? answers[1]! : prompt.includes("把检查放在") ? answers[2]! : answers[0]!);
@@ -34,7 +34,7 @@ test("a committed task gets a step plan; warnings are recorded, not refused, and
   expect(store.getStepPlan(workspaceId, "wo")?.steps).toHaveLength(2);
   expect(tasksAwaitingStepPlan(store, workspaceId)).toEqual([]);
   const pending = warningsAwaitingReview(store, workspaceId);
-  expect(pending[0]!.warnings.map((w) => w.code)).toEqual(expect.arrayContaining(["STEP_ORDER_RULE", "STEP_END_RULE", "STEP_REQUIRED_ROLE_MISSING"]));
+  expect(pending[0]!.warnings.map((w) => w.code)).toEqual(expect.arrayContaining(["STEP_ROLE_OUTSIDE_ARCHETYPE"]));
 
   const review = createWarningReviewer(store, workspaceId, "C:\\repo", () => runtime.rpc, (id, feedback) => planner(id, feedback));
   expect((await review(pending[0]!))?.verdict).toBe("redo");
@@ -142,204 +142,115 @@ test("the planner is told what the assistant already made for the same course, i
   store.close();
 });
 
-test("only an important task's questions are asked: a minor task's become assumptions; graded work is researched first", async () => {
+test("the model decides which questions reach the person (ask); the rest are assumptions at once, with no cap; graded work is researched first", async () => {
   const { stepAnswerSlot } = await import("@crossline/core");
   const store = new CrosslineStore(":memory:");
   seed(store);
-  const question = { id: "q1", text: "海报用哪种尺寸？", why: "影响排版", options: ["A3", "A2"] };
-  const plan = (longTerm: boolean) => JSON.stringify({ archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "",
-    importance: { longTerm, why: longTerm ? "期中 85 分要靠它" : "日常杂事" }, units: [], questions: [question], steps: [step("a", "solve")] });
-  const slot = stepAnswerSlot(question.text);
-  const fact = () => store.listProfileFacts(workspaceId).find((item) => item.slot === slot);
+  const cost = { waste: 60, harm: "quality", fixable: "before_step" };
+  const question = (text: string, ask: boolean, options = ["A3", "A2"], assume = options[0]) =>
+    ({ id: `q-${text.length}`, text, why: "影响排版", options, assume, neededBy: "a", ask, ifWrong: ask ? cost : { waste: 0, harm: "none", fixable: "before_step" } });
+  const plan = (questions: unknown[]) => JSON.stringify({ archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "",
+    importance: { longTerm: false, why: "日常杂事" }, units: [], questions, steps: [step("a", "solve")] });
+  const fact = (db: CrosslineStore, text: string) => db.listProfileFacts(workspaceId).find((item) => item.slot === stepAnswerSlot(text));
 
-  // Minor by rule and by the planner's own judgement: settled as an assumption the next plan reads, never asked.
-  let answer = plan(false);
+  // ask false: settled as its assumption (`assume`, not merely the first option) the next plan reads; ask true: left for the person.
+  let answer = plan([question("海报用哪种尺寸？", false, ["A3", "A2"], "A2"), question("评分看重哪一项？", true, ["创意", "规范"])]);
   const prompts: string[] = [];
   const runtime = scriptedRuntime(["crossline:crossline-step-planner"], (prompt) => { prompts.push(prompt); return answer; });
   expect((await createStepPlanner(store, workspaceId, "C:\repo", () => runtime.rpc)("wo")).state).toBe("planned");
-  expect(fact()).toMatchObject({ status: "inferred", value: "假设：【海报用哪种尺寸？】A3" });
+  expect(fact(store, "海报用哪种尺寸？")).toMatchObject({ status: "inferred", value: "假设：【海报用哪种尺寸？】A2" });
+  expect(fact(store, "评分看重哪一项？")).toBeUndefined();
   expect(prompts[0]).toContain('"research":false');
 
-  // The planner judging it important for the long run is not enough (2026-10-18: it said so of nearly everything): still an assumption.
+  // No cap: five asked questions all stay open; a replan after answers asks a new critical one too, and never one already settled.
+  const five = ["范围到第几讲？", "用哪本教材？", "交 PDF 还是纸质？", "允许用计算器吗？", "要不要写推导？"].map((text) => question(text, true, ["是", "否"]));
+  answer = plan(five);
+  expect((await createStepPlanner(store, workspaceId, "C:\repo", () => runtime.rpc)("wo")).state).toBe("planned");
+  expect(five.filter((item) => fact(store, item.text))).toEqual([]);
+  answer = plan([question("海报用哪种尺寸？", true), question("海报印刷数量？", true, ["10 张", "50 张"])]);
+  expect((await createStepPlanner(store, workspaceId, "C:\repo", () => runtime.rpc)("wo", "按回答重新安排")).state).toBe("planned");
+  expect(fact(store, "海报印刷数量？")).toBeUndefined();
+  expect(fact(store, "海报用哪种尺寸？")).toMatchObject({ value: "假设：【海报用哪种尺寸？】A2" });
+
+  // An asked question whose cost is nothing is sent back to the model with the reason, and the fixed answer is kept.
   const fresh = new CrosslineStore(":memory:");
   seed(fresh);
-  answer = plan(true);
-  expect((await createStepPlanner(fresh, workspaceId, "C:\repo", () => runtime.rpc)("wo")).state).toBe("planned");
-  expect(fresh.listProfileFacts(workspaceId).find((item) => item.slot === slot)).toMatchObject({ status: "inferred", value: "假设：【海报用哪种尺寸？】A3" });
+  const free = { ...question("字体用哪种？", true), ifWrong: { waste: 0, harm: "none", fixable: "before_step" } };
+  const answers = [plan([free]), plan([{ ...free, ask: false }])];
+  const repair = scriptedRuntime(["crossline:crossline-step-planner"], (prompt) => { prompts.push(prompt); return answers.shift() ?? answers[0]!; });
+  expect((await createStepPlanner(fresh, workspaceId, "C:\repo", () => repair.rpc)("wo")).state).toBe("planned");
+  expect(prompts.some((prompt) => prompt.includes("没有代价的就按 assume 做"))).toBe(true);
+  expect(fact(fresh, "字体用哪种？")).toMatchObject({ status: "inferred" });
 
-  // Graded coursework read from the course's files is important by rule: researched on the web first, its questions asked.
+  // Graded coursework read from the course's files is still researched on the web first.
   const graded = new CrosslineStore(":memory:");
   seed(graded);
   const order = graded.getWorkOrder(workspaceId, "wo")!;
   graded.saveWorkOrder({ ...order, payload: { ...(order.payload as object), datePair: { release: "2026-10-06", due: "2026-10-14" }, humanCore: [{ id: "h", intent: "解题" }] } });
-  answer = plan(false);
+  answer = plan([]);
   expect((await createStepPlanner(graded, workspaceId, "C:\repo", () => runtime.rpc)("wo")).state).toBe("planned");
   expect(prompts.at(-1)).toContain('"research":true');
-  expect(graded.listProfileFacts(workspaceId).find((item) => item.slot === slot)).toBeUndefined();
-  // The replan after the person answered asks nothing more: what it still wonders about is settled as an assumption (no re-ask loop).
-  const followUp = { id: "q2", text: "海报印刷数量？", why: "影响预算", options: ["10 张", "50 张"] };
-  answer = JSON.stringify({ ...JSON.parse(plan(true)), questions: [followUp] });
-  expect((await createStepPlanner(graded, workspaceId, "C:\repo", () => runtime.rpc)("wo", "按回答重新安排")).state).toBe("planned");
-  expect(graded.listProfileFacts(workspaceId).find((item) => item.slot === stepAnswerSlot(followUp.text)))
-    .toMatchObject({ status: "inferred", value: "假设：【海报印刷数量？】10 张" });
-  // Even an important task puts only its first two questions to the person; the third is an assumption.
-  const three = ["范围到第几讲？", "用哪本教材？", "交 PDF 还是纸质？"].map((text, index) => ({ id: `t${index}`, text, why: "", options: [`选项${index}`] }));
-  answer = JSON.stringify({ ...JSON.parse(plan(false)), questions: three });
-  expect((await createStepPlanner(graded, workspaceId, "C:\repo", () => runtime.rpc)("wo")).state).toBe("planned");
-  const assumed = graded.listProfileFacts(workspaceId).filter((item) => three.some((question) => item.slot === stepAnswerSlot(question.text)));
-  expect(assumed.map((item) => item.value)).toEqual(["假设：【交 PDF 还是纸质？】选项2"]);
   store.close(); fresh.close(); graded.close();
 });
 
-test("stored questions are filtered by rule: graded work keeps them, the rest become assumptions, whatever the planner judged", async () => {
+test("stored questions are settled by the model's own call: unasked and older ones become assumptions, asked ones stay, whatever the task", async () => {
   const { stepAnswerSlot } = await import("@crossline/core");
   const { settleOldQuestions } = await import("./step-planner");
   const store = new CrosslineStore(":memory:");
   seed(store);
   const question = { id: "q1", text: "期中考到第几讲？", why: "", options: ["L1–L5", "L1–L7"] };
-  const old = { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "", questions: [question], steps: [step("a", "solve")] };
+  const asked = { id: "q2", text: "目标分数多少？", why: "", options: ["85", "90"], assume: "90", neededBy: "a", ask: true,
+    ifWrong: { waste: 120, harm: "quality" as const, fixable: "before_step" as const } };
+  const old = { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "", questions: [question, asked], steps: [step("a", "solve")] };
   store.saveStepPlan(workspaceId, "wo", old, ownerId, "t");
   store.saveWorkOrder({ id: "hw", ownerId, workspaceId, identityId: "research", projectId: "ece548", milestoneId: "", intent: "作业 4", state: "approved", riskTier: "routine",
     estimate: { p25Minutes: 60, p50Minutes: 120, p85Minutes: 240, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: { datePair: { due: "2026-10-20" } } });
   store.saveStepPlan(workspaceId, "hw", old, ownerId, "t");
-  store.saveWorkOrder({ id: "new", ownerId, workspaceId, identityId: "research", projectId: "ece999", milestoneId: "", intent: "新计划", state: "approved", riskTier: "routine",
-    estimate: { p25Minutes: 60, p50Minutes: 120, p85Minutes: 240, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: {} });
-  store.saveStepPlan(workspaceId, "new", { ...old, importance: { longTerm: true, why: "毕业要求" } }, ownerId, "t");
-  expect(settleOldQuestions(store, workspaceId).sort()).toEqual(["new", "wo"]);
+  // Graded work is no longer special: its plan written before `ask` is settled like any other.
+  expect(settleOldQuestions(store, workspaceId).sort()).toEqual(["hw", "wo"]);
   const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.slot === stepAnswerSlot(question.text));
-  expect(facts.map((fact) => [fact.projectId, fact.value]).sort()).toEqual([["ece555", "假设：【期中考到第几讲？】L1–L5"], ["ece999", "假设：【期中考到第几讲？】L1–L5"]]);
-  // The planner's own judgement is kept with the plan.
-  expect(store.getStepPlan(workspaceId, "new")!.importance).toEqual({ longTerm: true, why: "毕业要求" });
+  expect(facts.map((fact) => [fact.projectId, fact.value]).sort()).toEqual([["ece548", "假设：【期中考到第几讲？】L1–L5"], ["ece555", "假设：【期中考到第几讲？】L1–L5"]]);
+  expect(store.listProfileFacts(workspaceId).some((fact) => fact.slot === stepAnswerSlot(asked.text))).toBe(false);
+  // Once settled, nothing more to do.
+  expect(settleOldQuestions(store, workspaceId)).toEqual([]);
   store.close();
 });
 
-test("the planner is given the person's AI tools, and each step keeps the tool that speeds it — one the person does not have is dropped", async () => {
+test("an asked question still open on the day its step starts is settled as its assumption, and the person is told once", async () => {
+  const { stepAnswerSlot } = await import("@crossline/core");
+  const { assumeAtNeededDay } = await import("./step-planner");
   const store = new CrosslineStore(":memory:");
   seed(store);
-  addAiTool(store, workspaceId, { name: "剪映", kind: "media", goodFor: "自动字幕、粗剪" });
-  const answer = { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "", units: [], questions: [],
-    importance: { longTerm: false, why: "" },
-    steps: [step("s", "solve", { aiAssist: { tool: "剪映", how: "自动字幕后只校对专有名词", minutesSaved: 25 } }),
-      step("u", "submit", { dependsOn: ["s"], aiAssist: { tool: "Midjourney", how: "画封面", minutesSaved: 10 } })] };
-  const runtime = scriptedRuntime(["crossline:crossline-step-planner"], () => JSON.stringify(answer));
-  expect((await createStepPlanner(store, workspaceId, "C:\repo", () => runtime.rpc)("wo")).state).toBe("planned");
-  const sent = JSON.parse(runtime.prompts()[0]!.split("\n\n").slice(1).join("\n\n")) as { aiTools: Array<{ name: string; by: string }> };
-  expect(sent.aiTools.map((tool) => [tool.name, tool.by])).toEqual([["Crossline 助手", "system"], ["联网调研（Codex）", "system"], ["剪映", "person"]]);
-  expect(store.getStepPlan(workspaceId, "wo")!.steps.map((item) => item.aiAssist?.tool ?? "")).toEqual(["剪映", ""]);
+  const asked = (text: string, neededBy: string) => ({ id: text, text, why: "", options: ["A", "B"], assume: "B", neededBy, ask: true,
+    ifWrong: { waste: 60, harm: "quality" as const, fixable: "before_step" as const } });
+  store.saveStepPlan(workspaceId, "wo", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "",
+    questions: [asked("今天要用的？", "a"), asked("下周才用的？", "b")],
+    steps: [step("a", "solve", { notBefore: "2026-10-10" }), step("b", "check", { notBefore: "2026-10-17" })] }, ownerId, "t");
+  expect(assumeAtNeededDay(store, workspaceId, "2026-10-09")).toEqual([]);
+  expect(assumeAtNeededDay(store, workspaceId, "2026-10-10")).toEqual(["wo"]);
+  // The stored plan's step ids are its own (`v1s1`); the questions' `neededBy` follows them.
+  expect(store.getStepPlan(workspaceId, "wo")!.questions.map((question) => question.neededBy)).toEqual(["v1s1", "v1s2"]);
+  const value = (text: string) => store.listProfileFacts(workspaceId).find((fact) => fact.slot === stepAnswerSlot(text))?.value;
+  expect(value("今天要用的？")).toBe("假设：【今天要用的？】B");
+  expect(value("下周才用的？")).toBeUndefined();
+  const told = store.listConversations(workspaceId).flatMap((conversation) => store.listConversationMessages(workspaceId, conversation.id));
+  expect(JSON.stringify(told)).toContain("今天要用的？");
+  expect(assumeAtNeededDay(store, workspaceId, "2026-10-10")).toEqual([]);
   store.close();
-});
-
-test("the task changed last is planned first, ahead of an older backlog", () => {
-  const store = new CrosslineStore(":memory:");
-  const order = (id: string) => ({ id, ownerId, workspaceId, identityId: "research", projectId: "ece555", milestoneId: "m", intent: `作业 ${id}`,
-    state: "approved", riskTier: "routine" as const, estimate: { p25Minutes: 30, p50Minutes: 60, p85Minutes: 90, source: "llm_prior" as const, observationCount: 0, confidence: "low" as const },
-    payload: { family: "deep_work" } });
-  vi.useFakeTimers();
-  try {
-    vi.setSystemTime(new Date("2026-10-01T12:00:00Z"));
-    seed(store);
-    for (const id of ["zold1", "zold2", "zold3"]) store.saveWorkOrder(order(id));
-    vi.setSystemTime(new Date("2026-10-02T12:00:00Z"));
-    store.saveWorkOrder(order("fresh"));
-    expect(tasksAwaitingStepPlan(store, workspaceId)[0]).toBe("fresh");
-    // A proposal still waiting for the person is planned before any committed task, so it is complete when it is shown.
-    vi.setSystemTime(new Date("2026-10-01T06:00:00Z"));
-    store.saveWorkOrder({ ...order("proposal"), state: "awaiting_plan_approval" });
-    expect(tasksAwaitingStepPlan(store, workspaceId)[0]).toBe("proposal");
-  } finally { vi.useRealTimers(); }
-});
-
-test("a plan from before first actions and AI assists is planned again once, and only when its work starts within a week", () => {
-  const store = new CrosslineStore(":memory:");
-  vi.useFakeTimers();
-  try {
-    vi.setSystemTime(new Date("2026-10-09T12:00:00Z"));
-    seed(store);
-    store.saveStepPlan(workspaceId, "wo", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "",
-      steps: [step("a", "solve"), step("b", "submit", { dependsOn: ["a"] })] }, ownerId, "planned");
-    const now = new Date("2026-10-21T12:00:00Z");
-    vi.setSystemTime(now);
-    // Its work has no time this week: left alone.
-    expect(requestOutdatedReplans(store, workspaceId, now)).toEqual([]);
-    store.setSetting(workspaceId, "schedule.orderStarts", JSON.stringify({ wo: "2026-10-23T14:00:00Z" }));
-    expect(requestOutdatedReplans(store, workspaceId, now)).toEqual(["wo"]);
-    expect(tasksAwaitingStepPlan(store, workspaceId)).toEqual(["wo"]);
-    expect((store.listEvents(workspaceId, { type: "task.steps_replan_requested" }).at(-1)!.payload as { feedback: string }).feedback).toBe(OUTDATED_PLAN_FEEDBACK);
-    // Asked once, even while the replan has not run yet.
-    expect(requestOutdatedReplans(store, workspaceId, now)).toEqual([]);
-  } finally { vi.useRealTimers(); store.close(); }
-});
-
-test("a plan that already gives first actions is not replanned for being old", () => {
-  const store = new CrosslineStore(":memory:");
-  seed(store);
-  store.saveStepPlan(workspaceId, "wo", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "",
-    steps: [step("a", "solve", { firstAction: "打开题目 1，写下已知量", product: "ability" }), step("b", "submit", { dependsOn: ["a"], product: "action" })] }, ownerId, "planned");
-  const now = new Date();
-  store.setSetting(workspaceId, "schedule.orderStarts", JSON.stringify({ wo: new Date(now.getTime() + 86_400_000).toISOString() }));
-  expect(requestOutdatedReplans(store, workspaceId, now)).toEqual([]);
-  // One planned before steps named their product (2026-10-22) is planned again once under the step type table.
-  store.saveStepPlan(workspaceId, "wo", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "",
-    steps: [step("a", "solve", { firstAction: "打开题目 1，写下已知量" })] }, ownerId, "planned");
-  expect(requestOutdatedReplans(store, workspaceId, now)).toEqual(["wo"]);
-  expect(requestOutdatedReplans(store, workspaceId, now)).toEqual([]);
-  store.close();
-});
-
-test("a step not got through on two days is planned again smaller, once: 未执行 one day, a block nobody started the next", () => {
-  const store = new CrosslineStore(":memory:");
-  vi.useFakeTimers();
-  try {
-    vi.setSystemTime(new Date("2026-10-11T12:00:00Z"));
-    seed(store);
-    store.saveStepPlan(workspaceId, "wo", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "",
-      steps: [step("a", "solve", { title: "推导第 1–2 题" }), step("b", "submit", { dependsOn: ["a"] })] }, ownerId, "planned");
-    expect(tasksAwaitingStepPlan(store, workspaceId)).toEqual([]);
-    vi.setSystemTime(new Date("2026-10-14T15:00:00Z"));
-    store.appendEvent({ ownerId, workspaceId, idempotencyKey: "c1", type: "block.confirmed", entityId: "m1",
-      payload: { blockId: "scheduled:wo:v1s1", workOrderId: "wo", stepId: "v1s1", day: "2026-10-12", outcome: "not_done" } });
-    // One day alone is not enough.
-    expect(requestFinerSplits(store, workspaceId)).toEqual([]);
-    store.setSetting(workspaceId, "nudge.blocks:2026-10-13", JSON.stringify({ "scheduled:wo:v1s1": { id: "scheduled:wo:v1s1", orderId: "wo", stepId: "v1s1", began: true } }));
-    expect(requestFinerSplits(store, workspaceId)).toEqual([{ orderId: "wo", stepId: "v1s1", version: 1, days: ["2026-10-12", "2026-10-13"] }]);
-    const request = store.listEvents(workspaceId, { type: "task.steps_replan_requested" }).at(-1)!;
-    expect((request.payload as { feedback: string }).feedback).toBe("「推导第 1–2 题」2 天没做成：拆细，首步 ≤15 分钟");
-    expect(tasksAwaitingStepPlan(store, workspaceId)).toEqual(["wo"]);
-    // Asked once: not again this week.
-    expect(requestFinerSplits(store, workspaceId)).toEqual([]);
-  } finally { vi.useRealTimers(); store.close(); }
-});
-
-test("a block the person started that day is not a trouble, and nor is a block not yet over", () => {
-  const store = new CrosslineStore(":memory:");
-  vi.useFakeTimers();
-  try {
-    vi.setSystemTime(new Date("2026-10-11T12:00:00Z"));
-    seed(store);
-    store.saveStepPlan(workspaceId, "wo", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "",
-      steps: [step("a", "solve"), step("b", "submit", { dependsOn: ["a"] })] }, ownerId, "planned");
-    vi.setSystemTime(new Date("2026-10-14T15:00:00Z"));
-    const seen = JSON.stringify({ "scheduled:wo:v1s1": { id: "scheduled:wo:v1s1", orderId: "wo", stepId: "v1s1", began: true } });
-    store.setSetting(workspaceId, "nudge.blocks:2026-10-12", seen);
-    store.setSetting(workspaceId, "nudge.blocks:2026-10-13", seen);
-    store.setSetting(workspaceId, "nudge.blocks:2026-10-14", seen);
-    store.recordConfirmedSession(workspaceId, "wo", ownerId, { startedAt: "2026-10-13T16:00:00.000Z", endedAt: "2026-10-13T17:00:00.000Z", minutes: 60, source: "one_tap", key: "s1" });
-    expect(requestFinerSplits(store, workspaceId)).toEqual([]);
-  } finally { vi.useRealTimers(); store.close(); }
 });
 
 // The real account, 2026-10-15: 「作业 3 题面及题目数」「作业提交方式」「协作与 AI 使用规则」 were put to the person for graded homework whose
 // course files were on record. What the files settle is read from them; only what changes the plan stays a question.
-test("an important task's questions the files answer become assumptions; the rest still go to the person", async () => {
+test("questions the files answer become assumptions; an asked one the files do not settle still goes to the person", async () => {
   const { stepAnswerSlot } = await import("@crossline/core");
   const { settleOldQuestions } = await import("./step-planner");
   const store = new CrosslineStore(":memory:");
   seed(store);
   store.saveWorkOrder({ id: "hw", ownerId, workspaceId, identityId: "research", projectId: "ece555", milestoneId: "", intent: "作业 3", state: "approved", riskTier: "routine",
     estimate: { p25Minutes: 60, p50Minutes: 120, p85Minutes: 240, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: { datePair: { due: "2026-10-20" } } });
-  const questions = [{ id: "q1", text: "作业 3 题面及题目数？", why: "", options: ["5 题", "6 题"] },
-    { id: "q2", text: "协作与 AI 使用规则？", why: "", options: [] },
-    { id: "q3", text: "当前完成状态？", why: "", options: ["未开始", "做了一半"] }];
+  const questions = [{ id: "q1", text: "作业 3 题面及题目数？", why: "", options: ["5 题", "6 题"], ask: true },
+    { id: "q2", text: "协作与 AI 使用规则？", why: "", options: [], ask: true },
+    { id: "q3", text: "当前完成状态？", why: "", options: ["未开始", "做了一半"], ask: true }];
   store.saveStepPlan(workspaceId, "hw", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "", questions, steps: [step("a", "solve")] }, ownerId, "t");
   // No file for the course yet: nothing can be read, nothing is assumed.
   settleOldQuestions(store, workspaceId);
@@ -394,4 +305,25 @@ test("a drill form taken from an identity template is cut on the way to the ledg
   const own = await run([{ slot: "method_exam_prep", value: "做完往年卷我习惯对着答案订正，错题记进错题本" }]);
   expect(own.saved.steps.map((item) => item.title)).toEqual(["汇集 ECE 555 往年期中卷", "推导 L5–L6 P-N 结静电与 I-V", "做 2 套往年卷并订正", "整理错题本", "限时模拟一套期中卷"]);
   expect(own.saved.questions.map((question) => question.text)).toEqual(["期中考到第几讲？", "错题本用纸质还是电子？"]);
+});
+
+test("the one granularity replan asks once for every open plan with several person's steps; the replan keeps a locked block and reported progress", async () => {
+  const { FROZEN_SETTING } = await import("@crossline/core");
+  const { GRANULARITY_FEEDBACK, requestGranularityReplans } = await import("./step-planner");
+  const store = new CrosslineStore(":memory:");
+  seed(store);
+  const base = { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "" };
+  store.saveStepPlan(workspaceId, "wo", { ...base, steps: [step("a", "read", { title: "读题" }), step("b", "solve", { title: "解第 1–4 题" }), step("c", "submit", { title: "提交" })] }, ownerId, "t");
+  store.updateStepProgress(workspaceId, "wo", "v1s2", { progressQuarter: 2 }, ownerId, "test");
+  store.setSetting(workspaceId, FROZEN_SETTING, JSON.stringify([{ blockId: "scheduled:wo:v1s2", start: "2026-11-22T15:00:00Z", end: "2026-11-22T16:00:00Z", reason: "locked" }]));
+  expect(requestGranularityReplans(store, workspaceId)).toEqual(["wo"]);
+  expect(requestGranularityReplans(store, workspaceId)).toEqual([]);
+  expect(tasksAwaitingStepPlan(store, workspaceId)).toEqual(["wo"]);
+  const whole = { ...base, steps: [step("s", "solve", { title: "完成作业 2（解第 1–4 题并提交）", doneCriterion: "4 题写完并已提交" })] };
+  const runtime = scriptedRuntime(["crossline:crossline-step-planner"], () => JSON.stringify(whole));
+  expect((await createStepPlanner(store, workspaceId, "C:\repo", () => runtime.rpc)("wo", GRANULARITY_FEEDBACK)).state).toBe("planned");
+  const plan = store.getStepPlan(workspaceId, "wo")!;
+  expect(plan.steps.map((item) => [item.id, item.progressQuarter])).toEqual([["v2s1", 2]]);
+  expect(JSON.parse(store.getSetting(workspaceId, FROZEN_SETTING)!).map((item: { blockId: string }) => item.blockId)).toEqual(["scheduled:wo:v2s1"]);
+  store.close();
 });

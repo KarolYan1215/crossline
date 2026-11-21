@@ -69,5 +69,7 @@
   "到期后在待确认回答": "Answer in Decisions when due",
   "查看原因": "See why",
   "上传或点「没有」": "Upload it, or say there is none",
-  "完成或归档": "Complete or archive"
+  "完成或归档": "Complete or archive",
+  "助手准备 {{count}} 项_one": "The assistant prepares {{count}} item",
+  "助手准备 {{count}} 项_other": "The assistant prepares {{count}} items"
 }

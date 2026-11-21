@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { DiffLine } from "@crossline/core";
 import type { InstructionsView } from "../../lib/instructions";
 import { useT } from "../locale-context";
+import { VoiceField } from "../ui/voice/voice-input";
 import { DiffView } from "../ui/diff-view";
 
 type Preview = { label: string; from: string; to: string; consequence: string; diff: DiffLine[] };
@@ -38,8 +39,8 @@ export function InstructionsCard({ view }: { view: InstructionsView }) {
     <section className="st-card st-card-wide" aria-label={t("给 Crossline 的话")}>
       <header><h3>{t("给 Crossline 的话")}</h3>
         <small>{t("对整个系统的长期偏好：每个环节每次运行都会读到。安全边界和需要你确认的事不受它影响。也可以直接对小帮手说。")}</small></header>
-      <textarea className="st-instructions" aria-label={t("给 Crossline 的话")} maxLength={view.max} rows={6} value={draft}
-        placeholder={t("例如：回答先给结论再给理由；晚上十点后不要提醒学习的事；称呼我小严")} onChange={(event) => setDraft(event.target.value)} />
+      <VoiceField kind="note"><textarea className="st-instructions" aria-label={t("给 Crossline 的话")} maxLength={view.max} rows={6} value={draft}
+        placeholder={t("例如：回答先给结论再给理由；晚上十点后不要提醒学习的事；称呼我小严")} onChange={(event) => setDraft(event.target.value)} /></VoiceField>
       <span className="st-design-actions">
         <small className="muted">{t("{{count}} / {{max}} 字 · 第 {{version}} 版", { count: draft.length, max: view.max, version: view.current.version })}</small>
         <button type="button" className="ui-button" disabled={draft.trim() === view.current.text} onClick={() => void ask(draft)}>{t("预览改动")}</button>

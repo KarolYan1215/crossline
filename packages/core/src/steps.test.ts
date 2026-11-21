@@ -49,9 +49,12 @@ describe("step plans", () => {
     expect(stepPlanWarnings(normalized).filter((w) => w.code === "STEP_ORDER_RULE")).toEqual([]);
   });
 
-  it("warns about a broken ordering rule instead of refusing", () => {
+  it("the archetype's order and required parts are guidance, not warnings: one step per deliverable is a whole plan (2026-11-20)", () => {
     const { plan: normalized } = normalizeStepPlan(plan([step("d", "draft"), step("g", "gather"), step("c", "check")]));
-    expect(stepPlanWarnings(normalized).map((w) => w.code)).toContain("STEP_ORDER_RULE");
+    expect(stepPlanWarnings(normalized).map((w) => w.code)).not.toContain("STEP_ORDER_RULE");
+    const { plan: one } = normalizeStepPlan({ ...plan([step("s", "solve", { title: "完成 ECE 555 作业 4", doneCriterion: "4 题写完并已在 Gradescope 提交" })]), archetypeId: "problem_set" });
+    expect(stepPlanWarnings(one).map((w) => w.code)).not.toEqual(expect.arrayContaining(["STEP_REQUIRED_ROLE_MISSING"]));
+    expect(stepPlanWarnings(one).map((w) => w.code)).not.toEqual(expect.arrayContaining(["STEP_END_RULE"]));
   });
 
   it("renames ids, drops unknown dependencies, breaks cycles and normalizes shares", () => {
@@ -178,18 +181,6 @@ describe("grounded, non-trivial plans", () => {
     const docs = [{ id: "doc-1", text: "Week 3: L5 PN Junction electrostatics; L6 Diode I-V" }];
     expect(unverifiedUnits([{ id: "u1", title: "PN 结静电", docId: "doc-1", quote: "L5 PN Junction electrostatics" },
       { id: "u2", title: "MOS 电容", docId: "doc-1", quote: "L7 MOS capacitor" }, { id: "u3", title: "x", docId: "doc-9", quote: "Diode" }], docs).map((unit) => unit.id)).toEqual(["u2", "u3"]);
-  });
-});
-
-describe("preparation written in English", async () => {
-  const { TRIVIAL_STEP } = await import("./steps");
-  it("is the assistant's, like its Chinese wording", () => {
-    expect(TRIVIAL_STEP.test("整理课程材料")).toBe(true);
-    expect(TRIVIAL_STEP.test("Collect the lecture slides")).toBe(true);
-    expect(TRIVIAL_STEP.test("Organize the course materials")).toBe(true);
-    expect(TRIVIAL_STEP.test("Build a reading list")).toBe(true);
-    expect(TRIVIAL_STEP.test("Derive the transfer function")).toBe(false);
-    expect(TRIVIAL_STEP.test("Review lecture 3")).toBe(false);
   });
 });
 

@@ -37,7 +37,6 @@
   "本机的 Crossline 版本比网页版旧，更新后才会再同步": "Crossline on this computer is older than the site; it syncs again once updated",
   "检查中…": "Checking…",
   "正常": "OK",
-  "每个重要任务问本人的问题数": "Questions put to the person per important task",
   "每天自动检查一次，修好的只记录，修不好才提醒": "Checked automatically once a day; what is repaired is only recorded, what is not is said",
   "沙箱命令行": "Sandboxed shell",
   "清理了 {{removed}} 个残留的浏览器锁{{restarted}}": "Removed {{removed}} leftover browser locks{{restarted}}",
@@ -54,7 +53,6 @@
   "自检通过、不涉及对外的助手成果，这么多天无人审就由系统采纳": "Assistant results that passed their checks and act on nothing outside are accepted by the system after this many days unreviewed",
   "范围 {{min}}–{{max}}，默认 {{value}}": "Range {{min}}–{{max}}, default {{value}}",
   "规则阈值": "Rule thresholds",
-  "超出的问题按假设处理，任务页上可改": "Questions beyond this are settled by assumption and can be changed on the task page",
   "邮箱与回信草稿": "Mailbox and reply drafts",
   "预览失败，请稍后重试": "Preview failed; try again later",
   "，重启了虚拟屏幕": " and restarted the virtual screen"

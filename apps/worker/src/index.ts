@@ -53,7 +53,7 @@ import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, DEVICE
 import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders, pendingTutorials, prepareMaterialsAhead } from "./manualbook";
 import { startingWithin } from "./schedule-window";
-import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsAwaitingJudgement, requestFinerSplits, requestOutdatedReplans, settleOldQuestions, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
+import { assumeAtNeededDay, requestGranularityReplans, createProgressJudge, createStepPlanner, createWarningReviewer, reportsAwaitingJudgement, requestFinerSplits, requestOutdatedReplans, settleOldQuestions, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
 import { createArchetypeCurator, curationDue } from "./archetype-curator";
 import { energyAdvicePass } from "./energy-advice";
 import { dedupePass } from "./dedupe";
@@ -771,15 +771,23 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
       const homework = settleHomeworkNeeds(analysisStore, workspaceId);
       if (homework.length) console.info(JSON.stringify({ type: "datepair.homework_provided", checkedAt, workspaceId, settled: homework }));
     } catch (error) { console.info(JSON.stringify({ type: "datepair.failed", checkedAt, workspaceId, message: error instanceof Error ? error.message : "" })); }
-    // Questions of plans made before importance was judged: filtered by rule, no model call (docs/review-2026-10-13.md §11).
+    // Questions the planner did not mark worth asking (and every question of a plan written before it could) are settled as assumptions;
+    // an asked one still unanswered on the day its step needs it is settled too, and the person told (§7.1). No model call.
     try {
       const settled = settleOldQuestions(analysisStore, workspaceId);
       if (settled.length) console.info(JSON.stringify({ type: "step_questions.assumed", checkedAt, workspaceId, settled }));
+      const late = assumeAtNeededDay(analysisStore, workspaceId, todayFor(analysisStore, workspaceId, new Date(checkedAt)));
+      if (late.length) console.info(JSON.stringify({ type: "step_questions.assumed_at_needed_day", checkedAt, workspaceId, settled: late }));
     } catch { /* next tick */ }
     // A step that did not get done on two days is planned again smaller: rules only, picked up below like any replan.
     try {
       const splits = requestFinerSplits(analysisStore, workspaceId);
       if (splits.length) console.info(JSON.stringify({ type: "steps.finer_split_requested", checkedAt, workspaceId, splits }));
+    } catch { /* next tick */ }
+    // Once per workspace: every open plan with several person's steps is planned again at deliverable granularity (2026-11-20).
+    try {
+      const regrained = requestGranularityReplans(analysisStore, workspaceId);
+      if (regrained.length) console.info(JSON.stringify({ type: "steps.granularity_replan_requested", checkedAt, workspaceId, orders: regrained }));
     } catch { /* next tick */ }
     // A plan written before first actions and AI assists were required is planned again once its work is a week away.
     try {

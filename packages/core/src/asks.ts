@@ -94,6 +94,11 @@ export type Ask = {
   /** Set when the decision is not this week's: the day it comes into the week's decisions (see `horizonEntry`). */
   entersOn?: string;
   /**
+   * A question that waits for the weekly review (2026-11-20, a plan's step question not needed within two days): answerable there and by
+   * id, but not on 待确认, not in the badge and never pushed.
+   */
+  inReview?: true;
+  /**
    * Whether the answer matters beyond itself: it blocks other work, the assistant needs it to go on, it bears on a
    * milestone weighted 60 or more, or it is a start-standard item. Unset falls back to `importance >= 60` (`askQuadrant`).
    */

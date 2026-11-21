@@ -108,7 +108,9 @@ function StepsPanel({ detail, editing, onEditing }: { detail: TaskDetail; editin
   return <div className="steps-panel">
     {plan.rationale && <p className="gen steps-rationale"><Clamp text={plainEstimateWords(plan.rationale, locale)} /></p>}
     {plan.units.length > 0 && <p className="steps-units"><small>{t("依据材料的内容")}</small>{plan.units.map((unit) => <span key={unit.id} className="tag" title={unit.quote}>{unit.title}</span>)}</p>}
-    <ol className="steps-list">{plan.steps.map((step, index) => {
+    {/* The person's work only, one deliverable a step (2026-11-20, near-term doc §3.3); what the assistant prepares is folded below. */}
+    {(() => {
+    const row = (step: Step, index: number) => {
       const open = expanded.has(step.id);
       const kind = step.status !== "planned" ? "done" : step.executor === "agent" ? "agent" : step === current ? "current" : "open";
       const waits = !step.schedulable && step.executor !== "agent";
@@ -132,7 +134,17 @@ function StepsPanel({ detail, editing, onEditing }: { detail: TaskDetail; editin
           {open && <StepDetail detail={detail} step={step} kind={kind} onStatus={setStatus} />}
         </div>
       </li>;
-    })}</ol>
+    };
+    const mine = plan.steps.filter((step) => step.executor !== "agent");
+    const assistant = plan.steps.filter((step) => step.executor === "agent");
+    return <>
+      <ol className="steps-list">{mine.map(row)}</ol>
+      {assistant.length > 0 && <details className="steps-assistant">
+        <summary>{t("助手准备 {{count}} 项", { count: assistant.length })} · {assistant.map((step) => t(agentState(detail, step))).filter((state, index, all) => all.indexOf(state) === index).join(" / ")}</summary>
+        <ol className="steps-list">{assistant.map(row)}</ol>
+      </details>}
+    </>;
+    })()}
     {plan.questions.length > 0 && <StepQuestions workOrderId={detail.id} questions={plan.questions} />}
     {status && <small role="status">{status}</small>}
     {division}

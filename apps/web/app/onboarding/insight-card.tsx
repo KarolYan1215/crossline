@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useT } from "../locale-context";
+import { VoiceField } from "../ui/voice/voice-input";
 import { Receipt } from "./receipt";
 import type { TurnInsightView } from "./onboarding-types";
 
@@ -77,7 +78,7 @@ export function InsightCard({ sessionId, seq, index = 0, insight, rating, onRate
       {shown && !correcting && <small className="ob-muted">{noted}</small>}
     </div>
     {correcting && <form className="ob-insight-correction" onSubmit={(event) => { event.preventDefault(); if (correction.trim()) void rate("partial"); }}>
-      <label>{t("哪部分对？用你的话说一句")}<textarea value={correction} maxLength={300} onChange={(event) => setCorrection(event.target.value)} /></label>
+      <label>{t("哪部分对？用你的话说一句")}<VoiceField kind="note"><textarea value={correction} maxLength={300} onChange={(event) => setCorrection(event.target.value)} /></VoiceField></label>
       <button type="submit" className="ob-btn" disabled={busy || !correction.trim()}>{t("记下更正")}</button>
     </form>}
   </aside>;

@@ -73,5 +73,7 @@
   "逾期 {{count}} 天_one": "{{count}} day overdue",
   "逾期 {{count}} 天_other": "{{count}} days overdue",
   "那天没有开始过的工作块。": "No work block started that day.",
-  "里程碑重要性 {{weight}}": "Milestone importance {{weight}}"
+  "里程碑重要性 {{weight}}": "Milestone importance {{weight}}",
+  "任务计划里只有本人知道的事。没答之前按建议的假设做；要用到答案的前一两天会在待确认里再提一次。": "What only the person knows, from the task plans. Until answered, the plans follow the suggested assumption; each comes up again on To confirm a day or two before its answer is needed.",
+  "本周要回答的问题": "Questions to answer this week"
 }

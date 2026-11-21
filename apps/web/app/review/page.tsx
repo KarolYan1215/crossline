@@ -1,6 +1,8 @@
 import { CheckCheck, Clock, GitPullRequestArrow, ShieldCheck } from "lucide-react";
 import { effectiveSchedulePreferences, firstAcceptedAt, getStore, lastNight, planToday } from "../../lib/crossline";
 import { mailEventsForReview } from "../../lib/mail-events";
+import { reviewAsks } from "../../lib/asks";
+import { AskList } from "../ask-list";
 import { FORM_STATE_LABEL, STOP_LABEL, localStamp } from "@crossline/core";
 import { loadWeekInvestment, loadWeeklyReview } from "../../lib/review";
 import { loadLedger } from "../../lib/ledger";
@@ -61,6 +63,8 @@ export default async function ReviewPage() {
   const outOfView = loadOutOfView(ctx);
   // Low-relevance events from mail (2026-11-10): listed here once a week, never a card and never on a calendar unless the person adds one.
   const mailEvents = mailEventsForReview(ctx, planToday(ctx));
+  // The plans' questions worth the person's answer that are not needed within two days (2026-11-20): answered here together.
+  const questions = reviewAsks(ctx);
   // The same numbers as the monthly report and the ledger page (docs/mail-bookkeeping.md §5.3); only their summary is here.
   const money = loadLedger(ctx);
   const taskDetails = loadTaskDetailsBatch(ctx, review.autoAccepted.map((item) => item.workOrderId));
@@ -82,7 +86,7 @@ export default async function ReviewPage() {
   const timedHours = hoursOf(week.lines.reduce((sum, line) => sum + line.actual, 0));
   const pendingProposals = pendingProposalCount(diligence, identities.map((identity) => identity.id));
   const candidateFindings = review.findings.filter((finding) => finding.status === "candidate").length;
-  const toDecide = review.candidates.kept.length + pendingProposals + candidateFindings;
+  const toDecide = review.candidates.kept.length + pendingProposals + candidateFindings + questions.length;
   const range = t("{{start}}–{{end}}", { start: monthDay(locale, week.start), end: monthDay(locale, week.end) });
 
   return <AppShell active={"计划与复盘"} className="subpage rd-page"><div className="rd-inner">
@@ -147,6 +151,11 @@ export default async function ReviewPage() {
       <OutOfView finds={outOfView.finds} watches={outOfView.watches} less={outOfView.less}
         lines={Object.fromEntries(linePacks(ctx, { includeArchived: true }).map((pack) => [pack.id, pack.label]))} />
     </section>}
+
+    {questions.length > 0 && <div className="review-wide rv-questions-week">
+      <p className="review-note">{t("任务计划里只有本人知道的事。没答之前按建议的假设做；要用到答案的前一两天会在待确认里再提一次。")}</p>
+      <AskList initial={questions} scope="review" heading={t("本周要回答的问题")} />
+    </div>}
 
     {mailEvents.length > 0 && <section className="rd-card review-block" aria-labelledby="rv-mail-events">
       <header className="rd-card-head"><h2 id="rv-mail-events" className="ds-serif">{t("邮件里的活动")}</h2></header>

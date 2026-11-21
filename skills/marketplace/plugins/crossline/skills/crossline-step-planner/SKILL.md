@@ -1,6 +1,6 @@
 ---
 name: crossline-step-planner
-description: Plan one Crossline task as the few intellectual steps only the person can do, grounded in their own material and situation, with the preparation handed to the assistant and what is unknown asked of the person.
+description: Plan one Crossline task as the few deliverable-level steps only the person can do, grounded in their own material and situation, with the preparation handed to the assistant and what is unknown asked of the person.
 ---
 
 # Crossline Step Planner
@@ -51,7 +51,15 @@ Material is looked for in this order, and the person is asked last: (1) the pers
 
 ## 4. Ask only what only the person knows: `questions`
 
-Up to five `{id, text, why, options}`: facts the plan depends on that neither the material nor `person` gives (the exam's scope or format, which units they already master, where they lost points before, the tool version they must use, who reviews the result). `options` are four to six concrete answers drawn from the material, so one click answers; put the most likely answer first. Order the questions by how much the answer changes the plan: only the first two of an important task are put to the person, and every other question is settled as an assumption (its first option) the person can change on the task.
+`{id, text, why, options, assume, neededBy, ifWrong, ask}`: facts the plan depends on that neither the material nor `person` gives (the exam's scope or format, which units they already master, where they lost points before, the tool version they must use, who reviews the result). There is no limit on how many; the person's attention is spent only on the ones marked `ask`.
+
+- `options` — two to six concrete answers drawn from the material, so one click answers; the most likely first.
+- `assume` — the option the plan follows until an answer comes (one of `options`, usually the first). Plan the steps on it.
+- `neededBy` — the id of the step that cannot start without the answer.
+- `ifWrong` — what a wrong `assume` costs: `waste` (minutes redone), `harm` (`none`; `quality`: the deliverable comes out worse; `deadline`: the due day is missed; `external`: something leaves for someone else wrong), `fixable` (`before_step`: the answer can still come before the step; `after_submit`: it can be put right after handing in; `never`).
+- `ask` — whether the person should be asked. **true** only where a wrong guess matters: it bears on a milestone, it has consequences outside (a submission, an email, someone else's time), only the person can decide it (their preference, their method, someone else's requirement they heard), or it cannot be undone. Otherwise **false**: the plan goes on with `assume`, which the person sees on the task and can change. `ask: true` with `ifWrong` all none (no minutes, harm none) is sent back.
+
+The app checks only the shape: `assume` is one of `options`, `neededBy` names a step of this plan, an asked question has a cost. Asked questions go to the person's weekly review, and come forward one or two days before the step that needs them; one whose wrong guess does real harm and can never be put right comes at once. Unanswered by the day its step starts, a question is settled as its `assume` and the person is told.
 
 | | question | options |
 |---|---|---|
@@ -62,11 +70,13 @@ Up to five `{id, text, why, options}`: facts the plan depends on that neither th
 | 坏 | 「在哪里复习？」 | a place changes nothing in the plan |
 | 坏 | 「你想怎么安排？」 | not a fact, no options |
 
-When nothing in `person` says how the person does this kind of work (prepares for an exam or a deadline, learns and goes back over material, writes or presents), the method is a question, never a guess: ask it as above, with 「没有固定方法，按这次需要定」 first (a question settled as an assumption takes its first option, and an assumed method must be none), and plan the steps by what the goal needs until it is answered.
+When nothing in `person` says how the person does this kind of work (prepares for an exam or a deadline, learns and goes back over material, writes or presents), the method is a question, never a guess: ask it as above, with 「没有固定方法，按这次需要定」 first (`assume` it: an assumed method must be none; `ask` true, since only the person knows how they work), and plan the steps by what the goal needs until it is answered.
 
 What the task's own material settles is read, never asked: the problems and how many, how and where it is handed in, format and length, collaboration and AI rules, the rubric, the due time. When `materials` does not show it (a handout not uploaded yet), plan a step that reads it from the course's files or page, assume the usual answer and say so in `rationale`. Never ask what `person.facts` or `person.answers` already say: an answered question is used. Until a question is answered the plan is provisional; say in `rationale` which steps change with the answer.
 
-## 5. The person's steps: only the intellectual core
+## 5. The person's steps: whole deliverables, only the intellectual core
+
+**One step per deliverable** (decided 2026-11-20): the person sees 「完成 ECE 555 作业 4」, not five steps that read, solve, check and hand it in. Split only where the person would do the parts apart: two different deliverables (the slides and the report), or two stretches with someone's feedback between them (a draft to the advisor, then the revision). Handing in is part of the done criterion (「4 题写完并已在 Gradescope 提交」), never a step of its own. The estimate still counts every part; `units` and `covers` keep the parts for the tutorial. The archetype's usual parts are guidance, not a list to fill.
 
 The person's attention is for what moves the outcome: understanding, solving, deriving, designing, deciding, writing the argument, making the piece (the hook, the cut, the pitch), rehearsing under the real conditions, checking work against a standard. Plan **only those** as `human` steps. The line and kind of task decide which rules apply: a course's rules are for coursework, not for a video, a pitch or an investment note.
 
@@ -141,7 +151,7 @@ Only the steps that need the answer depend on the send step; everything else pro
 
 - `archetypeId` — chosen by the structure of the work. The archetype's roles are a vocabulary and a few ordering rules (`requires`, `firstBefore`, `endsWith`), not a required sequence; never add a step only to use a role.
 - `rationale` — what the plan rests on, for the person to read in three to five short sentences: what the material contains in numbers (「讲义 12 讲，作业 4 题」; with no material, say what is missing, not that zero units were counted), the sources found by name, the assumptions made and which steps change with an open question. Name things as the person knows them (课程大纲, 第 2 个问题, 第 5 步), never the input's keys or ids.
-- `importance` — `{longTerm, why}`: true when the task moves something the person cares about over months (a graded part of a course with a target, a deliverable others will see, a step a milestone's outcome depends on), false for upkeep and errands; `why` names that milestone, grade or deliverable. It is recorded with the plan; whether questions reach the person is decided by the app's rules.
+- `importance` — `{longTerm, why}`: true when the task moves something the person cares about over months (a graded part of a course with a target, a deliverable others will see, a step a milestone's outcome depends on), false for upkeep and errands; `why` names that milestone, grade or deliverable. It is recorded with the plan; whether a question reaches the person is each question's own `ask`.
 - `completion` — how finishing the task is taken, judged with the material in hand; the app keeps it only for a task that has none yet. `{mode, reason, why, question, askAfterHours}`: `result_pending` (a result decided later by someone else: an exam sat, a submission, a review, a competition round; `needs_assessment`, `question` asks whether the result is out, `askAfterHours` 24 or more), `quality` (quality not judged at a glance: a draft, a design, a persuasive post; about 2 hours), `exploration` (no definite product; about 2 hours); everything else (handing in, homework, sending, attending, solving, practising, preparing for an exam) is `self_evident` with `reason` "", `question` "", `askAfterHours` 0. `why` is one sentence.
 
 Never invent facts about the person, the course or the material: mark an assumption in `rationale` and ask when it matters. Do not set goals, deadlines or importance weights. External sending, publishing, payment or trading is only ever the person's own step.
