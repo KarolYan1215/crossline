@@ -60,7 +60,7 @@ export function WrapBoard({ view, labels, tomorrow }: { view: WrapView; labels: 
   // same call as its own 完成 — and one worked for under 70% of its minutes as 部分 (docs/plans/closed-loop-1030.md §3). A block nobody
   // touched is left to its own three-part control: one tap at the end of a tiring day used to record every block whose time had passed as
   // done, and the work it never got was dropped from the plan (docs/reports/2026-10-30-overnight/month-sim.md).
-  const bulk = bulkDoneRows(view.rows, answers);
+  const bulk = bulkDoneRows(view.rows.filter((row) => !row.underway), answers);
   const allDone = async () => {
     setBusy("all");
     setFailed(false);
@@ -73,7 +73,7 @@ export function WrapBoard({ view, labels, tomorrow }: { view: WrapView; labels: 
     window.dispatchEvent(new Event(PENDING_CHANGED));
   };
   // 「推断都对」: every block not yet recorded as its inference says (docs/plans/closed-loop-1030.md §2); any one can be changed before.
-  const inferredOpen = view.rows.filter((row) => !answers[row.blockId]);
+  const inferredOpen = view.rows.filter((row) => !answers[row.blockId] && !row.underway);
   const allInferred = async () => {
     setBusy("inferred");
     setFailed(false);
@@ -102,7 +102,7 @@ export function WrapBoard({ view, labels, tomorrow }: { view: WrapView; labels: 
     if (response?.ok) setFinished(true); else setFailed(true);
   };
 
-  const open = view.rows.filter((row) => !answers[row.blockId]).length;
+  const open = view.rows.filter((row) => !answers[row.blockId] && !row.underway).length;
   const doneCount = view.rows.filter((row) => answers[row.blockId] === "done").length;
   const timed = (minutes: number) => minutes ? t("计时 {{time}}", { time: formatMinutes(minutes, locale) }) : t("未计时");
   const hours = Math.floor(view.timedMinutes / 60), rest = view.timedMinutes % 60;
@@ -235,7 +235,8 @@ function Block({ row, label, chosen, disabled, timed, onAnswer, drafted, onDraft
   const t = useT();
   return <li data-line={row.line ?? "none"}>
     <div className="wr-when"><b className="ds-serif">{row.start}–{row.end}</b><small>{timed}</small>
-      {!chosen && <small className="wr-inferred" data-inferred={row.inferred}>{t(INFERRED[row.inferred])}</small>}
+      {!chosen && (row.underway ? <small className="wr-inferred" data-inferred="underway">{t("进行中")}</small>
+        : <small className="wr-inferred" data-inferred={row.inferred}>{t(INFERRED[row.inferred])}</small>)}
       {row.snoozedTwice && <small className="wr-snoozed">{t("推迟两次")}</small>}
       {row.draft && (drafted !== undefined ? <small role="status">{t("已按拟计时记 {{minutes}} 分", { minutes: drafted })}</small>
         : <button type="button" className="secondary-button" disabled={disabled} onClick={onDraft}>{t("按拟计时记 {{minutes}} 分", { minutes: row.draft.minutes })}</button>)}</div>
@@ -248,7 +249,7 @@ function Block({ row, label, chosen, disabled, timed, onAnswer, drafted, onDraft
     <div className="wr-choices" role="group" aria-label={t("{{title}} 做得怎么样", { title: row.title })}>
       {OUTCOMES.map((item) => {
         const Icon = item.icon;
-        return <button key={item.id} type="button" aria-pressed={chosen === item.id} data-inferred={!chosen && row.inferred === item.id ? "" : undefined}
+        return <button key={item.id} type="button" aria-pressed={chosen === item.id} data-inferred={!chosen && !row.underway && row.inferred === item.id ? "" : undefined}
           disabled={disabled || Boolean(chosen)} onClick={() => onAnswer(item.id)}>
           <Icon {...ICON} />{t(item.label)}</button>;
       })}

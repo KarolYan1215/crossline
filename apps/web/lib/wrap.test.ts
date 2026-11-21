@@ -186,3 +186,24 @@ test("a block due tomorrow with no sign of work is asked by day, and the phone's
   expect(confirmBlock(TEST_CTX, message.id, { kind: "not_done", via: "push" }, at(plus(first.end, 5)))).toMatchObject({ ok: true, done: "not_done" });
   expect(store.listEvents(ws, { type: "block.confirmed" }).map((event) => event.payload)).toEqual([expect.objectContaining({ outcome: "not_done", source: "push" })]);
 });
+
+test("a block still under way is 进行中: nothing inferred about it, not yet counted to confirm, and counted once it ends", async () => {
+  at("08:30");
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  store.saveWorkOrder({ id: "hw", ownerId: TEST_CTX.principalId, workspaceId: ws, identityId: "research", projectId: "ece555", milestoneId: "",
+    intent: "完成 ECE 555 作业 3", state: "approved", riskTier: "routine", estimate, payload: { dueDate: "2026-10-16", materialContract: [], family: "deep_work" } });
+  store.saveStepPlan(ws, "hw", plan([step("s1", "推导第 1–2 题"), step("s2", "推导第 3–4 题", ["s1"])]), TEST_CTX.principalId, "initial");
+  const first = (await loadCurrentPlan(TEST_CTX)).blocks.filter((block) => block.id.startsWith("scheduled:hw") && block.day === DAY)
+    .sort((a, b) => a.start.localeCompare(b.start))[0]!;
+  await nudgesFor(TEST_CTX, at(plus(first.start, -10)));
+  await nudgesFor(TEST_CTX, at(plus(first.start, 1)));
+
+  const during = loadWrap(TEST_CTX, at(plus(first.start, 15)));
+  expect(during.rows).toEqual([expect.objectContaining({ blockId: first.id, underway: true })]);
+  expect(during.open).toBe(0);
+  const after = loadWrap(TEST_CTX, at(plus(first.end, 1)));
+  expect(after.rows[0]!.underway).toBeUndefined();
+  expect(after.open).toBe(1);
+  // An earlier day's block is never under way.
+  expect(loadWrap(TEST_CTX, new Date(Date.parse(toZonedInstant("2026-10-13", plus(first.start, 15), ZONE))), DAY).rows[0]!.underway).toBeUndefined();
+});

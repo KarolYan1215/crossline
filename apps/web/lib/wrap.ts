@@ -30,6 +30,11 @@ export type WrapRow = { blockId: string; orderId: string; title: string; step: s
    * they say about it (`inferBlockOutcome`; docs/plans/closed-loop-1030.md §2). Shown on the row as 「推断」 and taken by 「推断都对」.
    */
   workMinutes: number; inferred: InferredOutcome;
+  /**
+   * Today's block whose end has not come yet: under way, so nothing is inferred about it and it is not yet one to confirm (it was read
+   * 「推断：可能没做」 and counted in 「收工（N 块未确认）」 twenty minutes into it, 2026-11-20). It can still be answered early.
+   */
+  underway?: true;
   /** Its start prompt was snoozed twice (「推迟 10 分钟」), after which it was not said again (2026-11-11 §3): the row says so. */
   snoozedTwice?: true;
   /** This task's 拟计时 drafts that overlap the block, offered as one 「按拟计时记 N 分」 (lib/time-drafts.ts). */
@@ -131,6 +136,7 @@ export function loadWrap(ctx: AccessContext, now = appNow(), requestedDay?: stri
         workMinutes, inferred: ((outcome) => outcome === "done" && !finishes(block.orderId, block.stepId, workMinutes) ? "partial" : outcome)(
           inferBlockOutcome(workMinutes, Math.round((to - from) / 60_000))),
         ...(line ? { line } : {}), ...(answered.has(block.id) ? { answered: answered.get(block.id)! } : {}),
+        ...(day === today && now.getTime() < to ? { underway: true as const } : {}),
         ...((snoozes.get(block.id) ?? 0) >= MAX_SNOOZES ? { snoozedTwice: true as const } : {}),
         ...(own.length ? { draft: { ids: own.map((draft) => draft.id), minutes: own.reduce((sum, draft) => sum + draft.minutes, 0) } } : {}) };
     });
@@ -144,7 +150,7 @@ export function loadWrap(ctx: AccessContext, now = appNow(), requestedDay?: stri
   const rest = ((store.listPlanVersions(ctx.workspaceId)[0]?.payload as { blocks?: Array<{ day?: string; start: string; end: string; title: string }> } | undefined)?.blocks ?? [])
     .concat(eventBlocks(ctx, [day])).filter((block) => block.day === day && isRestEvent(block));
   const at = day === today ? wrapTimeOf(readAvailability(ctx), weekday, rest) : undefined;
-  const open = rows.filter((row) => !row.answered).length;
+  const open = rows.filter((row) => !row.answered && !row.underway).length;
   const doneBlocks = rows.filter((row) => row.answered && row.answered !== "not_done" && row.answered !== "partial").length;
   return { day, ...(at ? { at } : {}), rows, open, done: Boolean(store.getSetting(ctx.workspaceId, WRAP_DONE(day))), today: day === today, timedMinutes, doneBlocks,
     drafts, draftConsent: draftConsent(ctx), tasks };
