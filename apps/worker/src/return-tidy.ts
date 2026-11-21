@@ -116,10 +116,10 @@ export function staleOpenWork(store: CrosslineStore, workspaceId: string, now: D
 }
 
 /** Archives work by the system with the reason (recoverable from 已归档). */
-export function archiveBySystem(store: CrosslineStore, workspaceId: string, items: Array<{ order: StoredWorkOrder; why: string }>, by: "return" | "date" | "mail"): TidyOutcome["archived"] {
+export function archiveBySystem(store: CrosslineStore, workspaceId: string, items: Array<{ order: StoredWorkOrder; why: string }>, by: "return" | "date" | "mail" | "intake"): TidyOutcome["archived"] {
   const owner = ownerOf(store, workspaceId);
   const t = tFor(localeOf(store, workspaceId));
-  const reasonOf = (why: string) => by === "return" ? t("回来整理：{{why}}", { why }) : by === "mail" ? t("转为提醒：{{why}}", { why }) : t("到期整理：{{why}}", { why });
+  const reasonOf = (why: string) => by === "return" ? t("回来整理：{{why}}", { why }) : by === "mail" ? t("转为提醒：{{why}}", { why }) : by === "intake" ? why : t("到期整理：{{why}}", { why });
   return items.map(({ order, why }) => {
     const attempt = store.listEvents(workspaceId, { type: "work_order.archived", entityId: order.id }).length;
     const suffix = attempt ? `:${attempt}` : "";

@@ -1,12 +1,12 @@
 // i18n-exempt: the interview's extraction runs unseen by the person: its instructions, lookups and repair messages go to the model, its failures to the log
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   INTERVIEW_FLOW_STAGES, deepSectionsOf, flowOf, type InterviewFlow, CARD_TITLE, pendingItems, readInstrumentAnswers, PROFILE_INSTRUMENTS_SETTING,
   AVAILABILITY_PROPOSED_SETTING, ONBOARDING_KEEP_EARLY_MAX, type ProfileSection, PROFILE_CONFIRMED, droppedOnboardingItems, keepOnboardingExtraction, LIMITED_LISTS, listsAtLimit, prunedOnboardingItems, lineAttributes, numberedText, onboardingExtractSchema,
   portraitFingerprint, sectionClosed, validateOnboardingExtraction, type SectionRecord,
   type EvidenceSentence, type KnownSources, type OnboardingExtractContext, type OnboardingExtraction, type OnboardingStage, type StoredLineProfile,
   ONBOARDING_INSIGHTS, readInsightRatings, EXTRACT_LANE_KEYS, EXTRACT_KEYS, type ExtractLaneName, pointLines, pointsRules, cardCandidates, withProfileFramework,
-  DISCLOSURE_PLACEHOLDER, sensitiveReplies
+  DISCLOSURE_PLACEHOLDER, sensitiveReplies, type SlotUpdate
 } from "@crossline/core";
 import { runCodexSkill, withUsagePurpose, type CodexRpcBoundary, type SkillTools } from "@crossline/codex";
 import {
@@ -415,6 +415,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       writeExtractState(store, workspaceId, laneStateKey(sessionId, lane), { upTo, failures: 0, ranAt: new Date().toISOString(), readAt });
       if (finishing && profileTask) markFinishing(store, workspaceId, sessionId, finishing.runs + 1);
     });
+    nearTermCaptures(store, workspaceId, ownerId, sessionId, result.output.slotUpdates);
     store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:extracted:${sessionId}:${upTo}:${new Date().toISOString()}`, type: "onboarding.extracted",
       entityId: sessionId, payload: { replies: pendingReplies.length, files: taken.length, facts: result.output.slotUpdates.length,
         repairs: result.audit.repairs ?? 0, warnings: result.audit.warnings ?? [], pruned, lane } });
@@ -586,3 +587,25 @@ export const extractionRunning = (workspaceId: string, lane?: ExtractLane) =>
 export const extractionSettled = (workspaceId: string, lane?: ExtractLane): Promise<void> => lane
   ? inFlight.get(slotOf(workspaceId, lane))?.promise ?? Promise.resolve()
   : Promise.all(slotsOf(workspaceId).map((slot) => inFlight.get(slot)?.promise ?? Promise.resolve())).then(() => undefined);
+
+/** The person's 「没有」 to the near-term question (`near_term` with no task in it). */
+export const NO_NEAR_TERM = /^\s*(没有|无|暂无|没有了|都没有|none|nothing|no)\s*[。.!！]?\s*$/i;
+/**
+ * What the person said they will finish this week or next (`near_term`, 2026-11-20 §3.6): each becomes a capture the moment it is said, so
+ * the Today page has it before the interview ends. The person's own words are exempt from the milestone gate (round 1, R1-2): analysed and
+ * filed like anything typed into the input box. Once per sentence.
+ */
+export function nearTermCaptures(store: CrosslineStore, workspaceId: string, ownerId: string, sessionId: string, facts: readonly SlotUpdate[]): number {
+  const t = tOfWorkspace(store, workspaceId);
+  let made = 0;
+  for (const fact of facts) {
+    if (fact.slot !== "near_term" || fact.status !== "confirmed" || !fact.value.trim() || NO_NEAR_TERM.test(fact.value)) continue;
+    const key = createHash("sha256").update(`${fact.identityId}|${fact.value.trim()}`).digest("hex").slice(0, 12);
+    const id = `cap-interview-${key}`;
+    if (store.listCaptures(workspaceId).some((capture) => capture.id === id)) continue;
+    store.capture({ id, ownerId, workspaceId, title: fact.value.trim().slice(0, 240),
+      context: t("访谈里本人说近期要做完的事：「{{quote}}」", { quote: (fact.sourceQuote || fact.value).slice(0, 300) }) }, `interview:near_term:${key}`);
+    made += 1;
+  }
+  return made;
+}

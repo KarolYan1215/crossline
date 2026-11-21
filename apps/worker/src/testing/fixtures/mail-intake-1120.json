@@ -1,0 +1,24 @@
+{
+  "about": "Mail intake regression set (docs/plans/near-term-and-mail-bar-1120.md §3.8): the misreads seen on the owner's account on 2026-11-20, as triage answers to replay. Each case: the mails, the answers in order (a rejected one first where the validator must send it back), and what must happen.",
+  "cases": {
+    "movie-night": {
+      "mails": [{ "uid": 1, "subject": "Grad club: movie night Friday", "body": "Join us for movie night on Friday Nov 20 at 7pm in the lounge. Popcorn provided!", "headers": "List-Id: <grads.uni.edu>\r\n", "to": ["grads@uni.edu"] }],
+      "answers": [{ "items": [{ "uid": 1, "kind": "todo", "title": "参加研究生电影之夜", "waitingId": "", "serves": "none", "known": "", "courseStaff": false, "due": "", "why": "社团群发活动，与里程碑无关" }] }],
+      "expect": { "captures": 0, "log": ["unlisted"] }
+    },
+    "recurring-meeting-invite": {
+      "mails": [{ "uid": 1, "subject": "Invitation: Group meeting (weekly)", "body": "Group meeting on Tuesday, Nov 17, 14:00-15:00.", "to": ["me@qq.com"] }],
+      "answers": [{ "items": [{ "uid": 1, "kind": "event", "title": "组会", "waitingId": "", "serves": "m-ctrl", "known": "fixed-group@2026-11-17", "courseStaff": false, "due": "", "why": "日历上已有每周组会",
+        "meet": { "date": "2026-11-17", "start": "14:00", "end": "15:00", "location": "", "lineId": "", "relevance": 60, "personal": true, "quote": "Group meeting on Tuesday, Nov 17, 14:00-15:00", "attend": "must" } }] }],
+      "expect": { "captures": 0, "events": 0, "log": ["known"] }
+    },
+    "hw4-course-staff-floor": {
+      "mails": [{ "uid": 1, "subject": "ECE 555 HW4 released", "body": "HW4 is now posted on Canvas. It is due Tuesday Nov 24 at 11:59pm.", "to": ["me@qq.com"] }],
+      "answers": [
+        { "items": [{ "uid": 1, "kind": "info", "title": "", "waitingId": "", "serves": "", "known": "", "courseStaff": true, "due": "2026-11-24", "why": "作业发布通知" }] },
+        { "items": [{ "uid": 1, "kind": "todo", "title": "11/24 前完成并提交 ECE 555 HW4", "waitingId": "", "serves": "m-ctrl", "known": "", "courseStaff": true, "due": "2026-11-24", "why": "课程作业，有截止日" }] }
+      ],
+      "expect": { "captures": 1, "log": ["todo"], "repairs": 1 }
+    }
+  }
+}

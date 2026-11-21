@@ -107,6 +107,7 @@ export function undoMerge(ctx: AccessContext, absorbedId: string): { ok: true } 
   if (!result.ok) return result;
   if (!undone) store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `op.undone:${event.entityId}`,
     type: "op.undone", entityId: event.entityId, payload: { label: (event.payload as { label?: string }).label ?? "", partly: later } });
+  if (!undone) learnFromUndo(ctx, event.entityId, event.payload as { label?: string; bySystem?: boolean });
   return { ok: true };
 }
 
@@ -118,7 +119,20 @@ export function undoOp(ctx: AccessContext, opId: string): { ok: true; label: str
   if (!result.ok) return result;
   getStore().appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `op.undone:${op.id}`,
     type: "op.undone", entityId: op.id, payload: { label: op.label } });
+  const applied = getStore().listEvents(ctx.workspaceId, { type: "op.applied", entityId: op.id }).at(-1);
+  learnFromUndo(ctx, op.id, applied?.payload as { label?: string; bySystem?: boolean } | undefined);
   return { ok: true, label: op.label };
+}
+
+/**
+ * An undo of something the system did by itself is a lesson (2026-11-20, the owner: 「记进偏好」): one preference the models read with the
+ * ledger brief and every plan, naming what was undone, so the same judgement is not made again. Shown and deletable in Settings → 个性化.
+ * Undoing the person's own action teaches nothing.
+ */
+function learnFromUndo(ctx: AccessContext, opId: string, payload: { label?: string; bySystem?: boolean } | undefined): void {
+  if (!payload?.bySystem || !payload.label) return;
+  getStore().addPreference({ workspaceId: ctx.workspaceId, source: "correction", scope: "all", weight: 1, refId: `undo:${opId}`,
+    text: tOf(ctx)("本人撤销了系统自动做的「{{label}}」：同类的事以后不要自动做，先问本人。", { label: payload.label }) });
 }
 
 function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok: false; code: string } {

@@ -649,6 +649,8 @@
   "知悉": "For your information",
   "略过": "Skipped",
   "需要回复": "Needs a reply",
+  "已在账本里": "Already in the ledger",
+  "未列入": "Not listed",
   "由助手起草，需本人确认后自行发送。Crossline 不会发送这封邮件。": "Drafted by the assistant; you check it and send it yourself. Crossline never sends this email.",
   "回复：{{from}}（{{day}} 来信「{{subject}}」）": "Reply to: {{from}} (message of {{day}}, \"{{subject}}\")",
   "无主题": "No subject",
@@ -763,5 +765,8 @@
   "录音太长，中间约 {{minutes}} 分钟没有读；那一段里的承诺、日期和信息都不在这份摘要里。": "The recording is too long: about {{minutes}} minutes in the middle were not read, and nothing said there is in this summary.",
   "## 没有整理到的": "## Not covered",
   "另有 {{count}} 条在转写里找不到原话（或日期格式不对），没有记下。_one": "{{count}} more item had no matching words in the transcript (or a malformed date) and was not recorded.",
-  "另有 {{count}} 条在转写里找不到原话（或日期格式不对），没有记下。_other": "{{count}} more items had no matching words in the transcript (or a malformed date) and were not recorded."
+  "另有 {{count}} 条在转写里找不到原话（或日期格式不对），没有记下。_other": "{{count}} more items had no matching words in the transcript (or a malformed date) and were not recorded.",
+  "「{{line}}」近两周要做完的事已说明": "Near-term work for “{{line}}” stated",
+  "这周到下周已经定了要做完的事（没有也可以说）": "What is set to be finished this week or next (or that there is none)",
+  "「{{line}}」这周到下周有哪几件已经定了要做完的事？没有也可以直接说。": "What in “{{line}}” is set to be finished this week or next? If nothing, just say so."
 }

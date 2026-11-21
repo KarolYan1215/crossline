@@ -38,6 +38,7 @@ import { repairLineAttributes } from "./attribute-repair";
 import { returnTidy } from "./return-tidy";
 import { workSplitRepair } from "./work-split-repair";
 import { mailReminderRepair, moneyAskRepair } from "./mail-reminder-repair";
+import { MAIL_INTAKE_REPAIR, mailIntakeRepair } from "./mail-intake-repair";
 import { mailRecordsRepair } from "./mail-records-repair";
 import { moneyReportPass } from "./money-report";
 import { codexQuoteReader, wealthPricePass } from "./wealth-prices";
@@ -935,6 +936,12 @@ async function workspaceTick(workspace: { id: string }, checkedAt: string): Prom
     const records = mailRecordsRepair(analysisStore, workspace.id);
     if (records.voided || records.refunds || records.merged) console.info(JSON.stringify({ type: "repair.mail_records", workspaceId: workspace.id, ...records, checkedAt }));
   } catch (error) { console.warn(JSON.stringify({ type: "repair.mail_reminders_failed", workspaceId: workspace.id, error: String(error), checkedAt })); }
+  // Once: tasks mail made before the ledger brief are judged again with it (mail-intake-repair.ts, 2026-11-20).
+  if (!analysisStore.getSetting(workspace.id, MAIL_INTAKE_REPAIR) && spendAllows(await spendFor(workspace.id), "intake")) {
+    const cleaned = await mailIntakeRepair(analysisStore, workspace.id, accountClient(workspace.id), repoRoot)
+      .catch((error) => { console.warn(JSON.stringify({ type: "repair.mail_intake_failed", workspaceId: workspace.id, error: String(error), checkedAt })); return []; });
+    if (cleaned.length) console.info(JSON.stringify({ type: "repair.mail_intake", workspaceId: workspace.id, archived: cleaned.length, checkedAt }));
+  }
   // FX rates, coin prices and brokerage quotes once a day, then holdings valued (wealth-prices.ts, docs/ledger-wealth.md §2–3).
   try {
     const client = accountClient(workspace.id);

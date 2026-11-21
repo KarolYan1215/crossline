@@ -1,18 +1,18 @@
 import { occurrences, type FixedEvent } from "./fixed-events";
 import { squashText } from "./opportunity-discovery";
-import { mailObligation, type EventObligation, type EventTiming, type MailStructure, type ObligationBasis } from "./obligation";
+import { mailObligation, type EventObligation, type EventTiming, type MailAttend, type MailStructure, type ObligationBasis } from "./obligation";
 
 /**
  * Mail about something the person could go to (a talk, an info session, an activity, a meeting) is asked about, not planned (the owner's
  * decision of 2026-11-10): one card 「要去吗」 with how relevant it is and its line. Only 去 makes it a fixed event, and only a fixed event
- * reaches a calendar; 不去 drops it. Mass notices of low relevance are listed in the weekly review instead of asked. A personal invitation
- * (导师约见、面试、组会) is still asked, with 去 as the default and ahead of everything else. Nothing from a mail ever reaches a calendar
- * without the person's 去.
+ * reaches a calendar; 不去 drops it. What is not worth a question is listed in the weekly review instead. Asked cards put a personal
+ * invitation first. Nothing from a mail ever reaches a calendar without the person's 去.
  *
  * Since 2026-11-11 (§2 of docs/plans/2026-11-11-walkthrough-decisions.md) each event also carries `timing` and `obligation`
- * (`obligation.ts`): a required one from a source the person confirmed is on Crossline's own schedule as busy time without a question
- * (state `fixed`) — still on no calendar, which only 去 writes — a likely one is asked (relevance ≥ `LIKELY_RELEVANCE`), an optional one
- * waits in the weekly review. Events recorded before then are read as they are; nothing is migrated.
+ * (`obligation.ts`). Since 2026-11-20 the obligation is the model's `attend`, read with the ledger brief and the mail's structure as
+ * evidence: a `must` is on Crossline's own schedule as busy time without a question (state `fixed`) — still on no calendar, which only 去
+ * writes — a `likely` that serves a milestone is asked, the rest waits in the weekly review. Events recorded before then are read as they
+ * are; nothing is migrated.
  */
 export const MAIL_EVENTS_SETTING = "mail.events";
 /** Kept this many, newest last; past ones are dropped first. */
@@ -63,13 +63,9 @@ export type MailMeetReading = { date: string; start: string; end: string; locati
   personal: boolean;
   /** One sentence copied exactly from the mail that names the day. */
   quote: string;
-  /**
-   * One sentence copied exactly from the mail saying attendance is required (「必须参加」「attendance is required」), or empty. Evidence
-   * only: it can make an event `likely`, never `required` by itself (`mailObligation`). Optional for answers recorded before it existed.
-   */
-  required?: string;
-  /** Who sent it, as the mail shows: the person's advisor, a course's staff (instructor, TA, course office), or anyone else. */
-  senderRole?: "advisor" | "course_staff" | "other" };
+  /** Whether the person goes, the model's reading with the structure as evidence (`obligation.ts`). Optional for answers recorded before it. */
+  attend?: MailAttend | "";
+};
 
 /** `fixed`: required and from a source the person confirmed — on Crossline's own schedule as busy time, never asked, never published by itself. */
 export type MailEventState = "asked" | "digest" | "go" | "skip" | "fixed";
@@ -87,11 +83,11 @@ export type MailEvent = {
 };
 
 export const MAIL_MEET_SHAPE = {
-  type: "object", additionalProperties: false, required: ["date", "start", "end", "location", "lineId", "relevance", "personal", "quote", "required", "senderRole"], properties: {
+  type: "object", additionalProperties: false, required: ["date", "start", "end", "location", "lineId", "relevance", "personal", "quote", "attend"], properties: {
     date: { type: "string", maxLength: 10 }, start: { type: "string", maxLength: 5 }, end: { type: "string", maxLength: 5 },
     location: { type: "string", maxLength: 120 }, lineId: { type: "string", maxLength: 128 },
     relevance: { type: "integer", minimum: 0, maximum: 100 }, personal: { type: "boolean" }, quote: { type: "string", maxLength: 300 },
-    required: { type: "string", maxLength: 300 }, senderRole: { type: "string", enum: ["advisor", "course_staff", "other"] } }
+    attend: { type: "string", enum: ["", "must", "likely", "optional"] } }
 } as const;
 
 /**
@@ -113,7 +109,7 @@ export function mailEventRulesAfter(list: readonly MailEvent[], rules: readonly 
   const source = event?.source;
   if (!event || !source) return [...rules];
   let cap: MailEventRule["cap"] | undefined;
-  if (decision === "go" && (event.obligation === "required" || event.basis === "keyword")) cap = "required";
+  if (decision === "go" && event.obligation === "required") cap = "required";
   if (decision === "skip") {
     const answered = list.filter((item) => item.source === source && (item.state === "go" || item.state === "skip") && item.decidedAt)
       .sort((a, b) => a.decidedAt!.localeCompare(b.decidedAt!));
@@ -145,12 +141,13 @@ const plusHour = (time: string) => { const [h, m] = time.split(":").map(Number) 
  * (the model reads, it never supplies a day of its own) whose weekday, if it names one, is the day's, a line the person has. No end → one
  * hour. Undefined when any of that fails: the mail is then information.
  *
- * Its obligation is code's (`mailObligation`): the headers and invitation the connector read (`structure`, for the account's `person`),
- * the person's rule for the sender (`rules`), and the model's fields only as evidence. A `required` one from a confirmed source is `fixed`
- * (busy on the plan, not asked); a `required` one from a new source and every `likely` one is asked; `optional` waits in the weekly review.
+ * Its obligation is the model's `attend` (`mailObligation`), under the person's rule for the sender (`rules`) and their own answer to an
+ * invitation (`structure`, for the account's `person`): a `must` is `fixed` (busy on the plan, not asked); a `likely` that serves a
+ * milestone (`servesMilestone`) is asked; the rest waits in the weekly review.
  */
 export function mailEventFrom(meet: MailMeetReading | undefined, input: { id: string; title: string; from: string; subject: string; text: string;
-  today: string; lineIds: string[]; at: string; fromAddress?: string; sentAt?: string; structure?: MailStructure; person?: string; rules?: readonly MailEventRule[] }): MailEvent | undefined {
+  today: string; lineIds: string[]; at: string; fromAddress?: string; sentAt?: string; structure?: MailStructure; person?: string; rules?: readonly MailEventRule[];
+  servesMilestone?: boolean }): MailEvent | undefined {
   if (!meet || !DAY.test(meet.date) || Number.isNaN(Date.parse(`${meet.date}T00:00:00Z`)) || meet.date < input.today || !TIME.test(meet.start)) return undefined;
   if (input.sentAt && DAY.test(input.sentAt.slice(0, 10)) && meet.date < input.sentAt.slice(0, 10)) return undefined;
   const quote = squashText(meet.quote ?? "");
@@ -160,10 +157,8 @@ export function mailEventFrom(meet: MailMeetReading | undefined, input: { id: st
   const relevance = Math.max(0, Math.min(100, Math.round(Number(meet.relevance) || 0)));
   const personal = meet.personal === true;
   const source = (input.fromAddress ?? "").trim().toLowerCase();
-  const requiredQuote = squashText(meet.required ?? "");
-  const verdict = mailObligation({ structure: input.structure ?? { listed: false, recipients: [] }, person: input.person ?? "", personal, relevance,
-    requiredQuote: requiredQuote.length >= 6 && squashText(input.text).includes(requiredQuote), senderRole: meet.senderRole ?? "other",
-    rule: source ? input.rules?.find((rule) => rule.source === source)?.cap : undefined });
+  const verdict = mailObligation({ attend: meet.attend, structure: input.structure ?? { listed: false, recipients: [] }, person: input.person ?? "",
+    servesMilestone: input.servesMilestone === true, rule: source ? input.rules?.find((rule) => rule.source === source)?.cap : undefined });
   return { id: input.id, title: input.title.trim().slice(0, 120) || input.subject.slice(0, 120), date: meet.date, start: meet.start, end,
     location: meet.location.trim().slice(0, 120), lineId: input.lineIds.includes(meet.lineId) ? meet.lineId : "", relevance, personal,
     from: input.from.slice(0, 120), subject: input.subject.slice(0, 160), at: input.at,

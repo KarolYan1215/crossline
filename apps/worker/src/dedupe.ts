@@ -8,6 +8,7 @@ import type { CrosslineStore, StepPlanInput, StoredWorkOrder } from "@crossline/
 import { ownerOf } from "./owner";
 import { sayToPerson } from "./workflow-smith";
 import { localeOf } from "./locale";
+import { meetingDuplicatePass } from "./meeting-dedupe";
 
 /**
  * The daily self-check (the owner's decision of 2026-10-15): near-identical open tasks are merged, and a standalone request for a fact is
@@ -211,6 +212,13 @@ export async function dedupePass(deps: { store: CrosslineStore; workspaceId: str
   // Requests first, so a task that took one in and is then merged as a duplicate carries it along.
   const ordered = [...groups.filter((group) => group.kind === "info_request"), ...groups.filter((group) => group.kind === "duplicate")];
   const done = ordered.map((group) => applyMerge(store, workspaceId, group, now)).filter((item): item is NonNullable<typeof item> => Boolean(item));
+  // Tasks that are only going to something already on the calendar (2026-11-20, §3.4): the model decides, once a day.
+  const calendarClient = !catchUp ? deps.client() : undefined;
+  const onCalendar = calendarClient && spendAllows(await deps.spend(), deps.force ? "core" : "discretionary")
+    ? await meetingDuplicatePass(store, workspaceId, calendarClient, deps.cwd, now).catch(() => []) : [];
+  if (onCalendar.length && !deps.force) sayToPerson(store, workspaceId, [t("{{count}} 个任务和日历上已有的安排是同一件，已归档，日历上的保留：", { count: onCalendar.length }),
+    ...onCalendar.map((item) => `- ${t("「{{task}}」＝日历上的「{{calendar}}」", { task: item.title, calendar: item.calendar })}`), t("可在任务页「已归档」里逐个恢复。")].join("\n"),
+    "tasks_on_calendar", `on-calendar:${day}`, [], now);
   if (done.length && !deps.force) sayToPerson(store, workspaceId, [t("今天的自检合并了 {{count}} 个重复或只需一封邮件的任务：", { count: done.reduce((sum, item) => sum + item.absorbed.length, 0) }),
     ...done.map((item) => `- ${item.merged}`), t("可在任务页「已归档」的「已合并」里撤销。")].join("\n"),
     "tasks_merged", catchUp ? `merged:${day}:review` : `merged:${day}`, [{ label: t("查看", { context: "view" }), href: "/approvals" }], now);

@@ -1,43 +1,36 @@
 import { expect, test } from "vitest";
 import {
-  attendedName, dateItemAttributes, mailEventClash, mailEventFrom, mailEventRulesAfter, mailEventsOnSchedule, mailObligation, parseTimeRange, readMailEventRules,
+  attendedName, dateItemAttributes, mailEventClash, mailEventFrom, mailEventRulesAfter, mailEventsOnSchedule, mailObligation, parseTimeRange, readMailEventRules, structureEvidence,
   decideMailEvent, withMailEvent, type MailEvent, type MailMeetReading, type MailStructure
 } from "./index";
 
 const ME = "me@uni.edu";
 const plain: MailStructure = { listed: false, recipients: [ME] };
-const base = { person: ME, personal: false, relevance: 0, requiredQuote: false, senderRole: "other" as const };
+const base = { person: ME, servesMilestone: false };
 
-test("required comes only from structure: organizer, a required participant, an accepted invitation to the person alone", () => {
+test("the model's attend decides (2026-11-20): must is required and not asked, likely is asked only when it serves a milestone", () => {
+  expect(mailObligation({ ...base, attend: "must", structure: plain })).toEqual({ obligation: "required", basis: "model", ask: false });
+  expect(mailObligation({ ...base, attend: "likely", structure: plain })).toEqual({ obligation: "likely", basis: "model", ask: false });
+  expect(mailObligation({ ...base, attend: "likely", servesMilestone: true, structure: plain })).toEqual({ obligation: "likely", basis: "model", ask: true });
+  expect(mailObligation({ ...base, attend: "optional", servesMilestone: true, structure: plain })).toEqual({ obligation: "optional", basis: "model", ask: false });
+  // A list's notice is no longer capped by code: the structure is the model's evidence.
+  expect(mailObligation({ ...base, attend: "must", structure: { listed: true, recipients: [] } })).toMatchObject({ obligation: "required" });
+  // An answer recorded without attend is optional.
+  expect(mailObligation({ ...base, attend: undefined, structure: plain })).toMatchObject({ obligation: "optional" });
+});
+
+test("what stays code's is the person's own: two 不去 for a sender, and their 拒绝 of the invitation", () => {
+  expect(mailObligation({ ...base, attend: "must", rule: "optional", structure: plain })).toEqual({ obligation: "optional", basis: "rule", ask: false });
+  const declined: MailStructure = { ...plain, invite: { method: "REQUEST", organizer: "lin@uni.edu", attendees: [{ address: ME, role: "REQ-PARTICIPANT", partstat: "DECLINED" }] } };
+  expect(mailObligation({ ...base, attend: "must", structure: declined })).toEqual({ obligation: "optional", basis: "declined", ask: false });
+});
+
+test("the structure is said to the model as evidence", () => {
   const invite = (attendee: { role: string; partstat: string }, organizer = "lin@uni.edu") => ({ method: "REQUEST", organizer, attendees: [{ address: ME, ...attendee }] });
-  expect(mailObligation({ ...base, structure: { ...plain, invite: invite({ role: "", partstat: "" }, ME) } })).toEqual({ obligation: "required", basis: "organizer", ask: true });
-  expect(mailObligation({ ...base, structure: { ...plain, invite: invite({ role: "REQ-PARTICIPANT", partstat: "NEEDS-ACTION" }) } }))
-    .toMatchObject({ obligation: "required", basis: "required_participant" });
-  expect(mailObligation({ ...base, structure: { ...plain, invite: invite({ role: "OPT-PARTICIPANT", partstat: "ACCEPTED" }) } }))
-    .toMatchObject({ obligation: "required", basis: "accepted" });
-  // Accepted, but the invitation went to many: not required by that alone; still an invitation of the person's.
-  expect(mailObligation({ ...base, structure: { listed: false, recipients: [ME, "x@uni.edu"], invite: invite({ role: "OPT-PARTICIPANT", partstat: "ACCEPTED" }) } }))
-    .toMatchObject({ obligation: "likely", basis: "invitation" });
-  // A source the person said 去 to before is required without asking.
-  expect(mailObligation({ ...base, rule: "required", structure: { ...plain, invite: invite({ role: "REQ-PARTICIPANT", partstat: "" }) } }))
-    .toEqual({ obligation: "required", basis: "required_participant", ask: false });
-});
-
-test("a list or bulletin board is at most optional whatever the body or the invitation says", () => {
-  const listed: MailStructure = { listed: true, recipients: [ME], invite: { method: "REQUEST", organizer: ME, attendees: [] } };
-  expect(mailObligation({ ...base, structure: listed, personal: true, relevance: 95, requiredQuote: true, senderRole: "course_staff", rule: "required" }))
-    .toEqual({ obligation: "optional", basis: "list", ask: false });
-});
-
-test("body keywords alone give likely, from course staff or an advisor only; a 去 rule makes the same source required", () => {
-  expect(mailObligation({ ...base, structure: plain, requiredQuote: true, senderRole: "course_staff" })).toEqual({ obligation: "likely", basis: "keyword", ask: true });
-  expect(mailObligation({ ...base, structure: plain, requiredQuote: true, senderRole: "advisor", rule: "required" })).toEqual({ obligation: "required", basis: "rule", ask: false });
-  // Anyone else writing 「attendance required」 is not believed.
-  expect(mailObligation({ ...base, structure: plain, requiredQuote: true, senderRole: "other" })).toEqual({ obligation: "optional", basis: "none", ask: false });
-  expect(mailObligation({ ...base, structure: plain, personal: true })).toMatchObject({ obligation: "likely", basis: "invitation" });
-  expect(mailObligation({ ...base, structure: plain, relevance: 70 })).toMatchObject({ obligation: "likely", basis: "relevance" });
-  expect(mailObligation({ ...base, structure: plain, relevance: 69 })).toMatchObject({ obligation: "optional" });
-  expect(mailObligation({ ...base, structure: plain, personal: true, rule: "optional" })).toEqual({ obligation: "optional", basis: "rule", ask: false });
+  expect(structureEvidence({ ...plain, invite: invite({ role: "", partstat: "" }, ME) }, ME)).toEqual({ listed: false, recipients: 1, toPersonAlone: true, invite: "organizer" });
+  expect(structureEvidence({ listed: true, recipients: [ME, "x@uni.edu"], invite: invite({ role: "REQ-PARTICIPANT", partstat: "NEEDS-ACTION" }) }, ME))
+    .toEqual({ listed: true, recipients: 2, toPersonAlone: false, invite: "required" });
+  expect(structureEvidence(plain, ME).invite).toBe("");
 });
 
 const meet = (over: Partial<MailMeetReading> = {}): MailMeetReading => ({ date: "2026-11-17", start: "14:00", end: "", location: "", lineId: "", relevance: 40, personal: true,
@@ -45,15 +38,13 @@ const meet = (over: Partial<MailMeetReading> = {}): MailMeetReading => ({ date: 
 const input = (over: Partial<Parameters<typeof mailEventFrom>[1]> = {}) => ({ id: "m1", title: "与 Lin 老师见面", from: "Prof Lin <lin@uni.edu>", fromAddress: "lin@uni.edu",
   subject: "Meeting", text: "Can we meet on Tuesday, Nov 17 at 2pm in my office?", today: "2026-11-10", lineIds: [], at: "2026-11-10T09:00:00Z", ...over });
 
-test("an event carries timing and obligation; required and known goes on the schedule, required and new is asked, optional is listed", () => {
-  const asked = mailEventFrom(meet(), input())!;
-  expect(asked).toMatchObject({ timing: "fixed", obligation: "likely", state: "asked", source: "lin@uni.edu" });
-  const organizer = { listed: false, recipients: [ME], invite: { method: "REQUEST", organizer: ME, attendees: [] } };
-  expect(mailEventFrom(meet(), input({ structure: organizer, person: ME }))).toMatchObject({ obligation: "required", basis: "organizer", state: "asked" });
-  expect(mailEventFrom(meet(), input({ structure: organizer, person: ME, rules: [{ source: "lin@uni.edu", cap: "required", why: "went", at: "", example: "" }] })))
-    .toMatchObject({ obligation: "required", state: "fixed" });
-  expect(mailEventFrom(meet({ personal: false, relevance: 60 }), input())).toMatchObject({ obligation: "optional", state: "digest" });
-  expect(mailEventFrom(meet(), input({ structure: { listed: true, recipients: [] }, person: ME }))).toMatchObject({ obligation: "optional", state: "digest" });
+test("an event carries timing and obligation: must goes on the schedule, likely serving a milestone is asked, the rest is listed", () => {
+  expect(mailEventFrom(meet({ attend: "must" }), input())).toMatchObject({ timing: "fixed", obligation: "required", basis: "model", state: "fixed", source: "lin@uni.edu" });
+  expect(mailEventFrom(meet({ attend: "likely" }), input({ servesMilestone: true }))).toMatchObject({ obligation: "likely", state: "asked" });
+  expect(mailEventFrom(meet({ attend: "likely" }), input())).toMatchObject({ obligation: "likely", state: "digest" });
+  expect(mailEventFrom(meet({ attend: "optional" }), input({ servesMilestone: true }))).toMatchObject({ obligation: "optional", state: "digest" });
+  expect(mailEventFrom(meet({ attend: "must" }), input({ rules: [{ source: "lin@uni.edu", cap: "optional", why: "skipped_twice", at: "", example: "" }] })))
+    .toMatchObject({ obligation: "optional", state: "digest" });
 });
 
 test("a day the quote's weekday contradicts, or one before the mail was sent, is not taken (relative days count from the mail)", () => {
@@ -79,7 +70,7 @@ test("required events are on the schedule without being asked, and a clash with 
 test("answers become per-source rules: two 不去 in a row cap the source, 去 to a required one lets it be required directly", () => {
   const event = (id: string, over: Partial<MailEvent> = {}): MailEvent => ({ id, title: id, date: "2026-11-20", start: "10:00", end: "11:00", location: "", lineId: "",
     relevance: 80, personal: false, from: "Club <club@uni.edu>", subject: id, state: "asked", at: "", source: "club@uni.edu", obligation: "likely", basis: "relevance", ...over });
-  let list = [event("a"), event("b"), event("c", { source: "lab@uni.edu", obligation: "likely", basis: "keyword" })];
+  let list = [event("a"), event("b"), event("c", { source: "lab@uni.edu", obligation: "required", basis: "model" })];
   list = decideMailEvent(list, "a", "skip", "2026-11-10T10:00:00Z");
   let rules = mailEventRulesAfter(list, [], "a", "skip", "2026-11-10T10:00:00Z");
   expect(rules).toEqual([]);

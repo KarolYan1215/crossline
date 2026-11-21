@@ -63,6 +63,7 @@ export function interviewChecklistFor(store: CrosslineStore, workspaceId: string
     dates,
     availability: Boolean(store.getSetting(workspaceId, "schedule.availability.proposed") || store.getSetting(workspaceId, "schedule.availability")),
     unfiledFiles: extras.unfiledFiles,
+    nearTermSettled: nearTermSettled(store, workspaceId, lines.map((line) => line.id)),
     // 「准」 on an observation in each deep stage confirms the portrait piece by piece (2026-10-19), as the one 「符合」 at the end does.
     profileCards,
     // A portrait part whose section the extraction wrote from numbered sentences rests on the person's words, whatever the facts' slots.
@@ -72,6 +73,13 @@ export function interviewChecklistFor(store: CrosslineStore, workspaceId: string
     // Labels in the interview's language (docs/i18n.md): the list is about the interview.
     locale: extras.locale ?? interviewLocale(store, workspaceId) ?? readLocale(store, workspaceId)
   });
+}
+
+/** Lines whose near-term question needs no asking: open work on the board, or the start confirmed before the item existed (2026-11-20). */
+function nearTermSettled(store: CrosslineStore, workspaceId: string, lineIds: string[]): Record<string, boolean> {
+  const started = Boolean(store.getSetting(workspaceId, START_CONFIRMED_SETTING));
+  const busy = new Set(store.listWorkOrders(workspaceId).filter((order) => !order.tombstone && !["accepted", "archived"].includes(order.state)).map((order) => order.identityId));
+  return Object.fromEntries(lineIds.map((id) => [id, started || busy.has(id)]));
 }
 
 /** The projects (by id or name) a weekly meeting is on record for, from every date batch not superseded, pending or confirmed. */

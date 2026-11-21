@@ -14,7 +14,8 @@ const full: ChecklistInput = {
     { identityId: "person", projectId: "", slot: "method_exam_prep", status: "confirmed", sourceRef: "reply-6" },
     { identityId: "research", projectId: "ece555", slot: "grading", status: "confirmed", sourceRef: "src-1" },
     { identityId: "research", projectId: "ece555", slot: "goal", status: "confirmed", sourceRef: "reply-2" },
-    { identityId: "research", projectId: "ece555", slot: "evidence", status: "confirmed", sourceRef: "reply-2" }],
+    { identityId: "research", projectId: "ece555", slot: "evidence", status: "confirmed", sourceRef: "reply-2" },
+    { identityId: "research", projectId: "", slot: "near_term", status: "confirmed", sourceRef: "reply-7", value: "11/24 前提交 ECE 555 HW4" }],
   projects: [{ id: "ece555", identityId: "research", name: "ECE 555" }, { id: "research-default", identityId: "research", name: "研究者" }],
   dates: [{ project: "ECE 555", kind: "class", recurring: true, pending: false, sourceRef: "src-2" }, { project: "ECE 555", kind: "exam", recurring: false, pending: false, sourceRef: "src-1" }],
   availability: true, unfiledFiles: 0, portraitConfirmed: true
@@ -24,7 +25,7 @@ test("a complete record ticks every item, the portrait included", () => {
   const items = interviewChecklist(full);
   expect(items.filter((item) => !item.done)).toEqual([]);
   expect(items.map((item) => item.id)).toEqual(["portrait_fields", "portrait_synthesis", "portrait_grounded", "portrait_confirmed", "line_desc:research", "line_goal:research",
-    "hard_schedule:research", "availability", "line_project:research", "project:ece555", "project_course:ece555", "files_filed"]);
+    "hard_schedule:research", "availability", "line_project:research", "near_term:research", "project:ece555", "project_course:ece555", "files_filed"]);
 });
 
 test("a portrait written only from inferences is not finished, and what is missing is named", () => {
@@ -62,7 +63,7 @@ test("what the person could not say is assumed (「假设：」) and settles the
 test("可开始标准：五条打标，全满足才算；画像不要求", () => {
   const items = interviewChecklist({ ...full, portraitConfirmed: false, profile: {} });
   expect(items.filter((item) => item.start).map((item) => item.id))
-    .toEqual(["line_desc:research", "line_goal:research", "hard_schedule:research", "availability", "line_project:research"]);
+    .toEqual(["line_desc:research", "line_goal:research", "hard_schedule:research", "availability", "line_project:research", "near_term:research"]);
   expect(readyToStart(items)).toBe(true);
   expect(items.find((item) => item.id === "portrait_fields")?.done).toBe(false);
 });
@@ -216,4 +217,18 @@ test("a deep part is owed until a round was in it and its portrait section rests
   const bare = { ...full, facts: full.facts.filter((fact) => fact.slot !== "work_view" && fact.slot !== "flow"), groundedSections: [] };
   expect(partsUncovered({ stageOrder: order, stagesSeen: order, items: interviewChecklist(bare) })).toEqual(["compass"]);
   expect(partsUncovered({ stageOrder: order, stagesSeen: order, items })).toEqual([]);
+});
+
+test("near-term work is a start item (2026-11-20): a thing named, a 「没有」, or a skipped line settles it; an account already started is not held", () => {
+  const without = { ...full, facts: full.facts.filter((fact) => fact.slot !== "near_term") };
+  const open = interviewChecklist(without).find((item) => item.id === "near_term:research");
+  expect(open).toMatchObject({ done: false, start: true, owner: "interview" });
+  expect(open?.ask).toContain("这周到下周");
+  expect(readyToStart(interviewChecklist(without))).toBe(false);
+  const none = { ...without, facts: [...without.facts, { identityId: "research", projectId: "", slot: "near_term", status: "confirmed", sourceRef: "reply-8", value: "没有" }] };
+  expect(readyToStart(interviewChecklist(none))).toBe(true);
+  // A guess is not the person's word.
+  const guessed = { ...without, facts: [...without.facts, { identityId: "research", projectId: "", slot: "near_term", status: "inferred", sourceRef: "", value: "写论文" }] };
+  expect(readyToStart(interviewChecklist(guessed))).toBe(false);
+  expect(readyToStart(interviewChecklist({ ...without, nearTermSettled: { research: true } }))).toBe(true);
 });

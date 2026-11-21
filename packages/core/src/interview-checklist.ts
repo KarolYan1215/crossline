@@ -54,6 +54,11 @@ export type ChecklistInput = {
   dates: Array<{ project: string; kind: string; recurring: boolean; pending: boolean; sourceRef: string }>;
   /** A weekly pattern was proposed by the interview, or the person saved their own. */
   availability: boolean;
+  /**
+   * Lines whose near-term work is settled without the question (2026-11-20, §3.6): the line already has open work on the board, or the
+   * person confirmed the start before the item existed — an account already in use is not sent back to the interview for it.
+   */
+  nearTermSettled?: Record<string, boolean>;
   /** Files only the person can place; null where this is not known (the worker). */
   unfiledFiles: number | null;
   portraitConfirmed: boolean;
@@ -222,6 +227,18 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
       owner: "interview", start: true,
       ask: current.length ? t("「{{project}}」大概什么时候要完成？没有截止也可以直接说。", { project: current[0]!.name })
         : t("「{{line}}」这条线眼下在做的一件事是什么？大概什么时候要完成，没有截止也可以说。", { line: line.label }) });
+  }
+
+  // What each line has to finish this week or next (2026-11-20, §3.6, a start item): one thing the person named, their 「没有」, or 「这条线先
+  // 不规划」. What they name becomes a task the moment it is said (`nearTermCaptures` in the worker).
+  for (const line of input.lines) {
+    const lineProjects = new Set(input.projects.filter((project) => project.identityId === line.id).map((project) => project.id));
+    const said = input.facts.some((fact) => (fact.identityId === line.id || lineProjects.has(fact.projectId)) && confirmedFact(fact)
+      && (fact.slot === "near_term" || fact.slot === "skipped"));
+    const done = said || input.nearTermSettled?.[line.id] === true;
+    items.push({ id: `near_term:${line.id}`, group: "项目", label: t("「{{line}}」近两周要做完的事已说明", { line: line.label }), done,
+      detail: done ? "" : t("这周到下周已经定了要做完的事（没有也可以说）"), owner: "interview", start: true,
+      ask: t("「{{line}}」这周到下周有哪几件已经定了要做完的事？没有也可以直接说。", { line: line.label }) });
   }
 
   for (const project of input.projects.filter((item) => !isDefaultProject(item.id))) {

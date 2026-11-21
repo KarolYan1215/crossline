@@ -8,7 +8,8 @@ const EXAMPLE_AT = "2026-09-01T00:00:00.000Z";
 /**
  * What the start standard asks for (`readyToStart`), written for the example board: each built-in line with a description, two
  * candidates and an adopted goal, the default weekly hours as the interview's proposal (the same windows the scheduler uses when none
- * is stored, so the schedule does not change), one current project per line that the person said has no deadline, and the person's
+ * is stored, so the schedule does not change), one current project per line that the person said has no deadline, 「没有」 to the
+ * near-term question per line, and the person's
  * confirmation of all of it (`START_CONFIRMED_SETTING`). Only what is not
  * there yet is written, so it is safe to run on every load. Used by `ensureSeeded` with example data on, and by tests.
  */
@@ -41,6 +42,10 @@ export function seedExampleReadiness(store: CrosslineStore, ctx: AccessContext):
     if (!store.listProfileFacts(ws).some((fact) => fact.projectId === id && fact.slot === "no_deadline"))
       store.upsertProfileFact({ workspaceId: ws, identityId: pack.id, projectId: id, slot: "no_deadline", value: "没有截止", status: "confirmed",
         sourceRef: "reply-1", sourceQuote: "没有截止", updatedAt: EXAMPLE_AT });
+    // The near-term question (2026-11-20): the example person said nothing is set to be finished this week or next.
+    if (!store.listProfileFacts(ws).some((fact) => fact.identityId === pack.id && fact.slot === "near_term"))
+      store.upsertProfileFact({ workspaceId: ws, identityId: pack.id, projectId: "", slot: "near_term", value: "没有", status: "confirmed",
+        sourceRef: "reply-1", sourceQuote: "没有", updatedAt: EXAMPLE_AT });
   }
   if (!store.getSetting(ws, START_CONFIRMED_SETTING)) store.setSetting(ws, START_CONFIRMED_SETTING, JSON.stringify({ at: EXAMPLE_AT, via: "person" }));
 }

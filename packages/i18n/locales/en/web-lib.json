@@ -1133,5 +1133,6 @@
   "计时已截止，之后的时间不算": "Timer cut off; the time after it does not count",
   "计时一直没停，按超时提醒时截止": "The timer was left running; cut off at the overrun reminder",
   "{{what}}的计时一直没停，已算到 {{at}}（比通常多一半时），之后的时间不算。实际做得更久，完成时填实际用时即可。": "The timer for {{what}} was left running, so it counts until {{at}} (half again the usual length) and no further. If the work really took longer, enter the actual time when you finish.",
-  "知道了": "Got it"
+  "知道了": "Got it",
+  "本人撤销了系统自动做的「{{label}}」：同类的事以后不要自动做，先问本人。": "The person undid “{{label}}”, which the system did by itself: do not do this kind of thing by yourself again; ask first."
 }

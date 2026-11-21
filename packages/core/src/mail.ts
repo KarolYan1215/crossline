@@ -30,7 +30,12 @@ export type MailAccount = {
   noSentFolder?: string;
 };
 /** `needs_reply`: sorted as `reply` with no wait behind it — the sender expects an answer from the person (a draft may follow). */
-export type MailLogEntry = { accountId: string; uid: number; from: string; subject: string; date: string; kind: MailTriageKind | "needs_reply"; title: string; at: string;
+/**
+ * `known`: the ledger already has it (the task or time item named in the title). `unlisted`: a to-do that serves none of the person's
+ * milestones or lines — not created, not shown anywhere but here (the owner, round 1: 「都不要」).
+ */
+export type MailLogKind = MailTriageKind | "needs_reply" | "known" | "unlisted";
+export type MailLogEntry = { accountId: string; uid: number; from: string; subject: string; date: string; kind: MailLogKind; title: string; at: string;
   /** The message's own key (`mailMessageKey`): the same mail in a second mailbox is not sorted again. Absent on entries written before. */
   key?: string };
 
@@ -87,8 +92,8 @@ export function appPasswordPage(address: string, locale?: Locale): AppPasswordPa
  * `travel`: a booking confirmation (flight, train, hotel) of a future trip, read into `trip` with the mail's own sentence (§17.6 c).
  */
 export type MailTriageKind = "todo" | "date" | "event" | "reply" | "transaction" | "opportunity" | "travel" | "info" | "ignore";
-export const MAIL_TRIAGE_KIND_LABEL: Record<MailTriageKind | "needs_reply", string> = { todo: "待办", date: "日期", event: "活动", reply: "回复了等待项", transaction: "记账",
-  opportunity: "机会", travel: "行程", info: "知悉", ignore: "略过", needs_reply: "需要回复" };
+export const MAIL_TRIAGE_KIND_LABEL: Record<MailTriageKind | "needs_reply" | "known" | "unlisted", string> = { todo: "待办", date: "日期", event: "活动", reply: "回复了等待项", transaction: "记账",
+  opportunity: "机会", travel: "行程", info: "知悉", ignore: "略过", needs_reply: "需要回复", known: "已在账本里", unlisted: "未列入" };
 /** Where a booking takes the person: city and country, the first and last day there, and the sentence of the mail that says so. */
 export type MailTrip = { city: string; country: string; from: string; to: string; quote: string };
 /**
@@ -97,6 +102,13 @@ export type MailTrip = { city: string; country: string; from: string; to: string
  * against the mail's own text (`moneyEventFromMail`); `event` "" and the rest empty when the mail is not about money.
  */
 export type MailTriage = { items: Array<{ uid: number; kind: MailTriageKind; title: string; waitingId: string; why: string; money: MoneyReading;
+  /**
+   * Read against the ledger brief (docs/plans/near-term-and-mail-bar-1120.md §3.2), for `todo`, `date` and `event`; empty for the other kinds.
+   * `serves`: the milestone id it bears on, `line:<id>` for a line's long-term goal, or `none`. `known`: the id of the open or done task or
+   * the time item it already is. `courseStaff`: sent by an instructor, TA or course office of the person's course. `due`: the day it is due,
+   * YYYY-MM-DD, or empty. Optional only for answers recorded before 2026-11-20.
+   */
+  serves?: string; known?: string; courseStaff?: boolean; due?: string;
   /** Filled for `travel`, empty strings otherwise; optional here only for answers recorded before it existed. */
   trip?: MailTrip;
   /** Filled for `event` (a talk, info session, activity or meeting at a set time; `mail-events.ts`), empty otherwise; optional for older answers. */
@@ -105,12 +117,16 @@ export type MailTriage = { items: Array<{ uid: number; kind: MailTriageKind; tit
 export const MAIL_TRIAGE_SCHEMA = {
   type: "object", additionalProperties: false, required: ["items"], properties: {
     items: { type: "array", maxItems: 40, items: { type: "object", additionalProperties: false,
-      required: ["uid", "kind", "title", "waitingId", "why", "money", "trip", "meet"], properties: {
+      required: ["uid", "kind", "title", "waitingId", "why", "serves", "known", "courseStaff", "due", "money", "trip", "meet"], properties: {
       uid: { type: "integer", minimum: 1 },
       kind: { type: "string", enum: ["todo", "date", "event", "reply", "transaction", "opportunity", "travel", "info", "ignore"] },
       title: { type: "string", maxLength: 140 },
       waitingId: { type: "string", maxLength: 128 },
       why: { type: "string", maxLength: 200 },
+      serves: { type: "string", maxLength: 140 },
+      known: { type: "string", maxLength: 200 },
+      courseStaff: { type: "boolean" },
+      due: { type: "string", maxLength: 10 },
       money: { type: "object", additionalProperties: false,
         required: ["event", "amount", "amountLabel", "currency", "merchant", "category", "occurredOn", "refs", "last4", "instrument"], properties: {
         event: { type: "string", enum: [...MONEY_EVENTS] },
@@ -135,7 +151,17 @@ export const MAIL_TRIAGE_SCHEMA = {
  */
 // Repair messages to the triage Skill, not interface text.
 /* i18n-ignore-start */
-export function validateMailTriage(value: unknown, uids: number[], waitingIds: string[]): MailTriage {
+/** The ids the ledger brief named (`ledger-brief.ts`): `serves` and `known` must be one of them. */
+export type TriageLedgerIds = { milestones: ReadonlySet<string>; lines: ReadonlySet<string>; known: ReadonlySet<string> };
+const ADDS: readonly MailTriageKind[] = ["todo", "date", "event"];
+/**
+ * The one semantic floor code keeps (the owner, round 2: 「保留保底」): a mail from course staff with a due day is never dropped as
+ * information or as serving nothing — it is a task, a date, an event, or something the ledger already has.
+ */
+export const courseStaffFloorBroken = (item: Pick<MailTriage["items"][number], "kind" | "serves" | "known" | "courseStaff" | "due">) =>
+  item.courseStaff === true && /^\d{4}-\d{2}-\d{2}$/.test(item.due ?? "") && !item.known && (!ADDS.includes(item.kind) || item.serves === "none");
+
+export function validateMailTriage(value: unknown, uids: number[], waitingIds: string[], ledger?: TriageLedgerIds): MailTriage {
   const answer = value as MailTriage | undefined;
   if (!answer || !Array.isArray(answer.items)) throw Object.assign(new Error("MAIL_TRIAGE_INVALID"), { detail: "items 必须是数组" });
   const problems: string[] = [];
@@ -154,6 +180,21 @@ export function validateMailTriage(value: unknown, uids: number[], waitingIds: s
       if (!item.title.trim() || !meet || !/^\d{4}-\d{2}-\d{2}$/.test(meet.date) || !/^\d{2}:\d{2}$/.test(meet.start) || !meet.quote.trim()) {
         problems.push(`uid ${item.uid} 是活动却缺 meet：title、date（YYYY-MM-DD）、start（HH:MM）和邮件原文 quote 都要有；没有具体时间的不是活动`);
       }
+    }
+    if (ledger && ADDS.includes(item.kind)) {
+      const serves = item.serves ?? "";
+      const line = serves.startsWith("line:") ? serves.slice(5) : "";
+      if (serves !== "none" && !ledger.milestones.has(serves) && !(line && ledger.lines.has(line))) {
+        problems.push(`uid ${item.uid} 的 serves「${serves}」不是账本简报里进行中的里程碑 id，也不是 line:<主线 id>；都对不上就写 none`);
+      }
+      if (item.known && !ledger.known.has(item.known)) problems.push(`uid ${item.uid} 的 known「${item.known}」不是账本简报里的任务或时间项 id；不是已有的就留空`);
+    }
+    if (item.due && !/^\d{4}-\d{2}-\d{2}$/.test(item.due)) problems.push(`uid ${item.uid} 的 due 要写成 YYYY-MM-DD，没有截止就留空`);
+    if (ledger && courseStaffFloorBroken(item)) {
+      problems.push(`uid ${item.uid} 是课程教师发的、有截止日（${item.due}）的邮件：只能是 todo、date 或 event，serves 不能是 none；账本里已经有了就把那一项的 id 写进 known`);
+    }
+    if (item.kind === "event" && ledger && !["must", "likely", "optional"].includes(item.meet?.attend ?? "")) {
+      problems.push(`uid ${item.uid} 是活动却缺 meet.attend（must、likely 或 optional）`);
     }
     if (item.kind === "travel") {
       const trip = item.trip;

@@ -5,18 +5,29 @@ description: Sort newly arrived mail once — what the person must do, dates to 
 
 # Crossline Mail Triage
 
-Accept `{today, lines[], openTasks[], waiting[], messages[]}` and return `{items[]}` with exactly one entry per message (`uid` as given). You see only each message's sender, subject, date and opening lines; you never reply, forward or act on a message.
+Accept `{ledger, today, messages[]}` and return `{items[]}` with exactly one entry per message (`uid` as given). You see only each message's sender, subject, date and opening lines; you never reply, forward or act on a message.
 
-- `messages`: `{uid, from, subject, date, opening}`.
-- `lines`: what the person works on (`{id, label}`, e.g. 研究者, 创业者). Mail about these lines' courses, projects and people is likelier to matter.
-- `openTasks`: titles of the tasks already on the person's board.
-- `waiting`: what the person is waiting for: `{id, who, title, expectedAt}`.
+- `messages`: `{uid, from, subject, date, opening, structure}`. `structure` is what the headers say, read by the app: `listed` (a mailing list or bulletin), `recipients` (how many To and Cc), `toPersonAlone`, and `invite`, the person's place in a calendar invitation (`organizer`, `required`, `optional`, `accepted`, `declined`, `invited`, or empty). It is evidence for `attend` and `courseStaff`, never the answer by itself.
+- `ledger`: what the person already has, by id. `lines` (`{id, label, goal}`), `milestones` they are working towards (`{id, title, line, due, done}`), `openTasks` and `doneTasks` (`{id, title, line, milestoneId, due, state}`), `time`: the next 21 days of their calendar, fixed events, dates from their files and mail events, one entry per occurrence (`{id, title, day, start, end, source}`; a weekly meeting is there once per week), `waits` (`{id, who, title, expectedAt}`), and `preferences` (what the person told the system). `more` counts what was left out.
+
+## Against the ledger (todo, date, event)
+
+The ledger is what lets you tell new from known. For every todo, date and event fill:
+
+- `serves`: the id of the milestone it bears on; `line:<line id>` when it serves a line's long-term goal but no milestone; `none` when it serves neither (a club's movie night, a campus health day, a department-wide social, a general talk unrelated to their milestones). A todo or date that serves none is not created at all and is listed nowhere but the mail log (the owner's decision of 2026-11-20); the person's attention goes only where it is worth it.
+- `known`: the id of the open or done task, or the time item, it already is — the same assignment under another name, the same meeting (an invitation to a weekly meeting already in `time` is known), a release mail for work already planned. Then nothing is written and the log says where it already is. Empty when it is new.
+- `courseStaff`: true when an instructor, TA or course office of the person's own course sent it.
+- `due`: the day it is due, `YYYY-MM-DD`, or empty.
+- **The one rule code checks:** a mail from course staff with a due day is never `info` or `ignore` and never `serves: none` — it is a todo, date or event, or `known`. An answer breaking it is sent back.
+
+For every other kind, `serves` and `known` are `""`, `courseStaff` false and `due` `""`.
 
 What happens with your answer: the `money` you read becomes one line of the person's bookkeeping when its event is one where money moved (charge, receipt, refund, income) and the app finds the same amount beside a total in the mail itself; several mails about one payment (the receipt, the shipping mail, the bank alert) are merged into one line by the app, so read each mail on its own; `todo` and `date` items become lines in the person's inbox, and each line is then planned as a task, at most five a pass (the rest are kept as `info`). `reply` with a `waitingId` brings the matching wait forward on the person's 待决事项, naming this message; `reply` with an empty `waitingId` means the sender is waiting for the person's answer: a draft answer is written for the person (never sent) and they are told about it. `info` and `ignore` change nothing; they only label the message in the log the person can read.
 
 ## Kinds
 
-- **todo**: the message asks the person to do something beyond writing back, or doing nothing will cost them (a fee, a missed deadline, a lost place, a security risk): hand something in, fill a form, accept or prepare for a meeting, and check an account or money alert (an unusual transaction, a low balance, a failed payment, a security change they did not make, a bill or renewal due). Not for anything already in `openTasks` with the same day.
+- **event**: something at a set day and time the person could go to (a talk, an info session, a meeting, an exam sitting, an advisor's or interviewer's appointment). Fill `meet`, and `meet.attend`: `must` (an exam or quiz sitting, a class or meeting of their own, an advisor's or interviewer's appointment, something they organise or accepted), `likely` (worth going for one of their milestones, or addressed to them in particular), `optional` (a list's notice, a social event, a talk unrelated to their milestones). `must` goes on Crossline's own schedule without a question; `likely` is asked only when `serves` is a milestone; the rest waits in the weekly review. Preparing for it is a separate todo.
+- **todo**: the message asks the person to do something beyond writing back, or doing nothing will cost them (a fee, a missed deadline, a lost place, a security risk): hand something in, fill a form, accept or prepare for a meeting, and check an account or money alert (an unusual transaction, a low balance, a failed payment, a security change they did not make, a bill or renewal due). Not for anything already in the ledger: that is `known`.
 - **date**: a dated event or deadline worth keeping that the mail itself asks nothing about (a talk, an exam moved, a meeting time confirmed).
 - **transaction**: money that has already moved and nothing to do about it: a payment made or received, a purchase receipt, a refund, a salary (「您尾号 1234 的卡消费 35.00 元」, 「Your order total: $42.50」, 「工资已入账 12,000.00」). An unusual charge, a failed payment or a security alert is **todo** (the person must check it), not transaction; a bill still to pay is **todo** too.
 - **travel**: a booking confirmation of the person's own future trip — a flight, a train, a hotel (「Your flight to Lisbon on 12 Nov is confirmed」, 「酒店预订成功：上海，11月20日入住，11月23日退房」). Fill `trip`: `city` and `country` where they will be, `from` and `to` the first and last day there as `YYYY-MM-DD` (a flight alone is `from` = `to` = its arrival day; a hotel is check-in to check-out), and `quote` one sentence copied exactly from the mail that names the place and a day. A trip that already ended, a fare alert or a promotion for a destination is not travel. For every other kind, every `trip` field is `""`.

@@ -130,3 +130,8 @@ Costs and open points:
   - Extract Skill: starts take the window's first day, and 「年前」 is the day before the Spring Festival. Classes end at term end. Every stated window goes in `windows`. A stated ideal self becomes the person's own `state` candidates.
   - Dialogue Skill: 「不固定」「看情况」 are answers.
   - lines stage: ask which directions the person has already considered.
+
+## Near-term work (2026-11-20)
+
+- A start item per line, `near_term:<line>` (`packages/core/src/interview-checklist.ts`): settled by a confirmed `near_term` fact (a thing to finish this week or next, or 「没有」), by the line's `skipped`, or — so an account already in use is not sent back — by open work on that line or an earlier start confirmation (`nearTermSettled` in `packages/db/src/interview.ts`). Its `ask` is 「…这周到下周有哪几件已经定了要做完的事？没有也可以直接说。」
+- The extract Skill records each named thing as its own confirmed `near_term` fact. `nearTermCaptures` (`apps/worker/src/onboarding-extract.ts`) turns each into a capture `cap-interview-<hash>` the round it is said (once per sentence; 「没有」 and its variants make none). The person's own words skip the milestone gate (R1-2).
