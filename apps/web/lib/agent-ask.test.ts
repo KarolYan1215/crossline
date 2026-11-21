@@ -110,6 +110,12 @@ test("a stopped run for a step already done another way, or for a task done or a
   expect(agentAsks()).toHaveLength(1);
   store.updateStepProgress(ws, "hw4", stepId, { status: "done" }, owner, "person");
   expect(agentAsks()).toEqual([]);
+  // A run from an earlier version of the plan (live: v4s1, the plan now at v5 with that step done as v5s2) is matched by the step's title;
+  // one whose step the plan no longer has was planned away.
+  run(store, "x0", { title: "完成作业 4 · 提取题面约束", workOrderId: "hw4", stepId: "v0s9" }, { code: "AGENT_ARTIFACT_MISSING", message: "你说做了「约束.md」" });
+  expect(agentAsks()).toEqual([]);
+  run(store, "x9", { title: "完成作业 4 · 早已删掉的一步", workOrderId: "hw4", stepId: "v0s8" }, { code: "AGENT_ARTIFACT_MISSING", message: "你说做了「b.md」" });
+  expect(agentAsks()).toEqual([]);
   // A whole-task run for a task that was archived meanwhile.
   run(store, "x2", { title: "完成作业 4", workOrderId: "hw4" }, { code: "AGENT_ARTIFACT_MISSING", message: "你说做了「a.md」" });
   expect(agentAsks()).toHaveLength(1);

@@ -41,11 +41,16 @@ export function agentBlockedAsks(ctx: AccessContext, now: Date, today: string): 
   const rows = new Map(listAgentTasks(store, ctx.workspaceId, now).map((row) => [row.taskId, row]));
   // Work already finished another way (the person did the step, or the task is done or archived) is not the assistant's to fail at any
   // more: 待确认 listed 「助手没做成『提取作业4题面约束』」 for a step the task page showed done (W-294, 2026-11-20).
-  const settled = (chain: { latest: { workOrderId: string; stepId?: string } }) => {
+  // A run keeps the step id of the plan it was started from; once the plan is redone (v4s1 → v5s2) the same step is found by its title, and
+  // a step the new plan no longer has at all was planned away — on the live board the card stayed for a step done under the new id.
+  const settled = (chain: { latest: { workOrderId: string; stepId?: string; title: string } }) => {
     const order = orders.get(chain.latest.workOrderId);
     if (order && (order.state === "accepted" || order.state === "archived" || order.tombstone)) return true;
-    const status = order && chain.latest.stepId ? store.getStepPlan(ctx.workspaceId, order.id)?.steps.find((step) => step.id === chain.latest.stepId)?.status : undefined;
-    return status === "done" || status === "skipped";
+    if (!order || !chain.latest.stepId) return false;
+    const steps = store.getStepPlan(ctx.workspaceId, order.id)?.steps;
+    if (!steps) return false;
+    const step = steps.find((item) => item.id === chain.latest.stepId) ?? steps.find((item) => chain.latest.title.endsWith(` · ${item.title}`));
+    return !step || step.status === "done" || step.status === "skipped";
   };
   return agentChainsFor(store, ctx.workspaceId, now, locale).filter((chain) => chain.state === "stuck" && chain.failure && !settled(chain)).map((chain): Ask => {
     const failure = chain.failure!;
