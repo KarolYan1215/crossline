@@ -28,6 +28,8 @@ test("the card draws the day: a badge for what waits, one block per arrangement 
   const html = renderToStaticMarkup(<OpenerCard opener={opener} />);
   expect(html).toContain("10 月 15 日 周四");
   expect(html).toContain("待决 <span>14</span>");
+  // An opener stored before facts were counted apart has no `records`: all of it reads as 待决.
+  expect(html).not.toContain("待记录");
   expect(html.match(/class="opener-block"/g)).toHaveLength(4);
   expect(html).toContain("data-line=\"startup\"");
   expect(html).toContain("data-line=\"none\"");
@@ -46,4 +48,13 @@ test("an empty day says so in words, and a stored payload of another shape is no
   expect(readOpener(opener)).toBe(opener);
   expect(readOpener(undefined)).toBeUndefined();
   expect(readOpener({ day: "2026-10-15" })).toBeUndefined();
+});
+
+test("the badge splits what waits into choices (待决) and facts to report (待记录), and drops a kind with none", () => {
+  const html = renderToStaticMarkup(<OpenerCard opener={{ ...opener, asks: { ...opener.asks, records: 5 } }} />);
+  expect(html).toContain("待决 <span>9</span>");
+  expect(html).toContain("待记录 <span>5</span>");
+  const onlyRecords = renderToStaticMarkup(<OpenerCard opener={{ ...opener, asks: { count: 3, records: 3 } }} />);
+  expect(onlyRecords).toContain("待记录 <span>3</span>");
+  expect(onlyRecords).not.toContain("待决 <span>");
 });

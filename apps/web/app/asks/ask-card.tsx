@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
-import { DECISION_SECONDS_MAX, type Ask, type AskField, type AskOption, type AskProgress } from "@crossline/core";
+import { ASK_NATURE_LABEL, DECISION_SECONDS_MAX, askNature, type Ask, type AskField, type AskOption, type AskProgress } from "@crossline/core";
 import { Tag } from "../ui/tag";
 import { SegmentedControl } from "../ui/controls";
 import { Clamp } from "../ui/clamp";
@@ -264,7 +264,9 @@ function FieldInput({ field, value, onChange }: { field: AskField; value: string
 /** Urgency, the deadline it bears on, the milestone's weight (drawn), and — for one that can wait — the day it comes into the week. */
 export function AskMeta({ ask }: { ask: Ask }) {
   const t = useT(), locale = useLocale();
+  const nature = askNature(ask.kind);
   return <p className="ask-meta">
+    <Tag title={t(nature === "record" ? "只需说一个本人知道的事实" : "要在几种做法里选一个")}>{t(ASK_NATURE_LABEL[nature])}</Tag>
     <Tag tone={ask.urgency === "now" ? "info" : "neutral"}>{t(URGENCY[ask.urgency])}</Tag>
     {ask.dueDay && <small>{t("关系到 {{day}} 的截止", { day: shortDay(ask.dueDay, locale) })}</small>}
     {ask.importance !== undefined && <small className="ak-weight" title={t("里程碑重要性 {{value}} / 100", { value: ask.importance })}>

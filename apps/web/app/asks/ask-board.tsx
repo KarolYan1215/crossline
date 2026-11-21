@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { ASK_QUADRANTS, ASK_QUADRANT_LABEL, askQuadrant, type Ask, type AskKind, type AskQuadrant } from "@crossline/core";
+import { ASK_NATURE_LABEL, ASK_QUADRANTS, ASK_QUADRANT_LABEL, askNature, askQuadrant, type Ask, type AskKind, type AskNature, type AskQuadrant } from "@crossline/core";
 import { AlertTriangle, Bot, CalendarClock, ChevronLeft, ChevronRight, FileQuestion, Hourglass, ListChecks, MessageSquare, ShieldCheck, type LucideIcon } from "lucide-react";
 import { AskDeck, useAskList, useDeck } from "./ask-drawer";
 import { keysFree } from "./ask-card";
@@ -30,13 +30,15 @@ export const askGroup = (ask: Pick<Ask, "kind">): AskGroup => GROUP_OF[ask.kind]
 /** The short labels of the quadrant cells (the long ones stay the cells' accessible names). */
 const QUADRANT_SHORT: Record<AskQuadrant, string> = { urgent_important: "紧急 · 重要", important: "重要", urgent: "紧急", neither: "其余" };
 
-export type DeckFilter = { quadrant?: AskQuadrant | undefined; group?: AskGroup | undefined };
+export type DeckFilter = { quadrant?: AskQuadrant | undefined; group?: AskGroup | undefined; nature?: AskNature | undefined };
+const NATURES: AskNature[] = ["decide", "record"];
 
 /** The asks a filter leaves, in the order they came (ranked by urgency and importance), quadrant by quadrant. Pure, for its test. */
 export function filterAsks(asks: Ask[], filter: DeckFilter): Ask[] {
   const groups = byQuadrant(asks);
   return ASK_QUADRANTS.flatMap((quadrant) => groups[quadrant])
-    .filter((ask) => (!filter.quadrant || askQuadrant(ask) === filter.quadrant) && (!filter.group || askGroup(ask) === filter.group));
+    .filter((ask) => (!filter.quadrant || askQuadrant(ask) === filter.quadrant) && (!filter.group || askGroup(ask) === filter.group)
+      && (!filter.nature || askNature(ask.kind) === filter.nature));
 }
 
 /**
@@ -52,6 +54,7 @@ export function AskBoard({ initial, previews, aside }: { initial: Ask[]; preview
   const shown = filterAsks(asks, filter);
   const { at, go, pick } = useDeck(shown.length);
   const quadrants = byQuadrant(asks);
+  const natures = NATURES.map((nature) => ({ nature, count: asks.filter((ask) => askNature(ask.kind) === nature).length }));
   const groups = ASK_GROUPS.map((group) => ({ group, count: asks.filter((ask) => askGroup(ask) === group).length })).filter((item) => item.count > 0);
 
   // Today's 「打开」 links straight to one card.
@@ -75,6 +78,13 @@ export function AskBoard({ initial, previews, aside }: { initial: Ask[]; preview
 
   return <>
     <aside className="ap-left" aria-label={t("待决事项的分类")}>
+      {/* A choice to make or a fact to report (`askNature`, 2026-11-21): the two read differently, so they are counted apart. */}
+      {asks.length > 0 && <section className="ap-card ap-natures" aria-label={t("待决与待记录")}>
+        <div className="ap-quad-grid">{natures.map(({ nature, count }) => <button key={nature} type="button" data-nature={nature}
+          aria-pressed={filter.nature === nature} disabled={!count} title={t(nature === "record" ? "只需说一个本人知道的事实" : "要在几种做法里选一个")}
+          onClick={() => choose(filter.nature === nature ? {} : { nature })}>
+          <b className="ds-serif">{count}</b><span>{t(ASK_NATURE_LABEL[nature])}</span></button>)}</div>
+      </section>}
       <section className="ap-card ap-quads" aria-label={t("四个格子")}>
         <h2 className="ap-card-title">{t("四个格子")}</h2>
         <div className="ap-quad-grid">{ASK_QUADRANTS.map((quadrant) => <button key={quadrant} type="button" data-quadrant={quadrant}
@@ -100,7 +110,7 @@ export function AskBoard({ initial, previews, aside }: { initial: Ask[]; preview
           <header className="ap-deck-head">
             {top && <><span className="ap-quad-tag" data-quadrant={askQuadrant(top)}>{t(QUADRANT_SHORT[askQuadrant(top)])}</span>
               <span className="ap-kind-tag">{t(askGroup(top))}</span></>}
-            {(filter.quadrant || filter.group) && <button type="button" className="text-button ap-clear" onClick={() => choose({})}>{t("显示全部")}</button>}
+            {(filter.quadrant || filter.group || filter.nature) && <button type="button" className="text-button ap-clear" onClick={() => choose({})}>{t("显示全部")}</button>}
             <nav className="ap-deck-nav" aria-label={t("切换待决事项")}>
               <IconButton label={t("上一项")} icon={<ChevronLeft {...ICON} />} disabled={at === 0} onClick={() => go(-1)} />
               <span className="mono" aria-live="polite">{shown.length ? at + 1 : 0} / {shown.length}</span>

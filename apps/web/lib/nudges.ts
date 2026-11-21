@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { formatInTimeZone } from "date-fns-tz";
 import { dueProvenance, listAgentTasks, type StoredConversationMessage } from "@crossline/db";
 import {
-  availableSlots, calendarLineOf, inferBlockOutcome, OVER_CAPACITY_TAG, type InferredOutcome, isCancelledEvent, onPersonsBoard, planNudges, preparesOf, taskTitleOf,
+  askNature, availableSlots, calendarLineOf, inferBlockOutcome, OVER_CAPACITY_TAG, type InferredOutcome, isCancelledEvent, onPersonsBoard, planNudges, preparesOf, taskTitleOf,
   type AccessContext, type NotifyLevelName, type NudgeBlock, type NudgeEnding, type NudgeButton, type NudgeKind, type NudgeSlack, type PlannedNudge, type ProposedAction,
   QUIET_HOURS_SETTING, inQuiet, quietHoursOf, forgottenTimerStop
 } from "@crossline/core";
@@ -426,6 +426,8 @@ export async function ensureOpener(ctx: AccessContext, now = new Date(), force =
     .filter((item) => item.due && item.due >= today && item.due <= addDays(today, 3)).sort((a, b) => a.due.localeCompare(b.due));
   // This week's, the same count as Today's stack and 待确认: the ones that can wait are not today's to mention.
   const asks = thisWeek(listed(openAsks(ctx, now)));
+  // Facts only the person can report, apart from the choices (2026-11-21): the card and the button count them separately.
+  const records = asks.filter((ask) => askNature(ask.kind) === "record");
   const md = (day: string) => locale === "en" ? monthDay(locale, day) : `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
   // The text version (push, older pages) stays a few short lines: two of each with names cut short, the rest counted. The card drawn
   // from `opener` below carries the whole day.
@@ -450,7 +452,8 @@ export async function ensureOpener(ctx: AccessContext, now = new Date(), force =
     ...(first && typed ? [{ kind: "href" as const, label: t("写答案"), href: "/#asks" }] : []),
     ...(first ? answerable.map((option): NudgeButton => ({ kind: "action", label: option.label,
       action: { action: "ask.answer", summary: t("{{label}}：{{title}}", { label: first.title.slice(0, 40), title: option.label }), args: { askId: first.id, optionId: option.id, fields: [] } } })) : []),
-    ...(asks.length ? [{ kind: "href" as const, label: t("待决事项（{{count}}）", { count: asks.length }), href: "/approvals" }] : []),
+    ...(asks.length ? [{ kind: "href" as const, label: [asks.length - records.length ? t("待决 {{count}}", { count: asks.length - records.length }) : "",
+      records.length ? t("待记录 {{count}}", { count: records.length }) : ""].filter(Boolean).join(" · "), href: "/approvals" }] : []),
     { kind: "href", label: t("打开计划"), href: "/plan" }
   ];
   // The same day as data, for the card Today's conversation and the return page draw (the text above stays for push and older pages).
@@ -466,7 +469,7 @@ export async function ensureOpener(ctx: AccessContext, now = new Date(), force =
       ...missedItems(ctx, [], {}, now).filter((item) => item.day === today).map((item) => withLine({ start: item.start, end: item.end, title: item.title,
         ...(item.step ? { step: item.step } : {}), missed: true }, lineOfOrder.get(item.workOrderId ?? "")))].sort((a, b) => a.start.localeCompare(b.start)),
     soon: soon.slice(0, 6).map((item) => withLine({ title: taskTitleOf(item.order), due: item.due }, item.order.identityId)),
-    asks: { count: asks.length, ...(first ? { top: withLine({ title: first.title, urgency: first.urgency }, first.line) } : {}) }
+    asks: { count: asks.length, records: records.length, ...(first ? { top: withLine({ title: first.title, urgency: first.urgency }, first.line) } : {}) }
   };
   if (existing) {
     const text = lines.join("\n");

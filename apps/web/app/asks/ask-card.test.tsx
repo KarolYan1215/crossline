@@ -101,6 +101,10 @@ test("待确认 counts the week's asks in four quadrant cells and by kind, and a
   expect(html).toContain("1 / 3");
   // Kinds: the interview's group and waiting items.
   expect(html).toContain("等待到期");
+  // Choices and facts to report are counted apart (2026-11-21): all three of these only want a fact, so 待决 has none.
+  expect(html).toContain('<b class="ds-serif">3</b><span>待记录</span>');
+  expect(html).toMatch(/data-nature="decide" aria-pressed="false" disabled="" title="要在几种做法里选一个"><b class="ds-serif">0<\/b>/);
+  expect(html).toContain('<span class="ui-tag" data-tone="neutral" title="只需说一个本人知道的事实">待记录</span>');
   expect(html).not.toContain("以后的");
   expect(renderToStaticMarkup(<AskBoard initial={[]} previews={{}} />)).toContain("本周暂无待决事项。");
 });
@@ -113,6 +117,8 @@ test("a filter narrows the deck to one quadrant or one kind, in quadrant order",
   expect(filterAsks(asks, { quadrant: "urgent_important" }).map((ask) => ask.id)).toEqual(["b"]);
   expect(filterAsks(asks, { group: "等待到期" }).map((ask) => ask.id)).toEqual(["a"]);
   expect(filterAsks(asks, { group: "日程与承诺" }).map((ask) => ask.id)).toEqual(["c"]);
+  expect(filterAsks(asks, { nature: "decide" }).map((ask) => ask.id)).toEqual(["c"]);
+  expect(filterAsks(asks, { nature: "record" }).map((ask) => ask.id).sort()).toEqual(["a", "b"]);
   expect(askGroup({ kind: "risk_digest" })).toBe("风险与逾期");
   expect(askGroup({ kind: "relation_check" })).toBe("其他");
 });

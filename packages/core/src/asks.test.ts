@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { askQuadrant, horizonEntry, latestStart, rankAsks, snoozeUntil, urgencyFor, validateAskAnswer, validateAskChoice, type Ask } from "./asks";
+import { askNature, askQuadrant, horizonEntry, latestStart, rankAsks, snoozeUntil, urgencyFor, validateAskAnswer, validateAskChoice, type Ask } from "./asks";
 
 const ask = (id: string, over: Partial<Ask> = {}): Ask => ({ id, kind: "backplan_input", entityId: id, title: id, why: "", urgency: "later",
   raisedAt: "2026-10-07T00:00:00Z", fingerprint: "f1", options: [
@@ -78,5 +78,16 @@ describe("ask quadrants and choices", () => {
     const pick = ask("t", { options: [{ id: "a", label: "A" }] });
     expect(validateAskChoice(pick, [], {}, "周三下午")).toMatchObject({ ok: false, code: "ASK_NOTE_NOT_TAKEN" });
     expect(validateAskChoice({ ...pick, freeText: { placeholder: "A" } }, [], {}, " 周三下午 ")).toMatchObject({ ok: true, note: "周三下午" });
+  });
+});
+
+describe("askNature", () => {
+  it("tells a fact to report (待记录) from a choice to make (待决)", () => {
+    for (const kind of ["waiting_due", "outcome_check", "progress_check", "prep_question", "interview_question", "exam_time", "wealth_balances", "opportunity_result"] as const) {
+      expect(askNature(kind)).toBe("record");
+    }
+    for (const kind of ["milestone_risk", "milestone_overdue", "event_merge", "locked_conflict", "gate_failed", "missed_block", "opportunity_offer", "weekly_commit"] as const) {
+      expect(askNature(kind)).toBe("decide");
+    }
   });
 });

@@ -593,7 +593,6 @@
   "Crossline 模型额度邀请码": "Your Crossline model quota invite code",
   "没有这个配对码，或已过期：在那台电脑上重新生成一个。": "No such pairing code, or it has expired: create a new one on that computer.",
   "写答案": "Write the answer",
-  "待决事项（{{count}}）": "Decisions ({{count}})",
   "未命名": "Untitled",
   "读取{{label}}到{{where}}时要本人处理：请在电脑「{{host}}」上弹出的{{label}}窗口里完成，然后点「已在电脑上完成」，读取从停下的地方接着往下。": "Reading {{label}} needs the person at {{where}}: finish it in the {{label}} window open on the computer \"{{host}}\", then press \"Done on the computer\"; reading goes on from where it stopped.",
   "{{label}}在读取{{where}}时要求验证，请现在完成；完成后读取从停下的地方接着往下。": "{{label}} asked for verification while reading {{where}}. Complete it now; reading then goes on from where it stopped.",

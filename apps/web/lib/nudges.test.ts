@@ -155,7 +155,7 @@ test("the opener also stores the day as data, which the conversation hands to th
   await ensureOpener(TEST_CTX, NOW);
   const [opener] = nudges();
   expect(opener!.opener).toMatchObject({ day: "2026-10-12", label: "10 月 12 日 周一", timeZone: expect.any(String),
-    soon: [{ title: "完成 ECE 555 作业 2", due: "2026-10-14", line: "research" }], asks: { count: expect.any(Number) } });
+    soon: [{ title: "完成 ECE 555 作业 2", due: "2026-10-14", line: "research" }], asks: { count: expect.any(Number), records: expect.any(Number) } });
   expect(Array.isArray(opener!.opener!.work) && Array.isArray(opener!.opener!.fixed)).toBe(true);
   expect(opener!.card!.clarify.question.startsWith("10 月 12 日 周一。")).toBe(true);
 });

@@ -14,7 +14,8 @@ export type OpenerView = {
   /** Open work due within three days. */
   soon: Array<{ title: string; due: string; line?: string }>;
   /** This week's decisions: how many, and the most urgent one. */
-  asks: { count: number; top?: { title: string; urgency: "now" | "soon" | "later"; line?: string } };
+  /** `records`: of `count`, the asks that only want a fact reported (待记录, `askNature`); absent on openers stored before 2026-11-21. */
+  asks: { count: number; records?: number; top?: { title: string; urgency: "now" | "soon" | "later"; line?: string } };
 };
 
 import { monthDay, tFor, weekdayShort, type Locale } from "./i18n";

@@ -59,11 +59,16 @@ export function OpenerCard({ opener }: { opener: OpenerView }) {
   const top = opener.asks.top;
   const planned = opener.work.filter((block) => !block.missed);
   const missed = opener.work.length - planned.length;
+  const records = opener.asks.records ?? 0;
+  const decide = opener.asks.count - records;
   return <div className="opener-card" aria-label={t("{{day}}的安排", { day: dayLabel(opener.day, locale) })}>
     <div className="opener-head">
       <b>{dayLabel(opener.day, locale)}</b>
       {opener.asks.count > 0
-        ? <a className="opener-badge" href="/approvals" aria-label={t("待决 {{count}} 项", { count: opener.asks.count })}>{t("待决")} <span>{opener.asks.count}</span></a>
+        ? <span className="opener-badges">{decide > 0 && <a className="opener-badge" href="/approvals" aria-label={t("待决 {{count}} 项", { count: decide })}
+          title={t("要在几种做法里选一个")}>{t("待决")} <span>{decide}</span></a>}
+          {records > 0 && <a className="opener-badge" href="/approvals" aria-label={t("待记录 {{count}} 项", { count: records })}
+            title={t("只需说一个本人知道的事实")}>{t("待记录")} <span>{records}</span></a>}</span>
         : <span className="opener-badge" data-empty="" title={t("待批准的里程碑和提案在待确认页")}>{t("没有要回答的问题")}</span>}
     </div>
     <div className="opener-figure">

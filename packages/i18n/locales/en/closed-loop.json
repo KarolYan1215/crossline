@@ -71,5 +71,13 @@
   "没有回应 48 小时，已按推荐处理「{{title}}」": "No answer in 48 hours: “{{title}}” settled as recommended",
   "已按推荐处理「{{title}}」": "“{{title}}” settled as recommended",
   "没有回应 48 小时，已按推荐处理「{{title}}」等 {{count}} 项": "No answer in 48 hours: “{{title}}” and others, {{count}} settled as recommended",
-  "已按推荐处理「{{title}}」等 {{count}} 项": "“{{title}}” and others, {{count}} settled as recommended"
+  "已按推荐处理「{{title}}」等 {{count}} 项": "“{{title}}” and others, {{count}} settled as recommended",
+  "待记录": "To report",
+  "待决与待记录": "To decide and to report",
+  "只需说一个本人知道的事实": "Only needs a fact you know",
+  "要在几种做法里选一个": "Needs a choice between ways on",
+  "待决 {{count}}": "To decide {{count}}",
+  "待记录 {{count}}": "To report {{count}}",
+  "待记录 {{count}} 项_one": "{{count}} fact to report",
+  "待记录 {{count}} 项_other": "{{count}} facts to report"
 }

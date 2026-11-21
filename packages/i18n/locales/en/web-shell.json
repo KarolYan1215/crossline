@@ -430,7 +430,7 @@
   "{{day}}的安排": "Plan for {{day}}",
   "待决 {{count}} 项_one": "{{count}} decision waiting",
   "待决 {{count}} 项_other": "{{count}} decisions waiting",
-  "待决": "Decisions",
+  "待决": "To decide",
   "固定": "Fixed",
   "工作": "Work",
   "{{count}} 段 · 共 {{hours}}_one": "{{count}} block · {{hours}} in all",

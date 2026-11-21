@@ -168,6 +168,17 @@ export function askQuadrant(ask: Pick<Ask, "urgency" | "important" | "importance
   const important = ask.important ?? (ask.importance ?? 0) >= 60;
   return urgent && important ? "urgent_important" : important ? "important" : urgent ? "urgent" : "neither";
 }
+/**
+ * What answering an ask takes (the person's decision, 2026-11-21: 「区分待记录和待决」). 待记录: a fact only the person holds — did it
+ * arrive, how did it go, how far it got, a time, a balance, which project a file is, a missing input — so the answer is a report, not a
+ * choice. 待决: a choice between ways on — a milestone at risk or overdue, a conflict, a merge, a gate, an offer, something stopped.
+ */
+export type AskNature = "record" | "decide";
+export const ASK_NATURE_LABEL: Record<AskNature, string> = { record: "待记录", decide: "待决" };
+const RECORD_KINDS: ReadonlySet<AskKind> = new Set<AskKind>(["waiting_due", "outcome_check", "progress_check", "prep_question", "step_question",
+  "backplan_input", "source_project", "calendar_line_unclear", "interview_open", "interview_question", "exam_time", "travel_minutes",
+  "wealth_balances", "opportunity_result"]);
+export const askNature = (kind: AskKind): AskNature => RECORD_KINDS.has(kind) ? "record" : "decide";
 /** `until` is the person's local day (`YYYY-MM-DD`) on which the ask comes back. */
 export type AskSnooze = { askId: string; until: string; fingerprint: string };
 
