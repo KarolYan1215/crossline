@@ -18,6 +18,8 @@ Pop-Location
 
 现有 Crossline Codex 状态库的历史迁移校验和全部对应 CRLF，标签源码 checkout 却是 LF；未修复时 SQLx 会在启动阶段拒绝原有数据库。上面提到的迁移补丁只在旧校验和精确等于同一 SQL 的 CRLF 校验和时，把迁移元数据更新为当前源码校验和；未知差异仍由 SQLx 拒绝，其他平台保持上游行为。重建并运行前，先对 `state_5.sqlite` 做备份。
 
+这个修复**绝不碰官方 Codex 桌面应用的 `%USERPROFILE%\.codex`**（2026-10-22）。官方 Windows 版本身就用 CRLF 校验和，修复一旦改写它们，官方应用启动时就会报 `failed to initialize sqlite state runtime`，界面显示「无法加载组织设置」。那次是 fork 的调试版在没设 `CODEX_HOME` 时被直接运行，落到了默认的 `~/.codex`。现在有两道防护：一是 Windows 上没设 `CODEX_HOME` 时，fork 的默认家目录改为 Crossline 自己的（`codex-rs/utils/home-dir` 的 `crossline_default_home`：先 `%CROSSLINE_STATE_DIR%\codex-home`，否则 `%LOCALAPPDATA%\Crossline\codex-home`，打包重定向的 LOCALAPPDATA 换回 `%USERPROFILE%\AppData\Local`，与 `codexProcessEnvironment` 同一规则）；二是校验和修复遇到直接位于 `%USERPROFILE%\.codex` 的数据库一律跳过（`state/src/migrations.rs` 的 `is_official_codex_home_db`），交给 SQLx 拒绝。`patches/codex-windows-migrations.patch` 包含这两处改动。
+
 worker 只启动 `vendor/codex/codex-rs/target/debug/codex.exe`（`packages/codex/src/index.ts` 里 `resolveCodexCommand` 的默认路径），启动前核对固定的 SHA-256（`CODEX_FORK_BINARY_SHA256`）。`CROSSLINE_CODEX_PATH` 只允许指向具有相同 SHA-256 的绝对路径。缺少或替换构建产物时，启动会返回明确错误，不会改用 PATH 上的 npm CLI 或 Desktop。Rust debug 构建会把源码的绝对路径编入调试信息，所以**同一份源码在不同目录构建出的二进制哈希本身会不同**——从旧的本机 `.vendor/codex-fork` 迁移到现在的仓库内 `vendor/codex` 时二进制哈希随之改变是预期行为，`Cargo.lock` 哈希不变才是真正的可复现性证明。重建后若二进制哈希变化，须先核对源码、锁文件和协议，再更新 `packages/codex/src/index.ts` 与 `codex-baseline.json` 中的记录。
 
 验证命令：

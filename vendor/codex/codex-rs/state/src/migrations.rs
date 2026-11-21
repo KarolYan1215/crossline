@@ -35,11 +35,35 @@ fn runtime_migrator(base: &'static Migrator) -> Migrator {
 /// Windows release builds historically embedded CRLF migration text, while a source checkout may
 /// contain LF. Repair only checksums that exactly match the same embedded SQL with CRLF line endings;
 /// every other mismatch remains untouched for SQLx to reject.
+///
+/// Never repairs a database in the official Codex app's `%USERPROFILE%\.codex`: those CRLF
+/// checksums are the official app's own, and rewriting them stops it from starting
+/// ("failed to initialize sqlite state runtime"). There SQLx rejects the mismatch instead.
 #[cfg(windows)]
 pub(crate) async fn repair_windows_migration_checksums(
     pool: &SqlitePool,
     migrator: &Migrator,
+    db_path: &std::path::Path,
 ) -> anyhow::Result<()> {
+    let user_profile = std::env::var_os("USERPROFILE").map(std::path::PathBuf::from);
+    repair_windows_migration_checksums_for_profile(pool, migrator, db_path, user_profile.as_deref())
+        .await
+}
+
+#[cfg(windows)]
+pub(crate) async fn repair_windows_migration_checksums_for_profile(
+    pool: &SqlitePool,
+    migrator: &Migrator,
+    db_path: &std::path::Path,
+    user_profile: Option<&std::path::Path>,
+) -> anyhow::Result<()> {
+    if is_official_codex_home_db(db_path, user_profile) {
+        tracing::warn!(
+            database = %db_path.display(),
+            "skipping Windows migration checksum repair in the official Codex home"
+        );
+        return Ok(());
+    }
     let table_exists = sqlx::query_scalar::<_, i64>(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'",
     )
@@ -98,10 +122,32 @@ pub(crate) async fn repair_windows_migration_checksums(
     Ok(())
 }
 
+/// True when `db_path` sits directly in `<user_profile>\.codex`, the official Codex app's home.
+#[cfg(windows)]
+pub(crate) fn is_official_codex_home_db(
+    db_path: &std::path::Path,
+    user_profile: Option<&std::path::Path>,
+) -> bool {
+    let (Some(db_dir), Some(user_profile)) = (db_path.parent(), user_profile) else {
+        return false;
+    };
+    let normalize = |path: &std::path::Path| {
+        std::fs::canonicalize(path)
+            .unwrap_or_else(|_| path.to_path_buf())
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .trim_end_matches(['\\', '/'])
+            .replace('/', "\\")
+            .to_lowercase()
+    };
+    normalize(db_dir) == normalize(&user_profile.join(".codex"))
+}
+
 #[cfg(not(windows))]
 pub(crate) async fn repair_windows_migration_checksums(
     _pool: &SqlitePool,
     _migrator: &Migrator,
+    _db_path: &std::path::Path,
 ) -> anyhow::Result<()> {
     Ok(())
 }

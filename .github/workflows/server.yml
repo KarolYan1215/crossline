@@ -254,7 +254,7 @@ jobs:
           # detached (it takes about an hour and spends the developer's key), `compare-report` prints its progress and the newest report.
           # The ledger is copied by SQLite's online backup into /srv/crossline/compare (root and the app user only); nothing writes the live one.
           case "$ARGS" in *[!A-Za-z0-9@._,/\ +-]*) echo "args may hold only letters, digits and @._,/+- and spaces"; exit 1;; esac
-          ssh -i ~/.ssh/id -o ConnectTimeout=30 -o ServerAliveInterval=15 admin@"$HOST" "ACTION='$ACTION' ARGS='$ARGS' TOKEN='$TOKEN' ACTOR='$ACTOR' sudo -E sh -s" <<'REMOTE'
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 -o ServerAliveInterval=15 admin@"$HOST" "ACTION='$ACTION' ARGS='$ARGS' TOKEN='$TOKEN' ACTOR='$ACTOR' sudo --preserve-env=ACTION,ARGS,TOKEN,ACTOR sh -s" <<'REMOTE'
           set -e
           dir=/srv/crossline/compare
           registry=ghcr.io/karolyan1215/crossline-app:beta
@@ -315,7 +315,8 @@ jobs:
           # developer's key, throwaway ledgers only — nothing reads or writes the live one), `persona-report` prints its progress and packs
           # the newest run's folder for the artifact below. Everything it writes is about the fictional people of scripts/personas/.
           case "$ARGS" in *[!A-Za-z0-9._,/\ -]*) echo "args may hold only letters, digits and ._,/- and spaces"; exit 1;; esac
-          ssh -i ~/.ssh/id -o ConnectTimeout=30 -o ServerAliveInterval=15 admin@"$HOST" "ACTION='$ACTION' ARGS='$ARGS' TOKEN='$TOKEN' ACTOR='$ACTOR' sudo -E sh -s" <<'REMOTE'
+          # The variables are named for sudo: Ubuntu 26.04's sudo-rs ignores `-E`, and the run fell back to the default set (2026-11-17).
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 -o ServerAliveInterval=15 admin@"$HOST" "ACTION='$ACTION' ARGS='$ARGS' TOKEN='$TOKEN' ACTOR='$ACTOR' sudo --preserve-env=ACTION,ARGS,TOKEN,ACTOR sh -s" <<'REMOTE'
           set -e
           dir=/srv/crossline/persona
           install -d -m 750 -o 1000 -g 1000 $dir $dir/out
