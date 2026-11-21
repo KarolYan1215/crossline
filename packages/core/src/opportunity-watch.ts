@@ -47,7 +47,7 @@ export type Watch = {
 
 /** The tools a watch or the scout may use. Adapters from track A are tools now, not the shape of the pipeline. */
 export const WATCH_TOOLS = ["web_search", "web_fetch", "ats_board", "deadline_list", "devpost", "events_site", "mail_search", "site_read",
-  "calendar", "geo"] as const;
+  "calendar", "geo", "arxiv"] as const;
 export type WatchTool = (typeof WATCH_TOOLS)[number];
 /** One tool call a watch makes each run (added by track ①); `calendar` and `geo` serve the scout and feasibility, not targets. */
 export type WatchTarget =
@@ -58,16 +58,18 @@ export type WatchTarget =
   | { tool: "web_fetch"; url: string }
   | { tool: "mail_search"; from: string; query: string }
   | { tool: "web_search"; query: string }
-  | { tool: "site_read"; host: string; path: string };
+  | { tool: "site_read"; host: string; path: string }
+  /** New papers from arXiv's public read-only API (metadata CC0, one request every three seconds); `query` in its `search_query` syntax. */
+  | { tool: "arxiv"; query: string };
 
 /** What became of something surfaced. Outcomes, not ratings, drive the flywheel (§17.4). */
 export const OPPORTUNITY_OUTCOMES = ["surfaced", "ignored", "less", "declined", "later", "planned", "task", "submitted", "accepted",
-  "rejected", "attended"] as const;
+  "rejected", "attended", "useful"] as const;
 export type OpportunityOutcome = (typeof OPPORTUNITY_OUTCOMES)[number];
 /** How much each outcome counts towards a watch's yield; a rejection still means the find was right for the person. */
 export const OUTCOME_WEIGHT: Record<OpportunityOutcome, number> = {
   surfaced: 0, ignored: -0.2, less: -1, declined: -0.5, later: 0.2, planned: 1, task: 1, submitted: 2, accepted: 3, rejected: 1.5,
-  attended: 2.5,
+  attended: 2.5, useful: 1
 };
 
 /** Kept by code, never by the model: what a watch cost and what it produced (the bookkeeping Krishnamurthy et al. found models need). */

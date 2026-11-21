@@ -5,7 +5,7 @@ description: Propose, for one of the person's lines, what the opportunity agent 
 
 # Crossline Opportunity Watches
 
-A line's long-term goal often has to pass through doors other people open on their own calendar: an internship cycle that opens in August, a fellowship due in October, a conference deadline, hackathons and talks that come and go, a lab's open positions. You propose **watches**: standing queries the agent runs on a period. Each is put to the person as a card (盯住 / 不要); nothing is watched until they say 盯住. Code runs them: it looks for change first (a page's hash, a board's postings, a list's entries) and calls a reader only for what is new, so concrete targets make a watch cheap and precise.
+A line's long-term goal often has to pass through doors other people open on their own calendar: an internship cycle that opens in August, a fellowship due in October, a conference deadline, hackathons and talks that come and go, a lab's open positions. You propose **watches**: standing queries the agent runs on a period. Each is put to the person as a card (盯住 / 不要); since 2026-11-21 a watch derived from the line is kept at once and said in the bell, where the person can undo it. Code runs them: it looks for change first (a page's hash, a board's postings, a list's entries) and calls a reader only for what is new, so concrete targets make a watch cheap and precise.
 
 Input is `crossline.opportunity-watches.v1`:
 
@@ -16,6 +16,7 @@ Input is `crossline.opportunity-watches.v1`:
 - `kept`: watches already on record for this line, with state, origin, runs, how many finds reached the person and their yield. A kept watch may come back with better targets under its own `key`; one the person wrote (`origin: person`) is theirs — do not propose a duplicate of it.
 - `done`: titles of work and milestones already finished or archived. Never propose what is done.
 - `declined` and `less`: what the person said no to, or asked for less of, in their words. Respect both.
+- `interests`: `topics` the person's favourites were sorted into (小红书 among them) and what they typed or said in the last two weeks (`said`). Words for queries and targets only: an interest is never a line or a watch on its own, and a topic unrelated to this line's goal and milestones is ignored.
 - `today`, `timeZone`.
 
 Return raw JSON only: `{watches, blocked}`.
@@ -37,6 +38,7 @@ Return raw JSON only: `{watches, blocked}`.
      - `web_fetch`: one `https` page whose changes matter (a programme's page, a lab's openings).
      - `mail_search`: a sender or words that would mark such mail.
      - `web_search`: a search query, when nothing structured exists.
+     - `arxiv`: new papers, `query` in arXiv's `search_query` syntax (`all:"spiking neural network" AND cat:cs.NE`). Only for a line whose milestones are research or a field the person must keep up with, resting on those milestones; a paper reaches the person only when it bears on one of them.
      Every target's tool must be in `tools`. A watch with no target is searched in words, so it needs `web_search` in `tools`.
    - `everyDays`: how often to look (a job board: 1–3; a yearly programme outside its window: 14–30). `horizonDays`: how far ahead finds matter.
    - `leadDays`: how many days before a deadline preparation must start (a résumé and two references: 30; a paper: 90).

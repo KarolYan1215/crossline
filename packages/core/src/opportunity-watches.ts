@@ -133,6 +133,7 @@ export function describeTarget(target: WatchTarget): string {
     case "mail_search": return `邮件${target.from ? ` ${target.from}` : ""}：${target.query}`;
     case "web_search": return `网页检索：${target.query}`;
     case "site_read": return `${target.host}${target.path}`;
+    case "arxiv": return `arXiv：${target.query}`;
   }
 }
 /* i18n-ignore-end */
@@ -175,6 +176,8 @@ const TARGET_VARIANTS = [
     tool: { type: "string", enum: ["web_fetch"] }, url: { type: "string", minLength: 9, maxLength: 400 } } },
   { type: "object", additionalProperties: false, required: ["tool", "from", "query"], properties: {
     tool: { type: "string", enum: ["mail_search"] }, from: { type: "string", maxLength: 80 }, query: { type: "string", minLength: 1, maxLength: 80 } } },
+  { type: "object", additionalProperties: false, required: ["tool", "query"], properties: {
+    tool: { type: "string", enum: ["arxiv"] }, query: { type: "string", minLength: 3, maxLength: 160 } } },
   { type: "object", additionalProperties: false, required: ["tool", "query"], properties: {
     tool: { type: "string", enum: ["web_search"] }, query: { type: "string", minLength: 1, maxLength: 160 } } }
 ] as const;

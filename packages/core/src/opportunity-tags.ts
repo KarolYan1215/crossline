@@ -12,12 +12,24 @@
  */
 import type { Opportunity } from "./opportunity";
 
-export const OPPORTUNITY_TYPES = ["competition", "conference", "internship", "scholarship", "program", "talk", "event", "social", "job", "grant", "other"] as const;
+export const OPPORTUNITY_TYPES = ["competition", "conference", "internship", "scholarship", "program", "talk", "event", "social", "job", "grant", "other",
+  "news", "paper"] as const;
 export type OpportunityType = (typeof OPPORTUNITY_TYPES)[number];
 export const OPPORTUNITY_TYPE_LABEL: Record<OpportunityType, string> = {
   competition: "比赛", conference: "会议", internship: "实习", scholarship: "奖学金", program: "项目申请", talk: "讲座", event: "活动",
-  social: "社交", job: "工作", grant: "资助", other: "其他"
+  social: "社交", job: "工作", grant: "资助", other: "其他", news: "动态", paper: "文献"
 };
+
+/**
+ * The three ways a find is looked at (docs/plans/attention-ledger-1120.md §7.3, batch 6, 2026-11-21): an opportunity is decided (做 / 不做),
+ * news and a paper are only read or not (有用 / 少来这类). The last two pass a stricter gate (`pushable`): they must bear on a milestone the
+ * person is working towards, not only on a line's long-term goal.
+ */
+export type FindClass = "opportunity" | "news" | "literature";
+export const findClassOf = (type: OpportunityType | undefined): FindClass => type === "news" ? "news" : type === "paper" ? "literature" : "opportunity";
+export const isReading = (type: OpportunityType | undefined) => findClassOf(type) !== "opportunity";
+/** News and a paper have no deadline: unread this long after they were found, they are old and leave the review. */
+export const READING_SHOWN_DAYS = 21;
 
 /** A line the find may serve: the model's confidence, code's relevance, why, and what on the line it rests on. */
 export type OpportunityLineTag = {
@@ -54,9 +66,11 @@ export const CLASSIFICATION_REQUIRED = ["type", "reason", "lines"] as const;
 /* i18n-ignore-start: model-facing */
 export const CLASSIFICATION_INSTRUCTIONS = "Tag each item: type (competition, conference, internship, scholarship, program for a programme one applies to, "
   + "talk for a lecture or seminar, event, social for a mixer, coffee hour, dance, gala, happy hour or any gathering whose point is meeting people, "
-  + "job, grant, other); reason, one sentence on why it is worth this person's time; lines, every given line it serves (none is valid), each with "
+  + "job, grant, other; news for a development in the person's field, an announcement, a policy change or a tool or dataset release — nothing to "
+  + "apply for; paper for a new paper or preprint); reason, one sentence on why it is worth this person's time; lines, every given line it serves (none is valid), each with "
   + "a confidence from 0 to 1, a one-sentence reason and anchors: the ids of that line's milestones it moves, or \"goal\" for the long-term goal "
-  + "itself. Be strict: a confidence of 0.6 or more means the person would want to hear about it for that line today.";
+  + "itself. Be strict: a confidence of 0.6 or more means the person would want to hear about it for that line today. For news and a paper, anchor "
+  + "only to the milestones it bears on directly (what the person is working on now); the goal alone does not make it worth reading.";
 /* i18n-ignore-end */
 
 /** A line as code judges relevance against it: its goal, its live milestones and its watches' words. */
@@ -188,8 +202,13 @@ export type TaggedOpportunity = Pick<Opportunity, "lineId"> & { lines?: Opportun
 /** The best relevance of a record (0 when no line holds it); one read before tags existed counts as just pushable (shown under the old rules). */
 export const bestRelevance = (row: TaggedOpportunity): number => row.lines === undefined ? PUSH_RELEVANCE
   : row.lines.length ? Math.max(...row.lines.map((tag) => tag.relevance)) : 0;
-/** Whether a find may be pushed as a card (item 1): one line holds it at `PUSH_RELEVANCE` or above. */
-export const pushable = (row: TaggedOpportunity): boolean => bestRelevance(row) >= PUSH_RELEVANCE;
+/**
+ * Whether a find may be pushed as a card (item 1): one line holds it at `PUSH_RELEVANCE` or above. News and a paper also need that line's
+ * tag to rest on one of its milestones (§7.3 「和本人当前在做的事直接相关」): the long-term goal alone keeps them out.
+ */
+export const pushable = (row: TaggedOpportunity): boolean => isReading(row.type)
+  ? (row.lines ?? []).some((tag) => tag.relevance >= PUSH_RELEVANCE && tag.anchors.some((anchor) => anchor !== "goal"))
+  : bestRelevance(row) >= PUSH_RELEVANCE;
 /** The record's line: its most relevant one, else the line it was found under. */
 export const primaryLineOf = (tags: OpportunityLineTag[], fallback: string) => tags[0]?.lineId ?? fallback;
 
@@ -199,7 +218,8 @@ const TYPE_WORDS: Array<[OpportunityType, RegExp]> = [
   ["competition", /hackathon|competition|challenge|contest|olympiad|比赛|竞赛|大赛|挑战赛|黑客松/i],
   ["conference", /conference|symposium|congress|summit|workshop|call for papers|\bcfp\b|大会|会议|研讨会|峰会/i],
   ["talk", /\btalk\b|lecture|seminar|colloquium|讲座|报告会|论坛/i], ["job", /\bjob\b|full[- ]time|engineer\b|招聘|岗位/i],
-  ["program", /fellowship|residency|summer school|bootcamp|accelerator|incubator|cohort|暑期学校|训练营|项目/i]
+  ["program", /fellowship|residency|summer school|bootcamp|accelerator|incubator|cohort|暑期学校|训练营|项目/i],
+  ["paper", /arxiv|preprint|\bpaper\b|论文|预印本/i], ["news", /announc|\breleases?\b|\blaunch|发布|公告|上线/i]
 ];
 // i18n-ignore-end
 /** A record's type: its own, else read from its title and kind (rows read before tags existed). */

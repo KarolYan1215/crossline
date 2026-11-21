@@ -1107,12 +1107,6 @@
   "{{count}} 项截止已过，等本人决定": "{{count}} deadlines have passed and wait for a decision",
   "这些日期是课程、别人或本人定的，系统不替本人改，逐个列在下方；最早的是 {{day}}。每项可以补做、改成新的日期或放弃。": "These dates were set by a course, someone else or the person, so the system does not change them; each is listed below, the earliest is {{day}}. Each can be made up, moved to a new date or dropped.",
   "拆成每项一张卡": "One card for each",
-  "{{count}} 个机会来源等本人决定要不要盯": "{{count}} opportunity sources wait for a decision on whether to watch them",
-  "按各条主线的目标找到的来源，逐个列在下方。盯住后按周期去看，找到符合资格的会出现在早报和这里；{{days}} 天没回应就不再问，留在机会页。": "Sources found from each line's goals, listed below. Once watched each is checked on its cycle, and eligible finds appear in the morning brief and here; after {{days}} days without an answer they are no longer asked about and stay on the opportunities page.",
-  "逐个看": "One by one",
-  "拆成每条一张卡，盯住或不要": "One card for each, watch it or not",
-  "都盯住": "Watch them all",
-  "每条按它的周期看": "Each is checked on its own cycle",
   "一次只看前 {{max}} 张截图，没有看：{{files}}。需要的话再单独发一次。": "Only the first {{max}} screenshots are read at once; not read: {{files}}. Send them again on their own if needed.",
   "一张卡最多列 {{max}} 项；如果还有没列出的，请把剩下的再说一次。": "A card lists at most {{max}} items; if anything is missing, say the rest again.",
   "一次读取只能记这么多，后面的可能没有读到；需要的话在回答里补上": "one reading records only this many, so later ones may not have been read; add them in a reply if needed",
@@ -1144,5 +1138,7 @@
   "「{{title}}」可能还缺：{{gap}}": "\"{{title}}\" may still be missing: {{gap}}",
   "按「{{file}}」看，{{why}}": "Going by \"{{file}}\": {{why}}",
   "验收发现缺：{{gap}}": "The check found it missing: {{gap}}",
-  "本人说「{{title}}」验收时「{{gap}}」这一条不适用：同类任务以后不按它判。": "The person said that for \"{{title}}\" the point \"{{gap}}\" does not apply: do not judge similar tasks by it."
+  "本人说「{{title}}」验收时「{{gap}}」这一条不适用：同类任务以后不按它判。": "The person said that for \"{{title}}\" the point \"{{gap}}\" does not apply: do not judge similar tasks by it.",
+  "交付文件「{{file}}」被删除或清空": "The deliverable \"{{file}}\" was deleted or emptied",
+  "「{{file}}」被删除或清空，「{{title}}」已改回未完成。若只是移走了，按一下完成即可。": "\"{{file}}\" was deleted or emptied, so \"{{title}}\" is open again. If it was only moved, press Done."
 }

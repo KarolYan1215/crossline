@@ -1,13 +1,14 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { CrosslineStore, applicationProfile, readFormRuns, readWatchList, readWatchTuning, saveFormRun, saveWatchList } from "@crossline/db";
+import { CrosslineStore, applicationProfile, readFormRuns, readWatchList, readWatchTuning, recordOpportunityOutcome, saveFormRun, saveWatchList } from "@crossline/db";
 import { RUNTIME_OWNER_SETTING, emptyStats, validateAskAnswer, type Ask, type Opportunity, type StoredFormRun, type StoredWatch } from "@crossline/core";
 vi.mock("server-only", () => ({}));
 vi.mock("./codex-runtime", () => ({ requestCodexSupervisor: vi.fn(async () => ({})), CodexSupervisorRequestError: class extends Error {} }));
 import {
-  addWatch, answerApplicationResult, answerOpportunityNeed, answerOpportunityOffer, changeWatch, loadLineWatches, loadOpportunitySettings, loadOutOfView,
-  opportunityNeedAsks, opportunityOfferAsks, undoLess
+  addWatch, answerApplicationResult, answerOpportunityOffer, autoTrackWatches, changeWatch, loadLineWatches, loadOpportunitySettings, loadOutOfView,
+  opportunityOfferAsks, quietUnusedReading, undoLess
 } from "./opportunities";
 import { TEST_CTX } from "./test-support";
+import { recentOps, undoOp } from "./undo";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; vi.unstubAllEnvs(); });
 
@@ -37,30 +38,21 @@ const save = (store: CrosslineStore, over: Partial<Opportunity> = {}) =>
   store.saveOpportunity(ws, { opportunity: opportunity(over), terms: [], verdict: { state: "eligible", basis: [] } }).row;
 const offer = (asks: Ask[], id: string) => asks.find((ask) => ask.id === id)!;
 
-test("a proposed watch is a 盯住 / 不要 card; the scout's proposals wait for 视野外 instead", () => {
+test("a derived watch is kept at once and undoable in the bell, the undo remembered as 不要; the scout's and old proposals are left (§7.3)", () => {
   const store = setup();
-  saveWatchList(store, ws, [watch(), watch({ id: "explore:research:labs", origin: "scout", explore: true, title: "城市实验室开放日" })]);
-  const asks = opportunityNeedAsks(TEST_CTX, NOW);
-  expect(asks.map((ask) => ask.entityId)).toEqual(["need:research:intern"]);
-  expect(answerOpportunityNeed(TEST_CTX, asks[0]!, "track", {})).toEqual({ ok: true });
-  expect(readWatchList(store, ws)[0]?.state).toBe("active");
+  saveWatchList(store, ws, [watch(), watch({ id: "need:research:conf", title: "学术会议投稿" }), watch({ id: "need:research:old", title: "旧的提议", createdAt: "2026-10-10T00:00:00.000Z" }),
+    watch({ id: "explore:research:labs", origin: "scout", explore: true, title: "城市实验室开放日" })]);
+  expect(autoTrackWatches(TEST_CTX, NOW)).toEqual(["need:research:intern", "need:research:conf"]);
+  expect(readWatchList(store, ws).map((item) => [item.id, item.state])).toEqual([["need:research:intern", "active"], ["need:research:conf", "active"],
+    ["need:research:old", "proposed"], ["explore:research:labs", "proposed"]]);
   expect(loadOutOfView(TEST_CTX, NOW).watches.map((item) => item.id)).toEqual(["explore:research:labs"]);
-  expect(loadLineWatches(TEST_CTX).research?.map((item) => item.id)).toEqual(["need:research:intern"]);
-});
-
-test("two or more proposed watches are one card: 都盯住 tracks them all, 逐个看 splits it; one unanswered for 14 days stops asking but stays proposed (W-228)", () => {
-  const store = setup();
-  saveWatchList(store, ws, [watch(), watch({ id: "need:research:conf", title: "学术会议投稿" }),
-    watch({ id: "need:research:old", title: "旧的提议", createdAt: "2026-10-10T00:00:00.000Z" })]);
-  const [card] = opportunityNeedAsks(TEST_CTX, NOW);
-  expect(opportunityNeedAsks(TEST_CTX, NOW)).toHaveLength(1);
-  expect(card).toMatchObject({ entityId: "batch", title: "2 个机会来源等本人决定要不要盯" });
-  expect(card!.items!.map((item) => item.title)).toEqual(["暑期研究实习", "学术会议投稿"]);
-  expect(answerOpportunityNeed(TEST_CTX, card!, "split", {})).toEqual({ ok: true });
-  expect(opportunityNeedAsks(TEST_CTX, NOW).map((ask) => ask.entityId)).toEqual(["need:research:intern", "need:research:conf"]);
-  expect(answerOpportunityNeed(TEST_CTX, card!, "track_all", {})).toEqual({ ok: true });
-  expect(readWatchList(store, ws).map((item) => [item.id, item.state])).toEqual([["need:research:intern", "active"], ["need:research:conf", "active"], ["need:research:old", "proposed"]]);
-  expect(opportunityNeedAsks(TEST_CTX, NOW)).toEqual([]);
+  expect(autoTrackWatches(TEST_CTX, NOW)).toEqual([]);
+  const op = recentOps(TEST_CTX, NOW).at(-1)!;
+  expect(op.label).toBe("开始盯 2 个机会来源");
+  expect(undoOp(TEST_CTX, op.id)).toMatchObject({ ok: true });
+  expect(readWatchList(store, ws).filter((item) => item.state === "retired").map((item) => item.id)).toEqual(["need:research:intern", "need:research:conf"]);
+  expect(store.listPreferences(ws).filter((pref) => pref.source === "opportunity_declined")).toHaveLength(2);
+  expect(store.listPreferences(ws).filter((pref) => pref.source === "correction")).toHaveLength(0);
 });
 
 test("少来 takes a one-tap reason from a choice field, leaves the inbox, is listed for the review, and undo puts it back", async () => {
@@ -173,4 +165,39 @@ test("offers carry their type and lines, most relevant first; one no line holds 
   expect(offers[1]!.why).toMatch(/^为什么值得看：正对论文。/);
   const out = loadOutOfView(TEST_CTX, NOW).finds;
   expect(out.map((find) => [find.id, find.because])).toEqual([["opp-c", "relevance"]]);
+});
+
+test("offers wait for the weekly review unless due within the week; news and papers are read there with 有用 / 少来这类 (§7.3)", async () => {
+  const store = setup();
+  const tag = (anchors: string[]) => [{ lineId: "research", confidence: 0.9, relevance: 0.9, reason: "", anchors }];
+  save(store, { id: "far", key: "far", needId: undefined, lines: tag(["goal"]), type: "competition", deadlines: [{ day: "2026-12-30", quote: "Register by December 30, 2026" }] });
+  save(store, { id: "near", key: "near", needId: undefined, lines: tag(["goal"]), type: "competition", deadlines: [{ day: "2026-11-05", quote: "Register by November 5, 2026" }] });
+  save(store, { id: "paper", key: "paper", needId: undefined, lines: tag(["m1"]), type: "paper", kind: "event", deadlines: [], startsAt: undefined, url: "https://arxiv.org/abs/2611.1" });
+  const asks = opportunityOfferAsks(TEST_CTX, NOW);
+  expect(offer(asks, "opp:far").inReview).toBe(true);
+  expect(offer(asks, "opp:near").inReview).toBeUndefined();
+  expect(offer(asks, "opp:paper")).toMatchObject({ inReview: true });
+  expect(offer(asks, "opp:paper").options.map((option) => option.id)).toEqual(["useful", "less_kind", "less"]);
+  expect(await answerOpportunityOffer(TEST_CTX, offer(asks, "opp:paper"), "useful", {}, NOW)).toEqual({ ok: true });
+  expect(store.listOpportunities(ws, { id: "paper" })[0]!.decision).toBe("read");
+  expect(opportunityOfferAsks(TEST_CTX, NOW).some((ask) => ask.id === "opp:paper")).toBe(false);
+});
+
+test("papers shown for a month with none marked 有用 come less; an undo keeps them loud for a month; one marked 有用 makes them loud again", () => {
+  const store = setup();
+  for (const index of [1, 2, 3, 4]) {
+    const row = save(store, { id: `p${index}`, key: `p${index}`, needId: undefined, type: "paper", deadlines: [], url: `https://arxiv.org/abs/2611.${index}` });
+    recordOpportunityOutcome(store, ws, row.id, "surfaced", NOW.toISOString());
+  }
+  expect(quietUnusedReading(TEST_CTX, NOW)).toEqual(["paper"]);
+  expect(readWatchTuning(store, ws).quietTypes).toEqual([{ id: "auto-unread:paper", type: "paper" }]);
+  expect(quietUnusedReading(TEST_CTX, NOW)).toEqual([]);
+  expect(undoOp(TEST_CTX, recentOps(TEST_CTX, NOW).at(-1)!.id)).toMatchObject({ ok: true });
+  expect(readWatchTuning(store, ws).quietTypes).toEqual([]);
+  expect(quietUnusedReading(TEST_CTX, NOW)).toEqual([]);
+  store.deleteSetting(ws, "opportunity.quietUndone");
+  expect(quietUnusedReading(TEST_CTX, NOW)).toEqual(["paper"]);
+  recordOpportunityOutcome(store, ws, "p1", "useful", NOW.toISOString());
+  quietUnusedReading(TEST_CTX, NOW);
+  expect(readWatchTuning(store, ws).quietTypes).toEqual([]);
 });

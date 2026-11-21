@@ -90,8 +90,8 @@ export function planNotifications(input: NotifyInput): PlannedNotification[] {
       ...(input.asks ?? []).filter((ask) => ask.urgency === "now" && !ask.id.startsWith("wait:")).map((ask) => t("待决：{{title}}", { title: ask.title }))
     ].slice(0, 3);
     const found = input.opportunities?.fresh ?? [];
-    const offers = found.length === 1 ? [t("新机会：{{title}}", { title: found[0]!.title })]
-      : found.length ? [t("{{count}} 个新机会：{{titles}}", { count: found.length, titles: found.slice(0, 2).map((item) => item.title).join(input.locale === "en" ? ", " : "、") })] : [];
+    // One count, not titles (§7.3, 2026-11-21): opportunities, news and papers are gathered in the weekly review's 「机会与动态」.
+    const offers = found.length ? [t("新机会与动态 {{count}} 条，见周复盘", { count: found.length })] : [];
     const prep = (input.opportunities?.prepToday ?? []).slice(0, 1).map((item) => t("今天该开始准备：{{title}}", { title: item.title }));
     out.push({ key: briefKey, kind: "brief", path: "/", title: t("今天的 Crossline"),
       body: [...lines, ...offers, ...prep, input.unconfirmedLastNight ? t("昨晚 {{count}} 块待确认", { count: input.unconfirmedLastNight }) : "",

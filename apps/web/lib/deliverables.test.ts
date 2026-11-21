@@ -1,9 +1,9 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { DELIVERABLE_JUDGED } from "@crossline/core";
+import { DELIVERABLE_JUDGED, SOURCE_FOLDERS_SETTING, sourceFolderIndexSetting } from "@crossline/core";
 vi.mock("server-only", () => ({}));
 vi.mock("./codex-runtime", () => ({ requestCodexSupervisor: vi.fn(async () => ({})), CodexSupervisorRequestError: class extends Error {} }));
-import { answerGap, gapAsks, settleDeliverables } from "./deliverables";
+import { answerGap, gapAsks, settleDeliverables, withdrawDeliverables } from "./deliverables";
 import { undoOp } from "./undo";
 import { TEST_CTX } from "./test-support";
 
@@ -77,4 +77,26 @@ test("a gap in finished work is asked only at a key place, once; 我补一下 re
   expect(answerGap(TEST_CTX, asks.find((ask) => ask.entityId === "ms")!, "na")).toEqual({ ok: true });
   expect(store.listPreferences(ws).some((item) => item.text.includes("缺第 5 题"))).toBe(true);
   expect(gapAsks(TEST_CTX)).toEqual([]);
+});
+
+test("a file that closed a task and is then deleted or emptied takes the completion back once; moved, revised or left out by the person, it does not", () => {
+  const { store, order, judged } = setup();
+  store.setSetting(ws, SOURCE_FOLDERS_SETTING, JSON.stringify([{ id: "f1", path: "C:\\课程", label: "课程", addedAt: "2026-11-01T00:00:00.000Z", lines: [] }]));
+  const doc = (id: string, text: string) => store.saveSourceDocument({ id, ownerId: owner, workspaceId: ws, kind: "text", fileName: `${id}.pdf`, mediaType: "text/plain",
+    sha256: id, uri: `file:///C:/${id}.pdf`, extractedText: text, extractionStatus: "done", createdAt: NOW.toISOString() });
+  for (const id of ["deleted", "emptied", "moved", "revised", "excluded"]) { order(id, "approved"); doc(`d-${id}`, "作业全文"); judged(`d-${id}`, id, "deliverable", "pass", { fileName: `${id}.pdf` }); }
+  doc("d-empty", ""); doc("d-v2", "新版作业全文");
+  store.setSetting(ws, sourceFolderIndexSetting("f1"), JSON.stringify(Object.fromEntries(["deleted", "emptied", "moved", "revised", "excluded"].map((id) => [`${id}.pdf`, { size: 1, mtimeMs: 1, documentId: `d-${id}` }]))));
+  settleDeliverables(TEST_CTX, NOW);
+  expect(withdrawDeliverables(TEST_CTX, NOW)).toEqual([]);
+  // On disk: one deleted, one emptied, one moved into a subfolder, one revised; the person excluded the last (its document leaves the ledger).
+  store.setSetting(ws, sourceFolderIndexSetting("f1"), JSON.stringify({ "emptied.pdf": { size: 0, mtimeMs: 2, documentId: "d-empty" },
+    "old\\moved.pdf": { size: 1, mtimeMs: 1, documentId: "d-moved" }, "revised.pdf": { size: 2, mtimeMs: 2, documentId: "d-v2" } }));
+  store.deleteSourceDocument(ws, "d-excluded");
+  expect(withdrawDeliverables(TEST_CTX, NOW).sort()).toEqual(["deleted", "emptied"]);
+  expect(store.getWorkOrder(ws, "deleted")!.state).toBe("approved");
+  expect(store.getWorkOrder(ws, "moved")!.state).toBe("accepted");
+  expect(store.getWorkOrder(ws, "revised")!.state).toBe("accepted");
+  expect(store.getWorkOrder(ws, "excluded")!.state).toBe("accepted");
+  expect(withdrawDeliverables(TEST_CTX, NOW)).toEqual([]);
 });

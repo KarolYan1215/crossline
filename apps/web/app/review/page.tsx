@@ -64,7 +64,9 @@ export default async function ReviewPage() {
   // Low-relevance events from mail (2026-11-10): listed here once a week, never a card and never on a calendar unless the person adds one.
   const mailEvents = mailEventsForReview(ctx, planToday(ctx));
   // The plans' questions worth the person's answer that are not needed within two days (2026-11-20): answered here together.
-  const questions = reviewAsks(ctx);
+  const inReview = reviewAsks(ctx);
+  const questions = inReview.filter((ask) => ask.kind !== "opportunity_offer");
+  const finds = inReview.filter((ask) => ask.kind === "opportunity_offer");
   // The same numbers as the monthly report and the ledger page (docs/mail-bookkeeping.md §5.3); only their summary is here.
   const money = loadLedger(ctx);
   const taskDetails = loadTaskDetailsBatch(ctx, review.autoAccepted.map((item) => item.workOrderId));
@@ -134,6 +136,11 @@ export default async function ReviewPage() {
       <p className="review-note">{t("网上调研得出的提议在这里一周批一次；采纳「任务」类提议会收进待分析、变成任务；其余类型采纳后作为下次设计里程碑的参考。")}</p>
       <DiligenceReview reports={diligence} identities={identities} />
     </section>}
+
+    {finds.length > 0 && <div className="review-wide rv-finds" id="rv-finds">
+      <p className="review-note">{t("和当前里程碑直接相关的机会、动态和文献，一周看一次。机会选做或不做；动态和文献标有用或少来这类。截止在一周内的机会仍在待确认里。")}</p>
+      <AskList initial={finds} scope="review_finds" heading={t("机会与动态")} />
+    </div>}
 
     {(opportunities.found > 0 || opportunities.forms.length > 0) && <section className="rd-card review-block" aria-labelledby="rv-opportunities">
       <header className="rd-card-head"><h2 id="rv-opportunities" className="ds-serif">{t("本周机会")}</h2></header>

@@ -1,6 +1,6 @@
 ---
 name: crossline-opportunity-reader
-description: Read the pages of opportunities found for the person (a job posting, a competition, a programme, an event) into structured records — deadlines, cost, eligibility terms, materials, consents — each quoted verbatim from its page. Extracts only; code judges eligibility.
+description: Read the pages of opportunities, news and papers found for the person (a job posting, a competition, a programme, an event, an announcement, an arXiv paper) into structured records — deadlines, cost, eligibility terms, materials, consents — each quoted verbatim from its page. Extracts only; code judges eligibility.
 ---
 
 # Crossline Opportunity Reader
@@ -37,3 +37,7 @@ When the input carries `search: {query}` and `pages` is empty, no pages were giv
 **Output language.** Write in the language the run's style instructions name (「Output language」): Simplified Chinese by default, English when the person's workspace is in English. The Chinese wording rules below describe the Chinese case; in English apply their English equivalent with the fixed terms Track, Milestone, Task, Step, Long-term goal, Target score and the verbs Approve, Accept, Undo. Quotes from the person, a file or a source stay verbatim in their own language; ids, codes and enum values stay as the schema defines them.
 
 Every human-readable field: Simplified Chinese, concise, standard academic or workplace register, objective third person (no 你/您, no 我; an answer containing them is sent back), no greetings or filler. Fixed terms: 主线, 里程碑, 任务, 步骤, 长期目标. Titles, names of organisations and every `quote` stay as published.
+
+## News and papers
+
+A page that announces something in the person's field (a release, a lab's or company's announcement, a policy change) is one record of type `news`; an arXiv entry or another paper's page (title, authors, abstract) is one record of type `paper`. Its title is the page's own, `organizer` the authors (first three, then 等) or the publisher, `deadlines` empty unless the page names one, `eligibility` empty. Anchor it only to milestones it bears on directly; a paper that only fits the line's long-term goal is tagged with low confidence, since it reaches the person only when it serves what they are working on now.

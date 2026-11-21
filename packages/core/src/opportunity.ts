@@ -91,7 +91,8 @@ export type EligibilityVerdict =
   | { state: "ineligible"; failed: Array<{ dim: EligibilityDim; rule: string; why: string }> };
 
 /** What the person chose on the offer card (§8). `apply` writes an approved milestone; `register` queues a `FormRun`. */
-export type OpportunityDecision = "register" | "apply" | "plan" | "decline" | "later";
+/** `read`: news or a paper the person found useful (§7.3): read, nothing to decide. */
+export type OpportunityDecision = "register" | "apply" | "plan" | "decline" | "later" | "read";
 
 /**
  * The application profile's slots (§12). A sensitive slot's value lives only in the worker's secret store (`apply-<slot>`), never in

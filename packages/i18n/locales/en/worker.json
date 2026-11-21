@@ -915,5 +915,7 @@
   "这些问题到了要用答案的时候还没回答，已按建议的假设先做：": "These questions were still open when their answer was needed, so the plan went ahead with the suggested assumption:",
   "答案不对的话，在任务详情里改，任务会按新答案重排。": "If an answer is wrong, change it on the task; the task is replanned with the new answer.",
   "「{{task}}」{{question}} → {{answer}}": "“{{task}}” {{question}} → {{answer}}",
-  "打开任务": "Open task"
+  "打开任务": "Open task",
+  "新机会与动态 {{count}} 条，见周复盘_one": "{{count}} new opportunity or news item, in the weekly review",
+  "新机会与动态 {{count}} 条，见周复盘_other": "{{count}} new opportunities and news items, in the weekly review"
 }

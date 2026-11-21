@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   DAY_PART_LABEL, LESS_REASONS, LESS_REASON_LABEL, RUNTIME_OWNER_SETTING, SCOUT_STATS_SETTING, WEEKDAY_LABEL, eligibilityAnswer, exploreAccount,
   nextDeadline, prepStartFor, readScoutStats, stepLeavesMachine, taskTitleOf, watchYield, OPPORTUNITY_TYPE_LABEL, SLOT_LABEL, STOP_LABEL, bestRelevance, isSensitiveSlot,
-  kitDrafts, opportunityTypeOf, previewFields, type AccessContext, type Ask, type AskField, type AskFormTrack, type AskOption, type AskTag, type ApplicationSlot,
+  kitDrafts, opportunityTypeOf, previewFields, isReading, OPPORTUNITY_TYPE_LABEL as TYPE_LABEL, WATCH_TUNING_SETTING, type OpportunityType, type AccessContext, type Ask, type AskField, type AskFormTrack, type AskOption, type AskTag, type ApplicationSlot,
   type FormRunState, type FormStop, type PreviewRow, type StoredFormRun,
   type LessEntry, type LessReason, type OpportunityOutcome, type StoredWatch, type WatchTarget
 } from "@crossline/core";
@@ -16,7 +16,7 @@ import {
   surfacedOpportunities, undoLessEntry, watchOf, type StoredOpportunity, type WatchEdit
 } from "@crossline/db";
 import { appNow, getStore, planToday, saveGoalSettings, saveMilestoneEdit } from "./crossline";
-import { foldAsks, foldFingerprint, foldId, isFolded, splitFold } from "./ask-fold";
+import { QUIET_UNDONE_SETTING, recordOp } from "./undo";
 import { requestAutoBackplan } from "./approvals";
 import { identityLines } from "./lines";
 import { localeFor } from "./locale";
@@ -54,6 +54,7 @@ export function targetLabel(target: WatchTarget, t: ReturnType<typeof tFor>): st
     case "mail_search": return target.from ? t("邮件 {{from}}：{{query}}", { from: target.from, query: target.query }) : t("邮件：{{query}}", { query: target.query });
     case "web_search": return t("网页检索：{{query}}", { query: target.query });
     case "site_read": return `${target.host}${target.path}`;
+    case "arxiv": return t("arXiv 新论文：{{query}}", { query: target.query });
   }
 }
 const whereOf = (watch: StoredWatch, t: ReturnType<typeof tFor>) =>
@@ -66,51 +67,23 @@ const whereOf = (watch: StoredWatch, t: ReturnType<typeof tFor>) =>
 export const WATCH_ASK_DAYS = 14;
 
 /**
- * Proposed watches the line's derivation wrote; the scout's and exploration's wait for 视野外 in the weekly review instead. Two or more come
- * as one card (`foldAsks`): 「都盯住」, or 「逐个看」 to answer each.
+ * Watches the line's derivation proposed are kept at once and said in the bell, undoable for a day (§7.3, round 1 A3, 2026-11-21). Before,
+ * each was a 盯住 / 不要 card (W-228 folded two or more into one). An undo retires the watch, remembered as 「不要」, which the next
+ * derivation reads. The scout's and exploration's still wait for 视野外 in the weekly review; one older than `WATCH_ASK_DAYS` stays a
+ * proposal on the opportunities page, as before.
  */
-export function opportunityNeedAsks(ctx: AccessContext, now = appNow()): Ask[] {
+export function autoTrackWatches(ctx: AccessContext, now = appNow()): string[] {
+  const store = getStore();
   const t = tFor(localeFor(ctx));
-  const sep = localeFor(ctx) === "en" ? " " : "";
   const since = new Date(now.getTime() - WATCH_ASK_DAYS * DAY).toISOString();
-  const members = readWatchList(getStore(), ctx.workspaceId).filter((watch) => watch.state === "proposed" && (watch.origin === "derived" || watch.origin === "migrated")
-    && !watch.explore && watch.createdAt >= since).map((watch): Ask => ({
-    id: `oppneed:${watch.id}`, kind: "opportunity_need", entityId: watch.id, line: watch.lineId, urgency: "soon",
-    raisedAt: watch.createdAt, fingerprint: `${watch.title}|${watch.query}|${watch.cycle?.opens ?? ""}`,
-    important: watch.basis.milestoneIds.length > 0,
-    title: t("要不要盯住「{{title}}」？", { title: watch.title }),
-    why: watch.why + sep + t("会看：{{where}}。盯住后每 {{days}} 天看一次，找到符合资格的会出现在早报和这里。", { where: whereOf(watch, t), days: watch.everyDays }),
-    options: [
-      { id: "track", label: t("盯住"), recommended: true, detail: watch.cycle?.opens ? t("写一条「预计 {{month}} 开放」的等待项", { month: watch.cycle.opens }) : t("每 {{days}} 天看一次", { days: watch.everyDays }) },
-      { id: "decline", label: t("不要"), detail: t("记成偏好，不再推同类"), fields: [{ id: "note", label: t("原因"), kind: "text", required: false }] }
-    ]
-  }));
-  return foldAsks(ctx, "oppneed", members, (rest): Ask => ({
-    id: foldId("oppneed", rest), kind: "opportunity_need", entityId: "batch", urgency: "soon", raisedAt: rest.map((ask) => ask.raisedAt).sort().at(-1) ?? "",
-    fingerprint: foldFingerprint(rest), important: rest.some((ask) => ask.important),
-    items: rest.map((ask) => ({ id: ask.entityId, title: quotedOf(ask.title), ...(ask.line ? { line: ask.line } : {}), href: "/opportunities" })),
-    title: t("{{count}} 个机会来源等本人决定要不要盯", { count: rest.length }),
-    why: t("按各条主线的目标找到的来源，逐个列在下方。盯住后按周期去看，找到符合资格的会出现在早报和这里；{{days}} 天没回应就不再问，留在机会页。", { days: WATCH_ASK_DAYS }),
-    options: [
-      { id: "split", label: t("逐个看"), recommended: true, detail: t("拆成每条一张卡，盯住或不要") },
-      { id: "track_all", label: t("都盯住"), detail: t("每条按它的周期看") }
-    ]
-  }));
-}
-
-/** The title inside 「」 of a member's question, for the folded card's list. */
-const quotedOf = (title: string) => /「(.+)」/u.exec(title)?.[1] ?? title;
-
-export function answerOpportunityNeed(ctx: AccessContext, ask: Ask, optionId: string, values: Record<string, string>): { ok: true } | { ok: false; code: string } {
-  if (isFolded(ask)) {
-    if (optionId === "split") return splitFold(ctx, ask);
-    if (optionId !== "track_all") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
-    for (const id of ask.fingerprint.split("|")) decideWatch(getStore(), ctx.workspaceId, ctx.principalId, id.replace(/^oppneed:/, ""), "active", new Date(), "");
-    return { ok: true };
-  }
-  if (optionId !== "track" && optionId !== "decline") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
-  const decided = decideWatch(getStore(), ctx.workspaceId, ctx.principalId, ask.entityId, optionId === "track" ? "active" : "retired", new Date(), values.note ?? "");
-  return decided ? { ok: true } : { ok: false, code: "OPPORTUNITY_NEED_NOT_FOUND" };
+  const kept = readWatchList(store, ctx.workspaceId).filter((watch) => watch.state === "proposed" && (watch.origin === "derived" || watch.origin === "migrated")
+    && !watch.explore && watch.createdAt >= since)
+    .filter((watch) => decideWatch(store, ctx.workspaceId, ctx.principalId, watch.id, "active", now, ""));
+  if (!kept.length) return [];
+  // The undo's lesson is the 「不要」 preference `decideWatch` writes, so the op is not `bySystem` (that would write a second one).
+  recordOp(ctx, kept.length === 1 ? t("开始盯「{{title}}」", { title: kept[0]!.title }) : t("开始盯 {{count}} 个机会来源", { count: kept.length }),
+    { kind: "watch.retire", ids: kept.map((watch) => watch.id) });
+  return kept.map((watch) => watch.id);
 }
 
 /** A registration's progress in the person's words (§17.9 gap): what the offer card shows while the form filler works on it. */
@@ -139,6 +112,9 @@ export function offerTags(row: Pick<StoredOpportunity, "kind" | "title" | "type"
   return tags;
 }
 const lineNames = (ctx: AccessContext) => new Map(identityLines(ctx).map((line) => [line.id, line.label]));
+
+/** An opportunity whose preparation starts or deadline falls this many days ahead is not left for the weekly review. */
+export const OFFER_LEAD_DAYS = 7;
 
 export function opportunityOfferAsks(ctx: AccessContext, now = new Date()): Ask[] {
   const locale = localeFor(ctx);
@@ -174,7 +150,13 @@ export function opportunityOfferAsks(ctx: AccessContext, now = new Date()): Ask[
       row.consents.length ? t("报名即同意：{{items}}。", { items: row.consents.slice(0, 3).join(locale === "en" ? "; " : "；") }) : ""
     ].filter(Boolean);
     const answerFields: AskField[] = questions.map((question, index) => ({ id: `q${index}`, label: question.question, kind: "text", required: true }));
-    const options: AskOption[] = [
+    // News and a paper are read or not (§7.3): 有用 / 少来这类, nothing to apply for.
+    const reading = isReading(row.type);
+    const options: AskOption[] = reading ? [
+      { id: "useful", label: t("有用"), recommended: true, detail: t("记下，以后多找这类") },
+      { id: "less_kind", label: t("少来这类"), detail: t("这类隔久一点再看") },
+      { id: "less", label: t("少来，说原因"), detail: t("按原因调整，周报里可撤销"), fields: [lessReasonField(t), { id: "note", label: t("一句话"), kind: "text", required: false }] }
+    ] : [
       ...(answerFields.length ? [{ id: "answer", label: t("回答资格问题"), recommended: true, fields: answerFields }] : []),
       row.kind === "event"
         ? { id: "register", label: t("报名"), detail: t("交给代填：免费活动填完自动提交，其余停在提交前等本人"), recommended: !answerFields.length }
@@ -186,8 +168,10 @@ export function opportunityOfferAsks(ctx: AccessContext, now = new Date()): Ask[
       { id: "decline", label: t("不要"), detail: t("记成偏好，同类降权"), fields: [{ id: "note", label: t("原因"), kind: "text", required: false }] },
       { id: "later", label: t("以后再说"), detail: start ? t("最晚开始日前一周再问") : t("一周后再问") }
     ];
+    // Gathered in the weekly review's 「机会与动态」 (§7.3); one whose preparation or deadline is within the week is on 待确认 as before.
+    const soon = (start && start <= addDays(today, OFFER_LEAD_DAYS)) || (deadline && deadline <= addDays(today, OFFER_LEAD_DAYS));
     return {
-      id: `opp:${row.id}`, kind: "opportunity_offer", entityId: row.id, line: row.lineId,
+      id: `opp:${row.id}`, kind: "opportunity_offer", entityId: row.id, line: row.lineId, ...(reading || !soon ? { inReview: true as const } : {}),
       urgency: left !== undefined && left <= 2 ? "now" : left !== undefined && left <= 7 ? "soon" : "later",
       ...(deadline ? { dueDay: deadline } : {}), raisedAt: row.foundAt,
       fingerprint: `${row.updatedAt}|${row.verdict.state}|${verdict.state}|${verdict.state === "conflict" ? verdict.clashes.map((clash) => clash.blockId).join(",") : ""}`,
@@ -422,6 +406,12 @@ export async function answerOpportunityOffer(ctx: AccessContext, ask: Ask, optio
         ...(reason ? { reason } : {}), ...(note ? { note } : {}) }, now);
       if (!entry) return { ok: false, code: "OPPORTUNITY_NOT_FOUND" };
       store.decideOpportunity(ctx.workspaceId, row.id, "decline", at);
+      return { ok: true };
+    }
+    case "useful": {
+      store.decideOpportunity(ctx.workspaceId, row.id, "read", at);
+      outcome("useful");
+      record("useful");
       return { ok: true };
     }
     case "decline": {
@@ -684,4 +674,44 @@ export function addWatch(ctx: AccessContext, body: Record<string, unknown>, now 
 export function undoLess(ctx: AccessContext, id: string, now = new Date()): Result {
   if (!opportunityOwner(ctx)) return NOT_OWNER;
   return undoLessEntry(getStore(), ctx.workspaceId, ctx.principalId, id, now) ? { ok: true } : { ok: false, code: "OPPORTUNITY_LESS_NOT_FOUND" };
+}
+
+/** How many found-and-shown news items or papers of one type, none of them useful in a month, make it quiet. */
+export const UNUSED_READING_MIN = 4;
+const READING_TYPES: OpportunityType[] = ["news", "paper"];
+
+/**
+ * News or papers nobody found useful for a month come less (§7.3 「某类一个月没人点有用，自动降频」): the type joins the quiet types
+ * (`holdBack`: only a find at `QUIET_TYPE_RELEVANCE` still comes), undoable in the bell for a day and listed in Settings. One marked useful
+ * in the month makes it loud again.
+ */
+export function quietUnusedReading(ctx: AccessContext, now = appNow()): OpportunityType[] {
+  const store = getStore();
+  const t = tFor(localeFor(ctx));
+  const since = new Date(now.getTime() - 30 * DAY).toISOString();
+  const types = new Map(store.listOpportunities(ctx.workspaceId).map((row) => [row.id, opportunityTypeOf(row)]));
+  const counts = new Map<OpportunityType, { shown: number; useful: number }>();
+  for (const event of store.listEvents(ctx.workspaceId, { type: "opportunity.outcome" })) {
+    if (event.createdAt < since) continue;
+    const type = types.get(event.entityId);
+    const outcome = (event.payload as { outcome?: string }).outcome;
+    if (!type || !READING_TYPES.includes(type) || (outcome !== "surfaced" && outcome !== "useful")) continue;
+    const count = counts.get(type) ?? { shown: 0, useful: 0 };
+    if (outcome === "surfaced") count.shown += 1; else count.useful += 1;
+    counts.set(type, count);
+  }
+  const tuning = readWatchTuning(store, ctx.workspaceId);
+  const quiet = tuning.quietTypes ?? [];
+  const autoId = (type: OpportunityType) => `auto-unread:${type}`;
+  let undone: Record<string, string> = {};
+  try { undone = JSON.parse(store.getSetting(ctx.workspaceId, QUIET_UNDONE_SETTING) ?? "{}") as Record<string, string>; } catch { /* none */ }
+  const add = READING_TYPES.filter((type) => !quiet.some((item) => item.type === type) && !((undone[autoId(type)] ?? "") >= since)
+    && (counts.get(type)?.shown ?? 0) >= UNUSED_READING_MIN && !(counts.get(type)?.useful ?? 0));
+  const loud = quiet.filter((item) => item.id.startsWith("auto-unread:") && (counts.get(item.type)?.useful ?? 0) > 0).map((item) => item.id);
+  if (!add.length && !loud.length) return [];
+  store.setSetting(ctx.workspaceId, WATCH_TUNING_SETTING, JSON.stringify({ ...tuning,
+    quietTypes: [...quiet.filter((item) => !loud.includes(item.id)), ...add.map((type) => ({ id: autoId(type), type }))] }));
+  if (add.length) recordOp(ctx, t("一个月没标「有用」，少来{{types}}", { types: add.map((type) => t(TYPE_LABEL[type])).join(localeFor(ctx) === "en" ? ", " : "、") }),
+    { kind: "opportunity.unquiet", ids: add.map(autoId) });
+  return add;
 }

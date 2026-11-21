@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { DELIVERABLE_JUDGED, gapWorthAsking, onPersonsBoard, taskTitleOf, tidySentenceEnds, type AccessContext, type Ask, type AskOption, type DeliverableJudgement } from "@crossline/core";
+import { DELIVERABLE_JUDGED, gapWorthAsking, onPersonsBoard, readSourceFolders, SOURCE_FOLDERS_SETTING, sourceFolderIndexSetting, taskTitleOf, tidySentenceEnds, type AccessContext, type Ask, type AskOption, type DeliverableJudgement } from "@crossline/core";
 import { acceptWorkOrderEvidence, appNow, completeWorkOrderExecution, getStore, planToday, startWorkOrderExecution } from "./crossline";
 import { recordOp, reopenWorkOrders } from "./undo";
 import { tOf } from "./locale";
@@ -13,10 +13,15 @@ import { tOf } from "./locale";
  * - a file that falls short of a task the person already finished is asked about once, only at a key place (`gapWorthAsking`);
  * - everything else is only recorded, and so is a pass on finished work.
  * Work waiting in `evidence_review` with no milestone (the old 「算数，验收」 card) is accepted by the system the same way, undoable.
+ * A completion a file made is taken back when that file is deleted or emptied within two weeks (as Linear reopens an issue whose PR is
+ * reverted); a file the person left out of the folder, or a folder no longer authorized, takes back nothing.
  */
-export type JudgedFile = DeliverableJudgement & { fileName: string; uri: string; at: string };
+export type JudgedFile = DeliverableJudgement & { fileName: string; uri: string; at: string; folderId?: string };
 export const DELIVERABLE_SETTLED = "deliverable.settled";
 export const GAP_ANSWERED = "deliverable.gap_answered";
+export const DELIVERABLE_WITHDRAWN = "deliverable.withdrawn";
+/** How long after it closed a task a deleted or emptied file still takes the completion back. */
+const WITHDRAW_DAYS = 14;
 const OPEN = new Set(["approved", "ready_for_human", "active"]);
 
 export function judgedFiles(ctx: AccessContext): JudgedFile[] {
@@ -48,6 +53,7 @@ export function settleDeliverables(ctx: AccessContext, now = appNow()): string[]
     if (!acceptWorkOrderEvidence(ctx, order.id).ok) continue;
     recordOp(ctx, t("系统验收「{{title}}」", { title: taskTitleOf(order) }), { kind: "work_order.reopen", ids: [order.id] }, { bySystem: true });
   }
+  withdrawDeliverables(ctx, now);
   if (!closed.length) return [];
   const label = closed.length === 1 ? t("看到「{{file}}」，把「{{title}}」记为完成", { file: closed[0]!.file, title: closed[0]!.title })
     : t("按新文件把 {{count}} 个任务记为完成", { count: closed.length });
@@ -103,4 +109,52 @@ export function answerGap(ctx: AccessContext, ask: Ask, optionId: string): { ok:
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `${GAP_ANSWERED}:${file.doc}`, type: GAP_ANSWERED, entityId: file.doc,
     payload: { task: ask.entityId, answer: optionId } });
   return { ok: true };
+}
+
+/** Whether the file that closed a task is gone from its folder or now empty; undefined when that cannot be told (folder not authorized). */
+function deliverableGone(ctx: AccessContext, file: JudgedFile, docs: ReadonlyMap<string, { extractedText: string }>, folders: ReadonlySet<string>): boolean | undefined {
+  // Left out by the person's exclusions or purged with its folder: the document is gone from the ledger, and that is not a withdrawal.
+  if (!file.folderId || !folders.has(file.folderId) || !docs.has(file.doc)) return undefined;
+  let index: Record<string, { documentId?: string }> = {};
+  try { index = JSON.parse(getStore().getSetting(ctx.workspaceId, sourceFolderIndexSetting(file.folderId)) ?? "{}") as typeof index; } catch { return undefined; }
+  const entries = Object.entries(index).map(([relative, entry]) => ({ relative: relative.replace(/\\/g, "/"), documentId: entry.documentId ?? "" }));
+  // Still in the folder (moved inside it keeps the same document).
+  if (entries.some((entry) => entry.documentId === file.doc)) return false;
+  const now = entries.find((entry) => entry.relative === file.fileName);
+  // Changed into a new version with text: that version is judged on its own.
+  if (now?.documentId && (docs.get(now.documentId)?.extractedText.trim() ?? "")) return false;
+  return true;
+}
+
+export function withdrawDeliverables(ctx: AccessContext, now = appNow()): string[] {
+  const store = getStore();
+  const t = tOf(ctx);
+  const since = now.getTime() - WITHDRAW_DAYS * 86_400_000;
+  const withdrawn = new Set(store.listEvents(ctx.workspaceId, { type: DELIVERABLE_WITHDRAWN }).map((event) => event.entityId));
+  const closedBy = store.listEvents(ctx.workspaceId, { type: DELIVERABLE_SETTLED })
+    .filter((event) => (event.payload as { outcome?: string }).outcome === "completed" && Date.parse(event.createdAt) >= since && !withdrawn.has(event.entityId));
+  if (!closedBy.length) return [];
+  const files = new Map(judgedFiles(ctx).map((file) => [file.doc, file]));
+  const docs = new Map(store.listSourceDocuments(ctx.workspaceId).map((doc) => [doc.id, doc]));
+  const folders = new Set(readSourceFolders(store.getSetting(ctx.workspaceId, SOURCE_FOLDERS_SETTING)).map((folder) => folder.id));
+  const reopened: Array<{ id: string; title: string; file: string }> = [];
+  for (const event of closedBy) {
+    const file = files.get(event.entityId);
+    if (!file || deliverableGone(ctx, file, docs, folders) !== true) continue;
+    const order = store.getWorkOrder(ctx.workspaceId, file.task);
+    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `${DELIVERABLE_WITHDRAWN}:${file.doc}`, type: DELIVERABLE_WITHDRAWN,
+      entityId: file.doc, payload: { task: file.task, fileName: file.fileName } });
+    // Only a completion still standing: one the person already reopened, or finished again some other way since, is left alone.
+    if (order?.state !== "accepted") continue;
+    if (!reopenWorkOrders(ctx, [order.id], t("交付文件「{{file}}」被删除或清空", { file: file.fileName })).ok) continue;
+    reopened.push({ id: order.id, title: taskTitleOf(order), file: file.fileName });
+  }
+  if (!reopened.length) return [];
+  const text = reopened.map((item) => t("「{{file}}」被删除或清空，「{{title}}」已改回未完成。若只是移走了，按一下完成即可。", { file: item.file, title: item.title })).join("\n");
+  const conversation = store.conversationFor(ctx.workspaceId, planToday(ctx, now));
+  store.appendConversationMessage({ id: randomUUID(), workspaceId: ctx.workspaceId, conversationId: conversation.id, role: "nudge", text: "", createdAt: now.toISOString(),
+    payload: { nudge: { kind: "deliverable_withdrawn", fingerprint: `deliverable_withdrawn:${reopened.map((item) => item.id).join(",")}:${now.toISOString()}`, urgent: false, counted: false,
+      delivery: "pending" }, card: { actions: [], items: [{ state: "pending" }], confidence: "high", nudgeKind: "deliverable_withdrawn",
+      clarify: { question: tidySentenceEnds(text), options: [{ label: t("知道了"), actions: [], kind: "ack" }] } } } });
+  return reopened.map((item) => item.id);
 }

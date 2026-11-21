@@ -34,7 +34,7 @@ import { decidePair, mergePairs, readMerges, timedItemOf } from "./event-merges"
 import { identityLines } from "./lines";
 import { decisionHorizon } from "./horizon";
 import { answerRelationCheck, relationCheckAsks } from "./artifact-relations";
-import { answerApplicationResult, answerOpportunityApplyReady, answerOpportunityNeed, answerOpportunityOffer, opportunityApplyReadyAsks, opportunityNeedAsks, opportunityOfferAsks } from "./opportunities";
+import { answerApplicationResult, answerOpportunityApplyReady, answerOpportunityOffer, opportunityApplyReadyAsks, opportunityOfferAsks } from "./opportunities";
 import { agentBlockedAsks, answerAgentAsk } from "./agent-ask";
 import { foldAsks, foldFingerprint, foldId, isFolded, splitFold } from "./ask-fold";
 import { answerOutcome, outcomeAsks } from "./outcome-check";
@@ -1207,7 +1207,7 @@ export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now, t: tFor(locale), locale };
   return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskDigestAsks, weeklyCommitAsks, overdueFoldAsks, missedAsks, ledgerDuplicateAsks, wealthBalanceAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, interviewSettingAsks, mergeAsks, eventAsks, mailEventCards, examTimeAsks, travelAsks, stepQuestionAsks,
     ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks, ({ ctx: context, now: at }: Source) => outcomeAsks(context, at), ({ ctx: context }: Source) => gapAsks(context),
-    ({ ctx: context, now: at }: Source) => progressAsks(context, at), ({ ctx: context, now: at }: Source) => opportunityNeedAsks(context, at),
+    ({ ctx: context, now: at }: Source) => progressAsks(context, at),
     ({ ctx: context, now: at }: Source) => opportunityOfferAsks(context, at), ({ ctx: context, now: at }: Source) => opportunityApplyReadyAsks(context, at)]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } })
     // One card per id: two with one id are the same question twice, and answering finds only the first.
@@ -1696,7 +1696,6 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
       return { ok: true };
     }
     case "relation_check": return answerRelationCheck(ctx, ask, optionId, values);
-    case "opportunity_need": return answerOpportunityNeed(ctx, ask, optionId, values);
     case "opportunity_offer": return answerOpportunityOffer(ctx, ask, optionId, values, appNow());
     case "opportunity_result": return answerApplicationResult(ctx, ask, optionId);
     case "opportunity_apply_ready": return answerOpportunityApplyReady(ctx, ask, optionId);

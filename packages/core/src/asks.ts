@@ -33,7 +33,7 @@ export type AskKind =
   /** A course's or the person's own deadline passed with work still open (the daily pass's `milestone.overdue`): 补做 / 新日期 / 放弃. */
   | "milestone_overdue"
   /** A need the opportunity agent worked out for a line (docs/opportunity-agent.md §5): 跟踪 / 不要. */
-  | "opportunity_need"
+
   /** An opportunity the person qualifies for, or might (its eligibility questions with it): 报名 / 申请 / 加入计划 / 不要 / 以后再说. */
   | "opportunity_offer"
   /** What came of an application after its deadline (docs/opportunity-agent.md §17.4): 通过了 / 没过, the outcome that most moves a watch's yield. */

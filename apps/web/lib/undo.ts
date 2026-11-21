@@ -1,6 +1,6 @@
 import "server-only";
-import { currentInstructionsOf, instructionVersionsOf, reopenAgentResult, retractedEventIdsIn, setInstructions, withdrawArtifactRelationsFor, type StepPlanInput } from "@crossline/db";
-import { AUTOMATIONS_SETTING, GROWN_LIBRARY_SETTING, MODEL_EFFORT_SETTING, PORTRAIT_FIGURE_SETTING, SELF_SLEEP_SETTING, VOICE_SETTING, taskTitleOf, type AccessContext, type StoredDomainRecord, type WorkOrderState } from "@crossline/core";
+import { currentInstructionsOf, decideWatch, instructionVersionsOf, readWatchTuning, reopenAgentResult, retractedEventIdsIn, setInstructions, withdrawArtifactRelationsFor, type StepPlanInput } from "@crossline/db";
+import { WATCH_TUNING_SETTING, AUTOMATIONS_SETTING, GROWN_LIBRARY_SETTING, MODEL_EFFORT_SETTING, PORTRAIT_FIGURE_SETTING, SELF_SLEEP_SETTING, VOICE_SETTING, taskTitleOf, type AccessContext, type StoredDomainRecord, type WorkOrderState } from "@crossline/core";
 import { archiveWorkOrder, getStore, restoreCapture, restoreWorkOrder, saveMilestoneEdit } from "./crossline";
 import { tOf } from "./locale";
 import { restoreWealthRows, wealthRows, type WealthRowEntry } from "./wealth";
@@ -57,11 +57,17 @@ export type Inverse =
   | { kind: "instructions.revert"; version: number }
   /** Things the system learned that the operation removed (Settings → 个性化, `preference.change`): they reach the models again. */
   | { kind: "preference.undelete"; ids: string[] }
+  /** Watches the system started (`autoTrackWatches`): retired, as the person's 「不要」. */
+  | { kind: "watch.retire"; ids: string[] }
+  /** Types of find the system quieted for going unread (`quietUnusedReading`): loud again. */
+  | { kind: "opportunity.unquiet"; ids: string[] }
   | { kind: "batch"; items: Inverse[] };
 
 export type Op = { id: string; label: string; at: string; inverse: Inverse };
 
 const WINDOW_MS = 24 * 3_600_000;
+/** `{ [quietTypeId]: undoneAt }`: a type the person made loud again is not quieted by the system for a month. */
+export const QUIET_UNDONE_SETTING = "opportunity.quietUndone";
 
 /** Records an operation that has just happened. Returns the op so a route can hand its id to the toast. */
 /** `bySystem`: the system did it by itself, so undoing it is a lesson (`learnFromUndo`). */
@@ -218,6 +224,19 @@ function applyInverse(ctx: AccessContext, inverse: Inverse, reopenReason?: strin
           store.transitionWorkOrder(ctx.workspaceId, id, { type: "plan.approved", approvalId: ctx.principalId }, `undo-auto-close:${id}:${attempt}:open`);
           store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `work_order.reopened:${id}:${attempt}`, type: "work_order.reopened", entityId: id, payload: { reason } });
         }
+        return { ok: true };
+      }
+      case "watch.retire":
+        for (const id of inverse.ids) decideWatch(store, ctx.workspaceId, ctx.principalId, id, "retired", new Date(), "");
+        return { ok: true };
+      case "opportunity.unquiet": {
+        const tuning = readWatchTuning(store, ctx.workspaceId);
+        store.setSetting(ctx.workspaceId, WATCH_TUNING_SETTING, JSON.stringify({ ...tuning, quietTypes: (tuning.quietTypes ?? []).filter((item) => !inverse.ids.includes(item.id)) }));
+        // Kept loud for a month: the next pass would otherwise quiet it again at once.
+        let undone: Record<string, string> = {};
+        try { undone = JSON.parse(store.getSetting(ctx.workspaceId, QUIET_UNDONE_SETTING) ?? "{}") as Record<string, string>; } catch { /* none yet */ }
+        for (const id of inverse.ids) undone[id] = new Date().toISOString();
+        store.setSetting(ctx.workspaceId, QUIET_UNDONE_SETTING, JSON.stringify(undone));
         return { ok: true };
       }
       case "agent.reopen":

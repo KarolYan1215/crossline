@@ -197,3 +197,19 @@ test("the scout's file is checked like any find; its watches wait in 视野外 a
   expect(readWatchList(store, ws)[0]).toMatchObject({ id: "explore:research:open-days", state: "proposed", origin: "scout", explore: true });
   expect(readScoutStats(store.getSetting(ws, SCOUT_STATS_SETTING))).toMatchObject({ runs: 1, cost: 900, outcomes: { surfaced: 1 } });
 });
+
+test("an arxiv target reads the newest papers through the public API, one reading each; a paper older than a month is not new", async () => {
+  setUp();
+  store.setSetting(ws, RUNTIME_OWNER_SETTING, "1");
+  const entry = (id: string, title: string, published: string) => `<entry><id>http://arxiv.org/abs/${id}</id><published>${published}</published>`
+    + `<title>${title}</title><summary>We train spiking networks on chip.</summary><author><name>A. Author</name></author></entry>`;
+  const feed = `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">${entry("2611.00001v1", "Spiking &amp; Sparse", "2026-10-30T10:00:00Z")}`
+    + `${entry("2601.00002v1", "Old paper", "2026-01-02T10:00:00Z")}</feed>`;
+  const runtime = fakeRuntime([JSON.stringify({ items: [] })], OPPORTUNITY_READER);
+  await runWatch(store, ws, watch({ tools: ["arxiv"], targets: [{ tool: "arxiv", query: "all:\"spiking neural network\"" }] }),
+    { client: () => runtime.rpc, cwd: ".", http: routes({ "https://export.arxiv.org/api/query?search_query=": { body: feed, type: "application/atom+xml" } }), now: () => NOW, costSince: () => 0 });
+  const prompts = runtime.prompts().join("\n");
+  expect(prompts).toContain("Spiking & Sparse");
+  expect(prompts).toContain("https://arxiv.org/abs/2611.00001v1");
+  expect(prompts).not.toContain("Old paper");
+});

@@ -292,7 +292,7 @@ test("new opportunities ride in the brief; one closing today is never pushed (20
   const opportunities = { fresh: [{ id: "o1", title: "暑期研究实习", deadline: "2026-12-01" }, { id: "o2", title: "黑客松", deadline: "2026-10-08" }],
     prepToday: [{ id: "need:x", title: "研究实习" }], closingToday: [{ id: "o2", title: "黑客松" }] };
   const planned = planNotifications({ ...base, dueSoon: [], opportunities });
-  expect(planned[0]!.body).toContain("2 个新机会：暑期研究实习、黑客松");
+  expect(planned[0]!.body).toContain("新机会与动态 2 条，见周复盘");
   expect(planned[0]!.body).toContain("今天该开始准备：研究实习");
   expect(planned.some((item) => item.key === "opportunity:o2")).toBe(false);
   expect(planned.filter((item) => item.kind === "urgent")).toEqual([]);

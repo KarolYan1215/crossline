@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   IGNORED_AFTER_DAYS, LESS_LOG_SETTING, OUTCOME_WEIGHT, SCOUT_NEED_PREFIX, SCOUT_STATS_SETTING, SCOUT_URGENT_DAYS, SCOUT_NEEDS_SETTING,
-  WATCHES_SETTING, WATCH_TUNING_SETTING, addDays, bestRelevance, pushable, applyLess, emptyStats, exploreAccount, holdBack, mergeWatches, nextDeadline, prepStartFor, readLessLog,
+  WATCHES_SETTING, WATCH_TUNING_SETTING, READING_SHOWN_DAYS, isReading, addDays, bestRelevance, pushable, applyLess, emptyStats, exploreAccount, holdBack, mergeWatches, nextDeadline, prepStartFor, readLessLog,
   readNeeds, readScoutStats, readTuning, readWatches, retireCandidates, taskTitleOf, tFor, undoLess, watchFromNeed, weightedTokens, withOutcome,
   type LessEntry, type LessFeedback, type OpportunityOutcome, type StoredFormRun, type StoredWatch, type WatchTarget, type WatchTuning
 } from "@crossline/core";
@@ -319,6 +319,7 @@ export function surfacedOpportunities(store: CrosslineStore, workspaceId: string
   return store.listOpportunities(workspaceId).flatMap((row) => {
     if (row.decision && !(row.decision === "later" && (row.laterUntil ?? "") <= today)) return [];
     if (row.deadlines.length && !nextDeadline(row, today)) return [];
+    if (isReading(row.type) && row.foundAt.slice(0, 10) < addDays(today, -READING_SHOWN_DAYS)) return [];
     const watch = row.needId ? watches.get(row.needId) : undefined;
     if (holdBack({ opportunity: row, verdict: row.verdict, feasibility: row.feasibility, watch, tuning })) return [];
     const scout = isScoutFind(row);
