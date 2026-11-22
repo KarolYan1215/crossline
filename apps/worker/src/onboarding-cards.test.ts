@@ -167,6 +167,17 @@ test("a day is the person's to set: options that are days come back, a date ques
   expect(checkQuestions([resume, { ...resume, id: "q2", text: "恢复投递放在哪天？" }], context()).problems).toEqual([expect.stringContaining("同一件事的日子")]);
 });
 
+test("a date question is a repeat only by its subject, not by wording like another date's (2026-11-22, W-308)", () => {
+  store = new CrosslineStore(":memory:");
+  const at = "2026-11-22T05:00:00Z";
+  const thesis = store.recordQuestion(ws, { kind: "interview", key: "iq:s1:5:q1", text: "「毕业论文」有截止日期吗？", identityId: "study", status: "open", at });
+  store.answerQuestion(ws, thesis, { text: "12 月中旬交初稿", at });
+  const context = { ledger: interviewLedger(store, ws, "s1"), openItems: [], dates: [{ about: "毕业论文", answer: "12 月中旬交初稿" }], today: "2026-11-22" };
+  // Same line, same pattern, 0.67 alike: another project's day, not the thesis's.
+  expect(checkQuestions([ask("「毕业设计」有截止日期吗？", { identityId: "study", date: true, about: "毕业设计" })], context).accepted).toHaveLength(1);
+  expect(checkQuestions([ask("论文初稿哪天交？", { identityId: "study", date: true, about: "毕业论文" })], context).problems).toEqual([expect.stringContaining("不再问")]);
+});
+
 test("a card resting on the latest replies, or a stage's fourth card without a why, is no longer sent back (2026-11-22, IR-130/131 retired)", () => {
   expect(checkInsights([card()], insightContext([])).accepted).toHaveLength(1);
 });

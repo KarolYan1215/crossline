@@ -197,7 +197,7 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
 
   // L2: rules the interview Skill states (the model's own judgement, per the audit).
   { id: "IR-100", layer: "L2", verdict: "model", status: "active", rule: "已经答过的不重问，答了一部分只问缺的",
-    text: { file: INTERVIEW_SKILL, anchor: "**不要重复问本人已经说过的。**" } },
+    text: { file: INTERVIEW_SKILL, anchor: "**不要重复问本人已经说过的，也不把没问过的说成问过。**" } },
   { id: "IR-101", layer: "L2", verdict: "model", status: "active", rule: "本人说不确定、没定，就是答案，同一件事不再问日期",
     text: { file: INTERVIEW_SKILL, anchor: "**一件事一轮最多问一个日期，「还没定」就是答案。**" } },
   { id: "IR-102", layer: "L2", verdict: "model", status: "active", rule: "接着本人的话往深一层问",

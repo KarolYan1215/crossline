@@ -100,15 +100,18 @@ export function checkQuestions(questions: TurnQuestion[], context: QuestionConte
     const gapId = named?.key.startsWith("gap:") ? named.key.slice(4) : "";
     if (gapId && waiting.has(gapId)) { problems.push(`${label}问的是应用自己的待办题 #${named!.id}：把「${gapId}」放进 openItems，应用照原样出卡，不要换说法问。`); continue; }
     if (!question.followUp) {
-      const twin = named && (named.status === "answered" || named.status === "assumed") ? named : answered.find((item) => alike(item, question));
+      // A date question is the same as another only when it is about the same thing (`about`, checked above). By wording, two projects on
+      // one line asked in one pattern (「「毕业论文」有截止日期吗？」/「「毕业设计」…」, 0.67) read as one question (2026-11-22, W-308).
+      const like = (item: Parameters<typeof alike>[0]) => !question.date && alike(item, question);
+      const twin = named && (named.status === "answered" || named.status === "assumed") ? named : answered.find(like);
       if (twin) {
         problems.push(`${label}和 #${twin.id}「${short(twin.text)}」像是同一个问题，本人答过：「${short(twin.answer || "（跳过）", 120)}」。`
           + "是在这个回答上往深问，就让题干接住它并设 followUp: true；不是就不再问。");
         continue;
       }
-      const sameRound = round.find((other) => alike(other, question));
+      const sameRound = round.find(like);
       if (sameRound) { problems.push(`${label}和这一轮的「${short(sameRound.text)}」问的像是同一件事，留一个。`); continue; }
-      const near = ownAsked.filter((item) => item.id === named?.id || alike(item, question));
+      const near = ownAsked.filter((item) => item.id === named?.id || like(item));
       const earlier = ownAsked.filter((item) => near.includes(item) || near.some((other) => alike(other, item)));
       if (earlier.length >= MAX_ASKINGS) {
         problems.push(`${label}这件事已经问过 ${earlier.length} 次（${earlier.map((item) => `#${item.id}`).join("、")}），不再问；没答清的按可改的假设记，在 reply 里说一次。`);
