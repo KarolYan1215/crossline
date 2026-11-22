@@ -1,0 +1,12 @@
+/* The calendar tutorial (calendar-subscriptions.tsx, calendar-setup-step.tsx): the provider first, then its steps in full. */
+.calendar-subscriptions-providers button[data-picked]{outline:2px solid var(--ink);outline-offset:1px}
+.calendar-subscriptions-steps{display:grid;gap:6px;padding:8px 10px;border-left:2px solid var(--ink);font-size:13px}
+.calendar-subscriptions-steps ol{margin:0;padding-left:20px;display:grid;gap:3px}
+.calendar-subscriptions-steps a{justify-self:start;text-decoration:none}
+.calendar-subscriptions-note{margin:0;font-size:12px;color:var(--graphite)}
+.calendar-subscriptions-problems{font-size:12px}
+.calendar-subscriptions-problems dl{margin:6px 0 0;display:grid;gap:4px}
+.calendar-subscriptions-problems dd{margin:0 0 0 12px;color:var(--graphite)}
+.calendar-setup-step{display:grid;gap:10px;min-width:0}
+.calendar-setup-step-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:6px}
+.calendar-setup-step-head small{color:var(--graphite)}

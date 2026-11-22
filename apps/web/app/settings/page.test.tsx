@@ -43,7 +43,7 @@ describe("settings page", () => {
     globalThis.crosslineStore = undefined;
   }, 20000);
 
-  test("shows model use by function as a chart, without model names", async () => {
+  test("shows model use by function and by model (D19: the person can choose the model, so its name is shown)", async () => {
     const store = new CrosslineStore(":memory:");
     globalThis.crosslineStore = store;
     store.saveModelUsage({ workspaceId: TEST_CTX.workspaceId, skill: "crossline:crossline-onboarding", tier: "top", model: "gpt-5.6-sol", effort: "medium",
@@ -52,7 +52,11 @@ describe("settings page", () => {
     const { default: SettingsPage } = await import("./page");
     const html = renderToStaticMarkup(await SettingsPage({}));
     expect(html).toContain("访谈");
-    expect(html).not.toContain("gpt-5.6-sol");
+    expect(html).toContain("按模型的 tokens");
+    expect(html).toContain("gpt-5.6-sol");
+    // Settings → 模型: a default per slot, set beside the interview's box too.
+    expect(html).toContain('id="model-choice"');
+    for (const slot of ["整理层", "调研层", "其他 Skill"]) expect(html).toContain(slot);
     expect(html).toContain("15k tokens");
     expect(html).toContain("最长 420 秒");
     store.close();

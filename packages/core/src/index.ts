@@ -11,6 +11,7 @@ export * from "./background-facts-schema";
 export * from "./capacity";
 export * from "./cost";
 export * from "./model-effort";
+export * from "./model-choice";
 export * from "./estimate";
 export * from "./flywheel";
 export * from "./flywheel-schema";

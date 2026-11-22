@@ -60,6 +60,7 @@
 - 在 app 里自建、不依赖用户的 ChatGPT 账号：
   1. 先做订阅地址：粘贴日历的私密 iCal 地址（苹果、Google、Outlook 都能导出），只读，无需授权，配各家图文步骤。
   2. 再逐个加官方授权直连（Google 需机主注册 Google Cloud 项目，内测期最多 100 个手动添加的测试用户；微软需改 Entra 设置；苹果用 CalDAV 加用户自己生成的应用专用密码）。
+- 2026-11-22 重做教程（docs/plans/2026-11-22-interview-and-import-redesign.md §四.7）：`apps/web/app/connectors/calendar-setup-step.tsx` 是可复用的「日历（可跳过）」一步，放在访谈前准备页（`opening-card.tsx`）。先选服务商，所选那家的步骤直接展开（不再折叠在教程条里，按钮也不再一点就离开页面），每家附 `note`（`SUBSCRIPTION_GUIDES`）：Google 里「通过网址添加」的日历要 12–24 小时才刷新、学校或公司账号可能关掉私密地址、链接泄露后怎么重置。ChatGPT 日历连接器卡片（`CalendarApps`）也在这一步，说明连上之后可在设置里打开 Google 写入路径；写入边界不变，这一步不打开任何写入。
 
 ### 文件夹授权
 - 授权一个文件夹路径，递归读取所有子文件夹中能读的文件（PDF、Word、文本、Markdown、幻灯片），默认跳过 `.git`、`node_modules`、缓存；单个文件上限 50 MB，超过的只记文件名。读前显示文件数和总量。

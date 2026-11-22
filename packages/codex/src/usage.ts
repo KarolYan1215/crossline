@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { EffortPreference } from "@crossline/core";
+import type { EffortPreference, ModelChoice } from "@crossline/core";
 import type { SpendMode } from "./model-policy";
 
 /**
@@ -159,4 +159,15 @@ export function setEffortPreferenceProvider(provider: ((workspaceId: string | un
 /** Unreadable is `default`. */
 export function currentEffortPreference(): EffortPreference {
   try { return effortProvider?.(workspaceContext.getStore()?.workspaceId) ?? "default"; } catch { return "default"; }
+}
+
+let choiceProvider: ((workspaceId: string | undefined, skillName: string) => ModelChoice | undefined) | undefined;
+/**
+ * Where a run reads the person's own choice of model and effort for a Skill (the worker reads the ledger's `model.choice`, D19). Read per
+ * run, so a choice made beside the interview's box applies from the next turn.
+ */
+export function setModelChoiceProvider(provider: ((workspaceId: string | undefined, skillName: string) => ModelChoice | undefined) | undefined): void { choiceProvider = provider; }
+/** Unreadable is no choice: the route table decides, as before there was one. */
+export function currentModelChoice(skillName: string): ModelChoice | undefined {
+  try { return choiceProvider?.(workspaceContext.getStore()?.workspaceId, skillName); } catch { return undefined; }
 }

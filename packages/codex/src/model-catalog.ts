@@ -1,4 +1,5 @@
 import type { CodexRpcBoundary } from "./index";
+import type { ModelChoice } from "@crossline/core";
 import { tierRoutes, type ModelRoute, type RouteTier } from "./model-policy";
 import { currentUsageWorkspace } from "./usage";
 
@@ -8,7 +9,9 @@ import { currentUsageWorkspace } from "./usage";
  * account does not have and failed (2026-10-18). The catalogue is keyed by the account's plan inside the runtime, so asking it is the one
  * honest way to know; a route is fitted to it before a thread starts.
  */
-export type CatalogModel = { model: string; hidden: boolean; isDefault: boolean; efforts: string[]; defaultEffort: string };
+export type CatalogModel = { model: string; hidden: boolean; isDefault: boolean; efforts: string[]; defaultEffort: string;
+  /** The catalogue's own name for the model, shown in the model picker; absent when the runtime gives none. */
+  displayName?: string };
 
 const TTL_MS = 10 * 60_000;
 const cache = new Map<string, { at: number; models: CatalogModel[] | null }>();
@@ -35,7 +38,8 @@ export async function accountModels(client: CodexRpcBoundary, workspaceId = curr
         const efforts = Array.isArray(item.supportedReasoningEfforts)
           ? item.supportedReasoningEfforts.map((option) => String((option as { reasoningEffort?: unknown }).reasoningEffort ?? "")).filter(Boolean) : [];
         found.push({ model, hidden: item.hidden === true, isDefault: item.isDefault === true, efforts,
-          defaultEffort: typeof item.defaultReasoningEffort === "string" ? item.defaultReasoningEffort : "" });
+          defaultEffort: typeof item.defaultReasoningEffort === "string" ? item.defaultReasoningEffort : "",
+          ...(typeof item.displayName === "string" && item.displayName.trim() && item.displayName !== model ? { displayName: item.displayName.trim() } : {}) });
       }
       cursor = answer.nextCursor ?? undefined;
       if (!cursor) break;
@@ -71,4 +75,17 @@ export function fitRoute(route: ModelRoute | undefined, tier: RouteTier | undefi
   }
   const fallback = models.find((model) => model.isDefault) ?? models.find((model) => !model.hidden) ?? models[0]!;
   return withEffort(route, fallback);
+}
+
+/**
+ * The route for the person's own choice (D19), or why it cannot run. The chosen model is never swapped: one the account's catalogue does
+ * not list is refused (`unavailable`, said to the person) instead of falling down the tier ladder the way a table route does. The effort is
+ * the chosen one when the model takes it, else the model's own default; with no catalogue to ask, the choice is sent as it is and the
+ * runtime answers for it.
+ */
+export function routeForChoice(choice: ModelChoice, models: CatalogModel[] | null): { route: ModelRoute } | { unavailable: true } {
+  const route: ModelRoute = { model: choice.model, ...(choice.effort ? { effort: choice.effort } : {}) };
+  if (!models?.length) return { route };
+  if (!models.some((model) => model.model === choice.model)) return { unavailable: true };
+  return { route: fitRoute(route, undefined, models)! };
 }

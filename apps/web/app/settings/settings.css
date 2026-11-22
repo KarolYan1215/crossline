@@ -184,8 +184,6 @@ body:has(.settings-page) .running-head{background:var(--ds-bg)}
 .calendar-subscriptions-form{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,160px) auto;gap:6px;align-items:center}
 .calendar-subscriptions-form input{min-width:0;font:inherit;font-size:13px;padding:5px 8px;border:1px solid var(--ink);background:var(--paper);color:var(--ink)}
 .calendar-subscriptions-providers{display:flex;flex-wrap:wrap;gap:6px}
-.calendar-subscriptions-providers a{text-decoration:none}
-.calendar-subscriptions-providers a[aria-current]{outline:2px solid var(--ink);outline-offset:1px}
 .ob-left .calendar-subscriptions-form{grid-template-columns:minmax(0,1fr)}
 @media (max-width:640px){.calendar-subscriptions-form{grid-template-columns:minmax(0,1fr)}}
 /* Bringing other tools' lists in (connectors/import-card.tsx, import-review.tsx). */

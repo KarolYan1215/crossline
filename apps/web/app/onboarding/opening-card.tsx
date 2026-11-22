@@ -7,6 +7,7 @@ import { useLocale } from "../locale-context";
 import { withLink } from "./rich-text";
 import { VoiceField } from "../ui/voice/voice-input";
 import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY } from "./onboarding-types";
+import { CalendarSetupStep } from "../connectors/calendar-setup-step";
 
 /**
  * The interview's first message (docs/onboarding-v3.md, decided 2026-10-14): the premise in plain words, how it runs and what it gives,
@@ -185,6 +186,9 @@ export function OpeningCard({ linesKnown, knownLines, busy, hasMaterials, needsC
         </div>
       </fieldset>}
     </>}
+
+    {/* The calendar step (can be skipped): provider first, steps in full, and the ChatGPT Google calendar connector. */}
+    <CalendarSetupStep />
 
     <div className="ob-opening-go">
       <button type="button" className="ob-btn ob-primary" disabled={busy || !chosen.length || needsConnection}

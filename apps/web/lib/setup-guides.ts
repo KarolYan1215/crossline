@@ -319,15 +319,18 @@ export const CALENDAR_WRITER_GUIDE: SetupGuideSpec = {
 };
 
 /** A calendar by its private subscription link: each app's own steps (core `SUBSCRIPTION_GUIDES`), with the page each one is made on. */
-export function subscriptionGuide(guides: Array<{ app: string; url: string; steps: string[] }>): SetupGuideSpec {
+export function subscriptionGuide(guides: Array<{ app: string; url: string; steps: string[]; note?: string }>): SetupGuideSpec {
   return {
     title: "接入教程：各日历的订阅链接",
-    intro: "订阅链接是日历的只读地址，不用登录。点上面所用的日历会打开它的设置页，同时在这里展开对应的步骤。",
-    providers: guides.map((guide) => ({ id: guide.app, label: guide.app, steps: guide.steps, links: [{ label: guide.app, url: guide.url }] })),
+    intro: "订阅链接是日历的只读地址，不用登录。先选所用的日历服务，下面直接列出它的步骤。",
+    providers: guides.map((guide) => ({ id: guide.app, label: guide.app, steps: guide.steps, links: [{ label: guide.app, url: guide.url }], note: guide.note })),
     problems: [
       { symptom: "接入成功但没有读到日程", fix: "全天日程（节假日、生日）和标为「空闲」的日程不读入；只读未来九周有具体时间的日程。" },
       { symptom: "提示链接打不开或不是日历", fix: "拷贝的是网页地址而不是订阅链接。订阅链接以 webcal:// 开头，或以 https:// 开头、以 .ics 结尾。" },
       { symptom: "Outlook（工作或学校）里没有「发布日历」", fix: "学校或公司关闭了发布。改用 Outlook 手机 App 或网页版把课表复制到个人日历，或向管理员申请。" },
+      { symptom: "Google 账号的「集成日历」里没有私密地址", fix: "学校或公司的 Google 账号，管理员可以关掉私密地址。改用个人 Google 账号，或请管理员开启。" },
+      { symptom: "Google 日历里的外部日历变了，这里很久才跟上", fix: "在 Google 里「通过网址添加」的日历，Google 要 12–24 小时才刷新一次。把那本日历原本的订阅链接直接接到这里。" },
+      { symptom: "链接发给了别人或贴到了公开的地方", fix: "在日历里重置私密地址（Google 点「重置」，Outlook 取消发布后重新发布，iCloud 关掉再打开公开日历），在这里移除旧的，用新链接重新接入。" },
       { symptom: "过了一段时间显示读取失败", fix: "日历里重新生成或关闭了私密地址，旧链接失效。移除后用新链接重新接入。" }
     ]
   };

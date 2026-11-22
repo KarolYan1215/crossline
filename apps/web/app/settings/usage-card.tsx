@@ -2,9 +2,9 @@ import type { ModelUsageSummary } from "@crossline/db";
 import { BarChart, Sparkline } from "../ui/charts";
 import { tFor, type Locale } from "../../lib/i18n";
 
-/** Each Skill by what it does for the person; no model names (decided 2026-10-07). */
+/** Each Skill by what it does for the person. */
 const FUNCTION_LABEL: Record<string, string> = {
-  "crossline-onboarding": "访谈", "crossline-milestone-architect": "里程碑设计", "crossline-goal-backplanner": "任务倒推",
+  "crossline-onboarding": "访谈", "crossline-onboarding-extract": "整理层", "crossline-onboarding-research": "调研层", "crossline-milestone-architect": "里程碑设计", "crossline-goal-backplanner": "任务倒推",
   "crossline-flywheel-scout": "跨主线扩展", "crossline-automation-stripper": "收集分析", "crossline-manualbook-designer": "教程设计",
   "crossline-material-researcher": "资料检索", "crossline-material-writer": "教程写作", "crossline-milestone-gate": "验收判定",
   "crossline-weekly-insight": "每周洞察", "crossline-due-diligence": "网上查证", "crossline-background-facts": "背景整理",
@@ -15,8 +15,9 @@ const label = (skill: string) => FUNCTION_LABEL[skill.replace(/^crossline:/, "")
 const k = (n: number) => Math.round(n / 100) / 10;
 
 /**
- * Model use over the last week by function: tokens as bars (hover for runs, average and longest time, failures and repairs) and the
- * daily total as a trend. It is the app's own count of what the runtime reported, not the account's quota.
+ * Model use over the last week by function and by model: tokens as bars (hover for runs, average and longest time, failures and repairs)
+ * and the daily total as a trend. It is the app's own count of what the runtime reported, not the account's quota. Model names are shown
+ * since the person can choose the model themselves (D19, 2026-11-22; they were left out from 2026-10-07 until then).
  */
 export function UsageCard({ summary, daily, days, locale }: { summary: ModelUsageSummary[]; daily: Array<{ day: string; runs: number; totalTokens: number }>; days: number; locale?: Locale }) {
   const t = tFor(locale);
@@ -28,6 +29,14 @@ export function UsageCard({ summary, daily, days, locale }: { summary: ModelUsag
       repairs: current.repairs + row.repairs, longest: Math.max(current.longest, row.longestSeconds), seconds: current.seconds + row.averageSeconds * row.runs });
   }
   const rows = [...byFunction].sort((a, b) => b[1].tokens - a[1].tokens);
+  const byModel = new Map<string, { tokens: number; runs: number }>();
+  for (const row of summary) {
+    const current = byModel.get(row.model) ?? { tokens: 0, runs: 0 };
+    byModel.set(row.model, { tokens: current.tokens + row.totalTokens, runs: current.runs + row.runs });
+  }
+  const models = [...byModel].sort((a, b) => b[1].tokens - a[1].tokens);
+  // A run with no route named left the model to the runtime's own default.
+  const modelName = (model: string) => model || t("运行时默认");
   const total = rows.reduce((sum, [, row]) => sum + row.tokens, 0);
   const runs = rows.reduce((sum, [, row]) => sum + row.runs, 0);
   if (!rows.length) return <p className="muted">{t("近 {{days}} 天没有模型调用。", { days })}</p>;
@@ -42,5 +51,7 @@ export function UsageCard({ summary, daily, days, locale }: { summary: ModelUsag
       title: [`${t(name)}${locale === "en" ? ": " : "："}${k(row.tokens)}k tokens`, t("{{count}} 次", { count: row.runs }),
         t("平均 {{seconds}} 秒", { seconds: Math.round(row.seconds / Math.max(1, row.runs)) }), t("最长 {{seconds}} 秒", { seconds: Math.round(row.longest) }),
         ...(row.failed ? [t("失败 {{n}}", { n: row.failed })] : []), ...(row.repairs ? [t("重试 {{n}}", { n: row.repairs })] : [])].join(" · ") }))} />
+    <BarChart label={t("按模型的 tokens")} unit="k" data={models.map(([model, row]) => ({ label: modelName(model), value: k(row.tokens),
+      title: [`${modelName(model)}${locale === "en" ? ": " : "："}${k(row.tokens)}k tokens`, t("{{count}} 次", { count: row.runs })].join(" · ") }))} />
   </div>;
 }

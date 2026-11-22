@@ -21,6 +21,7 @@ import { withLink } from "./rich-text";
 import { tFor } from "../../lib/i18n";
 import { useLocale } from "../locale-context";
 import { VoiceField } from "../ui/voice/voice-input";
+import { ModelPicker } from "./model-picker";
 import { cardsOf, foldThread } from "./round-fold";
 import { Receipt } from "./receipt";
 import { FinishButton } from "./finish-button";
@@ -433,6 +434,8 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
             <input type="file" multiple accept={ACCEPT} hidden onChange={(event) => { void upload(event.target.files ?? []); event.target.value = ""; }} />
             {busy === "upload" ? t("上传中…") : t("添加文件")}
           </label>
+          {/* The interview's model and reasoning effort (D19), from the next round. */}
+          <ModelPicker slot="crossline-onboarding" compact />
           <button type="submit" className="ob-btn ob-primary" disabled={!canSend}>{deep ? t("回答") : open ? t("发送这一轮") : t("发送")}</button>
         </div>
       </form>}

@@ -23,6 +23,7 @@ import { deletionRefused } from "../../lib/account-deletion";
 import { EnergyCard, type EnergyStatus } from "./energy-card";
 import { HEALTH_TOKEN_SETTING, energyModel, phoneDailyLatest, phoneHealthOn } from "../../lib/energy";
 import { UsageCard } from "./usage-card";
+import { ModelChoiceCard } from "./model-choice-card";
 import { QuotaCard } from "./quota-card";
 import { readQuota } from "../../lib/quota";
 import { NotifyLevel, NotifyTimes } from "./notify-level";
@@ -158,7 +159,7 @@ export default async function SettingsPage({ searchParams }: { searchParams?: Pr
   const sections: SettingsSection[] = [
     { id: "general", label: t("通用"), alerts: alertsIn(["#phone"]), parts: [{ id: "phone", label: t("手机访问与推送") }, ...(hosted ? [{ id: "device", label: t("这台电脑") }] : [])] },
     { id: "calendar", label: t("日历与连接"), alerts: alertsIn(["#calendar", "#calendar-subscriptions", "#mail", "#model"]),
-      parts: [{ id: "calendar-subscriptions", label: t("订阅日历") }, { id: "mail", label: t("邮箱") }, { id: "import", label: t("从其他工具导入") }, { id: "mcp", label: t("在其他 AI 里用 Crossline") }, { id: "model", label: t("模型连接") }] },
+      parts: [{ id: "calendar-subscriptions", label: t("订阅日历") }, { id: "mail", label: t("邮箱") }, { id: "import", label: t("从其他工具导入") }, { id: "mcp", label: t("在其他 AI 里用 Crossline") }, { id: "model", label: t("模型连接") }, { id: "model-choice", label: t("模型与思考强度") }] },
     { id: "notify", label: t("时间与提醒"), parts: [{ id: "travel", label: t("出行") }] },
     { id: "automation", label: t("自动化与助手"), parts: [{ id: "outputs", label: t("助手产出") }] },
     { id: "background", label: t("后台任务") },
@@ -212,6 +213,7 @@ export default async function SettingsPage({ searchParams }: { searchParams?: Pr
           <CalendarModule ctx={ctx} />
           <div className="st-modules"><div id="mail"><MailAccounts accountEmail={sessionEmail} /></div><div id="import"><ImportCard /></div><McpCard /></div>
           <ConnectionsSection />
+          <div className="st-modules"><div id="model-choice"><ModelChoiceCard locale={locale} /></div></div>
         </section>
 
         <section id="notify" className="st-section" aria-labelledby="st-notify"><h2 id="st-notify" className="ds-serif">{t("时间与提醒")}</h2>

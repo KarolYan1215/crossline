@@ -3,8 +3,8 @@ import { useEffect, useState } from "react";
 import { SUBSCRIPTION_GUIDES, type CalendarSubscription } from "@crossline/core";
 import { useLocale, useT } from "../locale-context";
 import type { Translate } from "../../lib/i18n";
-import { SetupGuide } from "../ui/setup-guide";
 import { subscriptionGuide } from "../../lib/setup-guides";
+import "./calendar-setup-step.css";
 
 const GUIDE = subscriptionGuide(SUBSCRIPTION_GUIDES);
 
@@ -70,18 +70,29 @@ export function CalendarSubscriptions({ onChanged }: { onChanged?: () => void })
     else setMessage(text ? t("剪贴板里不是日历链接：请在日历的设置页拷贝订阅链接，再点一次。") : t("浏览器没有允许读取剪贴板，请把链接粘贴到下面的框里。"));
   };
 
+  const chosen = GUIDE.providers.find((item) => item.id === guide);
+
   return <section className="st-card calendar-subscriptions" aria-label={t("订阅日历")}>
-    <header><h3>{t("订阅日历")}</h3><small>{t("点所用的日历，在打开的页面复制订阅链接，回来点「粘贴并接入」。只读，不用登录。")}</small></header>
+    <header><h3>{t("订阅日历")}</h3><small>{t("先选所用的日历服务，照下面的步骤拷贝订阅链接，回来点「粘贴并接入」。只读，不用登录。")}</small></header>
     {items?.map((item) => <div className="st-row" key={item.id}>
       <span className="st-row-label">{item.label}
         <small>{item.host}{item.lastError ? ` · ${item.lastError}` : item.lastReadAt ? ` · ${ago(item.lastReadAt, now, t)}${en ? ", " : "，"}${t("{{count}} 个日程", { count: item.lastEvents ?? 0 })}` : ""}</small>
       </span>
       <button type="button" className="ob-btn ob-quiet secondary-button" disabled={busy} onClick={() => void remove(item.id)}>{t("移除")}</button>
     </div>)}
-    <div className="calendar-subscriptions-providers" role="group" aria-label={t("从哪个日历接入")}>
-      {SUBSCRIPTION_GUIDES.map((item) => <a key={item.app} href={item.url} target="_blank" rel="noreferrer" className="ob-btn secondary-button"
-        aria-current={guide === item.app || undefined} onClick={() => setGuide(item.app)}>{t(item.app)} ↗</a>)}
+    {/* The provider first, then its steps in full (2026-11-22): they used to sit folded under a tutorial bar, and the button left the
+        page before the person had read what to copy there. */}
+    <div className="calendar-subscriptions-providers" role="radiogroup" aria-label={t("从哪个日历接入")}>
+      {SUBSCRIPTION_GUIDES.map((item) => <button key={item.app} type="button" role="radio" aria-checked={guide === item.app}
+        className="ob-btn secondary-button" data-picked={guide === item.app || undefined} onClick={() => setGuide(item.app)}>{t(item.app)}</button>)}
     </div>
+    <b>{t(GUIDE.title)}</b>
+    {chosen ? <div className="calendar-subscriptions-steps" role="group" aria-label={t("{{label}}的步骤", { label: t(chosen.label) })}>
+      <ol>{chosen.steps.map((step) => <li key={step}>{t(step)}</li>)}</ol>
+      {chosen.links?.[0] && <a className="ob-btn secondary-button" href={chosen.links[0].url} target="_blank" rel="noopener noreferrer">
+        {t("打开{{app}}的设置页", { app: t(chosen.label) })} ↗</a>}
+      {chosen.note && <p className="calendar-subscriptions-note">{t(chosen.note)}</p>}
+    </div> : <p className="muted">{t("选一个日历服务，这里列出它的步骤。")}</p>}
     <button type="button" className="ob-btn primary-button" disabled={busy} onClick={() => void pasteAndAdd()}>{busy ? t("读取中…") : t("粘贴并接入")}</button>
     <form className="calendar-subscriptions-form" onSubmit={(event) => { event.preventDefault(); if (link.trim()) void add(); }}>
       <input type="url" inputMode="url" value={link} onChange={(event) => setLink(event.target.value)} placeholder={t("或手动粘贴：webcal://… 或 https://…ics")} aria-label={t("日历订阅链接")} disabled={busy} />
@@ -89,8 +100,9 @@ export function CalendarSubscriptions({ onChanged }: { onChanged?: () => void })
       <button type="submit" className="ob-btn secondary-button" disabled={busy || !link.trim()}>{t("接入")}</button>
     </form>
     {message && <p role="status" className="muted">{message}</p>}
-    {/* Keyed on the chosen app so picking one opens the guide on its steps, as the list under the buttons used to. */}
-    <SetupGuide key={guide ?? "none"} guide={GUIDE} selected={guide} {...(guide ? { open: true } : {})} />
-    <small className="muted">{t("链接相当于这本日历的钥匙：加密保存，只用来读取，不进备份。")}</small>
+    <small className="muted">{t("链接相当于这本日历的钥匙：加密保存，只用来读取，不进备份。泄露了就在日历里重置，再在这里换上新链接。")}</small>
+    {GUIDE.problems && <details className="calendar-subscriptions-problems"><summary>{t("常见出错")}</summary>
+      <dl>{GUIDE.problems.map((problem) => <div key={problem.symptom}><dt>{t(problem.symptom)}</dt><dd>{t(problem.fix)}</dd></div>)}</dl>
+    </details>}
   </section>;
 }

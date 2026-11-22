@@ -10,7 +10,7 @@ import { CALENDAR_APPS_GUIDE } from "../../lib/setup-guides";
  * Google and Outlook calendar as ChatGPT connectors of this account's Codex: connected or not, and a button that opens ChatGPT's own
  * page for the app in the person's browser, where they connect it. 「已连接，刷新」 reads the state again at once.
  */
-export function CalendarApps() {
+export function CalendarApps({ lead }: { lead?: string } = {}) {
   const [apps, setApps] = useState<CalendarAppStatus[] | undefined>();
   const [problem, setProblem] = useState("");
   const [busy, setBusy] = useState(false);
@@ -29,15 +29,17 @@ export function CalendarApps() {
   };
   useEffect(() => { void load(); }, []);
 
-  return <CalendarAppsView apps={apps} problem={problem} busy={busy} onRefresh={() => void load()} />;
+  return <CalendarAppsView apps={apps} problem={problem} busy={busy} onRefresh={() => void load()} {...(lead ? { lead } : {})} />;
 }
 
-export function CalendarAppsView({ apps, problem, busy, onRefresh }: {
-  apps: CalendarAppStatus[] | undefined; problem: string; busy: boolean; onRefresh: () => void;
+/** `lead`: a line under the header saying what connecting is for where the card is shown (the interview's calendar step). */
+export function CalendarAppsView({ apps, problem, busy, onRefresh, lead }: {
+  apps: CalendarAppStatus[] | undefined; problem: string; busy: boolean; onRefresh: () => void; lead?: string;
 }) {
   const t = useT();
   return <section className="st-card calendar-apps" aria-label={t("日历连接")}>
     <header><h3>{t("ChatGPT 日历连接器")}</h3><small>{t("只显示连接状态，暂不把日程读入计划；要让日历里的课表进入计划，用「订阅日历」粘贴链接")}</small></header>
+    {lead && <p className="muted">{lead}</p>}
     {!apps && <p className="muted">{t("读取中…")}</p>}
     {apps?.map((app) => <div className="st-row" key={app.app}>
       <span className="st-row-label">{t(app.label)}

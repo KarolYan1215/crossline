@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net";
 import { closeSync, existsSync, mkdirSync, openSync, readSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { readCostSignal } from "./cost";
+import { accountModels } from "./model-catalog";
 import { createRuntimePool, type PoolMember, type RuntimePool } from "./runtime-pool";
 import { verifyCapability } from "./capability";
 import { currentUsageWorkspace, enterUsageWorkspace } from "./usage";
@@ -1374,6 +1375,14 @@ export async function startCodexSupervisor(options: {
           return;
         }
         sendJson(response, 200, await costFor(sidecar.client, callerWorkspaceId));
+        return;
+      }
+      // The models the caller's own Codex offers (`model/list`, D19's picker), each with the efforts it takes. A workspace served by a
+      // provider says so: a choice made here moves only runs on the account's own Codex.
+      if (request.method === "GET" && pathname === "/v1/codex/models") {
+        const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
+        const models = await accountModels(rt, callerWorkspaceId);
+        sendJson(response, 200, { models: models ?? [], provider: Boolean(options.modelProviders?.cost(callerWorkspaceId)) });
         return;
       }
       // A guest's own Codex: connect (ChatGPT in the browser, a device code, or an API key), see it, cancel, sign out.
