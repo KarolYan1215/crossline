@@ -19,8 +19,9 @@ test("未达可开始标准的账号被带回访谈，已有工作也不豁免",
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
   seedOneWorkOrder(store, TEST_CTX.workspaceId);
   expect(() => gateUntilReady(TEST_CTX)).toThrow(expect.objectContaining({ digest: expect.stringContaining("/onboarding") }));
-  // No line the person named (the built-in ones standing in do not count, R2-B) and no milestone.
-  expect(startReadiness(TEST_CTX).missing.map((item) => item.id)).toEqual(["start_line", "start_milestone"]);
+  // No milestone. The built-in lines stand in for an account with work of its own that never listed lines (owner, 2026-11-22), so the
+  // line is not missing; the gate still holds on the milestone.
+  expect(startReadiness(TEST_CTX).missing.map((item) => item.id)).toEqual(["start_milestone"]);
   seedReadyToStart(store, TEST_CTX.workspaceId);
   expect(() => gateUntilReady(TEST_CTX)).not.toThrow();
   expect(startReadiness(TEST_CTX)).toMatchObject({ ready: true, missing: [] });

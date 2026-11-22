@@ -7,6 +7,10 @@ import type { CrosslineStore } from "./index";
 /** The lines the person listed (`LINE_SETTING` of @crossline/identity-packs, which this package does not depend on). */
 const LISTED_LINES_SETTING = "lines.v1";
 
+/** Whether the account had work of its own on the board (not the seeded examples) without ever listing lines. */
+const inUseBeforeLines = (store: CrosslineStore, workspaceId: string) => store.listWorkOrders(workspaceId)
+  .some((order) => !order.tombstone && !(order.payload as { seeded?: boolean } | undefined)?.seeded);
+
 type DateRow = { id: string; project?: string; kind?: string; sourceRef?: string; date?: string; to?: string;
   title?: string; weekdays?: number[]; startTime?: string; endTime?: string };
 
@@ -51,8 +55,9 @@ export function interviewChecklistFor(store: CrosslineStore, workspaceId: string
   // a milestone.
   return interviewChecklist({
     // Only lines the person listed count: with no `lines.v1` (identity-packs' LINE_SETTING) the built-in four stand in, and they are
-    // nobody's answer, so 「至少有一条主线」 stayed done for an account that never named one.
-    lines: store.getSetting(workspaceId, LISTED_LINES_SETTING) === undefined ? [] : lines,
+    // nobody's answer, so 「至少有一条主线」 stayed done for an account that never named one. An account already in use before lines were
+    // listed (work of its own on the board, not the examples) keeps them: it is not sent back to the interview (owner, 2026-11-22).
+    lines: store.getSetting(workspaceId, LISTED_LINES_SETTING) !== undefined || inUseBeforeLines(store, workspaceId) ? lines : [],
     descriptions: Object.fromEntries(Object.entries(profiles).map(([id, value]) => [id, { description: value.description ?? "", candidates: (value.attributes ?? []).length || (value.goalCandidates ?? []).length }])),
     profile,
     facts: store.listProfileFacts(workspaceId).map(({ identityId, projectId, slot, status, sourceRef, value }) => ({ identityId, projectId, slot, status, sourceRef, value })),
