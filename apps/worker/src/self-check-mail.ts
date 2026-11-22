@@ -91,6 +91,10 @@ export function automationsProbe(store: CrosslineStore): Probe {
     const toMinutes = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
     for (const automation of automations.filter((item) => item.status === "active")) {
       const { trigger } = automation;
+      // How its last run ended, not only whether it ran (W-301: twelve failed runs and the check said 正常).
+      const lastEnded = runs.filter((run) => run.automationId === automation.id && (run.state === "done" || run.state === "failed")).at(-1);
+      if (lastEnded?.state === "failed") failing.push({ code: "AUTOMATION_RUN_FAILED",
+        detail: t("自动化「{{name}}」上次没做成：{{reason}}", { name: automation.name, reason: lastEnded.detail ?? "" }) });
       if (trigger.type === "schedule") {
         const late = toMinutes(clock) - toMinutes(trigger.schedule.time);
         // Due today however late (`heldSince` today), and no firing of any kind noted today.

@@ -189,6 +189,37 @@ test("each firing goes on in the automation's own conversation: the next run res
   expect(started[1]!.inputs?.some((file) => file.replace(/\\/g, "/").endsWith("/out/auto-resume-1/index.md"))).toBe(true);
 });
 
+test("a run that made nothing and lists what it could not do is a failure; three in a row pause the automation and say so (W-301)", () => {
+  const { store, workspaceId, deps, setNow } = setup();
+  install(store, workspaceId, { id: "auto-watch", name: "作品监测更新" });
+  const started: Array<AgentTaskInput & { taskId: string }> = [];
+  const finish: Array<(outcome: never) => void> = [];
+  const running: AutomationDeps = { ...deps(), runFree: (_w, input, after) => { started.push(input); if (after) finish.push(after as (outcome: never) => void); return { state: "started", taskId: input.taskId }; } };
+  const current = () => readAutomations(store.getSetting(workspaceId, AUTOMATIONS_SETTING)).find((item) => item.id === "auto-watch")!;
+  const outcome = (taskId: string, made: boolean) => ({ state: "done", taskId, directory: `/out/${taskId}`,
+    summary: { summary: made ? "写了监测记录" : "第 1 次运行未能写入作品监测记录", artifacts: [], verification: [], needsHuman: [],
+      notDone: made ? [] : [{ what: "写入作品监测记录", why: "执行工具无法启动" }], assumptions: [] },
+    artifacts: made ? [{ path: "log.md", purpose: "记录", sha256: "x", bytes: 10 }] : [], audit: { commands: [], filesChanged: [], mcpCalls: [], searches: [], decisions: [], requests: { total: 0, allowed: 0 } },
+    inputsModified: [], checksPassed: true, reviewRequired: true, reviewReasons: [] }) as never;
+  const said = () => store.listConversationMessages(workspaceId, store.conversationFor(workspaceId, "2026-10-19").id).filter((message) => message.role === "nudge")
+    .map((message) => (message.payload as { card: { clarify: { question: string } } }).card.clarify.question);
+  const runOnce = (hour: number, made: boolean) => {
+    setNow(new Date(`2026-10-19T${String(hour).padStart(2, "0")}:00:00Z`));
+    fire(running, workspaceId, current(), { reason: "到点", context: "" });
+    finish.at(-1)!(outcome(started.at(-1)!.taskId, made));
+  };
+  runOnce(14, false);
+  expect(JSON.parse(store.getSetting(workspaceId, AUTOMATION_RUNS_SETTING) ?? "[]").at(-1)).toMatchObject({ state: "failed", detail: "写入作品监测记录：执行工具无法启动" });
+  expect(said().at(-1)).toContain("这次没做成");
+  expect(said().some((text) => text.includes("跑完了"))).toBe(false);
+  // A run that made something in between restarts the count.
+  runOnce(15, false); runOnce(16, true); runOnce(17, false); runOnce(18, false);
+  expect(current().status).toBe("active");
+  runOnce(19, false);
+  expect(current().status).toBe("off");
+  expect(said().at(-1)).toContain("连续 3 次没做成，已暂停");
+});
+
 test("a run the last worker lost at a restart is marked 没跑完 and said once, not left 已开始", () => {
   const { store, workspaceId, deps, started } = setup();
   install(store, workspaceId, { id: "auto-lost", name: "连接器测试" });

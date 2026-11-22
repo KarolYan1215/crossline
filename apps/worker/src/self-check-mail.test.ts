@@ -80,6 +80,21 @@ test("automations: a schedule passed today with no run fails; one that ran or wa
   expect(await probe.run(workspaceId, now)).toMatchObject({ status: "ok" });
 });
 
+test("automations: an active automation whose last run failed is failing, whatever ran before it (W-301)", async () => {
+  const { store, workspaceId } = setup();
+  const probe = automationsProbe(store);
+  store.setSetting(workspaceId, AUTOMATIONS_SETTING, JSON.stringify([automation({ trigger: { type: "interval", hours: 4 } })]));
+  const run = (state: "done" | "failed", firedAt: string) => ({ automationId: "auto-a", taskId: firedAt, firedAt, reason: "", state, ...(state === "failed" ? { detail: "执行工具无法启动" } : {}) });
+  store.setSetting(workspaceId, AUTOMATION_RUNS_SETTING, JSON.stringify([run("done", "2026-10-19T10:00:00Z"), run("failed", "2026-10-19T12:00:00Z")]));
+  expect(await probe.run(workspaceId, now)).toMatchObject({ status: "failing", code: "AUTOMATION_RUN_FAILED", detail: expect.stringContaining("执行工具无法启动") });
+  store.setSetting(workspaceId, AUTOMATION_RUNS_SETTING, JSON.stringify([run("failed", "2026-10-19T10:00:00Z"), run("done", "2026-10-19T12:00:00Z")]));
+  expect(await probe.run(workspaceId, now)).toMatchObject({ status: "ok" });
+  // Paused (off): not this check's business; the person was told when it paused.
+  store.setSetting(workspaceId, AUTOMATIONS_SETTING, JSON.stringify([automation({ status: "off", trigger: { type: "interval", hours: 4 } })]));
+  store.setSetting(workspaceId, AUTOMATION_RUNS_SETTING, JSON.stringify([run("failed", "2026-10-19T12:00:00Z")]));
+  expect(await probe.run(workspaceId, now)).toMatchObject({ status: "ok" });
+});
+
 test("automations: an old queued firing is dropped; a watch that fails or stopped reading and a design never taken up fail", async () => {
   const { store, workspaceId } = setup();
   const probe = automationsProbe(store);

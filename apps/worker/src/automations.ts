@@ -240,6 +240,34 @@ export function deleteAutomation(store: CrosslineStore, workspaceId: string, id:
   return true;
 }
 
+/** Failed runs in a row (since the automation was last turned on or changed) after which it is paused and the person told. */
+export const AUTOMATION_PAUSE_AFTER_FAILURES = 3;
+
+/**
+ * Why a run that "finished" did nothing: no artifact, and the run's own structured list of what it could not do is not empty. Read from
+ * the summary's fields, never from its prose.
+ */
+export function emptyRunReason(outcome: Extract<AgentOutcome, { state: "done" }>): string | undefined {
+  const first = outcome.summary.notDone[0];
+  if (outcome.artifacts.length || !first) return undefined;
+  return first.why ? `${first.what}：${first.why}` : first.what;
+}
+
+/** Pauses an automation whose last runs all failed, so a broken one stops spending the quota every day, and says so once. */
+function pauseAfterFailures(store: CrosslineStore, workspaceId: string, id: string, now: Date): void {
+  const automation = read(store, workspaceId).find((item) => item.id === id);
+  if (!automation || automation.status !== "active") return;
+  const ended = runs(store, workspaceId).filter((run) => run.automationId === id && (run.state === "done" || run.state === "failed")
+    && Date.parse(run.firedAt) >= Date.parse(automation.updatedAt));
+  const last = ended.slice(-AUTOMATION_PAUSE_AFTER_FAILURES);
+  if (last.length < AUTOMATION_PAUSE_AFTER_FAILURES || last.some((run) => run.state !== "failed")) return;
+  setAutomationStatus(store, workspaceId, id, "off");
+  const t = tFor(localeOf(store, workspaceId));
+  sayToPerson(store, workspaceId, t("自动化「{{name}}」连续 {{count}} 次没做成，已暂停，不再每次照跑。最近一次：{{reason}}。改好后在自动化页重新打开。",
+    { name: automation.name, count: AUTOMATION_PAUSE_AFTER_FAILURES, reason: last.at(-1)?.detail ?? "" }), "automation_failed", `automation-paused:${id}:${now.toISOString()}`,
+    [{ label: t("去自动化"), href: "/automation" }], now);
+}
+
 /** Starts one firing: the reminder said, or the assistant started with the instructions and what fired it. */
 export function fire(deps: AutomationDeps, workspaceId: string, automation: Automation, why: Fire, retry = false): AutomationRun {
   const now = deps.now?.() ?? new Date();
@@ -270,11 +298,21 @@ export function fire(deps: AutomationDeps, workspaceId: string, automation: Auto
   };
   const started = deps.runFree(workspaceId, input, (outcome) => {
     const at = deps.now?.() ?? new Date();
+    // A run that ended without making anything and says what it could not do did not do the job (walkthrough W-301: 「作品监测更新」
+    // reported 「执行工具无法启动」 twelve days running as 「跑完了」, and the self-check said 正常).
+    const madeNothing = outcome.state === "done" ? emptyRunReason(outcome) : undefined;
     // The run log said 「已开始」 for every run forever (2026-11-04): its entry now carries how the run ended.
-    const ended = outcome.state === "done" ? "done" as const : outcome.state === "blocked" || outcome.state === "failed" ? "failed" as const : undefined;
+    const ended = outcome.state === "done" && !madeNothing ? "done" as const
+      : outcome.state === "done" || outcome.state === "blocked" || outcome.state === "failed" ? "failed" as const : undefined;
+    const reason = (madeNothing ?? ("message" in outcome ? outcome.message ?? "" : "")).slice(0, 200);
     if (ended) deps.store.setSetting(workspaceId, AUTOMATION_RUNS_SETTING, JSON.stringify(runs(deps.store, workspaceId).map((run) => run.taskId === taskId
-      ? { ...run, state: ended, ...(ended === "failed" ? { detail: ("message" in outcome ? outcome.message ?? "" : "").slice(0, 120) } : {}) } : run)));
-    if (outcome.state === "done") {
+      ? { ...run, state: ended, ...(ended === "failed" ? { detail: reason.slice(0, 120) } : {}) } : run)));
+    if (outcome.state === "done" && madeNothing) {
+      const threadId = outcome.threadId;
+      if (threadId) update(deps.store, workspaceId, automation.id, (item) => ({ ...item, threadId }));
+      sayToPerson(deps.store, workspaceId, t("自动化「{{name}}」这次没做成：{{reason}}", { name: automation.name, reason }), "automation_failed", `automation-failed:${taskId}`,
+        [{ label: t("查看", { context: "view" }), href: "/automation" }], at);
+    } else if (outcome.state === "done") {
       // The conversation and what this run made, for the next firing to go on from.
       update(deps.store, workspaceId, automation.id, (item) => ({ ...item, ...(outcome.threadId ? { threadId: outcome.threadId } : {}),
         lastRun: { taskId, at: at.toISOString(), summary: outcome.summary.summary.slice(0, 600), directory: outcome.directory,
@@ -285,9 +323,10 @@ export function fire(deps: AutomationDeps, workspaceId: string, automation: Auto
       sayToPerson(deps.store, workspaceId, outcome.reviewRequired ? `${done}\n${t("有需要本人看的地方，在待确认里。")}` : done,
         "automation_done", `automation-done:${taskId}`, [...files, ...(outcome.reviewRequired ? [{ label: t("去待确认"), href: "/approvals#assistant" }] : [])], at);
     } else if (outcome.state === "blocked" || outcome.state === "failed") {
-      sayToPerson(deps.store, workspaceId, t("自动化「{{name}}」这次没跑完：{{reason}}", { name: automation.name, reason: (outcome.message || "").slice(0, 200) }), "automation_failed", `automation-failed:${taskId}`,
+      sayToPerson(deps.store, workspaceId, t("自动化「{{name}}」这次没跑完：{{reason}}", { name: automation.name, reason }), "automation_failed", `automation-failed:${taskId}`,
         [{ label: t("查看", { context: "view" }), href: "/automation" }], at);
     }
+    if (ended === "failed") pauseAfterFailures(deps.store, workspaceId, automation.id, at);
   });
   if (started.state === "started") {
     update(deps.store, workspaceId, automation.id, (item) => ({ ...item, lastFiredAt: now.toISOString(), runs: item.runs + 1 }));

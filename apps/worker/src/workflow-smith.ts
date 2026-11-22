@@ -1,6 +1,6 @@
 import { randomUUID, createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import {
   AGENT_CATEGORIES, GROW_AFTER_ACCEPTED, GROWN_SKILL_IDLE_DAYS, PUBLIC_SKILL_REVIEW_SCHEMA, accessProfileSlug, categoryFromWording, finalVerdict, grownSkillFilesKey, grownSkillId,
@@ -186,7 +186,28 @@ export function growTask(candidate: GrowCandidate, lineIds: string[], tools: Arr
   /* i18n-ignore-end */
 }
 
-/** Every text file of the skill the run wrote (`<task>/skill/`), within the limits a public skill has. */
+/**
+ * Whether `full` is a plain file of the run's own: not a link (symbolic or hard). The run's shell is sandboxed but the worker reading
+ * its folder afterwards is not, so a link the run made (to /proc/self/environ, the auth database, another account's files) would be
+ * read with the worker's rights (security review of 2026-11-21).
+ */
+function ownPlainFile(full: string): { size: number } | undefined {
+  const stat = lstatSync(full);
+  return stat.isFile() && stat.nlink === 1 ? { size: stat.size } : undefined;
+}
+
+/** A file the run left in its task directory, read only if it is a plain file inside that directory (see `ownPlainFile`). */
+export function readRunFile(directory: string, relative: string): string | undefined {
+  const full = path.join(directory, relative);
+  try {
+    if (!ownPlainFile(full)) return undefined;
+    const inside = path.relative(realpathSync.native(directory), realpathSync.native(full));
+    if (!inside || inside.startsWith("..") || path.isAbsolute(inside)) return undefined;
+    return readFileSync(full, "utf8");
+  } catch { return undefined; }
+}
+
+/** Every text file of the skill the run wrote (`<task>/skill/`), within the limits a public skill has. Links are never followed. */
 export function readSkillDir(root: string, t: (key: string) => string = tFor(undefined)): { files: Array<{ path: string; text: string }>; problem?: string } {
   const files: Array<{ path: string; text: string }> = [];
   let total = 0;
@@ -194,16 +215,21 @@ export function readSkillDir(root: string, t: (key: string) => string = tFor(und
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
       if (entry.isDirectory()) { const problem = walk(path.join(dir, entry.name), relative); if (problem) return problem; continue; }
-      if (!TEXT_FILE.test(relative)) continue;
-      const size = statSync(path.join(dir, entry.name)).size;
-      total += size;
+      if (!entry.isFile() || !TEXT_FILE.test(relative)) continue;
+      const plain = ownPlainFile(path.join(dir, entry.name));
+      if (!plain) continue;
+      total += plain.size;
       if (files.length >= MAX_FILES || total > MAX_TOTAL_BYTES) return t("工作流文件过多或过大");
       files.push({ path: relative, text: readFileSync(path.join(dir, entry.name), "utf8") });
     }
     return undefined;
   };
-  try { const problem = walk(root, ""); return problem ? { files, problem } : { files }; }
-  catch { return { files, problem: t("没有写出 skill/ 文件夹") }; }
+  try {
+    // `skill/` itself replaced by a link would make readdirSync list wherever it points.
+    if (!lstatSync(root).isDirectory()) throw new Error("not a folder");
+    const problem = walk(root, "");
+    return problem ? { files, problem } : { files };
+  } catch { return { files, problem: t("没有写出 skill/ 文件夹") }; }
 }
 
 /**

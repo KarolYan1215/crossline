@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   WORKFLOW_FEEDBACK_EVENT, classifyAgentFailure, finalVerdict, grownSkillFilesKey, grownSkillName, scanForDeclaredAccess, scanSkillFiles, skillFrontmatter, validateWorkflowManifest,
@@ -11,7 +11,7 @@ import type { AgentOutcome, AgentTaskInput } from "./agent-task";
 import { identityLines } from "./lines";
 import { ownerOf } from "./owner";
 import { localeOf } from "./locale";
-import { readSkillDir, reviewWorkflow, sayToPerson, SKILL_CREATOR } from "./workflow-smith";
+import { readRunFile, readSkillDir, reviewWorkflow, sayToPerson, SKILL_CREATOR } from "./workflow-smith";
 
 /**
  * Crossline revises its own workflows (docs/skills-library.md 「工作流自我改进」, the owner's request of 2026-10-24: 「crossline 自己能够
@@ -149,8 +149,7 @@ export async function installRevision(store: CrosslineStore, workspaceId: string
   if (outcome.state !== "done") return reject(outcome.state === "failed" || outcome.state === "blocked" ? outcome.message || t("运行失败") : t("助手未获准做这类工作"));
   const read = readSkillDir(path.join(outcome.directory, "skill"), t);
   if (read.problem) {
-    let why = "";
-    try { why = readFileSync(path.join(outcome.directory, "NO_CHANGE.md"), "utf8").trim(); } catch { /* none written */ }
+    const why = readRunFile(outcome.directory, "NO_CHANGE.md")?.trim() ?? "";
     if (why) {
       // Answered without a change: the signals are settled until something new comes (`improvedAt`).
       store.appendEvent({ ownerId, workspaceId, idempotencyKey: `skill.grown.improve_skipped:${record.id}:${now.getTime()}`, type: "skill.grown.improve_skipped",
