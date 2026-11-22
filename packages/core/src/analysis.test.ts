@@ -276,9 +276,24 @@ test("asking someone for a fact: the system may draft the email but never send i
   const proposal = (part: string) => ({ ...validProposal, title: "询问 ECE 548 期中考查范围", intent: "向助教确认 ECE 548 期中考查范围", family: "preparation",
     estimate: { p25Minutes: 5, p50Minutes: 10, p85Minutes: 15, source: "llm_prior", observationCount: 0, confidence: "low" }, estimateBreakdown: [{ step: "检查并发送", minutes: 10 }],
     automationParts: [{ ...validProposal.automationParts[0], intent: part, quote: "问助教 ECE 548 期中考查范围" }],
-    humanCore: [{ ...validProposal.humanCore[0], intent: "检查草稿并发送", quote: "问助教 ECE 548 期中考查范围" }] });
+    humanCore: [{ ...validProposal.humanCore[0], intent: "检查草稿并发送", quote: "问助教 ECE 548 期中考查范围" }],
+    request: { kind: "ask_person", who: "助教", fact: "ECE 548 期中考查范围" } });
   expect(() => core.validateAnalysisProposal(proposal("起草给助教的邮件草稿"), ask)).not.toThrow();
   expect(() => core.validateAnalysisProposal(proposal("发送邮件给助教"), ask)).toThrow("ANALYSIS_INFO_REQUEST_SENT_BY_SYSTEM");
+  // Whether it is a request is the Skill's `request` (2026-11-22), kept on the proposal for the merge and the preparation level.
+  expect(core.validateAnalysisProposal(proposal("起草给助教的邮件草稿"), ask).request).toEqual({ kind: "ask_person", who: "助教", fact: "ECE 548 期中考查范围" });
+});
+
+test("needsPerson, category and graded are the model's; a needsPerson quote must be the work's own words; older answers carry none", () => {
+  const fields = { request: { kind: "none", who: "", fact: "" }, category: "read_research_organize", graded: false };
+  const named = core.validateAnalysisProposal({ ...structuredClone(validProposal), ...fields, needsPerson: { kind: "decision", quote: validProposal.humanCore[0]!.intent } }, analysisContext);
+  expect(named).toMatchObject({ needsPerson: { kind: "decision" }, category: "read_research_organize", graded: false });
+  expect(() => core.validateAnalysisProposal({ ...structuredClone(validProposal), ...fields, needsPerson: { kind: "access", quote: "登录券商账户" } }, analysisContext))
+    .toThrow("ANALYSIS_NEEDS_PERSON_INVALID");
+  expect(() => core.validateAnalysisProposal({ ...structuredClone(validProposal), ...fields, category: "cooking", needsPerson: { kind: "none", quote: "" } }, analysisContext))
+    .toThrow("ANALYSIS_SCHEMA_INVALID");
+  const legacy = core.validateAnalysisProposal(structuredClone(validProposal), analysisContext);
+  for (const key of ["request", "needsPerson", "category", "graded"]) expect(legacy, key).not.toHaveProperty(key);
 });
 
 test("a drill form the capture never named is cut from the proposal; the person's own words keep it (2026-11-10)", () => {

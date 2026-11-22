@@ -14,7 +14,8 @@ test("eligible proposals take effect with the system as approver and are told in
   store.saveWorkOrder(order("prep", "整理复习提纲", "preparation"));
   store.saveWorkOrder(order("deep", "写论文方法部分", "deep_work", "milestone"));
   store.saveWorkOrder(order("send", "把提纲发送给同学", "preparation"));
-  store.saveWorkOrder(order("pick", "选定首轮选题", "review", "high_risk"));
+  // Choosing is the person's call: the Skill that wrote it says so in `needsPerson` (2026-11-22).
+  store.saveWorkOrder({ ...order("pick", "选定首轮选题", "review", "high_risk"), payload: { family: "review", humanCore: [], needsPerson: { kind: "decision", quote: "选定首轮选题" } } });
   // Orders written in the same millisecond come back in either order; which ones took effect is what counts.
   // 「把提纲发送给同学」 takes effect too since 2026-11-11: the person sends it themselves (W-257).
   expect(autoApproveEligible(store, "w").sort()).toEqual(["deep", "prep", "send"]);

@@ -86,7 +86,7 @@ export function planWorkSplit(store: CrosslineStore, workspaceId: string, now = 
     const plan = plans.get(order.id);
     const open = (plan?.steps ?? []).filter((step) => step.status === "planned");
     if (!plan || !open.length) return { all: false };
-    const result = resplitOpenSteps(open, plan.questions, title, plan.steps, localeOf(store, workspaceId));
+    const result = resplitOpenSteps(open, plan.questions, plan.steps, localeOf(store, workspaceId));
     const split = result.changes.length ? { order, title, plan, ...result } : undefined;
     return { all: result.steps.length > 0 && result.steps.every((step) => step.executor === "agent"), ...(split ? { split } : {}) };
   };

@@ -1,6 +1,6 @@
 import "@crossline/i18n/catalog/worker";
 import { describe, expect, test } from "vitest";
-import { planAssistantTask, categoryFromWording } from "./agent-dispatch";
+import { planAssistantTask, categoryOf } from "./agent-dispatch";
 import { decideCommand, decideFileChange, decideMcpTool } from "./agent-guard";
 import { plainProject, type KnownProject } from "./belonging";
 import { deriveCapacity } from "./capacity";
@@ -68,8 +68,8 @@ describe("text built in English, unchanged in Chinese", () => {
     expect(decideFileChange(["C:\\elsewhere\\a.txt"], context).reason).toMatch(/^Only the task's own folder may be written; "C:\\elsewhere\\a.txt" is outside it/);
     expect(decideMcpTool("gmail", "send_message", "en").reason).toBe("send_message on \"gmail\" sends something out; only you can do that");
     const order = { id: "o", intent: "Choose the venue for the retreat", state: "approved", projectId: "p", payload: { family: "preparation" } };
-    expect(planAssistantTask(order, { projectIsCourse: false, locale: "en" })).toEqual({ fit: false, reason: "This step needs your own choice or decision, so it is not handed to the assistant whole." });
-    const split = { ...order, intent: "Prepare notes", payload: { automationParts: [{ intent: "Summarize the three papers into notes" }] } };
+    expect(planAssistantTask(order, { projectIsCourse: false, locale: "en" })).toEqual({ fit: false, reason: "Your core work, so it is not handed to the assistant whole." });
+    const split = { ...order, intent: "Prepare notes", payload: { automationParts: [{ intent: "Summarize the three papers into notes" }], category: "read_research_organize" } };
     expect(planAssistantTask(split, { projectIsCourse: false, locale: "en" })).toMatchObject({ category: "read_research_organize", why: "The description of the AI part points to \"Reading, research and organizing\"." });
   });
 
@@ -147,10 +147,9 @@ describe("heuristics read English as well as Chinese", () => {
   });
 
   test("dispatch, external actions and workflow steps", () => {
-    expect(categoryFromWording("Edit the vlog footage and add subtitles")).toBe("media_edit");
-    expect(categoryFromWording("剪辑视频")).toBe("media_edit");
-    expect(categoryFromWording("Debug the simulation script")).toBe("data_code_sim");
-    expect(categoryFromWording("Draft the email to the advisor")).toBe("draft_text");
+    // The category is the model's field now (2026-11-22), whatever the language; code only reads it.
+    expect(categoryOf({ category: "media_edit" })).toBe("media_edit");
+    expect(categoryOf({ category: "" })).toBeUndefined();
     expect(mentionsExternalAction("Send the invoice to the client")).toBe(true);
     expect(mentionsExternalAction("发送发票")).toBe(true);
     expect(mentionsExternalAction("Summarize the notes")).toBe(false);

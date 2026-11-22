@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { accessProfileSlug, categoryFromWording, grownSkillId, monthlyFromDays, scanForDeclaredAccess, reassignedSteps, scheduleLabel, stepLeavesMachine, validateAutomationPlan,
+import { accessProfileSlug, grownSkillId, monthlyFromDays, scanForDeclaredAccess, reassignedSteps, scheduleLabel, stepLeavesMachine, validateAutomationPlan,
   validateWorkflowManifest, workflowDue, type WorkflowManifest } from "./index";
 
 const manifest: WorkflowManifest = {
@@ -69,9 +69,7 @@ test("a scheduled workflow is due on its days after its time, once a day, and no
   expect(scheduleLabel(null)).toBe("按需");
 });
 
-test("editing words point at the new kind of work, and ids stay unique", () => {
-  expect(categoryFromWording("把这周的素材剪辑成一条 vlog")).toBe("media_edit");
-  expect(categoryFromWording("用 python 脚本画图")).toBe("data_code_sim");
+test("grown workflow ids stay unique", () => {
   expect(grownSkillId("Weekly Vlog Cut", ["flow-weekly-vlog-cut"])).toBe("flow-weekly-vlog-cut-2");
 });
 

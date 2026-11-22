@@ -120,12 +120,12 @@ describe("grounded, non-trivial plans", () => {
   it("each step carries who does it; the assistant never gets a send, and a step needing the person's data becomes a question", () => {
     const { plan: normalized, warnings } = normalizeStepPlan(plan([
       step("a", "gather", { title: "汇总三只基金的公开费率", owner: "person" }),
-      step("b", "gather", { title: "整理本学期已出成绩", owner: "person" }),
+      step("b", "gather", { title: "整理本学期已出成绩", owner: "ask" }),
       step("c", "draft", { title: "写出调仓理由", owner: "person" }),
       step("d", "submit", { title: "提交调仓指令", executor: "agent", owner: "assistant" })]));
     expect(normalized.steps.map((item) => [item.owner, item.executor, item.schedulable])).toEqual([
       ["assistant", "agent", false], ["ask", "agent", false], ["person", "human", true], ["person", "human", true]]);
-    expect(normalized.questions.map((question) => question.text)).toEqual(["「整理本学期已出成绩」要用到本人的已出成绩：上传文件或截图，或直接写在这里。"]);
+    expect(normalized.questions.map((question) => question.text)).toEqual(["「整理本学期已出成绩」需本人提供哪些信息？"]);
     expect(warnings.map((warning) => warning.code)).toEqual(expect.arrayContaining(["STEP_TRIVIAL_TO_AGENT", "STEP_OWNER_ASK", "STEP_OWNER_PERSON"]));
   });
   it("a step that only reviews the assistant's output is folded into the first core step's first move, at most ten minutes", () => {
@@ -185,17 +185,17 @@ describe("grounded, non-trivial plans", () => {
 });
 
 describe("the step type table (3A, 2026-10-22)", () => {
-  it("what a step produces decides who does it; the wording only forces the person", () => {
+  it("what a step produces decides who does it; a decide step and an act that leaves the machine are the person's", () => {
     const { plan: normalized } = normalizeStepPlan(plan([
       step("a", "read", { title: "摘要 L1–L4 讲义", product: "material" }),
       step("b", "read", { title: "读懂 L3 的耗尽区推导", product: "ability" }),
       step("c", "draft", { title: "起草给助教的邮件", product: "material" }),
       step("d", "summarize", { title: "总结第 3 章", executor: "agent", product: "material" }),
-      step("e", "compare", { title: "比较三家门店并选定一家", product: "material" }),
+      step("e", "decide", { title: "比较三家门店并选定一家", product: "material" }),
       step("f", "learn", { title: "学习 BJT 小信号", product: "material" as never })], "exam_prep"));
     expect(normalized.steps.map((item) => [item.title, item.owner, item.product])).toEqual([
       ["摘要 L1–L4 讲义", "assistant", "material"], ["读懂 L3 的耗尽区推导", "person", "ability"], ["起草给助教的邮件", "assistant", "material"],
-      ["总结第 3 章", "assistant", "material"], ["比较三家门店并选定一家", "person", "material"], ["学习 BJT 小信号", "person", "ability"]]);
+      ["总结第 3 章", "assistant", "material"], ["比较三家门店并选定一家", "person", "output"], ["学习 BJT 小信号", "person", "ability"]]);
   });
   it("the person's own choice for a kind of step holds, except where only the person may act", () => {
     const preferences = new Map<string, "person" | "assistant">([["read|material", "person"], ["submit|action", "assistant"]]);

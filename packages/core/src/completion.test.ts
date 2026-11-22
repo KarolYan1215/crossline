@@ -78,17 +78,13 @@ describe("the model's judgement of completion (owner's direction, 2026-10-15)", 
   });
 });
 
-test("a formal last step the person does (handing in, sending, publishing) is done when said, whatever the model judged (2026-11-11)", () => {
-  // The owner's rule: 「提交 ECE 548 作业 4」 is a formality the person reports done; 「完成 ECE 548 作业 4」 is the work itself. The first
-  // never waits for a later quality check, even when the model that wrote it asked for one.
+test("the model's judgement is final for a formal last step too: the formality rule lives in the Skills (2026-11-22)", () => {
+  // 「提交 ECE 548 作业 4」 is a formality by the owner's rule of 2026-11-11, but the Skill that writes the task says so (self_evident);
+  // a title regex no longer overrules what the model judged.
   const quality = { completion: { mode: "needs_assessment", reason: "quality", why: "质量难判断", question: "效果如何？", askAfterHours: 2 } };
-  for (const title of ["提交 ECE 548 作业 4", "发布小红书首轮科研内容", "把实验方案发送给导师", "Submit the ECE 548 homework 4"])
-    expect(completionRule(order(title, quality)), title).toMatchObject({ mode: "self_evident" });
-  // The work itself keeps the model's judgement, and so does something sent off to be judged (a score comes later).
-  expect(completionMode(order("撰写 sleep replay 论文初稿", quality))).toBe("needs_assessment");
-  expect(completionMode(order("完成并提交 ECE 548 作业 4", quality))).toBe("needs_assessment");
-  const pending = { completion: { mode: "needs_assessment", reason: "result_pending", why: "等录用", question: "录用了吗？", askAfterHours: 72 } };
-  expect(completionMode(order("提交论文到 DAC 投稿", pending))).toBe("needs_assessment");
+  expect(completionRule(order("提交 ECE 548 作业 4", quality))).toMatchObject({ mode: "needs_assessment", by: "model" });
+  const formal = { completion: { mode: "self_evident", reason: "", why: "交上即完成", question: "", askAfterHours: 0 } };
+  expect(completionRule(order("提交 ECE 548 作业 4", formal))).toMatchObject({ mode: "self_evident", by: "model" });
   // The person's own choice still wins.
-  expect(completionMode(order("提交 ECE 548 作业 4", { ...quality, completionMode: "needs_assessment" }))).toBe("needs_assessment");
+  expect(completionMode(order("提交 ECE 548 作业 4", { ...formal, completionMode: "needs_assessment" }))).toBe("needs_assessment");
 });

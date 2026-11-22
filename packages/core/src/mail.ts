@@ -90,9 +90,12 @@ export function appPasswordPage(address: string, locale?: Locale): AppPasswordPa
 /**
  * `opportunity`: an event, competition, programme or opening the person could sign up or apply for (docs/opportunity-agent.md §6).
  * `travel`: a booking confirmation (flight, train, hotel) of a future trip, read into `trip` with the mail's own sentence (§17.6 c).
+ * `reminder`: something the mail only asks the person to look at or check (an unusual charge, a payment received, a provider's notice),
+ * said once as a reminder and never planned as a task. The triage Skill judges it in any language (2026-11-22; it used to be a Chinese
+ * title-verb regex over `todo`).
  */
-export type MailTriageKind = "todo" | "date" | "event" | "reply" | "transaction" | "opportunity" | "travel" | "info" | "ignore";
-export const MAIL_TRIAGE_KIND_LABEL: Record<MailTriageKind | "needs_reply" | "known" | "unlisted", string> = { todo: "待办", date: "日期", event: "活动", reply: "回复了等待项", transaction: "记账",
+export type MailTriageKind = "todo" | "reminder" | "date" | "event" | "reply" | "transaction" | "opportunity" | "travel" | "info" | "ignore";
+export const MAIL_TRIAGE_KIND_LABEL: Record<MailTriageKind | "needs_reply" | "known" | "unlisted", string> = { todo: "待办", reminder: "提醒", date: "日期", event: "活动", reply: "回复了等待项", transaction: "记账",
   opportunity: "机会", travel: "行程", info: "知悉", ignore: "略过", needs_reply: "需要回复", known: "已在账本里", unlisted: "未列入" };
 /** Where a booking takes the person: city and country, the first and last day there, and the sentence of the mail that says so. */
 export type MailTrip = { city: string; country: string; from: string; to: string; quote: string };
@@ -119,7 +122,7 @@ export const MAIL_TRIAGE_SCHEMA = {
     items: { type: "array", maxItems: 40, items: { type: "object", additionalProperties: false,
       required: ["uid", "kind", "title", "waitingId", "why", "serves", "known", "courseStaff", "due", "money", "trip", "meet"], properties: {
       uid: { type: "integer", minimum: 1 },
-      kind: { type: "string", enum: ["todo", "date", "event", "reply", "transaction", "opportunity", "travel", "info", "ignore"] },
+      kind: { type: "string", enum: ["todo", "reminder", "date", "event", "reply", "transaction", "opportunity", "travel", "info", "ignore"] },
       title: { type: "string", maxLength: 140 },
       waitingId: { type: "string", maxLength: 128 },
       why: { type: "string", maxLength: 200 },
@@ -170,7 +173,7 @@ export function validateMailTriage(value: unknown, uids: number[], waitingIds: s
     if (!uids.includes(item.uid)) problems.push(`uid ${item.uid} 不是这次给出的邮件`);
     else if (seen.has(item.uid)) problems.push(`uid ${item.uid} 重复`);
     seen.add(item.uid);
-    if ((item.kind === "todo" || item.kind === "date") && !item.title.trim()) problems.push(`uid ${item.uid} 是${item.kind === "todo" ? "待办" : "日期"}却没有 title`);
+    if ((item.kind === "todo" || item.kind === "reminder" || item.kind === "date") && !item.title.trim()) problems.push(`uid ${item.uid} 是${MAIL_TRIAGE_KIND_LABEL[item.kind]}却没有 title`);
     if (item.kind === "reply" && item.waitingId && !waitingIds.includes(item.waitingId)) {
       problems.push(`uid ${item.uid} 的 waitingId「${item.waitingId}」不是正在等的事项（需要本人回复、不是在等的回信时 waitingId 留空）`);
     }
@@ -317,17 +320,7 @@ export function mailReplyQuiet(input: { clock: string; timerRunning: boolean; in
   return undefined;
 }
 
-/**
- * Mail to-dos that only ask to look at something (an unusual charge, a payment received, a provider's notice) are reminders, not work:
- * on the real account each became a task with an AI analysis, a step plan, a line it did not belong to and an assistant run that asked
- * for the transaction records (2026-10-27).
- */
-const CHECK_VERB = /^(核实|核查|核对|查看|确认|检查|留意)/u;
+/** The nudge a `reminder` mail becomes: said once, never planned (on the real account each check-a-notice mail had become a task, 2026-10-27). */
 export const MAIL_CHECK_NUDGE_KIND = "mail_check";
 
-/**
- * A to-do sorted out of mail whose name only asks to look at something (核实 / 核查 / 查看 / 确认 / 留意 …): a reminder, not work to plan.
- * Judged only on what came from mail, where a check is almost always reading a notice.
- */
-export const isMailReminderTitle = (title: string): boolean => CHECK_VERB.test(title.trim()) || /^了解|^关注/u.test(title.trim());
 

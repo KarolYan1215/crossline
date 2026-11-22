@@ -18,9 +18,9 @@ describe("自动交给 Agent: when a handed-over step may start", () => {
   });
 });
 
-const order = (over: Partial<DispatchableOrder> & { ai?: string[]; human?: string[] } = {}): DispatchableOrder => ({
+const order = (over: Partial<DispatchableOrder> & { ai?: string[]; human?: string[]; extra?: Record<string, unknown> } = {}): DispatchableOrder => ({
   id: "wo-1", intent: over.intent ?? "整理资料", state: "approved", projectId: "p",
-  payload: {
+  payload: { ...over.extra,
     automationParts: (over.ai ?? []).map((intent, i) => ({ id: `a${i}`, intent })),
     humanCore: (over.human ?? ["决定怎么用"]).map((intent, i) => ({ id: `h${i}`, intent })),
     materialContract: [{ description: "6T SRAM 原理图" }]
@@ -33,26 +33,22 @@ describe("what the assistant is handed", () => {
     expect(plan(order({ ai: [], intent: "推导第 3 章的状态方程" }))).toMatchObject({ fit: false, reason: expect.stringContaining("不整件交给助手") });
   });
 
-  // A step worked back from a milestone has no AI/human split, so on the real account nothing was ever handed over. What it produces
-  // decides now (docs/work-split.md): not its family, not its course's words.
-  test("a small internal errand with no split is handed over whole; sending, the person's own work and a choice are not", () => {
-    const step = (intent: string, family: string) => ({ ...order({ ai: [], human: [intent], intent }),
-      payload: { automationParts: [], humanCore: [{ id: "h", intent }], family, evidenceContract: [{ description: "版本与输入规范的摘录和链接" }] } });
-    const whole = plan(step("汇集 NeuroSim 输入规范与版本说明", "deep_work"));
-    expect(whole).toMatchObject({ fit: true, delegated: true, category: "data_code_sim", humanPart: "审阅产出，决定用不用" });
+  // A step worked back from a milestone has no AI/human split. Who does it is the owner on record (docs/work-split.md), and its kind is
+  // the Skill's `category` (2026-11-22): no longer guessed from its words.
+  test("a task with no split goes whole only when the assistant owns it; sending stays the person's whatever the record says", () => {
+    const step = (intent: string, extra: Record<string, unknown> = {}) => ({ ...order({ ai: [], human: [intent], intent }),
+      payload: { automationParts: [], humanCore: [{ id: "h", intent }], evidenceContract: [{ description: "版本与输入规范的摘录和链接" }], ...extra } });
+    // Written before owners: the person's, never handed over whole.
+    expect(plan(step("汇集 NeuroSim 输入规范与版本说明"))).toMatchObject({ fit: false });
+    const whole = plan(step("汇集 NeuroSim 输入规范与版本说明", { owner: "assistant", category: "data_code_sim" }));
+    expect(whole).toMatchObject({ fit: true, delegated: true, category: "data_code_sim" });
     expect(whole.fit && whole.what).toContain("版本与输入规范的摘录和链接");
     expect(whole.fit && whole.what).toContain("needsHuman");
-    expect(plan(step("给师兄发邮件要数据", "preparation"))).toMatchObject({ fit: false });
-    expect(plan(step("写完仿真并出图", "deep_work"))).toMatchObject({ fit: false });
-    expect(plan(step("判断要补哪些实验", "preparation"))).toMatchObject({ fit: false });
+    expect(plan(step("把仿真结果发送给师兄", { owner: "assistant" }))).toMatchObject({ fit: false });
     // Compiling a course's material is the assistant's; the note keeps it from making anything that could be handed in.
-    expect(plan(step("整理 ECE 548 期中考试复习提纲", "preparation"), true)).toMatchObject({ fit: true, graded: true, notes: expect.stringContaining("学习辅助") });
+    expect(plan(step("整理 ECE 548 期中考试复习提纲", { owner: "assistant", graded: true }))).toMatchObject({ fit: true, graded: true, notes: expect.stringContaining("学习辅助") });
     expect(plan(order({ ai: ["整理文献"] }))).toMatchObject({ fit: true, delegated: false });
-    // Choosing is the person's: a real run chose 「真实事项」 for them (and chose the app itself).
-    expect(plan(step("选定一项创始人正在处理的真实事项，记录使用前状态", "preparation"))).toMatchObject({ fit: false });
-    expect(plan(step("从素材库选出四个首轮选题", "review"))).toMatchObject({ fit: false });
   });
-
   test("owned work: the assistant's item goes whole, a question waits, the person's core task is never handed over whole", () => {
     const owned = (intent: string, owner: string, extra: Record<string, unknown> = {}) => ({ id: "x", intent, state: "approved", projectId: "p",
       payload: { owner, automationParts: [{ id: "a", intent }], humanCore: [], ...extra } });
@@ -79,18 +75,14 @@ describe("what the assistant is handed", () => {
 describe("the kind of work", () => {
   const category = (ai: string[]) => { const result = plan(order({ ai })); return result.fit ? result.category : "no fit"; };
 
-  test("the wording picks the kind", () => {
-    expect(category(["写脚本清洗测量数据并画图"])).toBe("data_code_sim");
-    expect(category(["阅读并摘要三篇文献，整理对照笔记"])).toBe("read_research_organize");
-    expect(category(["起草给师兄的邮件草稿"])).toBe("draft_text");
-    expect(category(["归档课程文件并重命名，会前备齐材料"])).toBe("files_calendar_prep");
+  test("the kind is the Skill's `category`; none, or one it does not know, leaves the choice to the person", () => {
+    const category = (value: unknown) => { const result = plan(order({ ai: ["写脚本清洗测量数据并画图"], extra: { category: value } })); return result.fit ? result.category : "no fit"; };
+    expect(category("data_code_sim")).toBe("data_code_sim");
+    expect(category("draft_text")).toBe("draft_text");
+    expect(category("")).toBeUndefined();
+    expect(category("anything_else")).toBeUndefined();
+    expect(category(undefined)).toBeUndefined();
   });
-
-  test("most matches wins, and wording that points nowhere leaves the choice to the person", () => {
-    expect(category(["阅读文献", "整理摘要", "总结笔记", "画图"])).toBe("read_research_organize");
-    expect(category(["推进这件事"])).toBeUndefined();
-  });
-
   test("every kind is a known kind", () => {
     expect(Object.keys(AGENT_CATEGORIES).every(isAgentCategory)).toBe(true);
     expect(isAgentCategory("anything_else")).toBe(false);
@@ -110,12 +102,13 @@ describe("graded coursework", () => {
     expect(result.fit && result.graded).toBe(false);
   });
 
-  test("studying for a course without graded work is not marked graded", () => {
-    const result = planAssistantTask(order({ ai: ["整理 SRAM 学习资料"], intent: "熟悉 Cadence 和 SRAM" }), { projectIsCourse: true });
+  test("the Skill's `graded` decides; an order written before it is read by its project", () => {
+    const result = planAssistantTask(order({ ai: ["整理 SRAM 学习资料"], intent: "熟悉 Cadence 和 SRAM", extra: { graded: false } }), { projectIsCourse: true });
     expect(result.fit && result.graded).toBe(false);
+    const marked = planAssistantTask(order({ ai: ["整理往年卷"], intent: "准备期中", extra: { graded: true } }), { projectIsCourse: false });
+    expect(marked.fit && marked.graded).toBe(true);
   });
 });
-
 test("a run the person stopped is final; one the runtime lost is tried again", async () => {
   const { prepStepRetried } = await import("./agent-dispatch");
   expect(prepStepRetried([{ status: "blocked", blockerCode: "AGENT_CANCELLED" }])).toBe(false);

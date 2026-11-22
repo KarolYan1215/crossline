@@ -1,4 +1,4 @@
-import { FAMILIARITY_SETTING, familiarityOf, familiarityOverride, taskPreparation, taskTitleOf, type Familiarity, type Preparation } from "@crossline/core";
+import { FAMILIARITY_SETTING, familiarityOf, familiarityOverride, orderInfoRequest, taskPreparation, taskTitleOf, type Familiarity, type Preparation } from "@crossline/core";
 import type { CrosslineStore, StoredProfileFact, StoredStepPlan } from "./index";
 
 /**
@@ -19,8 +19,8 @@ export function doneKinds(store: CrosslineStore, workspaceId: string, plans: rea
 export function preparationOf(order: { id: string; identityId: string; intent: string; payload?: unknown; projectId?: string; estimate: { p50Minutes: number } },
   plan: StoredStepPlan | undefined, done: ReadonlyMap<string, string>, familiarity?: Familiarity): Preparation {
   const doneBefore = plan ? done.get(`${order.identityId}|${plan.archetypeId}`) : undefined;
-  return taskPreparation({ title: taskTitleOf(order), intent: order.intent, p50Minutes: order.estimate.p50Minutes, ...(plan ? { archetypeId: plan.archetypeId } : {}) },
-    plan?.steps, { ...(doneBefore ? { doneBefore } : {}), ...(familiarity ? { familiarity: familiarity.level } : {}) });
+  return taskPreparation({ title: taskTitleOf(order), intent: order.intent, p50Minutes: order.estimate.p50Minutes, ...(plan ? { archetypeId: plan.archetypeId } : {}),
+    ...(orderInfoRequest(order) ? { infoRequest: true } : {}) }, plan?.steps, { ...(doneBefore ? { doneBefore } : {}), ...(familiarity ? { familiarity: familiarity.level } : {}) });
 }
 
 /** The lines' own settings, read here because `@crossline/db` does not depend on the identity packs (`LINE_SETTING` there). */

@@ -133,7 +133,8 @@ test("a missing input is recorded with who has it, and the milestone is split an
   expect(milestonesAwaitingBackplan(store, workspaceId, new Date("2026-10-06T12:00:00Z"))).toEqual(["m"]);
   const runtime = fakeRuntime([
     JSON.stringify({ steps: [], dateCandidates: [], blockers: [missingData] }),
-    JSON.stringify({ steps: [step({ id: "get", intent: "向师兄确认实测数据的位置和字段", sourceQuote: "实测数据还没有到", acquires: "m1", family: "deep_work" }),
+    JSON.stringify({ steps: [step({ id: "get", intent: "向师兄确认实测数据的位置和字段", sourceQuote: "实测数据还没有到", acquires: "m1", family: "deep_work",
+        request: { kind: "ask_person", who: "师兄", fact: "实测数据的位置和字段" } }),
       step({ id: "map", dependsOn: ["get"], family: "deep_work" })], dateCandidates: [], blockers: [] })
   ], "crossline:crossline-goal-backplanner");
   const result = await createGoalBackplanner(store, workspaceId, "C:\\repo", () => runtime.rpc, { rolling: true })("m");
@@ -201,7 +202,7 @@ test("rolling mode keeps the person's next core task and its preparation, propos
   store.saveMilestone({ id: "m", ownerId, workspaceId, identityId: "research", projectId: "p", title: "稳定推进实验", status: "approved", version: 1 });
   store.saveMilestoneAnchor({ workspaceId, milestoneId: "m", stage: 1, deadline: "2026-10-12", baseline: "", target: "", stakeholders: [],
     sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
-  const chain = [step({ id: "a1", intent: "汇集三篇对照论文的实验参数", owner: "person" }),
+  const chain = [step({ id: "a1", intent: "汇集三篇对照论文的实验参数", owner: "assistant" }),
     step({ id: "c1", dependsOn: ["a1"], family: "deep_work", owner: "person" }),
     step({ id: "a2", intent: "按已定参数跑基线仿真", dependsOn: ["c1"], owner: "assistant", prepares: "c2" }),
     step({ id: "c2", intent: "判断要补哪些实验", dependsOn: ["a2"], family: "deep_work", owner: "person" })];
@@ -212,7 +213,7 @@ test("rolling mode keeps the person's next core task and its preparation, propos
   const round = store.listWorkOrders(workspaceId);
   expect(round).toHaveLength(2);
   const core = round.find((order) => order.intent === "设计实验方案")!;
-  // The model called the gathering the person's; it is the assistant's, prepares the core task and stays off the person's board.
+  // The model's owner stands (2026-11-22): the gathering is the assistant's, prepares the core task and stays off the person's board.
   expect(round.find((order) => order.id !== core.id)!.payload).toMatchObject({ owner: "assistant", prepares: core.id, automationParts: [{ intent: "汇集三篇对照论文的实验参数" }], humanCore: [] });
   expect(core.payload).toMatchObject({ owner: "person", humanCore: [{ intent: "设计实验方案" }] });
   const now = new Date("2026-10-06T12:00:00Z");

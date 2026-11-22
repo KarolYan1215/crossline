@@ -17,7 +17,7 @@ const step = (id: string, title: string, executor: "human" | "agent" = "human") 
 const deps = (now = new Date("2026-10-15T15:00:00.000Z")) => ({ store, workspaceId: ws, cwd: ".", client: () => undefined,
   spend: async () => ({ mode: "normal" as const }) as never, paused: () => false, enterUsage: () => {}, now });
 
-test("rules: the same title merges, a numbered sibling or a milestone weeks apart never does, and a near title with a different deliverable is left to the reviewer", () => {
+test("rules: the same title merges, a milestone weeks apart never does, and every other near title is left to the reviewer (2026-11-22)", () => {
   const task = (id: string, title: string, intent = title, extra: Partial<MergeTask> = {}): MergeTask => ({ id, identityId: "research", projectId: "ece548",
     milestoneId: "mid1", title, intent, state: "approved", dueDate: "", milestoneDeadline: "2026-10-27", progress: 0, hasStepPlan: false, started: false, dependsOn: [], ...extra });
   const { groups, unsure } = planMerges([
@@ -26,10 +26,14 @@ test("rules: the same title merges, a numbered sibling or a milestone weeks apar
     task("outline", "整理 ECE 548 复习提纲", "在周末前整理前几章的复习提纲"),
     task("final", "汇集 ECE 548 复习材料", "汇集讲义与往年题", { milestoneId: "final", milestoneDeadline: "2026-12-17" })
   ]);
-  expect(groups).toEqual([expect.objectContaining({ kind: "duplicate", keep: "b", absorb: ["a"] })]);
-  expect(unsure.map((pair) => [pair.a, pair.b].sort().join("~"))).toEqual(expect.arrayContaining(["b~outline"]));
+  // Synonyms (汇集 / 整理) and numbers (作业 2 / 作业 3) are the reviewer's call now; code merges nothing here by itself.
+  expect(groups).toEqual([]);
+  expect(unsure.map((pair) => [pair.a, pair.b].sort().join("~"))).toEqual(expect.arrayContaining(["a~b", "b~outline", "hw2~hw3"]));
   // Serving milestones whose deadlines are over three weeks apart: apart, and not even put to the reviewer.
-  expect(unsure.some((pair) => [pair.a, pair.b].includes("final") || [pair.a, pair.b].includes("hw2"))).toBe(false);
+  expect(unsure.some((pair) => [pair.a, pair.b].includes("final"))).toBe(false);
+  // Identical titles are settled by code.
+  expect(planMerges([task("a", "汇集 ECE 548 复习材料"), task("b", "汇集 ECE 548 复习材料", "x", { progress: 0.5 })]).groups)
+    .toEqual([expect.objectContaining({ kind: "duplicate", keep: "b", absorb: ["a"] })]);
   expect(planMerges([task("b", "汇集 ECE 548 复习材料", "x"), task("final", "汇集 ECE 548 复习材料", "x", { milestoneId: "final", milestoneDeadline: "2026-12-17" })], new Set(["b|final"])).groups).toEqual([]);
   // The reviewer's yes merges a pair the rules left open.
   expect(planMerges([task("b", "汇集 ECE 548 复习材料", "汇集讲义"), task("outline", "整理 ECE 548 复习提纲", "在周末前整理前几章的复习提纲")], new Set(["outline|b"])).groups)
@@ -39,9 +43,10 @@ test("rules: the same title merges, a numbered sibling or a milestone weeks apar
 test("a standalone request becomes the first steps of the task it serves; the merge is said once a day and undoable", async () => {
   store = new CrosslineStore(":memory:");
   // Recorded as the person's (as orders the person kept doing themselves are): what is merged and folded is decided within one owner.
-  order("ask", "确认 ECE 548 期中考查范围", { payload: { owner: "person" } });
+  // The request is what the Skill that wrote it said (`payload.request`, 2026-11-22).
+  order("ask", "确认 ECE 548 期中考查范围", { payload: { owner: "person", request: { kind: "ask_person", who: "助教或任课老师", fact: "ECE 548 期中考查范围" } } });
   order("mat", "汇集 ECE 548 复习材料", { payload: { owner: "person" } });
-  order("mat2", "整理 ECE 548 复习材料", { payload: { dueDate: "2026-10-25", owner: "person" } });
+  order("mat2", "汇集 ECE 548 复习材料", { payload: { dueDate: "2026-10-25", owner: "person" } });
   order("hw2", "完成 ECE 555 作业 2", { projectId: "ece555", milestoneId: "hw" });
   order("hw3", "完成 ECE 555 作业 3", { projectId: "ece555", milestoneId: "hw" });
   store.saveStepPlan(ws, "mat", { archetypeId: "research_decision", quantity: { basis: "", amount: 0, unit: "" }, rationale: "",
@@ -74,17 +79,17 @@ test("the person's work is never merged with the assistant's or with a question,
   order("q", "确认 ECE 548 期中考查范围", { payload: { owner: "ask", question: "期中考到第几讲？" } });
   expect(await dedupePass(deps())).toEqual([]);
   expect(["prep", "mine", "q"].map((id) => store.getWorkOrder(ws, id)!.state)).toEqual(["approved", "approved", "approved"]);
-  // Orders written before owners are read by what they produce: a compiling task and a question are apart from the person's too.
+  // Orders written before owners are the person's (2026-11-22: their wording is no longer read to guess one).
   order("old-prep", "汇集 ECE 548 往年卷");
   order("old-q", "确认 ECE 548 期中考查范围");
   expect(Object.fromEntries(mergeTasks(store, ws).map((task) => [task.id, task.owner])))
-    .toEqual({ prep: "assistant", mine: "person", q: "ask", "old-prep": "assistant", "old-q": "ask" });
+    .toEqual({ prep: "assistant", mine: "person", q: "ask", "old-prep": "person", "old-q": "person" });
 });
 
 test("requests in one milestone with nothing else to serve become one email; a task under way is never absorbed", async () => {
   store = new CrosslineStore(":memory:");
-  order("req1", "确认课程项目要求", { projectId: "ece555", milestoneId: "proj" });
-  order("req2", "确认课程项目评分标准", { projectId: "ece555", milestoneId: "proj" });
+  order("req1", "确认课程项目要求", { projectId: "ece555", milestoneId: "proj", payload: { request: { kind: "ask_person", who: "", fact: "ECE 555 课程项目要求" } } });
+  order("req2", "确认课程项目评分标准", { projectId: "ece555", milestoneId: "proj", payload: { request: { kind: "ask_person", who: "", fact: "ECE 555 课程项目评分标准" } } });
   order("busy", "汇集 ECE 548 复习材料", { state: "active" });
   order("busy2", "汇集 ECE 548 复习材料", { state: "active" });
   const done = await dedupePass(deps());

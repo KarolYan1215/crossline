@@ -3,7 +3,7 @@ import { isAttending } from "./mail-events";
 import { tFor, type Locale } from "./i18n";
 import { ARCHETYPE_IDS, PRODUCT_OWNER, STEP_PRODUCTS, STEP_ROLES, archetypeById, isStepRole, productOf, type Archetype, type StepProduct, type StepRole } from "./archetypes";
 import { normalizeAiAssist } from "./ai-tools";
-import { INFO_REQUEST_PERSON_MINUTES, infoRequestTraits } from "./info-request";
+import { INFO_REQUEST_PERSON_MINUTES } from "./info-request";
 import { COMPLETION_FIELD, type ModelCompletion } from "./completion";
 import { WORK_OWNERS, workOwner, type WorkOwner } from "./work-owner";
 import { asksMethod, backedDrillForms, drillFormsIn, methodQuestion, screenDrillItems, stripDrillSentences } from "./drill-forms";
@@ -437,7 +437,7 @@ const ACCEPTS_OUTPUT = /^(?:验收|批准|审核|审阅|核验|核对|复核|定
 const JUDGES = /结论|科学|正确|边界|权限|规则|选定|决定|取舍|\b(?:conclusions?|correct\w*|scope|boundar\w*|permissions?|rules?|decide|choose|trade-?offs?)\b/i;
 
 export function assignStepOwners(steps: PlannedStep[], questions: StepQuestion[], warnings: StepWarning[],
-  options: { assistant?: boolean; /** The task's title: a step of graded homework touching its problems stays the person's. */ taskTitle?: string;
+  options: { assistant?: boolean;
     /** Steps (of a stored plan being judged again) that come right after, or wait on, the assistant's already-finished work. */
     afterAgent?: ReadonlySet<string>;
     /** `role|product` → the owner the person chose for that kind of step (4A); never over what only the person may do. */
@@ -447,6 +447,14 @@ export function assignStepOwners(steps: PlannedStep[], questions: StepQuestion[]
   const t = tFor(options.locale);
   const assistant = options.assistant !== false;
   const reviews = new Set<string>();
+  // A step the model made a question (`owner: ask`) carries the model's question (`neededBy` it); a plain one only when it wrote none.
+  const askFor = (step: PlannedStep) => {
+    if (questions.some((item) => item.neededBy === step.id)) return;
+    const question = t("「{{title}}」需本人提供哪些信息？", { title: step.title });
+    if (!questions.some((item) => item.text === question))
+      questions.push({ id: `q${questions.length + 1}`, text: question, why: t("「{{title}}」需要本人持有的信息，答完由助手接着做", { title: step.title }), options: [],
+        ask: true, neededBy: step.id, ifWrong: { waste: 0, harm: "quality", fixable: "before_step" } });
+  };
   for (const step of steps) {
     if (!assistant) {
       if (step.executor === "agent") {
@@ -458,33 +466,21 @@ export function assignStepOwners(steps: PlannedStep[], questions: StepQuestion[]
       if (step.role === "wait") step.firstAction = "";
       continue;
     }
-    // Asking someone for a fact: the assistant drafts the message, the person sends it — sending is an external act (info-request.ts).
-    const request = step.role === "prepare" || /草稿|起草|\bdraft/i.test(step.title) ? null : infoRequestTraits({ title: step.title, p50Minutes: step.estimate.p50Minutes }).request;
-    if (request?.kind === "ask_person" && step.executor !== "human") {
-      step.executor = "human";
-      step.schedulable = true;
-      step.owner = "person";
-      warnings.push({ code: "STEP_INFO_REQUEST_PERSON", detail: `「${step.title}」要向别人发出询问，改由本人检查草稿后发送` }); // i18n-ignore: a warning for the log and the reviewer
-      continue;
-    }
     // Handing over material only the person has: theirs, an upload rather than work.
     if (step.provides) { step.executor = "human"; step.owner = "person"; step.schedulable = false; continue; }
     if (step.role !== "wait" && step.product) {
       const product = productOf(step.role, step.product);
       step.product = product;
-      // The wording rules are a cross-check now: they can only force the person (acts, choices, graded answers, practice), fold a
-      // review, or turn the assistant's step into a question; the table decides the rest.
-      const verdict = workOwner({ title: step.title, owner: PRODUCT_OWNER[product], ...(options.taskTitle ? { taskTitle: options.taskTitle } : {}) }, options.locale);
-      const forced = ["external", "decision", "graded", "person_skill"].includes(verdict.code) && verdict.owner === "person";
-      if (!forced && step.executor !== "agent" && verdict.code === "review_only") { reviews.add(step.id); continue; }
+      // The model names the step's product (and with it the owner, `PRODUCT_OWNER`) and may turn the assistant's material into a
+      // question (`owner: ask`). Code keeps one floor: an act that leaves the machine is the person's (`workOwner`, 2026-11-22).
+      const verdict = workOwner({ title: step.title, owner: "assistant" }, options.locale);
+      const forced = verdict.code === "external";
       if (!forced && step.executor !== "agent" && ACCEPTS_OUTPUT.test(step.title) && !JUDGES.test(step.title) && product !== "ability"
         && (step.dependsOn.some((dep) => steps.find((other) => other.id === dep)?.executor === "agent")
           || steps[steps.indexOf(step) - 1]?.executor === "agent" || options.afterAgent?.has(step.id))) { reviews.add(step.id); continue; }
       const preferred = options.ownerPreferences?.get(`${step.role}|${product}`);
       const table = PRODUCT_OWNER[product];
-      const owner: WorkOwner = forced || step.role === "decide" ? "person" : preferred ?? (table === "assistant" && verdict.owner === "ask" ? "ask" : table);
-      if (!forced && !preferred && (verdict.code === "design" || verdict.code === "static_artifact") && verdict.owner !== table)
-        warnings.push({ code: "STEP_OWNER_TABLE", detail: `「${step.title}」按产出（${STEP_PRODUCTS[product]}）由${table === "person" ? "本人" : "助手"}做，措辞规则判为${verdict.owner === "person" ? "本人" : "助手"}` }); // i18n-ignore: a warning for the log and the reviewer
+      const owner: WorkOwner = forced || step.role === "decide" ? "person" : preferred ?? (table === "assistant" && step.owner === "ask" ? "ask" : table);
       const was = step.executor;
       step.executor = owner === "person" ? (was === "agent" ? "human" : was) : "agent";
       if (owner === "person" && was === "agent") {
@@ -492,17 +488,11 @@ export function assignStepOwners(steps: PlannedStep[], questions: StepQuestion[]
         warnings.push({ code: "STEP_OWNER_PERSON", detail: `「${step.title}」改由本人完成：${forced ? verdict.reason : preferred ? "本人选择这类步骤自己做" : `产出是${STEP_PRODUCTS[product]}`}` }); // i18n-ignore: a warning for the log and the reviewer
       } else if (owner !== "person" && was !== "agent") warnings.push({ code: owner === "ask" ? "STEP_OWNER_ASK" : "STEP_TRIVIAL_TO_AGENT",
         detail: `「${step.title}」${owner === "ask" ? "改为问本人一句后由助手完成" : preferred ? "按本人的选择交给助手" : "产出是材料，改由助手完成"}` }); // i18n-ignore
-      if (owner === "ask") {
-        const question = verdict.question ?? t("「{{title}}」需本人提供哪些信息？", { title: step.title });
-        if (!questions.some((item) => item.text === question))
-          questions.push({ id: `q${questions.length + 1}`, text: question, why: t("「{{title}}」需要本人持有的信息，答完由助手接着做", { title: step.title }), options: [],
-            ask: true, neededBy: step.id, ifWrong: { waste: 0, harm: "quality", fixable: "before_step" } });
-      }
+      if (owner === "ask") askFor(step);
       step.owner = owner;
     } else if (step.role !== "wait") {
       // `executor: "agent"` is the model's word that the assistant does it, whatever `owner` it also wrote; `ask` stays a question.
-      const verdict = workOwner({ title: step.title, owner: step.executor === "agent" && step.owner !== "ask" ? "assistant" : step.owner ?? "person",
-        ...(options.taskTitle ? { taskTitle: options.taskTitle } : {}) }, options.locale);
+      const verdict = workOwner({ title: step.title, owner: step.executor === "agent" && step.owner !== "ask" ? "assistant" : step.owner ?? "person" }, options.locale);
       // Approving what the assistant just made (「验收定义稿」「批准可交付版本」「核验版本基线包」): the step before it, or one it waits on,
       // is the assistant's, and the step only checks that output. The real account kept a dozen of these after the first rule, which
       // asked for 「助手」 in the title; a judgement (结论, 边界, 权限), a decision or graded work is not folded.
@@ -528,17 +518,12 @@ export function assignStepOwners(steps: PlannedStep[], questions: StepQuestion[]
         step.executor = "human";
         step.schedulable = true;
         warnings.push({ code: "STEP_OWNER_PERSON", detail: `「${step.title}」改由本人完成：${verdict.reason}` }); // i18n-ignore: a warning for the log and the reviewer
-      } else if (owner === "assistant" && verdict.code === "review_only" && step.executor !== "agent") {
-        reviews.add(step.id);
       } else if (owner === "assistant" && step.executor !== "agent") {
         step.executor = "agent";
         warnings.push({ code: "STEP_TRIVIAL_TO_AGENT", detail: `「${step.title}」是准备工作，改由助手完成` }); // i18n-ignore: a warning for the log and the reviewer
       } else if (owner === "ask") {
         step.executor = "agent";
-        const question = verdict.question ?? t("「{{title}}」需本人提供哪些信息？", { title: step.title });
-        if (!questions.some((item) => item.text === question))
-          questions.push({ id: `q${questions.length + 1}`, text: question, why: t("「{{title}}」需要本人持有的信息，答完由助手接着做", { title: step.title }), options: [],
-            ask: true, neededBy: step.id, ifWrong: { waste: 0, harm: "quality", fixable: "before_step" } });
+        askFor(step);
         warnings.push({ code: "STEP_OWNER_ASK", detail: `「${step.title}」改为问本人一句后由助手完成` }); // i18n-ignore: a warning for the log and the reviewer
       }
       step.owner = step.executor === "agent" ? (owner === "ask" ? "ask" : "assistant") : "person";
@@ -563,7 +548,7 @@ type StoredStepLike = Omit<PlannedStep, "role" | "covers" | "why"> & { role: str
  * a review-only step is folded into the next person's step. Done steps are not passed and not touched; a dependency on one is kept. The
  * shares are not normalized: the removed review's share moves to the step it folds into, so the task's progress is unchanged.
  */
-export function resplitOpenSteps(open: readonly StoredStepLike[], questions: readonly StepQuestion[], taskTitle?: string,
+export function resplitOpenSteps(open: readonly StoredStepLike[], questions: readonly StepQuestion[],
   /** The whole plan in its order (finished steps too), so a step approving what the assistant already made is still recognised. */
   plan: readonly Pick<StoredStepLike, "id" | "executor" | "dependsOn">[] = open, locale?: Locale):
   { steps: PlannedStep[]; questions: StepQuestion[]; changes: StepOwnerChange[] } {
@@ -577,7 +562,7 @@ export function resplitOpenSteps(open: readonly StoredStepLike[], questions: rea
   const order = plan.map((step) => step.id);
   const afterAgent = new Set(open.filter((step) => step.dependsOn.some((dep) => agentDone.has(dep))
     || agentDone.has(order[order.indexOf(step.id) - 1] ?? "")).map((step) => step.id));
-  const reviews = assignStepOwners(steps, asked, warnings, { ...(taskTitle ? { taskTitle } : {}), afterAgent, locale });
+  const reviews = assignStepOwners(steps, asked, warnings, { afterAgent, locale });
   const reviewed = steps.filter((step) => reviews.has(step.id)).map((step) => ({ id: step.id, title: step.title, executor: step.executor }));
   foldReviewSteps(steps, reviews, warnings, locale);
   const changes: StepOwnerChange[] = [];
@@ -648,7 +633,7 @@ export function stepPlanWarnings(plan: StepPlan, window: { notBefore?: string; d
   const warnings: StepWarning[] = [];
   for (const step of plan.steps) {
     // A request for a fact is a quarter of an hour by design (info-request.ts), not a step too short to schedule.
-    if (step.schedulable && step.estimate.p50Minutes < 15 && !(step.estimate.p50Minutes <= INFO_REQUEST_PERSON_MINUTES && infoRequestTraits({ title: step.title }).match)) warnings.push({ code: "STEP_TOO_SHORT", detail: `「${step.title}」只有 ${step.estimate.p50Minutes} 分钟，不足一个工作时段` }); // i18n-ignore
+    if (step.schedulable && step.estimate.p50Minutes < 15 && !(step.estimate.p50Minutes <= INFO_REQUEST_PERSON_MINUTES && step.role === "contact")) warnings.push({ code: "STEP_TOO_SHORT", detail: `「${step.title}」只有 ${step.estimate.p50Minutes} 分钟，不足一个工作时段` }); // i18n-ignore
     if (!archetype.roles.includes(step.role)) warnings.push({ code: "STEP_ROLE_OUTSIDE_ARCHETYPE", detail: `「${step.title}」的类型「${STEP_ROLES[step.role]}」不在「${archetype.label}」的常见步骤中` }); // i18n-ignore
     if (!step.doneCriterion) warnings.push({ code: "STEP_DONE_CRITERION_MISSING", detail: `「${step.title}」没有完成标准` }); // i18n-ignore
   }

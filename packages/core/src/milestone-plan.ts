@@ -73,8 +73,6 @@ export const MILESTONE_PLAN_SCHEMA = {
  * A title that describes keeping something going, or a mood, is not an event that either happened by the deadline or did not.
  * 「ECE 555 课程学习保持可完成状态」 passed every other check and says nothing anyone could verify on the day.
  */
-/** Things that are marked, so that finishing them is not the same as doing well in them. */
-const GRADED = /考试|期末|期中|小测|测验|作业|成绩|quiz|exam|midterm|final|homework|\bHW\b/i;
 const VAGUE_TITLE = /保持.*状态|可完成状态|稳定推进|[继持]续推进|维持|做好|跟上进度|不掉队/;
 /**
  * The same in a target, where a number is the way out: 「保持每周 3 条发布」 is a cadence, 「保持良好」 is not. Only the person's own
@@ -162,9 +160,6 @@ export function validateMilestonePlans(milestones: Proposed[], profile: ProfileF
     if (!kinds.some((kind) => kind === "count" || kind === "threshold" || kind === "artifact")) {
       refuse("MILESTONE_NOT_MEASURABLE", `${label} 的达成标准全是「判断」型。至少要有一条能用数字或「某个产出物存在」直接核对的标准（count / threshold / artifact）。`);
     }
-    if (GRADED.test(`${item.title} ${plan.target}`) && !kinds.includes("threshold")) {
-      refuse("MILESTONE_NOT_MEASURABLE", `${label} 是有分数的事（考试、小测、作业或项目），需要一条 threshold 型标准给出分数线，比如「成绩 ≥ 85 分」「平均正确率 ≥ 80%」。课程没有目标成绩时，先在 targetProposals 里提出一个，再按大纲里的评分占比从它倒推这一项的分数线（bareLine 和留了余量的 value）；其他部分的预计成绩写进 derivation 和 assumptions。`);
-    }
     // Every number is worked back from the result the person wants, and says how much room was left. 「≥ 85」 with nothing behind it is a
     // guess that looks like a standard; the derivation is what the person can check, and the margin is what absorbs a bad day.
     if (plan.outcome.trim().length < 4) refuse("MILESTONE_OUTCOME_UNSTATED", `${label} 没有写 plan.outcome：这些数字是为了哪个最终结果（比如「ECE 555 总评 A」）。先有结果，再倒推数字。`);
@@ -175,21 +170,6 @@ export function validateMilestonePlans(milestones: Proposed[], profile: ProfileF
     for (const measure of thresholds) {
       const problem = thresholdProblem(measure);
       if (problem) refuse("MILESTONE_NO_MARGIN", `${label} 的分数线：${problem}。从结果倒推出刚好够的最低线填 bareLine，再往安全的一边多留一些（至少 ${MARGIN_RATIO * 100}%）作为 value。`);
-    }
-    // A course's numbers are worked back from a target grade, and that target is on the record: the person's own, or the model's proposal from
-    // their long-term goals (stored as an unconfirmed fact they can change in one click). Either way the milestone has to cite it, so the
-    // derivation can be traced to the number the person can edit. A course with no target at all gets one proposed in this same answer.
-    const projectFacts = item.projectId ? profile.facts.filter((fact) => fact.projectId === item.projectId) : [];
-    if (item.projectId && isCourse(item.projectId, projectFacts, profile.dates, profile.undated)) {
-      const onRecord = projectFacts.find((fact) => fact.slot === "target_grade");
-      const proposed = proposals.find((entry) => entry.projectId === item.projectId);
-      if (!onRecord && !proposed) {
-        refuse("MILESTONE_TARGET_UNPROPOSED", `${label} 所在的课程还没有目标成绩。根据这个人的长期目标（科研方向、职业打算、各线优先级）在 targetProposals 里先提一个：projectId「${item.projectId}」、value（如「总评 A−（≥ 90）」）、why（为什么这个目标适合他）；他之后可以一键修改，分数线会跟着重算。`);
-      }
-      const targetId = onRecord?.id ?? profileFactId({ identityId: item.identityId, projectId: item.projectId, slot: "target_grade" });
-      if (thresholds.length && !plan.sourceFactIds.includes(targetId)) {
-        refuse("MILESTONE_TARGET_NOT_CITED", `${label} 的分数线是从目标成绩倒推的，sourceFactIds 里要有目标成绩那条事实「${targetId}」，outcome 就写这个目标。`);
-      }
     }
     if (!plan.sourceFactIds.length) refuse("MILESTONE_SOURCE_REQUIRED", `${label} 必须引用至少一条画像事实作为依据。`);
     for (const id of plan.sourceFactIds) {
@@ -210,28 +190,6 @@ export function validateMilestonePlans(milestones: Proposed[], profile: ProfileF
       refuse("MILESTONE_PREP_ONLY", `${label} 的标准全是「资料已就绪」类（汇集、整理、清单、样本包）。准备由助手做，不单独成为里程碑：把它并入一个有本人产出的里程碑（本人练习、写出、做出、交出或拿到结果），在那个里程碑的标准里写本人的结果。`);
     }
     keys.set(plan.key, { ...item, plan });
-  }
-
-  // A project whose own files give dates of several kinds — quizzes, homework, an exam, a project due date — is a chain of graded parts,
-  // not one event. A real run gave ECE 555 a single milestone, the final exam, with the five quizzes, four homeworks and project dropped.
-  const partOf = (kind: string) => kind === "quiz" ? "小测" : kind === "homework_out" || kind === "homework_due" ? "作业" : kind === "exam" ? "考试" : kind === "project_due" ? "项目" : "";
-  for (const project of profile.projects) {
-    const parts = new Map<string, number>();
-    for (const entry of profile.dates ?? []) {
-      const part = entry.project === project.id ? partOf(entry.kind) : "";
-      if (part && entry.date >= profile.today) parts.set(part, (parts.get(part) ?? 0) + 1);
-    }
-    // A part the file marks TBD still counts: a project worth a quarter of the grade does not vanish because its day is not announced.
-    for (const entry of profile.undated ?? []) {
-      const part = entry.project === project.id ? partOf(entry.kind) : "";
-      if (part) parts.set(part, (parts.get(part) ?? 0) + 1);
-    }
-    if (parts.size < 2) continue;
-    const have = [...keys.values()].filter((item) => item.projectId === project.id).length;
-    const need = Math.min(parts.size, MAX_CHAIN);
-    if (have < need) {
-      refuse("MILESTONE_COURSE_PARTS_MISSING", `项目「${project.name}」的文件里有 ${[...parts].map(([part, count]) => `${part} ${count} 个`).join("、")}，是一整个学期的几个有分数的部分；现在只有 ${have} 个里程碑，至少要 ${need} 个——每一类有分数的部分各一个（小测算一个，目标是平均分），按日期排成一条链，每个都带分数线。`);
-    }
   }
 
   // Several projects can share one line, and a line with four of them and one milestone chain served one of the four: a real
