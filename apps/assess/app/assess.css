@@ -83,8 +83,11 @@ h3.as-type-name{font-size:20px}
 .as-code{letter-spacing:.06em;font-weight:700;color:var(--muted)}
 .as-subtitle{font-size:15px;font-weight:700}
 .as-savable{display:grid;gap:10px;justify-items:center}
-.as-poster{margin:0;width:100%;max-width:540px;background:var(--group-tint);border:2px solid var(--ink)}
-.as-poster img{display:block;width:100%;height:auto;-webkit-touch-callout:default}
+.as-poster{position:relative;overflow:hidden;margin:0;width:100%;max-width:540px;background:var(--group-tint);border:2px solid var(--ink)}
+.as-poster img{position:relative;display:block;width:100%;height:auto;-webkit-touch-callout:default}
+.as-poster-wait{position:absolute;inset:0;display:grid;place-items:center}
+.as-poster-wait b{font-size:16px;color:var(--ink);animation:as-breathe 2.4s ease-in-out infinite}
+.as-poster-wait i{position:absolute;left:0;bottom:0;height:6px;width:40%;background:var(--group);animation:as-sweep 1.8s ease-in-out infinite}
 .as-block{display:grid;gap:10px;padding-top:16px;border-top:2px solid var(--ink)}
 .as-axes{margin:0;padding:0;list-style:none;display:grid;gap:12px}
 .as-dimensions{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
@@ -170,7 +173,7 @@ h3.as-type-name{font-size:20px}
   .as-main{padding-top:40px}
   .as-figure{width:140px;height:210px}
 }
-@media (prefers-reduced-motion:reduce){.as-progress i{transition:none}.as-figure-tile[data-waiting],.as-drawing-figure span,.as-drawing-figure i{animation:none}}
+@media (prefers-reduced-motion:reduce){.as-progress i{transition:none}.as-figure-tile[data-waiting],.as-drawing-figure span,.as-drawing-figure i,.as-poster-wait b,.as-poster-wait i{animation:none}}
 input::placeholder{color:var(--muted);opacity:1}
 
 /* The hosted beta's steps on the result page: a numbered list that reads on a 360 px phone. */

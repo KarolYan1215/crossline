@@ -16,6 +16,8 @@ export function SavableImage({ src, alt, width, height, downloadName, label, ext
   const named = inner(label ?? t("海报"));
   return <div className="as-savable">
     <figure className="as-poster">
+      {/* Under the image until it arrives: a poster nobody asked for before is drawn on request and can take a few seconds. */}
+      <span className="as-poster-wait" aria-hidden="true"><b>{t("海报生成中…")}</b><i /></span>
       {/* eslint-disable-next-line @next/next/no-img-element -- a plain image is what a long press can save */}
       <img src={src} alt={alt} width={width} height={height} />
     </figure>

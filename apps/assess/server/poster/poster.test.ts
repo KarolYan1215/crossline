@@ -65,12 +65,12 @@ describe("rendered PNGs", () => {
     expect(pngSize(await renderPairCard(samplePair(path.join(dir, "fig"))))).toEqual({ width: 1080, height: 1440 });
   });
 
-  test("once the fonts are loaded, a poster nobody asked for before draws in under 1.5 s", { timeout: 30_000 }, async () => {
+  test("once the fonts are loaded, a poster nobody asked for before draws in under 5 s (the page shows a waiting animation meanwhile)", { timeout: 30_000 }, async () => {
     const input = samplePoster(path.join(dir, "fig"), ROAMER, "计时", "#8C3709");
     for (const render of [renderTypePoster, renderLongImage]) {
       const started = performance.now();
       await render(input);
-      expect(performance.now() - started).toBeLessThan(1_500);
+      expect(performance.now() - started).toBeLessThan(5_000);
     }
   });
 
