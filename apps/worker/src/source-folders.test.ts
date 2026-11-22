@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import { SOURCE_FOLDERS_SETTING, folderPathProblem, readSourceFolders } from "@crossline/core";
 import { CrosslineStore } from "@crossline/db";
 import { fileURLToPath } from "node:url";
-import { addFolder, configureFolderReading, folderDocuments, folderReaderFor, listFolderEntries, previewFolder, readFolderFile, removeFolder, scanFolder, setFolderLines, setFolderRules, syncFolder } from "./source-folders";
+import { addFolder, configureFolderReading, folderDocuments, folderReaderFor, importScreenedFiles, listFolderEntries, previewFolder, readFolderFile, removeFolder, scanFolder, setFolderLines, setFolderRules, syncFolder } from "./source-folders";
 import { createFolderClassifier } from "./folder-classifier";
 import { fakeRuntime } from "./testing/fake-runtime";
 
@@ -182,6 +182,42 @@ test("on this computer a folder is listed, not imported; what is written there a
   put("week2/report.md", "my week 2 report");
   await syncFolder(store, workspaceId, folder, { ...deps(), onDemand: true });
   expect(names()).toEqual(["course/week2/report.md"]);
+});
+
+// D3 on a linked device (R2-B, 2026-11-22): the site cannot open a file later, so the list is screened there first and only what it keeps is read.
+test("a linked device sends only the list to be screened, reads in what the screening keeps, and never offers the rest again", async () => {
+  const old = new Date(Date.UTC(2026, 0, 1));
+  put("drafts/key.md", "OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwx");
+  for (const file of ["syllabus.md", "week1/notes.txt", "week1/slides.pptx", "drafts/key.md"]) utimesSync(path.join(root, "course", file), old, old);
+  const folder = await addCourse();
+  await syncFolder(store, workspaceId, folder, { ...deps(), onDemand: true });
+  const offered: Array<Array<{ path: string; size: number; modified: number }>> = [];
+  // Unreachable: nothing is read, nothing is marked, and the list is offered again on the next pass.
+  expect(await importScreenedFiles(store, workspaceId, { ...deps(), onDemand: true }, async () => undefined)).toBe(0);
+  expect(store.listSourceDocuments(workspaceId)).toEqual([]);
+  // The screening keeps the syllabus and the key file (as a model might): the key is still refused by code; a path never offered is ignored.
+  const read = await importScreenedFiles(store, workspaceId, { ...deps(), onDemand: true }, async (_folder, files) => {
+    offered.push(files);
+    return ["syllabus.md", "drafts/key.md", "../outside.md"];
+  });
+  expect(read).toBe(1);
+  expect(names()).toEqual(["course/syllabus.md"]);
+  // Only names, sizes and dates were offered, never content; the credential's name was offered (its content is what gives it away).
+  expect(offered[0]!.map((file) => file.path).sort()).toEqual(["drafts/key.md", "syllabus.md", "week1/notes.txt", "week1/slides.pptx"]);
+  expect(JSON.stringify(offered)).not.toContain("ECE 548");
+  // Not offered again.
+  expect(await importScreenedFiles(store, workspaceId, { ...deps(), onDemand: true }, async () => { throw new Error("asked again"); })).toBe(0);
+});
+
+test("without a model answer a linked device keeps the most recently changed listed files", async () => {
+  const old = new Date(Date.UTC(2026, 0, 1)), older = new Date(Date.UTC(2025, 0, 1));
+  utimesSync(path.join(root, "course", "syllabus.md"), old, old);
+  utimesSync(path.join(root, "course", "week1/notes.txt"), older, older);
+  utimesSync(path.join(root, "course", "week1/slides.pptx"), older, older);
+  const folder = await addCourse();
+  await syncFolder(store, workspaceId, folder, { ...deps(), onDemand: true });
+  expect(await importScreenedFiles(store, workspaceId, { ...deps(), onDemand: true }, async () => "unavailable")).toBe(2);
+  expect(names()).toEqual(["course/syllabus.md", "course/week1/notes.txt"]);
 });
 
 test("the interview opens a folder's file on demand: inside the folder only, never a credential, an excluded path or a private paper", async () => {

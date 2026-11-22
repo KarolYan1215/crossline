@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore, interviewChecklistFor, rateInsight, writeExtractState } from "@crossline/db";
-import { cardWordsHead, DISCLOSURE_PLACEHOLDER, LESSON_QUESTION, PROFILE_SECTIONS_SETTING, ONBOARDING_STAGES, PROFILE_FRAMEWORK, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
+import { cardWordsHead, documentsByRef, DISCLOSURE_PLACEHOLDER, LESSON_QUESTION, PROFILE_SECTIONS_SETTING, ONBOARDING_STAGES, PROFILE_FRAMEWORK, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
   type OnboardingProgress, type ProfileCard } from "@crossline/core";
 import { createOnboardingSessionRunner as createRunner, enqueueInterview, finishInterview, INSTRUCTIONS, interviewQueueKey, ONBOARDING_SKILL, readQueued, stageGuide,
   steerInterview } from "./onboarding-session";
@@ -591,6 +591,31 @@ test("a file read again since it was shown is shown to the dialogue again and ex
   // A later round names the file and reads it whole with `read_file` (2026-11-22).
   expect(dialogue(prompts)[2]).toContain("新文件 1 份：《Plan.txt》");
   expect(extraction(prompts).at(-1)).toContain(`[${latest.id}] Week-8: 28th Oct.`);
+});
+
+// R2-B (2026-11-22): a folder file the model opens with `read_folder_file` becomes a stored document during the turn; the next turn used
+// to announce it as 「新文件」 although the model had just read it. The same holds for any file it opened with `read_file`.
+test("a file the model opened itself with a read tool during a turn is not announced as new on the next turn", async () => {
+  let turns = 0;
+  const answers: Array<Record<string, unknown>> = [];
+  const made = fakeRuntime([turn({ questions: [] }), turn({ questions: [] }), turn({ questions: [] })], {
+    script: async ({ threadId, ask }) => {
+      const dialogueThreads = made.threadStarts().flatMap((params, index) =>
+        (params.dynamicTools as Array<{ name: string }> | undefined)?.some((tool) => tool.name === "read_file") ? [`thread-${index + 1}`] : []);
+      if (!dialogueThreads.includes(threadId) || (turns += 1) !== 2) return;
+      // What `read_folder_file` does: the file is read into the ledger while the turn runs, then shown to the model.
+      store.saveSourceDocument({ id: "d-folder", ownerId: "o", workspaceId, kind: "text", fileName: "Notes/Plan.txt", mediaType: "text/plain", sha256: "f", uri: "file:///f",
+        extractedText: "Week-8: 27th Oct.", extractionStatus: "done", createdAt: "2026-10-02T00:00:00.000Z" });
+      answers.push(await ask("item/tool/call", { callId: "read-1", tool: "read_file", arguments: { id: "d-folder" } }));
+    } });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => made.rpc);
+  await run({ sessionId: "s", text: "先聊聊" });
+  await run({ sessionId: "s", text: "看看我的文件夹" });
+  expect(answers[0]).toMatchObject({ success: true });
+  await run({ sessionId: "s", text: "继续" });
+  expect(dialogue(made.rawPrompts).at(-1)).not.toContain("新文件");
+  const ref = [...documentsByRef(store.listSourceDocuments(workspaceId))].find(([, doc]) => doc.fileName === "Notes/Plan.txt")![0];
+  expect((store.getOnboardingSession(workspaceId, "s")!.coverage as { announcedSources?: string[] }).announcedSources).toContain(ref);
 });
 
 test("a re-read still accepts the numbers of files an earlier turn of the thread showed", async () => {

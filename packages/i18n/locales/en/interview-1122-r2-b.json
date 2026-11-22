@@ -1,0 +1,7 @@
+{
+  "# AI 对话摘要：{{file}}": "# AI conversation summaries: {{file}}",
+  "每段对话一条摘要。本人逐字说的话在原件 {{ref}} 里，需要引用时用 read_file 读原件。": "One summary per conversation. The person's own words are in the original, {{ref}}; read it with read_file when a quote is needed.",
+  "（没有写出摘要，原件里有这段对话）": "(No summary was written; the conversation is in the original.)",
+  "{{file}}（对话摘要）.md": "{{file}} (conversation summaries).md",
+  "AI 对话记录的逐段摘要，原件仍保留": "Per-conversation summaries of an AI conversation export; the original is kept"
+}

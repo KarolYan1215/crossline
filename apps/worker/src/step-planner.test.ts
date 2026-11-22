@@ -242,27 +242,25 @@ test("an asked question still open on the day its step starts is settled as its 
 });
 
 // The real account, 2026-10-15: 「作业 3 题面及题目数」「作业提交方式」「协作与 AI 使用规则」 were put to the person for graded homework whose
-// course files were on record. What the files settle is read from them; only what changes the plan stays a question.
-test("questions the files answer become assumptions; an asked one the files do not settle still goes to the person", async () => {
+// course files were on record. Since 2026-11-22 what the files settle is the planner's call (`ask` false), not a word list in code: a
+// question it does not mark worth asking is settled as its assumption; one it does mark goes to the person, files or not.
+test("old questions: the planner's `ask` decides, whatever the question's wording and whatever files are on record", async () => {
   const { stepAnswerSlot } = await import("@crossline/core");
   const { settleOldQuestions } = await import("./step-planner");
   const store = new CrosslineStore(":memory:");
   seed(store);
   store.saveWorkOrder({ id: "hw", ownerId, workspaceId, identityId: "research", projectId: "ece555", milestoneId: "", intent: "作业 3", state: "approved", riskTier: "routine",
     estimate: { p25Minutes: 60, p50Minutes: 120, p85Minutes: 240, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: { datePair: { due: "2026-10-20" } } });
-  const questions = [{ id: "q1", text: "作业 3 题面及题目数？", why: "", options: ["5 题", "6 题"], ask: true },
-    { id: "q2", text: "协作与 AI 使用规则？", why: "", options: [], ask: true },
+  const questions = [{ id: "q1", text: "作业 3 题面及题目数？", why: "", options: ["5 题", "6 题"], ask: false },
+    { id: "q2", text: "协作与 AI 使用规则？", why: "", options: ["可以用 AI"], ask: true },
     { id: "q3", text: "当前完成状态？", why: "", options: ["未开始", "做了一半"], ask: true }];
   store.saveStepPlan(workspaceId, "hw", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "", questions, steps: [step("a", "solve")] }, ownerId, "t");
-  // No file for the course yet: nothing can be read, nothing is assumed.
-  settleOldQuestions(store, workspaceId);
-  expect(store.listProfileFacts(workspaceId).some((fact) => fact.slot === stepAnswerSlot("作业 3 题面及题目数？"))).toBe(false);
   store.saveSourceDocument({ id: "syl", ownerId, workspaceId, kind: "text", fileName: "ECE555 syllabus.pdf", mediaType: "text/plain", sha256: "s", uri: "file://s",
     extractedText: "Homework policy", extractionStatus: "done", projectId: "ece555", createdAt: "2026-10-01T00:00:00Z" } as never);
   expect(settleOldQuestions(store, workspaceId)).toContain("hw");
   const facts = new Map(store.listProfileFacts(workspaceId).map((fact) => [fact.slot, fact.value]));
-  expect(facts.get(stepAnswerSlot("作业 3 题面及题目数？"))).toBe("假设：【作业 3 题面及题目数？】以任务材料为准；材料未写明时按「5 题」");
-  expect(facts.get(stepAnswerSlot("协作与 AI 使用规则？"))).toBe("假设：【协作与 AI 使用规则？】以任务材料为准");
+  expect(facts.get(stepAnswerSlot("作业 3 题面及题目数？"))).toBe("假设：【作业 3 题面及题目数？】5 题");
+  expect(facts.has(stepAnswerSlot("协作与 AI 使用规则？"))).toBe(false);
   expect(facts.has(stepAnswerSlot("当前完成状态？"))).toBe(false);
   store.close();
 });

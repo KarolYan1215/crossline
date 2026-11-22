@@ -2,7 +2,7 @@ import { personProfileFor } from "./planning-profile";
 import { drillBackingFor } from "./drill-backing";
 import {
   ARCHETYPES, AVAILABILITY_PROPOSED_SETTING, aiToolBrief, stepTypesBrief, AVAILABILITY_SETTING, resolveAvailability, VALIDATION_REVIEW_SCHEMA, archetypeBrief, archetypeById, stepPlanSchema, goalSettingKey,
-  normalizeStepPlan, readableFromMaterial, STEP_ANSWER_SLOT, stepAnswerSlot, stepPlanWarnings, unverifiedUnits, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
+  normalizeStepPlan, STEP_ANSWER_SLOT, stepAnswerSlot, stepPlanWarnings, unverifiedUnits, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
   PROGRESS_ASSESSMENT_SCHEMA, validateProgressAssessment, type ProgressAssessment, type StepPlan, type StepWarning, type ValidationReview,
   FINER_SPLIT_FEEDBACK, FAMILIARITY_INSTRUCTIONS, FAMILIARITY_JUDGE, stepsNeedingFinerSplit, readModelCompletion, onPersonsBoard, preparesOf, type FinerSplit, type StepTrouble, type SuccessCriterion,
   assumedAnswer, questionNeededDay, taskTitleOf, carryOverSteps, remapFrozenSteps, parseFrozen, FROZEN_SETTING, MILESTONE_RISKS_SETTING, milestoneReadingOf, parseMilestoneRisks
@@ -477,10 +477,9 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     // wrong assumption costs and whether it is worth asking (`ask`). The rest are settled as their assumption at once. No per-task cap and
     // no importance rule any more (the cap of two and the weight-60 rule asked about the wrong things and hid the costly ones), and a
     // replan no longer assumes every new question: one already answered or settled has its slot fact and is not asked again; a new
-    // critical one is asked like any other. What the task's own files settle is read from them, never asked.
-    const readable = materialQuestions(store, workspaceId, order, normalized.questions);
-    assumeAnswers(store, workspaceId, order, readable, true);
-    assumeAnswers(store, workspaceId, order, normalized.questions.filter((question) => !readable.includes(question) && question.ask !== true));
+    // critical one is asked like any other. What the task's own files settle is the model's call too (`ask` false, the Skill's section 4):
+    // a word list in code used to pick such questions out by their wording (2026-11-22, removed).
+    assumeAnswers(store, workspaceId, order, normalized.questions.filter((question) => question.ask !== true));
     if (warnings.length) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
       idempotencyKey: `validation.warned:task_steps:${workOrderId}:${saved.version}`, type: "validation.warned", entityId: workOrderId,
       payload: { subject: "task_steps", version: saved.version, warnings, revised: Boolean(feedback) } });
@@ -489,8 +488,8 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
 }
 
 /**
- * Questions already stored are settled by the same rule as new ones (2026-11-20): one the files answer is read from them; one the model
- * did not mark worth asking — every question of a plan written before `ask` existed — is settled as its assumption. Runs on the task pass.
+ * Questions already stored are settled by the same rule as new ones (2026-11-20): one the model did not mark worth asking — every
+ * question of a plan written before `ask` existed — is settled as its assumption. Runs on the task pass.
  */
 export function settleOldQuestions(store: CrosslineStore, workspaceId: string): string[] {
   const orders = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order]));
@@ -498,10 +497,8 @@ export function settleOldQuestions(store: CrosslineStore, workspaceId: string): 
   for (const plan of store.listStepPlans(workspaceId)) {
     const order = orders.get(plan.workOrderId);
     if (!order || !plan.questions.length) continue;
-    const readable = materialQuestions(store, workspaceId, order, plan.questions);
-    const assumed = plan.questions.filter((question) => !readable.includes(question) && question.ask !== true);
-    const fresh = unanswered(store, workspaceId, order, [...readable, ...assumed]);
-    if (readable.length) assumeAnswers(store, workspaceId, order, readable, true);
+    const assumed = plan.questions.filter((question) => question.ask !== true);
+    const fresh = unanswered(store, workspaceId, order, assumed);
     if (assumed.length) assumeAnswers(store, workspaceId, order, assumed);
     if (fresh.length) settled.push(plan.workOrderId);
   }
@@ -544,25 +541,15 @@ function unanswered(store: CrosslineStore, workspaceId: string, order: { project
   return questions.filter((question) => !answered.has(stepAnswerSlot(question.text)));
 }
 
-/** The questions the task's own files answer (`readableFromMaterial`), when the task's project has files at all. */
-function materialQuestions(store: CrosslineStore, workspaceId: string, order: { projectId: string }, questions: StepPlan["questions"]): StepPlan["questions"] {
-  const readable = questions.filter((question) => readableFromMaterial(question.text));
-  return readable.length && order.projectId && store.listSourceDocuments(workspaceId).some((doc) => doc.projectId === order.projectId) ? readable : [];
-}
-
-/**
- * Records each question's assumption (`assume`, else its first option) under the question's answer slot: `假设：【question】option`. One
- * the files answer says so: the files rule, the option only where they say nothing.
- */
-function assumeAnswers(store: CrosslineStore, workspaceId: string, order: { identityId: string; projectId: string }, questions: StepPlan["questions"],
-  fromMaterial = false): void {
+/** Records each question's assumption (`assume`, else its first option) under the question's answer slot: `假设：【question】option`. */
+function assumeAnswers(store: CrosslineStore, workspaceId: string, order: { identityId: string; projectId: string }, questions: StepPlan["questions"]): void {
   const answered = new Set(store.listProfileFacts(workspaceId).filter((fact) => fact.slot.startsWith(STEP_ANSWER_SLOT)).map((fact) => `${fact.projectId}|${fact.slot}`));
   for (const question of questions) {
     const slot = stepAnswerSlot(question.text);
     const assumed = assumedAnswer(question);
-    if (answered.has(`${order.projectId}|${slot}`) || (!assumed && !fromMaterial)) continue;
+    if (answered.has(`${order.projectId}|${slot}`) || !assumed) continue;
     // i18n-ignore: the stored assumption form, read back by code and by the next plan
-    const value = fromMaterial ? `假设：【${question.text}】以任务材料为准${assumed ? `；材料未写明时按「${assumed}」` : ""}` : `假设：【${question.text}】${assumed}`;
+    const value = `假设：【${question.text}】${assumed}`;
     store.upsertProfileFact({ workspaceId, identityId: order.identityId, projectId: order.projectId, slot, value,
       status: "inferred", sourceRef: "", sourceQuote: "", updatedAt: new Date().toISOString() });
   }

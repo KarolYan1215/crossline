@@ -91,6 +91,7 @@ import { runScaleAnalysis, scaleAnalysisOwed } from "./scale-analysis";
 import { extractText, reextractForLayout } from "./extract";
 import { maskForModel, readSourceText, screenUploadedText } from "./source-intake";
 import { createVersionJudge } from "./source-versions";
+import { createChatDigester } from "./chat-digest";
 import { WHISPER_MODEL, createTranscriber, createWhisperEngine, modelsDirectory } from "./transcribe";
 import { recordingPass, recordingsOn, transcribeConcurrency } from "./recordings";
 import { createRecordingDigester, transcriptsAwaitingDigest } from "./recording-digest";
@@ -1380,6 +1381,9 @@ async function versionPass(workspaceId: string): Promise<void> {
     enterUsageWorkspace(workspaceId);
     const outcome = await createVersionJudge(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId), { dataDir })().catch(() => undefined);
     if (outcome && "superseded" in outcome && outcome.asked) console.info(JSON.stringify({ type: "sources.versions_judged", workspaceId, ...outcome }));
+    // AI conversation exports, one summary per conversation (chat-digest.ts, D14): the same Skill, the same intake budget.
+    const chats = await createChatDigester(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId), { dataDir })().catch(() => undefined);
+    if (chats && "notes" in chats && (chats.summarized || chats.notes)) console.info(JSON.stringify({ type: "sources.chats_digested", workspaceId, ...chats }));
   } finally { versioning.delete(workspaceId); }
 }
 

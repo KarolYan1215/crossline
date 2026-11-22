@@ -15,6 +15,8 @@ function setup(nextAction: "ask" | "ready_for_milestones" = "ask", projects = tr
   // The example board meets the start standard; these tests set it up themselves.
   vi.stubEnv("CROSSLINE_SEED_EXAMPLES", "");
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  // A line the person named: only those count for 「至少有一条主线」, not the built-in ones that stand in without them (R2-B).
+  store.setSetting(ws, "lines.v1", JSON.stringify([{ id: "research", label: "研究者", color: "research", goal: "", goals: [], createdAt: "2026-10-01" }]));
   // A project is a milestone for the start standard (D10, 2026-11-22): without them the account is not ready to start.
   for (const [id, name] of projects ? [["ece555", "ECE 555"], ["ece548", "ECE 548"]] as const : []) {
     store.saveProject({ id, ownerId: "o", workspaceId: ws, identityId: "research", name, summary: "", status: "active", createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z" });

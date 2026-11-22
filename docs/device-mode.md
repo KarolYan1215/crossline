@@ -28,7 +28,7 @@
 | 本机的事 | 怎么做 | 发给托管站 |
 | --- | --- | --- |
 | 屏幕活动、作息（长时间空闲）、键鼠节律 | 原有的活动读取器写进本机暂存账本，规则不变 | `POST /api/device/activity`：每天合计、按小时合计、长空闲段、键鼠刻钟合计、按类别的时段，和各项同意的状态 |
-| 授权文件夹 | 原有的文件夹读取，规则（排除、私密文件、凭据）不变 | `POST /api/device/sources`：每个文件的文字、文件名、原文件 sha256、所属文件夹；排除后发删除 |
+| 授权文件夹 | 授权时已有的文件只列清单，先把清单（相对路径、大小、日期，不含内容）发 `POST /api/device/folder-screen` 由托管站的模型筛（最多留 200 个），只读入留下的；之后新写的文件照常读入。规则（排除、私密文件、凭据）不变，在本机代码里执行（D3，2026-11-22） | `POST /api/device/sources`：每个文件的文字、文件名、原文件 sha256、所属文件夹；排除后发删除 |
 | 本机录音 | 本机 Whisper 转写 | `POST /api/device/recordings`：转写文字和录音的 sha256、时长 |
 | Codex/Claude Code 使用记录 | 原有的时间汇总 | 随活动一起发（只有汇总） |
 
@@ -102,6 +102,7 @@
 - `GET /api/device/hello`：设备令牌，确认连接。
 - `GET /api/device/snapshot`：设备令牌，本账号账本的镜像（见上一节）。GET，不在 CSRF 发现式测试的范围里。
 - `POST /api/device/activity`、`/api/device/sources`、`/api/device/recordings`：设备令牌，只接受上面说的形状，未知字段一律忽略；每小时最多 600 次。
+- `POST /api/device/folder-screen`：设备令牌，只收文件清单（路径、大小、日期），转给托管 worker 的文件夹筛选，答要留的路径；没有模型答复时答 `FOLDER_SCREEN_UNAVAILABLE`，设备改留最近改过的文件。
 
 本机：
 

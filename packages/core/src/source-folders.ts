@@ -7,7 +7,8 @@ import { tFor, type Locale } from "./i18n";
  * Folders the person authorized (docs/onboarding-v3.md 「文件夹授权」, decided 2026-10-14): walked recursively, skipping version control,
  * dependencies, caches and anything that looks like a secret, and kept up to date in the background. On the person's own computer an
  * authorized folder is not imported (D3, 2026-11-22): its readable files are listed and the interview opens the ones it needs; what is
- * written there afterwards is read as it arrives. A linked device still reads every file, since its server cannot open them later. A
+ * written there afterwards is read as it arrives. A linked device lists them the same way, has its site's model screen the list by name,
+ * size and date (`DEVICE_FOLDER_SCREEN_LIMIT`), and imports only what the screening keeps, since its server cannot open the rest later. A
  * file over 50 MB is recorded by name only. A folder belongs to one or more lines, proposed by a model and changeable by the person.
  */
 export const SOURCE_FOLDERS_SETTING = "sources.folders";
@@ -74,6 +75,8 @@ export type SourceFolder = {
 export type FolderIndexEntry = { size: number; mtimeMs: number; documentId: string; created?: boolean; sensitive?: string; flagged?: string; hard?: true;
   /** Seen and readable, not read: an on-demand folder's file nobody has opened yet (`documentId` is empty). */
   listed?: true;
+  /** On a linked device: a listed file the hosted screening (or, without it, the newest-first fallback) left out; not offered again. */
+  screened?: true;
   /**
    * A recording (docs/phone-recording.md), seen while 录音自动转写 was on: `queued` waits for the one transcription at a time, `done`
    * became the transcript `documentId` names, `silent` held no speech, `failed` says why in `note`. The audio itself is never copied.
@@ -362,6 +365,11 @@ export const FOLDER_LINES_SCHEMA = { type: "object", additionalProperties: false
  * format, size and date, the files worth reading for knowing the person and their work, at most `limit`.
  */
 export type FolderScreenAnswer = { keep: number[]; why: string };
+/**
+ * Files a linked device imports at most from what was in an authorized folder when it was authorized (D3): its site cannot open the rest
+ * later, so the screening keeps this many, most useful first; what is written there afterwards is read as it arrives.
+ */
+export const DEVICE_FOLDER_SCREEN_LIMIT = 200;
 export const FOLDER_SCREEN_SCHEMA = { type: "object", additionalProperties: false, required: ["keep", "why"], properties: {
   keep: { type: "array", maxItems: 1000, items: { type: "integer", minimum: 0 } }, why: { type: "string", maxLength: 300 } } } as const;
 /** Only indexes of files that were offered, each once, in the model's order, up to `limit`. */

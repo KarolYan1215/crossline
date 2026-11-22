@@ -355,7 +355,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // A phone recording's raw transcript is read through its digest (「… 摘要.md」, recording-digest.ts): all-day transcripts are mostly
     // talk the interview has no use for, and would take the whole reading budget.
     const transcripts = transcriptDocumentIds(store, workspaceId);
-    const unread = [...docs].filter(([id, doc]) => doc.extractionStatus === "done" && !announced.has(id) && !transcripts.has(id));
+    // `transcripts` holds document ids; `docs` is keyed by reference (`src-N`), so the row's own id is what is looked up.
+    const unread = [...docs].filter(([id, doc]) => doc.extractionStatus === "done" && !announced.has(id) && !transcripts.has(doc.id));
     const fresh = withinBudget(unread);
     const waiting = unread.length - fresh.length;
     // What the connected calendars hold in the coming week: sent on the first turn and again whenever it changed.
@@ -556,10 +557,11 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     };
     /* i18n-ignore-end */
     // With them, the read tools (P3): the ledger and the files in full, page by page, where the context shows only part of them.
+    const readTools = interviewReadTools(store, workspaceId, sessionId);
     const tools = mergeTools(mergeTools(cardTools({ schemas: { question: itemSchema("questions"), insight: itemSchema("insights"), research: itemSchema("research"), round: roundSchema },
       ids: () => ids, draft: () => draft,
       check: (next) => deskCheck({ reply: "", coverage: [], nextAction: "ask", stage: stageNow, safety: false, ...next } as unknown as OnboardingDialogue).problems }),
-    interviewReadTools(store, workspaceId, sessionId)), stateTool);
+    readTools), stateTool);
     const findings = () => researchNow().flatMap((item) => [item.conclusion ?? "", item.found ?? ""]).filter(Boolean);
     // Where a date in the reply may come from: what the person said, the research, the files, the facts on record (`inventedDates`).
     const givenTexts = () => [...messages.filter((message) => message.role === "user").map((message) => String((message.content as { text?: string }).text ?? "")),
@@ -851,13 +853,19 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         hypotheses: profile.hypotheses.map((item) => (keys.has(item.id) && !item.cardKey ? { ...item, cardKey: keys.get(item.id)! } : item)) }));
     }
     recordRound(store, workspaceId, sessionId, roundSeq, output.questions, new Date().toISOString());
+    // A file the model opened itself this turn (`read_file`, `read_folder_file`) counts as shown: the next turn does not announce it as
+    // new. One it had not been shown yet goes to the extraction as a shown file would (the next extraction run takes it).
+    // Shown files are kept by their reference (`src-N`); a folder file read on demand got its row during the turn, so it is looked up now.
+    const sentIds = new Set(sent.map(([id]) => id));
+    const openedNew = [...sourceIds(store.listSourceDocuments(workspaceId))].filter(([ref, doc]) => readTools.opened.has(doc.id) && !announcedNow.has(ref) && !sentIds.has(ref));
+    if (openedNew.length) queueExtractDocs(store, workspaceId, openedNew.map(([, doc]) => doc.id).filter((id) => !(extracted[id]! > 0)));
     // Saved over the session as it is now, so a stage the extraction never writes is not lost to the copy read at the start.
     const current = store.getOnboardingSession(workspaceId, sessionId) ?? session;
     store.saveOnboardingSession({
       ...current, ...(threadId ? { codexThreadId: threadId } : {}),
       state: output.nextAction === "ready_for_milestones" ? "complete" : "active",
       coverage: { ...current.coverage, coverage: output.coverage, ...(output.stage ? { stage: output.stage } : {}), ...(progress ? { progress } : {}),
-        announcedSources: [...announcedNow, ...sent.map(([id]) => id)], heardAt, ...(week.length ? { calendarSent: weekSent } : {}), lastRound: edits,
+        announcedSources: [...announcedNow, ...sentIds, ...openedNew.map(([ref]) => ref)], heardAt, ...(week.length ? { calendarSent: weekSent } : {}), lastRound: edits,
         ...(cardMode ? { cardTools: cardMode } : {}), ...(startMetRound !== null ? { startMetRound } : {}),
         ...(hidden.size ? { redacted: [...hidden] } : {}), ...(lessonAsked ? { lesson: "asked" as const } : lesson !== "unasked" ? { lesson } : {}),
         ...(guideNow ? { guide: stageNow } : {}) },

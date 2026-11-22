@@ -4,7 +4,7 @@ import { lstat, open, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
-  FOLDER_MAX_ENTRIES, FOLDER_MAX_FILES, RECORDING_SETTLE_MS, SOURCE_FOLDERS_SETTING, cleanFolderNames, cleanFolderRules, credentialName, credentialText, excludedByRules, folderFileAction, folderGroup, folderLabel,
+  DEVICE_FOLDER_SCREEN_LIMIT, FOLDER_MAX_ENTRIES, FOLDER_MAX_FILES, RECORDING_SETTLE_MS, SOURCE_FOLDERS_SETTING, cleanFolderNames, cleanFolderRules, credentialName, credentialText, excludedByRules, folderFileAction, folderGroup, folderLabel,
   folderPathProblem, readSourceFolders, redactSecrets, sensitiveName, sensitiveText, skipFolderDirectory, sourceFolderIndexSetting, sourceKindFor,
   type FolderIndexEntry, type SourceFolder, type SourceKind, tFor, type Locale
 } from "@crossline/core";
@@ -540,4 +540,39 @@ export async function readFolderFile(store: CrosslineStore, workspaceId: string,
   if (!entry.documentId) return { ok: false, message: t("这个文件的内容含{{what}}，不读。", { what: entry.sensitive ?? "" }) };
   const doc = store.listSourceDocuments(workspaceId).find((item) => item.id === entry.documentId);
   return doc ? { ok: true, doc } : { ok: false, message: t("读不到这个文件。") };
+}
+
+/** A listed file as the screening sees it: the relative path with `/`, its size and its modification time. */
+export type ListedFile = { path: string; size: number; modified: number };
+/**
+ * The site's answer for one folder's listed files: the paths it keeps, `"unavailable"` when it had no model answer (no model, quota), or
+ * undefined when it could not be reached (the files stay listed and are offered again on the next pass).
+ */
+export type ScreenListed = (folder: string, files: ListedFile[]) => Promise<string[] | "unavailable" | undefined>;
+
+/**
+ * A linked device's folders (D3, docs/plans/2026-11-22-interview-and-import-redesign.md §四.4): its site cannot open a file later, so what
+ * an authorized folder held when it was authorized is only listed (`syncFolder` with `onDemand`), the list — names, sizes and dates, never
+ * content — is screened by the site's model, and only the files it keeps are read in, through `readFolderFile` with every check the walk
+ * makes (inside the folder, nothing excluded, no credential, no private paper; keys in the text refuse the file). Without a model answer
+ * the most recently changed files are kept, as the page does for a folder picked in the browser. The rest are marked `screened` and not
+ * offered again. Answers how many files were read in.
+ */
+export async function importScreenedFiles(store: CrosslineStore, workspaceId: string, deps: FolderDeps, screen: ScreenListed): Promise<number> {
+  let read = 0;
+  for (const folder of list(store, workspaceId)) {
+    const files = Object.entries(readIndex(store, workspaceId, folder.id)).filter(([, entry]) => entry.listed && !entry.screened && !entry.documentId)
+      .map(([relative, entry]) => ({ path: slash(relative), size: entry.size, modified: entry.mtimeMs })).sort((a, b) => b.modified - a.modified);
+    if (!files.length) continue;
+    const answer = await screen(folder.label, files).catch(() => undefined);
+    if (!answer) continue;
+    const offered = new Set(files.map((file) => file.path));
+    const keep = (answer === "unavailable" ? files.map((file) => file.path) : answer.filter((item) => offered.has(item))).slice(0, DEVICE_FOLDER_SCREEN_LIMIT);
+    for (const relative of keep) if ((await readFolderFile(store, workspaceId, deps, folder.id, relative)).ok) read += 1;
+    // Read the index again: the reads above wrote it. What was offered and is still only listed was left out by the screening.
+    const index = readIndex(store, workspaceId, folder.id);
+    for (const [relative, entry] of Object.entries(index)) if (entry.listed && !entry.documentId && offered.has(slash(relative))) index[relative] = { ...entry, screened: true };
+    store.setSetting(workspaceId, sourceFolderIndexSetting(folder.id), JSON.stringify(index));
+  }
+  return read;
 }

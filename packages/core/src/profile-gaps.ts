@@ -461,14 +461,3 @@ export function answeredGapFacts(replyText: string, gaps: ProfileGap[]): GapAnsw
   }
   return out;
 }
-
-/**
- * A step plan's question the task's own material answers — the problem set and how many problems, how and where it is handed in, the
- * format and length, the rules on collaboration and AI, the grading rubric, the due time. When the task has files these are read from
- * them (by the assistant and the next plan), never asked; whatever the files do not say is assumed (the owner's decision, 2026-10-15:
- * 「作业 3 题面及题目数」「作业提交方式」「协作与 AI 使用规则」 were put to the person for a homework whose handout was on record).
- */
-const FROM_MATERIAL = /题面|题目|几道|题数|多少题|提交(方式|平台|渠道|格式|位置|地址)|怎么提交|如何提交|交到哪|格式要求|页数|字数|篇幅|协作(与|和)?.{0,6}规则|合作规则|AI.{0,4}(使用|规则|政策)|使用\s*AI|评分(标准|细则|方式)|rubric|截止(时间|日期)|几点截止|submission|handout|problem set|how many (problems|questions)|number of (problems|questions)|how (to|do i|should i) (submit|hand in|turn in)|where to (submit|hand in|turn in)|required format|format requirements|page (limit|count)|word (limit|count)|length limit|collaboration (policy|rules)|(ai|chatgpt|llm) (use|usage|policy|rules)|use of (ai|chatgpt)|grading (criteria|scheme|policy)|due (time|date)|what time .{0,20}\bdue\b/i;
-export function readableFromMaterial(questionText: string): boolean {
-  return FROM_MATERIAL.test(questionText);
-}
