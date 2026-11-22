@@ -15,7 +15,7 @@ Accept `{version: "crossline.calendar-lines.v2", lines, projects, files, facts, 
 - `facts`: what the person confirmed (`lineId`, `project`, `statement`): fixed meetings, courses taken, collaborators.
 - `events`: one entry per distinct title: `key`, `title`, `source` (`calendar` = their synced calendar, `file` = a date confirmed from their files), `count` (occurrences on the plan) and up to three `when` examples (date, weekday, time).
 
-Return raw JSON only: `{items: [{key, lineId, why, unclear}]}`, one item for every event, with its `key` copied exactly. Read everything before deciding: the title, its timing and recurrence, the projects, the files and the facts (a fact saying 「每周二组会」 places a Tuesday 「Meeting」; a weekly slot matching a hard line's class times belongs to that line).
+Return raw JSON only: `{items: [{key, lineId, why, unclear, rest, cancelled}]}`, one item for every event, with its `key` copied exactly. Read everything before deciding: the title, its timing and recurrence, the projects, the files and the facts (a fact saying 「每周二组会」 places a Tuesday 「Meeting」; a weekly slot matching a hard line's class times belongs to that line).
 
 ## Deciding
 
@@ -29,6 +29,20 @@ Return raw JSON only: `{items: [{key, lineId, why, unclear}]}`, one item for eve
 | 「Meeting」 every Tuesday 14:00, fact 「每周二下午固定组会」 on the 研究者 line | that line's id | 「事实记录每周二固定组会」 |
 | 「Dentist」 | "" | 「个人就医，不属于任何主线」 |
 | 「Hold」 once, no fact or file mentions it | "", unclear | 「标题未说明内容，也无相关记录」 |
+
+## Marks
+
+Two more answers per event, independent of its line. No word list in the app makes these calls any more; yours are the only ones.
+
+- `rest`: `true` when the event is rest rather than a commitment — a break, a meal, sleep, 「休息」「不排工作」「勿扰」, a block the person set to keep work off their evening. It still keeps work off those hours; it is only not counted as fixed schedule, and the evening wrap-up takes the working day as ending where it begins. A seminar, meeting or class held over a meal (「Lunch Seminar」「Dinner with advisor」) is attended, so `false`.
+- `cancelled`: `true` when the title says the organiser cancelled it (「Canceled: Group Meeting」「已取消：组会」). The plan then does not block that time for it. `false` otherwise.
+
+| Event | `rest` | `cancelled` |
+|---|---|---|
+| 「休息」 21:00–23:59 | true | false |
+| 「Lunch」 12:00–13:00 daily | true | false |
+| 「Lunch Seminar」 | false | false |
+| 「Canceled: ECE 555 Office Hours」 | false | true |
 
 - `why`: one short clause naming what decided it, or for an unclear one, what is missing.
 - Never invent a line id; never merge or split events.

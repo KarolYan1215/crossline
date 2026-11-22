@@ -578,7 +578,7 @@ export function readScoutFile(value: unknown, lineIds: string[]): ScoutFile {
       needsAccount: find.needsAccount === true, materials: (Array.isArray(find.materials) ? find.materials : []).map((m) => str(m, 120)).filter(Boolean),
       consents: (Array.isArray(find.consents) ? find.consents : []).map((c) => str(c, 300)).filter(Boolean), registrationUrl: str(find.registrationUrl), why: str(find.why, 300),
       classification: { type: str(find.type, 40), reason: str(find.reason, 160) || str(find.why, 160),
-        lines: claimed.length ? claimed : [{ lineId, confidence: 0.5, reason: str(find.why, 160), anchors: [] }] } }];
+        lines: claimed.length ? claimed : [{ lineId, confidence: 0.5, reason: str(find.why, 160), anchors: [] }], lowValue: find.lowValue === true } }];
   });
   const watches = (Array.isArray(raw.watches) ? raw.watches : []).slice(0, 6).flatMap((item): ScoutFile["watches"] => {
     const value = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;

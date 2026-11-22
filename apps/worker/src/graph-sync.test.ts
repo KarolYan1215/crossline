@@ -409,6 +409,9 @@ test("changing the declared time zone rereads unchanged events and updates their
 
 test("a cancelled meeting carried from before cancellations were dropped leaves quietly", async () => {
   seedPlan("draft", [imported("x", "Canceled: DEJA-VU Monthly Meeting", "12:00", "13:30")]);
+  // The calendar classifier marked it cancelled (2026-11-22); no title pattern decides it.
+  store.setSetting(WORKSPACE, "calendar.lines", JSON.stringify({ basis: "", entries: {
+    "canceled: deja-vu monthly meeting": { lineId: "", why: "", at: "", rest: false, cancelled: true } } }));
   const sync = createGraphSync(store, WORKSPACE, {
     sources: only([{ items: [event("b", "组会", "06:00", "07:00")], cursor: "delta-2" }]).sources, now: NOW, timeZone: "UTC"
   });

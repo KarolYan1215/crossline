@@ -18,7 +18,7 @@ test("unknown events are dropped; an unknown line is asked about, not refused; p
     { key: "a", lineId: "research", why: "组会", unclear: false }, { key: "b", lineId: "ghost", why: "", unclear: false },
     { key: "c", lineId: "", why: "个人事务", unclear: false }, { key: "d", lineId: "", why: "标题看不出", unclear: true },
     { key: "zzz", lineId: "research", why: "", unclear: false }, { key: "a", lineId: "media", why: "重复", unclear: false }] }, ["a", "b", "c", "d"], ["research", "media"]);
-  expect(result.items).toEqual([{ key: "a", lineId: "research", why: "组会", unclear: false }, { key: "b", lineId: "", why: "", unclear: true },
+  expect(result.items.map(({ rest: _rest, cancelled: _cancelled, ...item }) => item)).toEqual([{ key: "a", lineId: "research", why: "组会", unclear: false }, { key: "b", lineId: "", why: "", unclear: true },
     { key: "c", lineId: "", why: "个人事务", unclear: false }, { key: "d", lineId: "", why: "标题看不出", unclear: true }]);
   expect(calendarLinesBasis([{ id: "b", label: "创业者" }, { id: "a", label: "研究者" }])).toBe("a=研究者|b=创业者");
 });
@@ -36,8 +36,10 @@ test("a file date imported without its course is shown and filed with it, from i
   expect(taskTitleOf({ intent: "x", payload: { title: "完成 Crossline 介入" }, projectId: "crossline" })).toBe("完成 Crossline 介入");
 });
 
-test("a meeting the organiser cancelled is recognised by Outlook's title prefix", async () => {
+test("a meeting the organiser cancelled is the classifier's mark, not a title prefix", async () => {
   const { isCancelledEvent } = await import("./calendar-lines");
-  expect(["Canceled: DEJA-VU Monthly Meeting", "Cancelled: Lab sync", "已取消：组会"].every(isCancelledEvent)).toBe(true);
-  expect(isCancelledEvent("Cancellation policy review")).toBe(false);
+  const filing = { basis: "", entries: { "canceled: deja-vu monthly meeting": { lineId: "", why: "", at: "", rest: false, cancelled: true } } };
+  expect(isCancelledEvent(filing, "Canceled: DEJA-VU Monthly Meeting")).toBe(true);
+  // Unmarked, it is not dropped on the strength of its words.
+  expect(isCancelledEvent(filing, "Cancelled: Lab sync")).toBe(false);
 });

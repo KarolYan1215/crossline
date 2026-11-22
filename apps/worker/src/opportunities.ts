@@ -425,7 +425,7 @@ export async function runWatch(store: CrosslineStore, workspaceId: string, watch
 
 const watchBrief = (watch: StoredWatch) => ({ title: watch.title, line: watch.lineId, why: watch.why, judge: watch.judge, query: watch.query });
 /** The classifier's part of a read item (§18). */
-const rawOf = (item: ReadItem): Partial<RawClassification> => ({ type: item.type ?? "", reason: item.reason ?? "", lines: item.lines ?? [] });
+const rawOf = (item: ReadItem): Partial<RawClassification> => ({ type: item.type ?? "", reason: item.reason ?? "", lines: item.lines ?? [], lowValue: item.lowValue === true });
 
 /**
  * Pages handed to one reader call. One: a batch of six lost a page's place or start time to the others in the real-model run (D11 acceptance,

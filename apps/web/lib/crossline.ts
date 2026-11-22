@@ -73,7 +73,7 @@ const knownZones = new Set<string>();
 
 /** The key the weekly availability lives under. One settings row, not a new table. */
 export { AVAILABILITY_SETTING } from "@crossline/core";
-import { FIRST_DRAFTS_SETTING, firstDraftsState, STEP_ENERGY_CEILING, learnedEfficiency, type EfficiencySample, type StepRole, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, BYPRODUCT_LAG_DAYS, RELATION_KIND_LABEL, isCancelledEvent, resolveAvailability, hoursFromText, type AvailabilitySource, type PortraitReport } from "@crossline/core";
+import { FIRST_DRAFTS_SETTING, firstDraftsState, STEP_ENERGY_CEILING, learnedEfficiency, type EfficiencySample, type StepRole, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, BYPRODUCT_LAG_DAYS, RELATION_KIND_LABEL, CALENDAR_LINES, isCancelledEvent, resolveAvailability, type CalendarLines, hoursFromText, type AvailabilitySource, type PortraitReport } from "@crossline/core";
 import { statedShares, type UnplacedKind } from "./plan-stats";
 import { milestonesBeingBackplanned } from "./backplan-status";
 import { nearestDueProposal } from "./urgent-proposal";
@@ -1248,7 +1248,7 @@ export function netCapacity(ctx: AccessContext, horizonDays: number): { capacity
   const preferences = effectiveSchedulePreferences(ctx).preferences;
   const days = planDays(planToday(ctx), horizonDays);
   const committed = ((store.listPlanVersions(ctx.workspaceId)[0]?.payload as { blocks?: PersistedScheduleBlock[] } | undefined)
-    ?.blocks ?? []).filter((block) => block.day && !(block.id.startsWith("graph_calendar:") && isCancelledEvent(block.title)));
+    ?.blocks ?? []).filter((block) => block.day && !(block.id.startsWith("graph_calendar:") && isCancelledEvent(calendarMarks(ctx), block.title)));
   const signatures = new Map<string, Set<string>>();
   for (const block of committed.filter((item) => item.id.startsWith("graph_calendar:"))) {
     const weekday = new Date(`${block.day}T00:00:00Z`).getUTCDay();
@@ -1297,7 +1297,8 @@ function personEventBlocks(ctx: AccessContext, days: string[]): PersistedSchedul
  * on read like the schedule itself. A cancelled meeting still on the calendar (imported before cancellations were dropped) holds no time.
  */
 function committedBlocks(ctx: AccessContext, payload: unknown): PersistedScheduleBlock[] {
-  const blocks = [...((payload as { blocks?: PersistedScheduleBlock[] }).blocks ?? []).filter((block) => !(block.id.startsWith("graph_calendar:") && isCancelledEvent(block.title))),
+  const marks = calendarMarks(ctx);
+  const blocks = [...((payload as { blocks?: PersistedScheduleBlock[] }).blocks ?? []).filter((block) => !(block.id.startsWith("graph_calendar:") && isCancelledEvent(marks, block.title))),
     ...personEventBlocks(ctx, planDays(planToday(ctx)))];
   // Getting to an event at a physical place, and back, is busy time too (「路上」, `travelBlocks`).
   return [...blocks, ...travelBlocks(blocks, travelStateOf(ctx), localeFor(ctx))];
@@ -2203,9 +2204,21 @@ function milestoneTitleOf(ctx: AccessContext, milestoneId: string): string {
     () => new Map(getStore().listMilestones(ctx.workspaceId).map((milestone) => [milestone.id, milestone.title]))).get(milestoneId) ?? "";
 }
 function fixedBlocksOf(ctx: AccessContext): PersistedScheduleBlock[] {
-  return memoByLedger(getStore(), `fixed-blocks:${ctx.workspaceId}`, 60_000, () =>
-    ((getStore().listPlanVersions(ctx.workspaceId)[0]?.payload as { blocks?: PersistedScheduleBlock[] } | undefined)?.blocks ?? [])
-      .filter((block) => block.day && !(block.id.startsWith("graph_calendar:") && isCancelledEvent(block.title))));
+  return memoByLedger(getStore(), `fixed-blocks:${ctx.workspaceId}`, 60_000, () => {
+    const marks = calendarMarks(ctx);
+    return ((getStore().listPlanVersions(ctx.workspaceId)[0]?.payload as { blocks?: PersistedScheduleBlock[] } | undefined)?.blocks ?? [])
+      .filter((block) => block.day && !(block.id.startsWith("graph_calendar:") && isCancelledEvent(marks, block.title)));
+  });
+}
+
+/**
+ * The calendar classifier's marks by title (`rest`, `cancelled`; 2026-11-22), read from the stored filing whatever lines it was made
+ * against: unlike a line, a mark does not go stale when the lines change.
+ */
+export function calendarMarks(ctx: AccessContext): CalendarLines | null {
+  return memoByLedger(getStore(), `calendar-marks:${ctx.workspaceId}`, 5_000, () => {
+    try { return JSON.parse(getStore().getSetting(ctx.workspaceId, CALENDAR_LINES) ?? "null") as CalendarLines | null; } catch { return null; }
+  });
 }
 
 const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {

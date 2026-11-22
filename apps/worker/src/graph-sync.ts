@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { isCancelledEvent, realityChanges, syncWindowDays, tFor, toRealityBlock, type RealityBlock, type RealityChange } from "@crossline/core";
+import { CALENDAR_LINES, isCancelledEvent, realityChanges, syncWindowDays, tFor, toRealityBlock, type RealityBlock, type RealityChange, type CalendarLines } from "@crossline/core";
 import { localeOf } from "./locale";
 import { reconcileExternalItems, type ExternalItem, type GraphDeltaPage } from "@crossline/connectors";
 import type { CrosslineStore } from "@crossline/db";
@@ -187,7 +187,10 @@ export function createGraphSync(store: CrosslineStore, workspaceId: string, opti
     const carried = planReality(current.payload, today);
     // A meeting its organiser cancelled, carried from before cancellations were dropped at sync: the delta never mentions it again.
     // It was never a commitment, so it leaves quietly — no 「removed」 change.
-    const previous = carried.filter((block) => !isCancelledEvent(block.title));
+    // Which ones were cancelled is the calendar classifier's mark (2026-11-22), no longer a title pattern.
+    let marks: CalendarLines | null = null;
+    try { marks = JSON.parse(store.getSetting(workspaceId, CALENDAR_LINES) ?? "null") as CalendarLines | null; } catch { /* none */ }
+    const previous = carried.filter((block) => !isCancelledEvent(marks, block.title));
     /**
      * An incremental delta page lists what CHANGED. A block it does not mention is unchanged, not
      * gone — treating every page as the authoritative set wiped the whole plan on the second tick and

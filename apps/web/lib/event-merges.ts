@@ -3,7 +3,7 @@ import {
   EVENT_MERGES, FIXED_EVENTS, fixedEventBlocks, isCancelledEvent, mergeCandidates, mergeDecision, readMergeBook,
   type AccessContext, type FixedEvent, type MergeBook, type MergeCandidate, type MergeDecision, type MergeHow, type TimedItem
 } from "@crossline/core";
-import { getStore, planToday, plannerIdOfBlock, type PersistedScheduleBlock } from "./crossline";
+import { calendarMarks, getStore, planToday, plannerIdOfBlock, type PersistedScheduleBlock } from "./crossline";
 
 /**
  * Overlapping items that are the same thing (`packages/core/src/event-merge.ts`): the person's answers, the `event_merge` ask's pairs, and
@@ -49,8 +49,9 @@ export const daysFrom = (from: string, count: number) => Array.from({ length: co
 export function fixedTimedItems(ctx: AccessContext, now = new Date(), days = daysFrom(planToday(ctx, now), MERGE_LOOKAHEAD_DAYS)): TimedItem[] {
   const store = getStore();
   const wanted = new Set(days);
+  const marks = calendarMarks(ctx);
   const stored = ((store.listPlanVersions(ctx.workspaceId)[0]?.payload as { blocks?: BlockLike[] } | undefined)?.blocks ?? [])
-    .filter((block) => block.day && wanted.has(block.day) && !(block.id.startsWith("graph_calendar:") && isCancelledEvent(block.title)));
+    .filter((block) => block.day && wanted.has(block.day) && !(block.id.startsWith("graph_calendar:") && isCancelledEvent(marks, block.title)));
   let events: FixedEvent[] = [];
   try { events = JSON.parse(store.getSetting(ctx.workspaceId, FIXED_EVENTS) ?? "[]") as FixedEvent[]; } catch { /* none */ }
   return [...stored, ...fixedEventBlocks(events, days)].flatMap((block) => { const item = timedItemOf(block); return item && item.kind !== "work" ? [item] : []; });

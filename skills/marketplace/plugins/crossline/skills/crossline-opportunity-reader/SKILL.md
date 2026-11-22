@@ -41,3 +41,7 @@ Every human-readable field: Simplified Chinese, concise, standard academic or wo
 ## News and papers
 
 A page that announces something in the person's field (a release, a lab's or company's announcement, a policy change) is one record of type `news`; an arXiv entry or another paper's page (title, authors, abstract) is one record of type `paper`. Its title is the page's own, `organizer` the authors (first three, then 等) or the publisher, `deadlines` empty unless the page names one, `eligibility` empty. Anchor it only to milestones it bears on directly; a paper that only fits the line's long-term goal is tagged with low confidence, since it reaches the person only when it serves what they are working on now.
+
+## Low-value gatherings
+
+`lowValue` is your call, not a word list's: `true` for a gathering whose point is socialising — a mixer, coffee hour, dance, gala, happy hour, a mentor meet-and-greet — unless one of the given lines is about meeting people in that field (its goal or milestones say networking, recruiting, fundraising, finding co-founders or building a community). A competition, conference or programme with a social part is not one. Such a record is kept for the weekly review and never pushed. `false` for everything else.

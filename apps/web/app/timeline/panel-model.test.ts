@@ -21,8 +21,8 @@ describe("the day panel", () => {
 
   test("rest is not fixed schedule: an evening 「休息」 and lunch keep work off but are not counted (W-156)", () => {
     const day = [
-      item("event:rest", { kind: "calendar", title: "休息", day: "2026-10-29", start: "21:00", end: "23:59" }),
-      item("graph_calendar:lunch", { kind: "calendar", title: "Lunch", day: "2026-10-29", start: "12:00", end: "13:00" }),
+      item("event:rest", { kind: "calendar", title: "休息", day: "2026-10-29", start: "21:00", end: "23:59", rest: true }),
+      item("graph_calendar:lunch", { kind: "calendar", title: "Lunch", day: "2026-10-29", start: "12:00", end: "13:00", rest: true }),
       item("graph_calendar:class", { kind: "calendar", title: "ECE 548", day: "2026-10-29", start: "13:00", end: "14:15" }),
       item("graph_calendar:seminar", { kind: "calendar", title: "Lunch seminar", day: "2026-10-29", start: "14:15", end: "15:00" })
     ];

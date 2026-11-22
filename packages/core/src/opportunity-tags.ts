@@ -51,6 +51,11 @@ export type RawClassification = {
   type: string;
   reason: string;
   lines: Array<{ lineId: string; confidence: number; reason: string; anchors: string[] }>;
+  /**
+   * The model's call (2026-11-22, replacing the social word list): a gathering whose point is socialising that no line of the person's is
+   * about meeting people in that field. Optional for answers and fixtures written before it.
+   */
+  lowValue?: boolean | undefined;
 };
 
 /** Model-facing schema fragment, merged into the reader's item and the scout's file. */
@@ -59,9 +64,10 @@ export const CLASSIFICATION_PROPERTIES = {
   reason: { type: "string", maxLength: 160 },
   lines: { type: "array", maxItems: 4, items: { type: "object", additionalProperties: false, required: ["lineId", "confidence", "reason", "anchors"], properties: {
     lineId: { type: "string", maxLength: 80 }, confidence: { type: "number", minimum: 0, maximum: 1 }, reason: { type: "string", maxLength: 160 },
-    anchors: { type: "array", maxItems: 6, items: { type: "string", maxLength: 160 } } } } }
+    anchors: { type: "array", maxItems: 6, items: { type: "string", maxLength: 160 } } } } },
+  lowValue: { type: "boolean" }
 } as const;
-export const CLASSIFICATION_REQUIRED = ["type", "reason", "lines"] as const;
+export const CLASSIFICATION_REQUIRED = ["type", "reason", "lines", "lowValue"] as const;
 
 /* i18n-ignore-start: model-facing */
 export const CLASSIFICATION_INSTRUCTIONS = "Tag each item: type (competition, conference, internship, scholarship, program for a programme one applies to, "
@@ -70,7 +76,10 @@ export const CLASSIFICATION_INSTRUCTIONS = "Tag each item: type (competition, co
   + "apply for; paper for a new paper or preprint); reason, one sentence on why it is worth this person's time; lines, every given line it serves (none is valid), each with "
   + "a confidence from 0 to 1, a one-sentence reason and anchors: the ids of that line's milestones it moves, or \"goal\" for the long-term goal "
   + "itself. Be strict: a confidence of 0.6 or more means the person would want to hear about it for that line today. For news and a paper, anchor "
-  + "only to the milestones it bears on directly (what the person is working on now); the goal alone does not make it worth reading.";
+  + "only to the milestones it bears on directly (what the person is working on now); the goal alone does not make it worth reading. "
+  + "lowValue: true for a gathering whose point is socialising (a mixer, coffee hour, dance, gala, happy hour, a mentor meet-and-greet) unless one "
+  + "of the given lines is about meeting people in that field (its goal or milestones say networking, recruiting, fundraising, finding co-founders "
+  + "or building a community); a competition, conference or programme with a social part is not one. false otherwise.";
 /* i18n-ignore-end */
 
 /** A line as code judges relevance against it: its goal, its live milestones and its watches' words. */
@@ -151,15 +160,16 @@ export type Classified = { type: OpportunityType; reason: string; lines: Opportu
 /**
  * One find's classification, judged by code: unknown lines dropped, each claim's relevance computed, tags under `KEEP_RELEVANCE` left
  * out, the rest ranked. The line of the watch that found it is kept even when the model did not name it (at its computed relevance, so a
- * find the model thinks belongs elsewhere simply ranks low there). A social gathering not tied to a line whose goal is meeting people in
- * its field is marked `lowValue` (item 2).
+ * find the model thinks belongs elsewhere simply ranks low there). A social gathering the model marked `lowValue` (item 2; the model's
+ * call since 2026-11-22, the social and networking word lists are gone) is kept as `lowValue: "social"`.
  */
 export function classifyFind(raw: Partial<RawClassification> | undefined, input: { lines: LineBrief[]; title: string; organizer: string; pageText?: string;
   viaLine?: string | undefined; fallbackType?: OpportunityType | undefined }): Classified {
   const known = new Map(input.lines.map((line) => [line.id, line]));
   const type = (OPPORTUNITY_TYPES as readonly string[]).includes(raw?.type ?? "") ? raw!.type as OpportunityType : input.fallbackType ?? "other";
   const reason = (raw?.reason ?? "").trim().slice(0, 160);
-  const findText = findTextOf(input, `${reason}\n${(input.pageText ?? "").slice(0, 600)}`);
+  const findText = findTextOf(input, `${reason}
+${(input.pageText ?? "").slice(0, 600)}`);
   const claims = new Map<string, { confidence: number; reason: string; anchors: string[] }>();
   for (const claim of raw?.lines ?? []) {
     if (!claim || !known.has(claim.lineId) || claims.has(claim.lineId)) continue;
@@ -170,30 +180,8 @@ export function classifyFind(raw: Partial<RawClassification> | undefined, input:
     const judged = relevanceOf({ confidence: claim.confidence, anchors: claim.anchors, line: known.get(lineId)!, findText, viaLine: input.viaLine });
     return { lineId, confidence: round2(claim.confidence), relevance: judged.relevance, reason: claim.reason, anchors: judged.anchors };
   }).filter((tag) => tag.relevance >= KEEP_RELEVANCE).sort((a, b) => b.relevance - a.relevance || a.lineId.localeCompare(b.lineId));
-  const signs = socialSigns(`${input.title}\n${input.organizer}`).length > 0;
-  const final: OpportunityType = signs && !SOCIAL_KEEPS_TYPE.has(type) ? "social" : type;
-  const tied = lines.some((tag) => tag.relevance >= PUSH_RELEVANCE && networkingLine(known.get(tag.lineId)!));
-  return { type: final, reason, lines, ...(final === "social" && !tied ? { lowValue: "social" as const } : {}) };
+  return { type, reason, lines, ...(raw?.lowValue === true ? { lowValue: "social" as const } : {}) };
 }
-/** Types a social word in passing does not turn into a social gathering (a competition with a mixer is still a competition). */
-const SOCIAL_KEEPS_TYPE = new Set<OpportunityType>(["competition", "conference", "internship", "scholarship", "program", "job", "grant"]);
-
-// i18n-ignore-start: words matched against pages and goals, never shown
-const SOCIAL = [
-  /\b(?:formal|winter|spring|lunar new year|charity)?\s*(?:ball|gala|prom|dance party|semi-formal)\b/i,
-  /\bcoffee (?:hour|chat|social|break)\b/i, /\bhappy hour\b/i, /\bmixer\b/i, /\bmeet[- ]and[- ]greet\b/i, /\bsocial (?:night|hour|event|gathering)\b/i,
-  /\bnetworking (?:night|reception|social|event|hour)\b/i, /\b(?:wine|cheese|pizza|ice cream|boba|bubble tea) (?:night|social|party)\b/i,
-  /\btrivia night\b/i, /\bgame night\b/i, /\bpotluck\b/i, /\bpub (?:night|crawl)\b/i, /\bmentor(?:ship)? (?:mixer|meetup|social|coffee)\b/i,
-  /舞会/, /酒会/, /联谊/, /茶话会/, /咖啡时间/, /咖啡角/, /(?:导师|校友)(?:交流会|见面会|茶叙)/, /社交(?:之夜|活动|晚会|酒会)/, /见面会/, /派对/, /晚宴/
-];
-const NETWORKING = /network|人脉|社交|结识|connections|business development|\bbd\b|fundrais|融资|投资人|合伙人|co-?founder|招募|recruit|community|社群|圈子/i;
-// i18n-ignore-end
-/** Why a find reads as a low-value social gathering (舞会, coffee hour, mentor mixer, 社交酒会 …): the words that say so. */
-export function socialSigns(text: string): string[] {
-  return SOCIAL.flatMap((pattern) => { const match = pattern.exec(text); return match ? [match[0].trim()] : []; });
-}
-/** A line whose goal or milestones are about meeting people in its field: there a social gathering may be worth going to. */
-export const networkingLine = (line: LineBrief) => NETWORKING.test([line.goal, ...line.milestones.map((item) => item.title)].join("\n"));
 
 /** The tags as kept on a record (what the store and the card read). */
 export type TaggedOpportunity = Pick<Opportunity, "lineId"> & { lines?: OpportunityLineTag[] | undefined; type?: OpportunityType | undefined;
@@ -225,7 +213,6 @@ const TYPE_WORDS: Array<[OpportunityType, RegExp]> = [
 /** A record's type: its own, else read from its title and kind (rows read before tags existed). */
 export function opportunityTypeOf(row: Pick<Opportunity, "kind" | "title"> & { type?: OpportunityType | undefined }): OpportunityType {
   if (row.type) return row.type;
-  if (socialSigns(row.title).length) return "social";
   for (const [type, pattern] of TYPE_WORDS) if (pattern.test(row.title)) return type;
   return row.kind === "application" ? "program" : "event";
 }
