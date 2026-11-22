@@ -1,12 +1,12 @@
 import { clipWidth } from "./text-width";
-import { isAttending } from "./mail-events";
 import { tFor, type Locale } from "./i18n";
 import { ARCHETYPE_IDS, PRODUCT_OWNER, STEP_PRODUCTS, STEP_ROLES, archetypeById, isStepRole, productOf, type Archetype, type StepProduct, type StepRole } from "./archetypes";
 import { normalizeAiAssist } from "./ai-tools";
 import { INFO_REQUEST_PERSON_MINUTES, infoRequestTraits } from "./info-request";
 import { COMPLETION_FIELD, type ModelCompletion } from "./completion";
 import { WORK_OWNERS, workOwner, type WorkOwner } from "./work-owner";
-import { asksMethod, backedDrillForms, drillFormsIn, methodQuestion, screenDrillItems, stripDrillSentences } from "./drill-forms";
+import { METHOD_QUESTION_ID, backedDrillForms, drillFormsIn, methodQuestion, screenDrillItems, stripDrillSentences } from "./drill-forms";
+import { FAMILIARITY_FIELD, readModelFamiliarity, type ModelFamiliarity } from "./familiarity";
 
 /**
  * A task's step graph: the step planner's wire contract, the normalization that makes any answer usable, the warnings a reviewer
@@ -63,6 +63,16 @@ export type PlannedStep = {
   uses?: string[];
   /** On the step that asks the person for a need: that need's id (the step shows an upload box and 「没有」). */
   provides?: string;
+  /**
+   * The model's reading (2026-11-22, replacing the verb list 「参加/出席…」): the step is going to an event at its own time (a talk, a
+   * rehearsal, an exam sitting). It is never placed in free hours. Optional for plans stored before it; the schema requires it.
+   */
+  attends?: boolean;
+  /**
+   * The model's reading (2026-11-22, replacing the exercise word list): the step is physical exercise, so confirming it done on the
+   * health line records a workout. Optional for plans stored before it; the schema requires it.
+   */
+  workout?: boolean;
 };
 /**
  * Material the task needs that the files and folders on record do not cover and that the person is known to have (their lecture notes,
@@ -132,6 +142,16 @@ export type StepPlan = {
    */
   importance?: { longTerm: boolean; why: string };
   /**
+   * How close the work is to what the person already knows, judged by the planner from their background (`familiarity.ts`; 2026-11-22,
+   * replacing the rule score). The person's own choice still wins. Optional for plans stored before it; the schema requires it.
+   */
+  familiarity?: ModelFamiliarity;
+  /**
+   * The question the planner would ask about how the person usually does this kind of work, asked only when a drill form was cut and
+   * nothing on record says how they work (`methodQuestion`; 2026-11-22, replacing the exam/writing word lists). Not stored.
+   */
+  methodQuestion?: { text: string; options: string[] };
+  /**
    * How finishing the task is taken (`completion.ts`), judged with the task's material in hand. Kept on the task only when the task has no
    * judgement yet (one from a course's dates, or written before the field). Optional for plans stored before it; the schema requires it.
    */
@@ -176,6 +196,8 @@ export const stepPlanSchema = (extraIds: readonly string[] = []) => object({
   quantity: object({ basis: str, amount: num, unit: str }),
   rationale: str,
   importance: object({ longTerm: { type: "boolean" }, why: str }),
+  familiarity: FAMILIARITY_FIELD,
+  methodQuestion: object({ text: str, options: { type: "array", items: str } }),
   completion: COMPLETION_FIELD,
   offline: { type: "boolean" },
   units: { type: "array", items: object({ id: str, title: str, docId: str, quote: str }) },
@@ -191,7 +213,9 @@ export const stepPlanSchema = (extraIds: readonly string[] = []) => object({
     firstAction: str,
     owner: { type: "string", enum: [...WORK_OWNERS] },
     product: { type: "string", enum: Object.keys(STEP_PRODUCTS) },
-    uses: { type: "array", items: str }
+    uses: { type: "array", items: str },
+    attends: { type: "boolean" },
+    workout: { type: "boolean" }
   }) },
   usedRefs: { type: "array", items: str }
 });
@@ -299,9 +323,7 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
    */
   drillBacking?: readonly string[];
   /** Whether a fact already says how the person does this kind of work: then no method question is added when a drill form is cut. */
-  methodKnown?: boolean;
-  /** The task's own title and intent, which pick the wording of that method question. */
-  taskText?: string } = {}): { plan: StepPlan; warnings: StepWarning[] } {
+  methodKnown?: boolean } = {}): { plan: StepPlan; warnings: StepWarning[] } {
   const t = tFor(options.locale);
   const assistant = options.assistant !== false;
   const warnings: StepWarning[] = [];
@@ -327,7 +349,8 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
       firstAction: clipWidth(text(step.firstAction).trim(), FIRST_ACTION_MAX),
       owner: (step.owner === "assistant" || step.owner === "ask" || step.owner === "person" ? step.owner : step.executor === "agent" ? "assistant" : "person") as WorkOwner,
       // No product named: what the model said about the doer picks among the role's products (the assistant's work is material).
-      product: productOf(step.role, step.product ?? (step.executor === "agent" ? "material" : undefined)), uses: list(step.uses) };
+      product: productOf(step.role, step.product ?? (step.executor === "agent" ? "material" : undefined)), uses: list(step.uses),
+      ...(step.attends === true ? { attends: true } : {}), ...(step.workout === true ? { workout: true } : {}) };
   });
   // The person's own material first: each need becomes a provide step at the front (an upload box and 「没有」, no calendar time).
   // Only material something on record says the person has: a need without that is guessed, and asking for it wastes their time.
@@ -399,13 +422,13 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
   const unitIds = new Set(units.map((unit) => unit.id));
   for (const step of steps) step.covers = step.covers.filter((id) => unitIds.has(id));
   // A drill form was cut and nothing on record says how the person works: ask them, first, instead of guessing a method.
-  if (drill.changed && !options.methodKnown && !questions.some((question) => asksMethod(question.text)))
-    // Only the person knows how they work (§7.1): asked, with the neutral answer assumed meanwhile.
-    { const method = methodQuestion([options.taskText ?? "", ...steps.map((step) => step.title)].join(" "), options.locale);
+  if (drill.changed && !options.methodKnown && !questions.some((question) => question.id === METHOD_QUESTION_ID))
+    // Only the person knows how they work (§7.1): the planner's own wording of the question, with the neutral answer assumed meanwhile.
+    { const method = methodQuestion(plan.methodQuestion, options.locale);
       questions.unshift({ ...method, assume: method.options[0] ?? "", ask: true, ifWrong: { waste: 0, harm: "quality", fixable: "before_step" } }); }
   return { plan: { archetypeId: plan.archetypeId, rationale: stripDrillSentences(text(plan.rationale).trim(), drill.backed).slice(0, 600),
     quantity: { basis: text(plan.quantity?.basis).slice(0, 60), amount, unit: text(plan.quantity?.unit).slice(0, 12) }, units,
-    questions, needs, steps }, warnings };
+    questions, needs, steps, ...(readModelFamiliarity(plan.familiarity) ? { familiarity: readModelFamiliarity(plan.familiarity)! } : {}) }, warnings };
 }
 
 /**
@@ -433,8 +456,6 @@ function screenStepDrills(plan: StepPlan, backing: readonly string[], warnings: 
  * assistant's step; reviewing the assistant's output is returned (the ids) to be folded into the first core step (`foldReviewSteps`).
  * Shared by `normalizeStepPlan` and the one-time reorganisation of plans already stored (`apps/worker/src/work-split-repair.ts`).
  */
-const ACCEPTS_OUTPUT = /^(?:验收|批准|审核|审阅|核验|核对|复核|定稿|审定)|^(?:accept|approve|review|verify|check|sign off on)\b/i;
-const JUDGES = /结论|科学|正确|边界|权限|规则|选定|决定|取舍|\b(?:conclusions?|correct\w*|scope|boundar\w*|permissions?|rules?|decide|choose|trade-?offs?)\b/i;
 
 export function assignStepOwners(steps: PlannedStep[], questions: StepQuestion[], warnings: StepWarning[],
   options: { assistant?: boolean; /** The task's title: a step of graded homework touching its problems stays the person's. */ taskTitle?: string;
@@ -477,7 +498,9 @@ export function assignStepOwners(steps: PlannedStep[], questions: StepQuestion[]
       const verdict = workOwner({ title: step.title, owner: PRODUCT_OWNER[product], ...(options.taskTitle ? { taskTitle: options.taskTitle } : {}) }, options.locale);
       const forced = ["external", "decision", "graded", "person_skill"].includes(verdict.code) && verdict.owner === "person";
       if (!forced && step.executor !== "agent" && verdict.code === "review_only") { reviews.add(step.id); continue; }
-      if (!forced && step.executor !== "agent" && ACCEPTS_OUTPUT.test(step.title) && !JUDGES.test(step.title) && product !== "ability"
+      // A check (the model's role) right after the assistant's work only looks it over: folded into the next core step. Since 2026-11-22 by
+      // the role the plan gave it, no longer by the title's verb (验收, 批准, 核验 …) and a list of words that meant a judgement.
+      if (!forced && step.executor !== "agent" && step.role === "check" && product !== "ability"
         && (step.dependsOn.some((dep) => steps.find((other) => other.id === dep)?.executor === "agent")
           || steps[steps.indexOf(step) - 1]?.executor === "agent" || options.afterAgent?.has(step.id))) { reviews.add(step.id); continue; }
       const preferred = options.ownerPreferences?.get(`${step.role}|${product}`);
@@ -513,7 +536,7 @@ export function assignStepOwners(steps: PlannedStep[], questions: StepQuestion[]
         step.owner = "person";
         continue;
       }
-      if (step.executor !== "agent" && ACCEPTS_OUTPUT.test(step.title) && !JUDGES.test(step.title) && verdict.code === "model"
+      if (step.executor !== "agent" && step.role === "check" && verdict.code === "model"
         && (step.dependsOn.some((dep) => steps.find((other) => other.id === dep)?.executor === "agent")
           || steps[steps.indexOf(step) - 1]?.executor === "agent" || options.afterAgent?.has(step.id))) {
         reviews.add(step.id);
@@ -545,8 +568,8 @@ export function assignStepOwners(steps: PlannedStep[], questions: StepQuestion[]
     } else step.owner = "person";
     if (step.executor === "agent") step.schedulable = false;
     // Attending an event happens at the event's own time, never in free hours (W-274: 「参加 ECE 555 小测」 was placed as six work
-    // blocks). The step stays; preparing for it starts with another verb and stays work.
-    if (isAttending(step.title)) step.schedulable = false;
+    // blocks). The step stays; preparing for it is work. The model's `attends`, no longer the title's verb (2026-11-22).
+    if (step.attends) step.schedulable = false;
     // A first move is the person's: the assistant's steps and waits have none.
     if (step.executor === "agent" || step.role === "wait") step.firstAction = "";
   }

@@ -240,7 +240,7 @@ export type TaskExtras = {
   /** How the card is prepared before its work starts (docs/task-preparation.md): nothing, its steps, or a full tutorial, and why. */
   preparation?: Preparation;
   /** How close the work is to what the person knows (`familiarityOf`, W-154), and whether the person set it; they can change it on the task. */
-  familiarity?: { level: FamiliarityLevel; by: "person" | "rules" };
+  familiarity?: { level: FamiliarityLevel; by: "person" | "model" | "none" };
   /** Other lines this work feeds: the milestone relations from this task's milestone, and its byproducts. */
   supports: Array<{ line: string; lineLabel: string; target: string; artifact?: string; pending: boolean }>;
   /** Cross-line artifacts at task level: what this task produces for another line's work, and whose output it uses (docs/flywheel-and-views.md §5.5). */

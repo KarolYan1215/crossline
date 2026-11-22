@@ -131,7 +131,9 @@ export type StepPlanInput = {
     /** A concrete first move of at most five minutes for a person's step ("" for the assistant's steps and waits). */
     firstAction?: string;
     /** What the step produces (`STEP_TYPES`), the needs it uses, and on a provide step the need it asks for (packages/core/src/steps.ts). */
-    product?: "material" | "output" | "ability" | "action"; uses?: string[]; provides?: string }>;
+    product?: "material" | "output" | "ability" | "action"; uses?: string[]; provides?: string;
+    /** The planner's readings (core `PlannedStep`, 2026-11-22): going to an event at its own time; physical exercise. */
+    attends?: boolean; workout?: boolean }>;
   /** Material only the person has, asked for before anything that uses it (provide steps). */
   needs?: Array<{ id: string; what: string; why: string; basis?: string; kind?: "personal" | "reference" }>;
   /** The content units read from the person's material, and what only the person can answer (packages/core/src/steps.ts). */
@@ -141,6 +143,8 @@ export type StepPlanInput = {
     ifWrong?: { waste: number; harm: "none" | "quality" | "deadline" | "external"; fixable: "before_step" | "after_submit" | "never" } }>;
   /** The planner's judgement of the task's long-term importance; absent on plans made before it was asked for. */
   importance?: { longTerm: boolean; why: string };
+  /** The planner's judgement of how close the work is to what the person knows (core `familiarity.ts`); absent on plans made before it. */
+  familiarity?: { level: "near" | "mid" | "far"; why: string };
 };
 export type StoredTaskStep = StepPlanInput["steps"][number] & {
   workOrderId: string; seq: number; status: "planned" | "done" | "skipped"; progressQuarter: number; updatedAt: string;
@@ -149,6 +153,7 @@ export type StoredStepPlan = {
   workOrderId: string; version: number; archetypeId: string; quantity: StepPlanInput["quantity"]; rationale: string; plannedAt: string;
   units: NonNullable<StepPlanInput["units"]>; questions: NonNullable<StepPlanInput["questions"]>;
   importance?: StepPlanInput["importance"];
+  familiarity?: StepPlanInput["familiarity"];
   needs?: StepPlanInput["needs"];
   steps: StoredTaskStep[];
 };
@@ -3175,7 +3180,7 @@ export class CrosslineStore {
         detail_json = excluded.detail_json`)
         .run(workspaceId, workOrderId, version, plan.archetypeId, JSON.stringify(plan.quantity), plan.rationale, now,
           JSON.stringify({ units: plan.units ?? [], questions, ...(plan.importance ? { importance: plan.importance } : {}),
-            ...(plan.needs?.length ? { needs: plan.needs } : {}) }));
+            ...(plan.familiarity ? { familiarity: plan.familiarity } : {}), ...(plan.needs?.length ? { needs: plan.needs } : {}) }));
       // New ids continue after the kept ones so a dependency on a done step still points at it.
       const offset = kept.length;
       const insert = this.#prepare(`INSERT INTO task_steps (workspace_id, work_order_id, id, seq, role, title, deliverable, done_criterion, share,
@@ -3187,7 +3192,8 @@ export class CrosslineStore {
           step.share, step.estimate.p25Minutes, step.estimate.p50Minutes, step.estimate.p85Minutes,
           JSON.stringify(step.dependsOn.map((dep) => rename.get(dep) ?? dep)), step.notBefore, step.dueBy, step.schedulable ? 1 : 0,
           step.executor, step.tickOutcome, now, JSON.stringify({ covers: step.covers ?? [], why: step.why ?? "", ...(step.aiAssist?.tool ? { aiAssist: step.aiAssist } : {}), ...(step.firstAction ? { firstAction: step.firstAction } : {}),
-            ...(step.product ? { product: step.product } : {}), ...(step.uses?.length ? { uses: step.uses } : {}), ...(step.provides ? { provides: step.provides } : {}) }));
+            ...(step.product ? { product: step.product } : {}), ...(step.uses?.length ? { uses: step.uses } : {}), ...(step.provides ? { provides: step.provides } : {}),
+            ...(step.attends ? { attends: true } : {}), ...(step.workout ? { workout: true } : {}) }));
       });
       this.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.steps_planned:${workOrderId}:${version}`, type: "task.steps_planned",
         entityId: workOrderId, payload: { version, archetypeId: plan.archetypeId, steps: plan.steps.length, kept: kept.length, reason } });
@@ -3214,14 +3220,15 @@ export class CrosslineStore {
         dependsOn: JSON.parse(String(row.depends_on_json)) as string[], notBefore: String(row.not_before), dueBy: String(row.due_by),
         schedulable: Number(row.schedulable) === 1, executor: row.executor as StoredTaskStep["executor"], tickOutcome: String(row.tick_outcome),
         status: row.status as StoredTaskStep["status"], progressQuarter: Number(row.progress_quarter), updatedAt: String(row.updated_at),
-        ...(JSON.parse(String(row.detail_json ?? "{}")) as Pick<StoredTaskStep, "covers" | "why" | "aiAssist" | "firstAction" | "product" | "uses" | "provides">) });
+        ...(JSON.parse(String(row.detail_json ?? "{}")) as Pick<StoredTaskStep, "covers" | "why" | "aiAssist" | "firstAction" | "product" | "uses" | "provides" | "attends" | "workout">) });
       byOrder.set(String(row.work_order_id), list);
     }
     return plans.map((row) => ({ workOrderId: String(row.work_order_id), version: Number(row.version), archetypeId: String(row.archetype_id),
       quantity: JSON.parse(String(row.quantity_json)) as StoredStepPlan["quantity"], rationale: String(row.rationale),
       plannedAt: String(row.planned_at),
-      ...(() => { const detail = JSON.parse(String(row.detail_json ?? "{}")) as Partial<Pick<StoredStepPlan, "units" | "questions" | "importance" | "needs">>;
+      ...(() => { const detail = JSON.parse(String(row.detail_json ?? "{}")) as Partial<Pick<StoredStepPlan, "units" | "questions" | "importance" | "familiarity" | "needs">>;
         return { units: detail.units ?? [], questions: detail.questions ?? [], ...(detail.importance ? { importance: detail.importance } : {}),
+          ...(detail.familiarity ? { familiarity: detail.familiarity } : {}),
           ...(detail.needs?.length ? { needs: detail.needs } : {}) }; })(),
       steps: byOrder.get(String(row.work_order_id)) ?? [] }));
   }

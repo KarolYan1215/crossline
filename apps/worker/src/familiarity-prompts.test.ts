@@ -25,20 +25,37 @@ function seed() {
   return store;
 }
 
-test("the step planner is told the familiarity level and what it means", async () => {
-  const store = seed();
-  const plan = { archetypeId: "content", quantity: { basis: "选题", amount: 3, unit: "个" }, rationale: "", steps: [{ id: "s", role: "decide", title: "选定首轮三个选题",
+const plan = { archetypeId: "content", quantity: { basis: "选题", amount: 3, unit: "个" }, rationale: "",
+  familiarity: { level: "far", why: "本人说完全是新手，第一次做内容" }, steps: [{ id: "s", role: "decide", title: "选定首轮三个选题",
     deliverable: "选题表", doneCriterion: "每个选题标出受众与冲突点", share: 1, estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 45 }, dependsOn: [],
     notBefore: "", dueBy: "", schedulable: true, executor: "human", tickOutcome: "" }] };
+
+test("the step planner judges the familiarity itself (no rule scores the person's words) and it is kept with the plan", async () => {
+  const store = seed();
   const runtime = scriptedRuntime(["crossline:crossline-step-planner"], () => JSON.stringify(plan));
   await createStepPlanner(store, ws, "C:\\repo", () => runtime.rpc)("wo");
   const prompt = runtime.prompts().join("\n");
-  expect(prompt).toContain("\"familiarity\":{\"level\":\"far\"");
+  // Nothing set by the person: the planner is asked to judge, from the facts it is given (「完全是新手」 among them).
+  expect(prompt).toContain("\"familiarity\":{\"setByPerson\":\"\"}");
+  expect(store.getStepPlan(ws, "wo")?.familiarity).toEqual({ level: "far", why: "本人说完全是新手，第一次做内容" });
   store.close();
 });
 
-test("the tutorial's design and its sections carry the level", () => {
+test("the person's own choice is passed to the planner as set", async () => {
   const store = seed();
+  store.setSetting(ws, "tasks.familiarity", JSON.stringify({ "media|*": "near" }));
+  const runtime = scriptedRuntime(["crossline:crossline-step-planner"], () => JSON.stringify(plan));
+  await createStepPlanner(store, ws, "C:\\repo", () => runtime.rpc)("wo");
+  expect(runtime.prompts().join("\n")).toContain("\"familiarity\":{\"setByPerson\":\"near\"}");
+  store.close();
+});
+
+test("the tutorial's design and its sections carry the planner's level", async () => {
+  const store = seed();
+  // Before any plan: mid, never a guess from the words.
+  expect(buildManualContext(store, ws, "wo", "2026-10-29")?.familiarity?.level).toBe("mid");
+  const runtime = scriptedRuntime(["crossline:crossline-step-planner"], () => JSON.stringify(plan));
+  await createStepPlanner(store, ws, "C:\\repo", () => runtime.rpc)("wo");
   expect(buildManualContext(store, ws, "wo", "2026-10-29")?.familiarity?.level).toBe("far");
   store.close();
 });

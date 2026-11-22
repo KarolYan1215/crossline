@@ -4,7 +4,7 @@ import {
   ARCHETYPES, AVAILABILITY_PROPOSED_SETTING, aiToolBrief, stepTypesBrief, AVAILABILITY_SETTING, resolveAvailability, VALIDATION_REVIEW_SCHEMA, archetypeBrief, archetypeById, stepPlanSchema, goalSettingKey,
   normalizeStepPlan, readableFromMaterial, STEP_ANSWER_SLOT, stepAnswerSlot, stepPlanWarnings, unverifiedUnits, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
   PROGRESS_ASSESSMENT_SCHEMA, validateProgressAssessment, type ProgressAssessment, type StepPlan, type StepWarning, type ValidationReview,
-  FINER_SPLIT_FEEDBACK, FAMILIARITY_INSTRUCTIONS, stepsNeedingFinerSplit, readModelCompletion, onPersonsBoard, preparesOf, type FinerSplit, type StepTrouble, type SuccessCriterion,
+  FINER_SPLIT_FEEDBACK, FAMILIARITY_INSTRUCTIONS, FAMILIARITY_JUDGE, stepsNeedingFinerSplit, readModelCompletion, onPersonsBoard, preparesOf, type FinerSplit, type StepTrouble, type SuccessCriterion,
   assumedAnswer, questionNeededDay, taskTitleOf, carryOverSteps, remapFrozenSteps, parseFrozen, FROZEN_SETTING
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
@@ -347,8 +347,8 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
         // Facts to get from someone before the work (folded in by the backplanner or the daily merge): each is a drafted email and a send.
         getFirst: payload.infoRequests ?? [] },
       milestone: milestone ? { title: milestone.title, criteria: milestone.successCriteria.map((item) => item.statement) } : null,
-      // How close the work is to what the person knows (W-154): near steps are short, far ones explain (FAMILIARITY_INSTRUCTIONS).
-      familiarity: (({ level, basis }) => ({ level, basis }))(familiarityFor(familiarityBook(store, workspaceId), order, previous?.archetypeId)),
+      // How close the work is to what the person knows (W-154): the planner judges it (FAMILIARITY_JUDGE) unless the person set it.
+      familiarity: (({ level, by }) => ({ setByPerson: by === "person" ? level : "" }))(familiarityFor(familiarityBook(store, workspaceId), order, previous?.archetypeId)),
       window,
       // The task's files and the passages chosen for it (docs/context-selection.md): the strongest in full, the rest by their opening line,
       // read further through search_material/read_chunk. On a route that cannot call them, the passages code picked, in full.
@@ -407,7 +407,7 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
         + "quality, deadline or external, and fixable: before_step, after_submit or never). Set ask true only where a wrong assumption matters: "
         + "it bears on a milestone, has consequences outside (a submission, someone else), only the person can decide it, or cannot be undone; "
         + "otherwise ask false and the plan goes on with assume. There is no limit on how many; the person answers them in the weekly review. "
-        + FAMILIARITY_INSTRUCTIONS + " "
+        + FAMILIARITY_JUDGE + FAMILIARITY_INSTRUCTIONS + " "
         + "usedRefs lists the bracketed ids ([f3], [p1], [l2]) of the facts, preferences and lessons the plan really rests on, [] when none.",
       /* i18n-ignore-end */
       // The prompt cache (docs/token-economy.md §2.5): what every plan of this workspace shares first, then the line's and the project's,
@@ -448,7 +448,7 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     const drill = drillBackingFor(store, workspaceId, { captureId: order.id, scopes: [order.identityId, `task:${order.id}`] });
     const { plan: shapedPlan, warnings: fixed } = normalizeStepPlan(result.output, tools.map((tool) => tool.name),
       { assistant: true, ownerPreferences: ownerPreferencesFor(store, workspaceId, order.identityId), locale: localeOf(store, workspaceId),
-        drillBacking: drill.backing, methodKnown: drill.methodKnown, taskText: taskQuery(store, workspaceId, order, { core: true }) });
+        drillBacking: drill.backing, methodKnown: drill.methodKnown });
     const normalized = result.output.importance ? { ...shapedPlan, importance: result.output.importance } : shapedPlan;
     // Steps must not start before the window or end after it: clamp, the reviewer sees the warning.
     // What normalization already fixed (rescaled shares, a missing estimate filled in, an unknown dependency dropped) needs no judgement;

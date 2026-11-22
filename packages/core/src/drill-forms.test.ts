@@ -32,12 +32,14 @@ test("only the person's own words back a form, and a sentence that turns it down
   expect(stripDrillForms("做 2 套往年卷并订正", backedDrillForms(["做完卷子我习惯订正"]))).toBe("做 2 套往年卷并订正");
 });
 
-test("the method question fits the kind of work, its first option assumes no method", () => {
-  expect(methodQuestion("准备 ECE 548 期中考试").text).toBe("平时怎么准备这类考试？");
-  expect(methodQuestion("写论文引言").text).toBe("平时怎么写这类东西？");
-  expect(methodQuestion("搭建试用门店名单").text).toBe("平时怎么做这类事？");
-  for (const text of ["期中", "写报告", "别的"]) {
-    const question = methodQuestion(text);
+test("the method question is the planner's wording; its first option always assumes no method", () => {
+  const planned = methodQuestion({ text: "平时怎么准备这类限时考试？", options: ["主要做往年卷", "没有固定方法，按这次需要定", "主要重读讲义"] });
+  expect(planned.text).toBe("平时怎么准备这类限时考试？");
+  expect(planned.options).toEqual(["没有固定方法，按这次需要定", "主要做往年卷", "主要重读讲义"]);
+  // No word list picks a canned question from the task's title any more: without the planner's wording, a general one.
+  for (const missing of [undefined, { text: "", options: ["a", "b"] }, { text: "怎么做？", options: ["只有一个"] }]) {
+    const question = methodQuestion(missing);
+    expect(question.text).toBe("平时怎么做这类事？");
     expect(question.options[0]).toBe("没有固定方法，按这次需要定");
     expect(question.options.flatMap(drillFormsIn)).toEqual([]);
   }

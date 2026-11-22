@@ -298,8 +298,9 @@ test("a drill form taken from an identity template is cut on the way to the ledg
   expect(saved.steps.map((item) => item.title)).toEqual(["汇集 ECE 555 往年期中卷", "推导 L5–L6 P-N 结静电与 I-V", "做 2 套往年卷", "限时模拟一套期中卷"]);
   // The mock waited on the dropped step; it now waits on what that step waited on.
   expect(saved.steps[3]!.dependsOn).toEqual([saved.steps[2]!.id]);
-  // The method is asked, first, and the question about the 错题本 is gone; an assumed answer invents no method.
-  expect(saved.questions.map((question) => question.text)).toEqual(["平时怎么准备这类考试？", "期中考到第几讲？"]);
+  // The method is asked, first, and the question about the 错题本 is gone; an assumed answer invents no method. This recorded answer
+  // predates the planner's own `methodQuestion`, so the general wording is asked (no word list picks one from the title any more).
+  expect(saved.questions.map((question) => question.text)).toEqual(["平时怎么做这类事？", "期中考到第几讲？"]);
   expect(assumed.join(" ")).not.toMatch(/订正|错题/);
 
   const own = await run([{ slot: "method_exam_prep", value: "做完往年卷我习惯对着答案订正，错题记进错题本" }]);

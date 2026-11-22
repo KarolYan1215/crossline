@@ -223,7 +223,8 @@ describe("drill forms (the owner's rule of 2026-11-10: no 订正-type task from 
     const drillPlan = plan([practice(), step("e", "check", { title: "整理错题本", dependsOn: ["p"] }), step("x", "draft", { title: "写出第 3 章推导", dependsOn: ["e"] })], "writing");
     drillPlan.rationale = "期中占 30%。按学生惯例做完卷子后订正错题。讲义 12 讲。";
     drillPlan.questions = [{ id: "q1", text: "期中考到第几讲？", why: "", options: ["L1–L8", "L1–L10"] }];
-    const { plan: normalized, warnings } = normalizeStepPlan(drillPlan, undefined, { taskText: "准备 ECE 548 期中考试" });
+    drillPlan.methodQuestion = { text: "平时怎么准备这类考试？", options: ["主要做题，再对照答案", "主要重读讲义和笔记"] };
+    const { plan: normalized, warnings } = normalizeStepPlan(drillPlan, undefined, {});
     expect(normalized.steps.map((item) => item.title)).toEqual(["做 2 套往年卷", "写出第 3 章推导"]);
     expect(normalized.steps[0]!.doneCriterion).toBe("2 套卷子做完");
     // The dropped step's dependants take its dependencies.
@@ -253,8 +254,10 @@ describe("drill forms (the owner's rule of 2026-11-10: no 订正-type task from 
     drillPlan.questions = [{ id: "q1", text: "错题本用纸质还是电子？", why: "", options: ["纸质", "电子"] },
       { id: "q2", text: "平时怎么复习？", why: "", options: ["做题", "背诵公式", "重读讲义"] }];
     const { plan: normalized } = normalizeStepPlan(drillPlan);
-    // The person's method is already being asked (q2), so no second method question is added.
-    expect(normalized.questions).toEqual([{ id: "q2", text: "平时怎么复习？", why: "", options: ["做题", "重读讲义"] }]);
+    // The method question is the app's own (`q-method`, the planner's `methodQuestion` or the general wording), asked first; the
+    // planner's q2 keeps its non-drill options. No word list decides that q2 is already a method question any more.
+    expect(normalized.questions.map((question) => question.id)).toEqual(["q-method", "q2"]);
+    expect(normalized.questions[1]).toEqual({ id: "q2", text: "平时怎么复习？", why: "", options: ["做题", "重读讲义"] });
   });
   it("a plan with no drill form is untouched", () => {
     const clean = plan([step("x", "draft", { title: "写出第 3 章推导" })], "writing");
@@ -272,5 +275,18 @@ describe("needs", () => {
     const { plan: normalized } = normalizeStepPlan({ ...plan([step("s1", "draft", { uses: ["n1", "n3"] } as never)]), needs } as never);
     expect(normalized.steps.filter((item) => item.provides).map((item) => item.title)).toEqual(["提供密码学讲义"]);
     expect(normalized.steps.find((item) => item.id === "s1")!.uses).toEqual(["n3"]);
+  });
+});
+
+describe("the planner's readings of a step (2026-11-22, replacing the verb and exercise word lists)", () => {
+  it("a step marked as going to something at its own time is never placed in free hours; workout is kept", () => {
+    const marked = plan([step("a", "solve", { title: "参加组会汇报", attends: true } as never), step("b", "solve", { title: "5 公里", workout: true } as never)]);
+    const { plan: normalized } = normalizeStepPlan(marked);
+    expect(normalized.steps.find((item) => item.title === "参加组会汇报")).toMatchObject({ attends: true, schedulable: false });
+    expect(normalized.steps.find((item) => item.title === "5 公里")).toMatchObject({ workout: true, schedulable: true });
+  });
+  it("the planner's familiarity is kept only when it is a known level", () => {
+    expect(normalizeStepPlan({ ...plan([step("a", "draft")]), familiarity: { level: "far", why: "第一次做" } }).plan.familiarity).toEqual({ level: "far", why: "第一次做" });
+    expect(normalizeStepPlan({ ...plan([step("a", "draft")]), familiarity: { level: "x", why: "" } } as never).plan.familiarity).toBeUndefined();
   });
 });
