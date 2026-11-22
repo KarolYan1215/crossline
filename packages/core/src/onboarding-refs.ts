@@ -43,8 +43,20 @@ function reject(code: string, detail: string): never {
   throw error;
 }
 
-/** A card answer the app wrote into the reply (`scaleAnswerLine`). */
-const TAP_LINE = /^【.+】点选：[1-5]\/5/;
+/** A card answer the app wrote into the reply (`scaleAnswerLine`; five points before 2026-11-22, six for a TwIVI item). */
+export const TAP_LINE = /^【.+】点选：[1-6]\/[56]/;
+/**
+ * Whether a cited sentence is part of a tap line: the app's wording the person rated, never the person's own words. Read by the whole line
+ * it sits on, since an item with a full stop in it (a TwIVI portrait) is split into two sentences.
+ */
+const isTap = (index: Index, id: number, texts: Record<string, string> = {}) => {
+  const entry = index.get(id);
+  if (!entry) return false;
+  const whole = texts[entry.ref];
+  if (whole === undefined || whole.slice(entry.start, entry.end) !== entry.text) return TAP_LINE.test(entry.text.trim());
+  const from = whole.lastIndexOf("\n", Math.max(0, entry.start - 1)) + 1, to = whole.indexOf("\n", entry.start);
+  return TAP_LINE.test(whole.slice(entry.start === 0 ? 0 : from, to < 0 ? whole.length : to).trim());
+};
 const numbers = (ids: number[]) => ids.map((id) => `[${id}]`).join("");
 type Wire = Record<string, unknown>;
 const list = (value: unknown): Wire[] => Array.isArray(value) ? value.filter((item): item is Wire => Boolean(item) && typeof item === "object") : [];
@@ -70,7 +82,7 @@ export function resolveOnboardingRefs(value: unknown, known: { replies: Record<s
     const cited = span(update.refs, `事实「${String(update.slot ?? "")}」`, update.status === "confirmed");
     // A fact resting only on card tap lines restates what the app already keeps per item (`profile.instruments`); the website walkthrough
     // of 2026-11-14 got two of them with the side flipped (「1/5 掌握资源和话语权」 written as 「倾向让更多人受益」), so it is dropped.
-    if (cited.ids.length && cited.ids.every((id) => TAP_LINE.test(index.get(id)?.text.trim() ?? ""))) return [];
+    if (cited.ids.length && cited.ids.every((id) => isTap(index, id, texts))) return [];
     const { refs: _refs, ...rest } = update;
     return [{ ...rest, sourceRef: cited.ids.length ? cited.sourceRef : "inference", sourceQuote: cited.quote, sentences: cited.ids }];
   });
@@ -84,7 +96,7 @@ export function resolveOnboardingRefs(value: unknown, known: { replies: Record<s
     const { refs: _refs, ...rest } = item;
     // A card's tap line (「【话不多】点选：4/5」) is the app's wording the person rated, not their own words, so it is no source for an
     // attribute: a real run made 「话不多」 the long-term goal of both lines (2026-11-03).
-    const ownWords = cited.ids.some((id) => !TAP_LINE.test(index.get(id)?.text.trim() ?? ""));
+    const ownWords = cited.ids.some((id) => !isTap(index, id, texts));
     if (options.strict && cited.ids.length && !ownWords) reject("ONBOARDING_ATTRIBUTE_FROM_CARD",
       `定语「${String(item.text ?? "")}」引用的是卡片题的题面（【…】点选），不是本人的原话；只用本人自己写的句子，没有就不写这个定语。`);
     return { ...rest, sourceRef: ownWords ? cited.sourceRef : "" };
@@ -120,9 +132,10 @@ export function resolveOnboardingRefs(value: unknown, known: { replies: Record<s
       sentences: cited.ids }];
   })) : undefined;
   // A point rests on the sentences it cites, each kept whole with its reply or file; a number the run was not shown is left out (the point
-  // with nothing left is not kept, `applyPointChanges`).
+  // with nothing left is not kept, `applyPointChanges`). A tap line is no basis either (2026-11-22, D9: a tap is not evidence): a point
+  // resting on one card line showed 「依据 1 条」 beside the person's own words.
   const pointChanges = list(turn.pointChanges).map(({ refs, ...change }) => ({ ...change,
-    quotes: citedSpan(refs, index, texts).ids.map((id) => ({ ref: index.get(id)!.ref, text: index.get(id)!.text })) }));
+    quotes: citedSpan(refs, index, texts).ids.filter((id) => !isTap(index, id, texts)).map((id) => ({ ref: index.get(id)!.ref, text: index.get(id)!.text })) }));
   // A card item read off the person's words rests on the sentences that say it; no citation is no reading (the item is left unanswered).
   const itemScores = list(turn.itemScores).flatMap(({ refs, ...item }) => {
     /* i18n-ignore-start */

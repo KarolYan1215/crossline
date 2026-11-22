@@ -1,4 +1,4 @@
-import { ledgerLines } from "@crossline/core";
+import { ledgerLines, pointLines, PROFILE_INSTRUMENTS_SETTING, PROFILE_SCALE_ANALYSIS_SETTING, PROFILE_SCALE_SETTING, readInstrumentAnswers, readScaleAnalysis, readScaleSession, scaleLedgerLines } from "@crossline/core";
 import type { SkillTools } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
 import { readProfileModel } from "./onboarding-persist";
@@ -15,10 +15,10 @@ import { interviewLedger } from "./question-ledger";
 export const FILE_PAGE = 14_000;
 /** Lines of a ledger section one `read_ledger` call returns. */
 export const LEDGER_PAGE = 60;
-export const LEDGER_SECTIONS = ["questions", "facts", "hypotheses", "research"] as const;
+export const LEDGER_SECTIONS = ["questions", "facts", "hypotheses", "research", "scale", "notes"] as const;
 
 /* i18n-ignore-start: tool answers for the model */
-export const READ_TOOLS_INSTRUCTIONS = "上下文里的问题记录、文件和事实只是一部分：要看全，用 `read_ledger`（section 取 questions、facts、hypotheses、research，"
+export const READ_TOOLS_INSTRUCTIONS = "上下文里的问题记录、文件和事实只是一部分：要看全，用 `read_ledger`（section 取 questions、facts、hypotheses、research、scale、notes，"
   + "按 page 翻页）和 `read_file`（文件 id，从 offset 字起读）。只在这一轮的判断需要时读，不必每轮都读。";
 
 const page = (lines: string[], at: number, what: string): string => {
@@ -30,7 +30,7 @@ const page = (lines: string[], at: number, what: string): string => {
 
 export function interviewReadTools(store: CrosslineStore, workspaceId: string, sessionId: string): SkillTools {
   const specs: SkillTools["specs"] = [
-    { name: "read_ledger", description: "读访谈账本的一部分：questions（问过的每道题和本人的回答）、facts（记下的事实）、hypotheses（假设日志）、research（调研线程和结论）。按页返回。",
+    { name: "read_ledger", description: "读访谈账本的一部分：questions（问过的每道题和本人的回答）、facts（记下的事实）、hypotheses（假设日志）、research（调研线程和结论）、scale（量表分数、本人补充、自述的其他测试、量表分析和待验证的假设）、notes（整理层按维度写下的笔记，含【自报】与矛盾）。按页返回。",
       inputSchema: { type: "object", properties: { section: { type: "string", enum: [...LEDGER_SECTIONS] }, page: { type: "integer", minimum: 0 } },
         required: ["section"], additionalProperties: false } },
     { name: "read_file", description: "读本人上传的一个文件的正文，从 offset 字起，每次最多 14000 字。",
@@ -57,6 +57,10 @@ export function interviewReadTools(store: CrosslineStore, workspaceId: string, s
         `${item.id} [${item.status}${item.cardKey ? "，出过卡" : ""}] ${item.dimension ?? ""} ${item.statement}`), at, "假设日志");
       case "research": return page(readResearch(store, workspaceId, sessionId).map((thread) =>
         `[${thread.status}] ${thread.question}${thread.conclusion ? ` → ${thread.conclusion.slice(0, 300)}` : ""}`), at, "调研线程");
+      // The scale before the first round and its analysis (2026-11-22), and the organizing layer's notes by dimension (D9).
+      case "scale": return page(scaleLedgerLines(readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING)),
+        readScaleSession(store.getSetting(workspaceId, PROFILE_SCALE_SETTING)), readScaleAnalysis(store.getSetting(workspaceId, PROFILE_SCALE_ANALYSIS_SETTING))), at, "量表");
+      case "notes": return page(pointLines(readProfileModel(store, workspaceId).points ?? []), at, "整理层笔记");
       default: throw new Error(`section 只能是 ${LEDGER_SECTIONS.join("、")}。`);
     }
   };

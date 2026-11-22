@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
-import { citationWarnings, citedSpan, keepOnboardingAnswer, numberedText, resolveDateRefs, validateOnboardingAnswer, validateOnboardingExtraction } from "./onboarding-refs";
+import { citationWarnings, citedSpan, keepOnboardingAnswer, numberedText, resolveDateRefs, resolveOnboardingRefs, validateOnboardingAnswer, validateOnboardingExtraction } from "./onboarding-refs";
+import { applyPointChanges, type PointChange } from "./profile-points";
 import { segmentText } from "./sentences";
 import type { EvidenceSentence, KnownSources } from "./onboarding-turn-schema";
 
@@ -114,4 +115,20 @@ test("a card's tap line is never the source of a long-term goal attribute (2026-
   const facts = validateOnboardingAnswer(turn({ slotUpdates: [fact({ slot: "value", value: "话多", refs: [tap] }),
     fact({ slot: "walk", value: "爱看街道", refs: [own, tap] })] }), cardKnown);
   expect(facts.slotUpdates.map((update) => update.slot)).toEqual(["walk"]);
+});
+
+test("a point's evidence never includes a tap line: one resting only on a tap keeps no quote and is dropped (2026-11-22, D9)", () => {
+  const cardReplies = { "reply-1": "我喜欢在街上走，看街道的细节。\n【话不多】点选：4/5（偏向「非常像我」）\n【Ta 喜欢冒险，总在寻找新的历险。】点选：6/6（非常像我）" };
+  const sentences = new Map<number, EvidenceSentence>();
+  let id = 1;
+  for (const segment of segmentText(cardReplies["reply-1"])) sentences.set(id++, { ref: "reply-1", ...segment });
+  const taps = [...sentences].filter(([, entry]) => entry.text.startsWith("【")).map(([number]) => number);
+  const own = [...sentences].find(([, entry]) => entry.text.startsWith("我"))![0];
+  expect(taps).toHaveLength(2);
+  const change = (refs: number[]) => ({ op: "add", id: "", section: "energy", text: "爱看街道", refs, external: [], why: "" });
+  const resolved = resolveOnboardingRefs({ pointChanges: [change([own, ...taps]), change(taps)] }, { replies: cardReplies, sources: {}, sentences }, { strict: false }) as
+    { pointChanges: Array<{ quotes: Array<{ text: string }> }> };
+  expect(resolved.pointChanges[0]!.quotes.map((quote) => quote.text)).toEqual(["我喜欢在街上走，看街道的细节。"]);
+  expect(resolved.pointChanges[1]!.quotes).toEqual([]);
+  expect(applyPointChanges([], resolved.pointChanges as unknown as PointChange[], "2026-11-22T00:00:00.000Z")).toMatchObject({ dropped: 1 });
 });

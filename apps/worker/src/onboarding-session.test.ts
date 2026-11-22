@@ -197,15 +197,14 @@ test("before the start standard stands, the model is told what is still owed, an
   expect(dialogue(prompts)[0]).toContain('"startStandard":{"met":false,"missing":[');
 });
 
-test("the start standard is not said to stand while a deep part of the interview has not had its minimum (W-269)", async () => {
+// W-269's minimum per deep part held the start from 2026-11-14; D10 (2026-11-22) lets the person decide when to start, and only a line and
+// a milestone are hard gates (`partsUncovered` returns none).
+test("no deep part of the interview is listed as owed before the start (D10, 2026-11-22)", async () => {
   const { rpc, prompts } = fakeRuntime([turn({ stage: "narrative" })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });
   await run({ sessionId: "s", text: "我在读大三" });
   const [first] = dialogue(prompts);
-  // Situation was skipped entirely in the walkthrough and 「可以开始使用」 came at round 10: every deep part is owed until it is walked
-  // and its portrait section rests on the person's words.
-  for (const part of ["处境", "指南针", "能量", "经历"]) expect(first).toContain(`访谈的「${part}」部分`);
-  expect(first).toContain('"startStandard":{"met":false');
+  for (const part of ["处境", "指南针", "能量", "经历"]) expect(first).not.toContain(`访谈的「${part}」部分`);
 });
 
 test("every round's input opens with the progress header, counted from the rounds already in the ledger", async () => {
@@ -439,74 +438,18 @@ test("先读材料：首轮把已读出的文件全部带上，清单标出可�
   expect(store.getOnboardingSession(workspaceId, "s")!.coverage).toMatchObject({ flow: "v2" });
 });
 
-test("the profile module's cards: added by the app beside the model's questions (they take none of its slots), taps scored, words left for the extraction", async () => {
-  const texts: Record<string, string> = { q1: "小时候最佩服谁？", q2: "常看哪些账号？", q3: "最喜欢哪个故事？", q4: "为什么工作？", q5: "什么让生活值得？" };
-  const free = (id: string) => ({ id, text: texts[id]!, kind: "free", allowOther: true, identityId: "person", projectId: "", options: [] });
-  // The one interview there is asks the full card set.
-  const { rpc } = fakeRuntime([turn({ stage: "compass", questions: [free("q1"), free("q2"), free("q3")] }),
-    turn({ stage: "energy", questions: [free("q4")] }), turn({ stage: "energy", questions: [free("q5")] })]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
-  await run({ sessionId: "s", text: "先从经历说起吧" });
-  const lastCards = () => ((store.listOnboardingMessages(workspaceId, "s").filter((message) => message.role === "assistant").at(-1)!.content) as
-    { cards?: ProfileCard[]; questions: Array<{ id: string }> });
-  const first = lastCards();
-  expect(first.cards!.length).toBeGreaterThan(0);
-  expect(first.questions.map((question) => question.id)).toEqual(["q1", "q2", "q3"]);
-  const [tapped] = first.cards!;
-  await run({ sessionId: "s", text: tapped!.items.map((item) => scaleAnswerLine(item, 4)).join("\n") });
-  const answers = () => readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING));
-  expect(tapped!.items.map((item) => answers()[item.id])).toEqual(tapped!.items.map(() => expect.objectContaining({ by: "tapped", score: 4 })));
-  // The compass items the first round had no room for come before the energy part's own, three items at most.
-  // The next round's cards are new items, never the ones already tapped, six at most.
-  const second = lastCards();
-  const tappedIds = new Set(tapped!.items.map((item) => item.id));
-  expect(second.cards!.flatMap((card) => card.items).some((item) => tappedIds.has(item.id))).toBe(false);
-  expect(second.cards!.flatMap((card) => card.items).length).toBeLessThanOrEqual(6);
-  const [worded] = second.cards!;
-  await run({ sessionId: "s", text: `${cardWordsHead(worded!)}：看人，熟了才放开` });
-  expect(worded!.items.map((item) => answers()[item.id]!.by)).toEqual(worded!.items.map(() => "pending"));
-  // Past the module, what is left comes one card a round.
-  expect(cardsForRound("lines", new Set())).toHaveLength(1);
-  expect(cardsForRound("lines", new Set(PROFILE_ITEMS.map((item) => item.id)))).toEqual([]);
-  // Back at an earlier module stage with only later stages' items left: those still come.
-  const later = new Set(PROFILE_ITEMS.filter((item) => item.stage !== "energy").map((item) => item.id));
-  expect(cardsForRound("compass", later).flatMap((card) => card.items).every((item) => item.stage === "energy")).toBe(true);
-  expect(cardsForRound("compass", later)).toHaveLength(1);
-});
-
-test("a person who says they want to start gets no rating card that round, and the header tells the dialogue (replay 16)", async () => {
+// 2026-11-22 (D1): the scale is one page of its own before the first round (profile-scale.ts); no rating card is asked inside the interview,
+// so the card tests of 2026-10-31 to 2026-11-17 went with them (S3, docs/onboarding-validation-audit.md).
+test("a person who says they want to start gets no rating card that round — nor any other round, since the scale has its own page", async () => {
   const free = (id: string) => ({ id, text: `题 ${id}`, kind: "free", allowOther: true, identityId: "person", projectId: "", options: [] });
-  const { rpc, prompts } = fakeRuntime([turn({ stage: "compass", questions: [free("q1")] }), turn({ stage: "compass", questions: [free("q2")] })]);
+  const { rpc } = fakeRuntime([turn({ stage: "compass", questions: [free("q1")] }), turn({ stage: "compass", questions: [free("q2")] })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   const lastCards = () => ((store.listOnboardingMessages(workspaceId, "s").filter((message) => message.role === "assistant").at(-1)!.content) as { cards?: ProfileCard[] }).cards ?? [];
   await run({ sessionId: "s", text: "先从经历说起吧" });
-  expect(lastCards().length).toBeGreaterThan(0);
+  expect(lastCards()).toEqual([]);
   await run({ sessionId: "s", text: "差不多了吧，能直接排一周吗" });
   expect(lastCards()).toEqual([]);
-  expect(dialogue(prompts).at(-1)).toContain("本人这一轮说想先开始用");
-  // The next round without it has them again.
-  await run({ sessionId: "s", text: "周末一般在家。" });
-  expect(lastCards().length).toBeGreaterThan(0);
-  expect(dialogue(prompts).at(-1)).not.toContain("本人这一轮说想先开始用");
-});
-test("a person who wants to start still gets the cards when they are all the start lacks, and the header says so (replay 17)", async () => {
-  const free = (id: string) => ({ id, text: `题 ${id}`, kind: "free", allowOther: true, identityId: "person", projectId: "", options: [] });
-  const deep = ["narrative", "compass", "energy", "situation"];
-  const { rpc, prompts } = fakeRuntime([...deep.map((stage, index) => turn({ stage, questions: [free(`q${index + 1}`)] })), turn({ stage: "compass", questions: [free("q9")] })]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
-  const lastCards = () => ((store.listOnboardingMessages(workspaceId, "s").filter((message) => message.role === "assistant").at(-1)!.content) as { cards?: ProfileCard[] }).cards ?? [];
-  const openStart = () => interviewChecklistFor(store, workspaceId, [], { unfiledFiles: 0 }).filter((item) => item.start && !item.done).map((item) => item.id);
-  // No line yet and the available hours on record: once the interview has begun, the cards are the only start item left. Every deep part
-  // has had a round and rests on the person's words, so nothing else is owed (W-269).
-  store.setSetting(workspaceId, "lines.v1", "[]");
-  store.setSetting(workspaceId, "schedule.availability.proposed", JSON.stringify({ windows: [{ days: [1, 2, 3, 4, 5], startMinute: 540, endMinute: 720, energy: "high" }], why: "本人所述" }));
-  store.setSetting(workspaceId, PROFILE_SECTIONS_SETTING, JSON.stringify(Object.fromEntries(["situation", "compass", "energy"].map((section) => [section, { sentences: [1], final: false }]))));
-  for (const index of deep.keys()) await run({ sessionId: "s", text: `先从经历说起吧（${index + 1}）` });
-  expect(openStart()).toEqual(["profile_cards"]);
-  await run({ sessionId: "s", text: "差不多了吧，能直接排一周吗" });
-  expect(lastCards().length).toBeGreaterThan(0);
-  expect(dialogue(prompts).at(-1)).toContain("本人这一轮说想先开始用；开始只差画像卡片题，这一轮应用照放卡片。");
-  expect(dialogue(prompts).at(-1)).not.toContain("这一轮应用不放量表卡");
+  expect(cardsForRound("compass", new Set())).toEqual([]);
 });
 test("there are no tiers: a stored choice is never read, no tier, tone or stage count is sent, and there is no per-project details part", async () => {
   expect(stageOrderFor("v1")).not.toContain("details");
@@ -1081,16 +1024,11 @@ test("every weekly arrangement reaches the dialogue each round as its own weekda
   }
 });
 
-test("the cards' start item counts the short set whatever tier an account once chose: the start standard is unchanged by the tiers' removal (W-186)", async () => {
+test("the scale holds no start item (D10, 2026-11-22): a v2 interview with no answers is not held for cards", async () => {
   const { interviewChecklistFor } = await import("@crossline/db");
-  const { cardBank } = await import("@crossline/core");
   const at = "2026-11-03T00:00:00.000Z";
   store.saveOnboardingSession({ id: "s", ownerId: "o", workspaceId, state: "active", coverage: { flow: "v2" }, createdAt: at, updatedAt: at });
-  store.setSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING, JSON.stringify(Object.fromEntries(cardBank("short").map((item) => [item.id, { itemId: item.id, score: 3, by: "tapped", at }]))));
-  const cardsItem = () => interviewChecklistFor(store, workspaceId, [], { unfiledFiles: 0 }).find((item) => item.id === "profile_cards");
-  expect(cardsItem()).toMatchObject({ done: true });
-  store.setSetting(workspaceId, "onboarding.depth", "standard");
-  expect(cardsItem()).toMatchObject({ done: true });
+  expect(interviewChecklistFor(store, workspaceId, [], { unfiledFiles: 0 }).some((item) => item.id === "profile_cards")).toBe(false);
 });
 
 

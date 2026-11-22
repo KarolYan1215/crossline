@@ -1,4 +1,4 @@
-// i18n-exempt: claims read off the profile cards, whose items exist in Chinese only so far (English cards are not offered); the writer's claims are in the interview's language
+// i18n-exempt: claims read off the scale, written in Chinese like its items (译本待校); the writer's claims are in the interview's language
 /**
  * Claims for the profile report (docs/profile-and-agent-kit.md §五–§六): what the cards measured, computed here and never by a model, and
  * what the portrait writer said, each kept only with a quote that is really in the person's replies.
@@ -68,17 +68,18 @@ const administrationOfAll = (scores: DimensionScore[]) => scores.every((score) =
   : scores.every((score) => score.administration === "mapped") ? "mapped" as const : "mixed" as const;
 const itemsBehind = (scores: DimensionScore[], instrument: InstrumentId) => {
   const dimensions = new Set(scores.map((score) => score.dimension));
-  return PROFILE_ITEMS.filter((item) => item.instrument === instrument
-    && (instrument === "values" ? item.dimension.split("|").some((side) => dimensions.has(side)) : dimensions.has(item.dimension))).map((item) => item.id);
+  return PROFILE_ITEMS.filter((item) => item.instrument === instrument && dimensions.has(item.dimension)).map((item) => item.id);
 };
 type Scored = DimensionScore & { score: number };
 const scored = (answers: InstrumentAnswers, instrument: InstrumentId) =>
   instrumentScores(answers, instrument).filter((score): score is Scored => score.score !== null);
+/** The values in the person's own order (TwIVI), highest first. */
+const rankedValues = (answers: InstrumentAnswers) => scored(answers, "twivi").filter((score) => score.rank).sort((a, b) => a.rank! - b.rank!);
 
 /**
- * The cards' claims: one per Big Five dimension, the three strongest work interests with the weakest, the value tradeoffs' top three and
- * bottom two, and life satisfaction. Only dimensions with a score speak (every item answered, at most half by words); each says how it was
- * answered. `measured` only when every item behind it was tapped, else `inferred` (§六). Relative tendencies only, no norms (§三).
+ * The scale's claims (2026-11-22): one per Big Five domain with its percentile against the published norm (`NEO_NORMS`), and the
+ * values' top three and bottom two in the person's own order. Only dimensions with a score speak; each says how it was answered.
+ * `measured` only when every item behind it was tapped, else `inferred` (§六).
  */
 export function instrumentClaims(answers: InstrumentAnswers, at: string): ProfileClaim[] {
   const reviewBy = addDays(at, 180);
@@ -89,32 +90,27 @@ export function instrumentClaims(answers: InstrumentAnswers, at: string): Profil
     confidence: Math.min(...scores.map(confidenceOf)),
     basis: [{ instrument, items: itemsBehind(scores, instrument), administration: administrationOfAll(scores) }], reviewBy });
   const out: ProfileClaim[] = [];
-  for (const score of scored(answers, "mini_ipip"))
-    out.push(claim("personality", `${score.label}${levelOf(score.score)}（${score.score}/100，${administrationNote(score)}）`, [score], "mini_ipip",
+  for (const score of scored(answers, "ipip_neo_120"))
+    out.push(claim("personality", `${score.label}${levelOf(score.score)}（第 ${score.score} 百分位，${administrationNote(score)}）`, [score], "ipip_neo_120",
       `${score.dimension}:${levelOf(score.score)}`));
-  const interests = scored(answers, "rest18").sort((a, b) => b.score - a.score);
-  if (interests.length >= 4) out.push(claim("interests", `最想做的工作类型：${interests.slice(0, 3).map((score) => `${score.label}（${score.score}）`).join("、")}；`
-    + `最不想做：${interests.at(-1)!.label}（${interests.at(-1)!.score}）`, interests, "rest18",
-    [...interests.slice(0, 3), interests.at(-1)!].map((score) => score.dimension).join(",")));
-  const values = scored(answers, "values").sort((a, b) => b.score - a.score);
-  if (values.length >= 5) out.push(claim("values", `取舍时更看重：${values.slice(0, 3).map((score) => score.label).join("、")}；更容易让出：`
-    + values.slice(-2).map((score) => score.label).join("、"), values, "values",
+  const values = rankedValues(answers);
+  if (values.length >= 5) out.push(claim("values", `最看重：${values.slice(0, 3).map((score) => score.label).join("、")}；相对最不看重：`
+    + values.slice(-2).map((score) => score.label).join("、"), values, "twivi",
     [...values.slice(0, 3), ...values.slice(-2)].map((score) => score.dimension).join(",")));
-  const life = scored(answers, "swls")[0];
-  if (life) out.push(claim("lifestyle", `对眼下生活的整体满意度${levelOf(life.score)}（${life.score}/100，${administrationNote(life)}）`, [life], "swls", levelOf(life.score)));
   return out;
 }
 
-/** The cards' readings for the person's own page (2026-11-15): per scored dimension its label and level in words, never the number. */
+/** The scale's readings for the person's own page: per scored domain its level in words, and the three values they rate highest. */
 export function instrumentLevels(answers: InstrumentAnswers): Array<{ label: string; level: string }> {
-  return (["mini_ipip", "rest18", "swls", "values"] as const).flatMap((instrument) =>
-    scored(answers, instrument).map((score) => ({ label: score.label, level: levelOf(score.score) })));
+  return [...scored(answers, "ipip_neo_120").map((score) => ({ label: score.label, level: levelOf(score.score) })),
+    ...rankedValues(answers).slice(0, 3).map((score) => ({ label: score.label, level: `第 ${score.rank} 看重` }))];
 }
 
-/** What the writer is told about the cards: levels in words, never a number, so its own claims say how a tendency shows in a day. */
+/** What the writer is told about the scale: domain levels with their percentiles, and the values in the person's own order. */
 export function instrumentReadings(answers: InstrumentAnswers): string[] {
-  return (["mini_ipip", "rest18", "swls", "values"] as const).flatMap((instrument) =>
-    scored(answers, instrument).map((score) => `${score.label}：${levelOf(score.score)}（${administrationNote(score)}）`));
+  const values = rankedValues(answers);
+  return [...scored(answers, "ipip_neo_120").map((score) => `${score.label}：${levelOf(score.score)}（第 ${score.score} 百分位，${administrationNote(score)}）`),
+    ...(values.length ? [`价值观（本人自己的排序，高到低）：${values.map((score) => score.label).join("、")}`] : [])];
 }
 
 export type ReportSectionView = {

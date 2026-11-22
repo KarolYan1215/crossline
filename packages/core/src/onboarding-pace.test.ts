@@ -138,7 +138,8 @@ describe("项目细节不再拖住访谈", () => {
     const project = items.find((item) => item.id === "project:p1")!;
     expect(project.deferred).toBe(true);
     expect(interviewOwnedOpen(items).some((item) => item.id === "project:p1")).toBe(false);
-    expect(interviewComplete(items.filter((item) => !item.id.startsWith("portrait")))).toBe(true);
+    // No line is given here, so the start item 「至少有一条主线」 (D10) is open; it is not what this test is about.
+    expect(interviewComplete(items.filter((item) => !item.id.startsWith("portrait") && item.id !== "start_line"))).toBe(true);
   });
 });
 

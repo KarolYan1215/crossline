@@ -21,10 +21,36 @@ export const POINT_OPS = ["add", "revise", "retract"] as const;
 /** The longest point: a paragraph. */
 export const POINT_TEXT_MAX = 800;
 
+/**
+ * The organizing layer's free notes (D9, 2026-11-22) refer to the 24 dimensions of the owner's personal-modeling method
+ * (`references/outputs-and-dimensions.md`): `M1` … `M24`, labels in Chinese. A note names at most one; there is no cap on how many notes
+ * a dimension holds, and the Skill rewrites a note when new evidence comes for it rather than adding a near copy.
+ */
+/* i18n-ignore-start: dimension names shown in the person's portrait are translated where they are shown */
+export const PERSONAL_DIMENSIONS = [
+  "基本背景与时间线", "能力与资产盘点", "人格", "动机与欲望结构", "价值观与价值排序", "认知风格与思维模式", "决策模式", "工作习惯与执行",
+  "学习方式", "与 AI 的协作方式", "语言风格", "社交与关系", "情绪与压力调节", "专业兴趣与品味", "职业规划与路径", "创业与产品",
+  "财务与资本观", "公众表达", "身份与合规约束", "生活方式、健康、消费与兴趣", "审美", "时间观与自我叙事", "优势与盲点", "未知与待补"
+] as const;
+/* i18n-ignore-end */
+export const PERSONAL_DIMENSION_IDS = PERSONAL_DIMENSIONS.map((_, index) => `M${index + 1}`);
+export const personalDimensionLabel = (id: string | undefined): string | undefined => {
+  const index = /^M(\d{1,2})$/.exec(id ?? "")?.[1];
+  return index ? PERSONAL_DIMENSIONS[Number(index) - 1] : undefined;
+};
+
 export type ProfilePoint = {
   id: string;
   section: PointSection;
   text: string;
+  /** The personal-modeling dimension the note is about (`M1` … `M24`, D9); absent on a point written before 2026-11-22. */
+  dimension?: string;
+  /** The person corrected or stated this about themselves in so many words: shown 【自报】. */
+  selfReported?: true;
+  /** Literature the note rests on (author, year, title), beside or instead of the person's words: never a tap. */
+  literature?: string[];
+  /** A note this one contradicts: both are kept, each with its time (the log's `at`). */
+  contradicts?: string;
   /** The person's words it rests on: a reply or file (`reply-N`, `src-N`) and the sentence, or a card's correction (`card:<session>#<seq>`). */
   quotes: Array<{ ref: string; text: string }>;
   /** Outside data from the research threads, each with its URL. */
@@ -46,6 +72,10 @@ export type PointChange = {
   quotes: Array<{ ref: string; text: string }>;
   external: Array<{ text: string; url: string }>;
   why: string;
+  dimension?: string;
+  selfReported?: boolean;
+  literature?: string[];
+  contradicts?: string;
 };
 
 /**
@@ -61,7 +91,12 @@ export const POINT_CHANGE_FIELD = object({
   op: { type: "string", enum: [...POINT_OPS] }, id: { type: "string", maxLength: 12 }, section: { type: "string", enum: [...POINT_SECTIONS] },
   text: { type: "string", maxLength: POINT_TEXT_MAX }, refs: { type: "array", maxItems: 8, items: { type: "integer", minimum: 1 } },
   external: { type: "array", maxItems: 3, items: object({ text: { type: "string", minLength: 1, maxLength: 300 }, url: { type: "string", minLength: 8, maxLength: 500 } }) },
-  why: { type: "string", maxLength: 300 }
+  why: { type: "string", maxLength: 300 },
+  // D9 (2026-11-22): the personal-modeling dimension ("" for none), 【自报】, literature, and the note this one contradicts ("" for none).
+  dimension: { type: "string", enum: ["", ...PERSONAL_DIMENSION_IDS] },
+  selfReported: { type: "boolean" },
+  literature: { type: "array", maxItems: 3, items: { type: "string", minLength: 4, maxLength: 300 } },
+  contradicts: { type: "string", maxLength: 12 }
 });
 
 const loose = (value: string) => value.replace(/[^\p{L}\p{N}]+/gu, "").toLowerCase();
@@ -83,15 +118,25 @@ export function applyPointChanges(points: ProfilePoint[], changes: PointChange[]
     const quotes = unique(change.quotes.filter((quote) => quote.ref && quote.text.trim()), (quote) => `${quote.ref}|${quote.text}`);
     const external = unique(change.external.filter((item) => item.text.trim() && isWebUrl(item.url)).map((item) => ({ text: item.text.trim(), url: item.url.trim() })), (item) => item.url);
     const target = next.find((point) => point.id === change.id && !point.retracted);
+    // A note's basis (D9): the person's words, outside data, or literature — at least one. A tap is never one (`resolveOnboardingRefs`).
+    const literature = unique((change.literature ?? []).map((item) => str(item, 300)).filter((item) => item.length >= 4), (item) => item).slice(0, 3);
+    const based = quotes.length > 0 || literature.length > 0;
+    const dimension = PERSONAL_DIMENSION_IDS.includes(change.dimension ?? "") ? change.dimension : undefined;
+    const contradicts = next.some((point) => point.id === change.contradicts) ? change.contradicts : undefined;
+    const extra = { ...(dimension ? { dimension } : {}), ...(change.selfReported ? { selfReported: true as const } : {}),
+      ...(literature.length ? { literature } : {}), ...(contradicts ? { contradicts } : {}) };
     if (change.op === "add") {
-      if (!text || !quotes.length || !oneOf(POINT_SECTIONS, change.section) || next.some((point) => !point.retracted && loose(point.text) === loose(text))) { dropped += 1; continue; }
-      next.push({ id: `p${++last}`, section: change.section, text, quotes, external, source: "stated", log: [{ at, op: "add", before: "", why }] });
+      if (!text || !based || !oneOf(POINT_SECTIONS, change.section) || next.some((point) => !point.retracted && loose(point.text) === loose(text))) { dropped += 1; continue; }
+      next.push({ id: `p${++last}`, section: change.section, text, quotes, external, source: "stated", ...extra, log: [{ at, op: "add", before: "", why }] });
     } else if (change.op === "revise") {
-      if (!target || target.source !== "stated" || !text || !quotes.length || !why || loose(text) === loose(target.text)) { dropped += 1; continue; }
+      if (!target || target.source !== "stated" || !text || !based || !why || loose(text) === loose(target.text)) { dropped += 1; continue; }
       target.log = [...target.log, { at, op: "revise", before: target.text, why }];
       target.text = text;
       target.quotes = unique([...target.quotes, ...quotes], (quote) => `${quote.ref}|${quote.text}`).slice(-12);
       target.external = unique([...target.external, ...external], (item) => item.url).slice(-6);
+      if (dimension) target.dimension = dimension;
+      if (change.selfReported) target.selfReported = true;
+      if (literature.length) target.literature = unique([...(target.literature ?? []), ...literature], (item) => item).slice(-6);
     } else {
       if (!target || target.source !== "stated" || !why) { dropped += 1; continue; }
       target.retracted = true;
@@ -241,7 +286,10 @@ function candidateRows(hypotheses: Hypothesis[], limit: number) {
 /** The ledger as the extraction and the dialogue are shown it: one line per point still standing. */
 export function pointLines(points: ProfilePoint[]): string[] {
   const label: Record<PointSource, string> = { stated: "原话", confirmed: "本人确认", corrected: "本人更正" };
-  return points.filter((point) => !point.retracted).map((point) => `${point.id} [${point.section}·${label[point.source]}] ${point.text.slice(0, 200)}`);
+  // The dimension, 【自报】, the note it contradicts and when it was last written (D9): the layer rewrites a dimension's note, keeps both
+  // sides of a contradiction with their times.
+  return points.filter((point) => !point.retracted).map((point) => `${point.id} [${point.section}·${label[point.source]}${point.dimension ? `·${point.dimension} ${personalDimensionLabel(point.dimension)}` : ""}]`
+    + `${point.selfReported ? "【自报】" : ""}${point.contradicts ? `（与 ${point.contradicts} 矛盾，记于 ${point.log.at(-1)?.at.slice(0, 10) ?? ""}）` : ""} ${point.text.slice(0, 200)}`);
 }
 
 /* i18n-ignore-end */

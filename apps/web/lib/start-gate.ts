@@ -8,9 +8,9 @@ import { timedSync } from "./sections";
 import { startConfirmed } from "./start-confirm";
 
 /**
- * Whether the five start items stand (`standard`, `readyToStart`, decided 2026-10-12): a description of every line, the weekly hours, a
- * hard line's fixed schedule, a current project per line with its deadline or 「没有截止」, and a long-term goal the person adopted — and
- * whether the person then confirmed what was recorded (`ready`, 2026-10-19: the plan rests on it, so they look it over once). The
+ * Whether the start standard stands (`standard`, `readyToStart`; since D10 of 2026-11-22 only two hard items: at least one line and at
+ * least one milestone — everything else the interview asks is gathered while the app is in use) — and whether the person then confirmed
+ * what was recorded (`ready`, 2026-10-19: the plan rests on it, so they look it over once, with what the portrait is still thin on). The
  * portrait is not required. Seeding first: with example data on, a brand-new account has its lines and hours only after this runs.
  */
 export function startReadiness(ctx: AccessContext): { ready: boolean; standard: boolean; confirmed: boolean; missing: ChecklistItem[] } {

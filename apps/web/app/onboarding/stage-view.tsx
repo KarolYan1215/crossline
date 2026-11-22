@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Circle } from "lucide-react";
-import { interviewParts, pointsRules, SCHWARTZ_VALUES, type InterviewFlow } from "@crossline/core";
+import { Circle } from "lucide-react";
+import { pointsRules, SCHWARTZ_VALUES } from "@crossline/core";
 import { ValuesRadar } from "../portrait/portrait-charts";
 import { FlywheelPreview, type Link } from "./flywheel-preview";
 import { StartConfirm } from "./start-confirm";
@@ -18,8 +18,8 @@ import { useLocale, useT } from "../locale-context";
 /**
  * The interview's right column (docs/onboarding-v3.md, decided 2026-10-14): what the answers are building, one picture per stage — the
  * lines, the week, the portrait's map, the projects on a time axis, and at the end the whole structure drawn from the person's own
- * content. The current stage's picture is shown; earlier ones stay one click away. Above it, the start standard as a ring and the time
- * left, so the person always knows how far they are. The compass and energy pictures are now details of the map's dimensions (decision 25).
+ * content. The current stage's picture is shown; earlier ones stay one click away. Above it, the start standard (D10: a line and a milestone)
+ * and what is still missing, with no time estimate. The compass and energy pictures are now details of the map's dimensions (decision 25).
  */
 export type StageKey = "lines" | "week" | "map" | "projects" | "structure";
 const VIEWS: Array<{ key: StageKey; label: string }> = [
@@ -36,24 +36,6 @@ export function viewForStage(stage: string, complete: boolean, ready = false): S
 /** The dimension the map opens on in a stage that is about one (decision 15: the life story D8, the compass D4, energy D1). */
 export function dimensionForStage(stage: string): DimensionId | undefined {
   return ({ narrative: "D8", compass: "D4", energy: "D1" } as Record<string, DimensionId>)[stage];
-}
-
-/** The profile module's parts in flow v2 (narrative, compass, energy, situation). */
-const MODULE_PARTS = 4;
-
-/** Rough minutes to the start standard and to the end, from what is still open: honest enough to plan a sitting, never a promise. */
-export function minutesLeft(state: Pick<OnboardingState, "readyToStart" | "startMissing">, stage: string, flow: InterviewFlow = "v1",
-  reached = 0): { label: string; minutes: number } {
-  const order: string[] = interviewParts(flow);
-  // Counted from the furthest part reached: going back to an earlier part for one question does not add its parts' time again (W-235).
-  const here = Math.max(order.indexOf(stage), reached - 1);
-  // A start item is per line and most are settled by one answer, several to a round: about 2.5 minutes each, never more than half an hour.
-  const facts = Math.min(30, Math.ceil(state.startMissing.filter((item) => item.id !== "profile_cards").length * 2.5));
-  // The profile module (flow v2) comes before the start: about ten minutes a part still ahead of it.
-  const module = flow === "v2" ? Math.max(0, MODULE_PARTS - Math.max(0, here)) * 10 : 0;
-  if (!state.readyToStart) return { label: "开始使用前约", minutes: Math.max(3, module + facts) };
-  const left = Math.max(1, order.length - Math.max(0, here));
-  return { label: "画像访谈还剩约", minutes: left * 5 };
 }
 
 /** Codes that mean no model can run for this account yet: the conversation already says so in the same words, under the reply. */
@@ -79,44 +61,26 @@ export function StageView({ state, stage, complete, onChanged }: {
   // A new stage brings its picture forward; a picture the person opened stays until the stage moves on.
   useEffect(() => setShown(current), [current]);
   const reached = VIEWS.findIndex((view) => view.key === current);
-  const total = state.startTotal;
-  const left = minutesLeft(state, stage, state.flow, state.progress?.reached);
-  // A long-term goal is adopted in the left column, not answered in the conversation: its missing item links there (W-8).
-  const missing = state.startMissing.map((item) => ({ label: item.label, href: item.id.startsWith("line_goal:") ? "#ob-goals" : "" }));
   const progress = state.progress;
+  // 「整理中」 is the background lane's real state (D13): the organizing note while it runs, nothing when it is caught up.
   const organizing = organizingNote(state.organizing, locale);
   // While the last replies are still being written into the record, what is open may already be answered: the names wait for it rather
   // than show the list from before (the 2026-10-31 walkthrough read a stale 「还缺」 for several rounds).
   const settling = Boolean(state.organizing?.replies && !state.organizing.failing);
-  // The start items by kind (they are per line): one row each, done when every line's is, the open ones named under it.
-  const groups = START_GROUPS.map((group) => {
-    const items = (state.startItems ?? []).filter((item) => item.id.split(":")[0] === group.prefix);
-    return { ...group, items, open: missing.filter((item) => state.startItems ? items.some((one) => one.label === item.label) : false) };
-  }).filter((group) => group.items.length > 0);
-  // A state read before the items were sent lists what is missing as before.
-  const loose = state.startItems ? [] : missing;
-  // Under the points rules (2026-11-12) the map lists the points, and a stage's view appears once that stage is over, written once.
+  // Under the points rules (2026-11-12) the map lists the points. Since 2026-11-22 (D13) nothing waits for a stage to end: the views fill
+  // in live as the organizing lane writes.
   const rules = pointsRules(state.session?.coverage);
-  const viewOnce = (section: string, view: React.ReactNode) => !rules || state.sectionsFinal?.includes(section) ? view
-    : <p className="ob-muted">{t("这一部分结束后，在这里写一次当前看法。")}</p>;
   return <aside className="ob-stage" aria-label={t("正在成形")}>
-    {/* The start standard only (2026-10-28): the old ring read 100% beside the time the rest of the interview still takes. */}
+    {/* The start standard (D10, 2026-11-22): only at least one line and one milestone are required; no time estimate, no item groups. */}
     <section className="ob-start" aria-label={t("开始使用的进度")}>
       <header>
-        <b>{state.readyToStart ? t("可以开始使用") : total ? t("开始使用前还差 {{count}} 项", { count: state.startMissing.length }) : t("先回答中间的第一组问题")}</b>
-        {!state.readyToStart && total > 0 && <small>{t("约 {{minutes}} 分钟", { minutes: left.minutes })}</small>}
+        <b>{state.readyToStart ? t("可以开始使用") : t("开始使用前还差 {{count}} 项", { count: state.startMissing.length })}</b>
       </header>
       {organizing && <small className="ob-organizing" role="status">{organizing}</small>}
-      {groups.length > 0 && <ul className="ob-start-list">{groups.map((group) => { const open = group.items.some((item) => !item.done);
-        return <li key={group.prefix} data-done={!open || undefined}>
-          {open ? <Circle size={15} strokeWidth={1.75} aria-hidden="true" /> : <Check size={15} strokeWidth={2} aria-hidden="true" />}
-          <span>{t(group.label)}{open && settling && <small><span>{t("整理中")}</span></small>}{open && !settling && group.open.length > 0 && <small>{group.open.slice(0, 3).map(({ label, href }) =>
-            href ? <a key={label} href={href}>{t("{{label}}（在左栏采用）", { label: t(label) })}</a> : <span key={label}>{t(label)}</span>)}
-            {group.open.length > 3 && <span>{t("等 {{count}} 项", { count: group.open.length - 3 })}</span>}</small>}</span>
-        </li>; })}</ul>}
-      {!state.readyToStart && !settling && loose.length > 0 && <ul className="ob-ring-missing">{loose.slice(0, 3).map(({ label, href }) => <li key={label}>{href ? <a href={href}>{t("{{label}}（在左栏采用）", { label: t(label) })}</a> : t(label)}</li>)}
-        {loose.length > 3 && <li>{t("等 {{count}} 项", { count: loose.length - 3 })}</li>}</ul>}
-      {/* The first time, the person looks over what the plan will rest on before every page opens; after that it is a plain link. */}
+      {!state.readyToStart && !settling && state.startMissing.length > 0 && <ul className="ob-start-list">{state.startMissing.map((item) => <li key={item.id}>
+        <Circle size={15} strokeWidth={1.75} aria-hidden="true" /><span>{t(item.label)}</span>
+      </li>)}</ul>}
+      {/* 「开始使用」 is there as soon as the two hard items stand; pressing it shows what the portrait is still thin on (D10). */}
       {state.readyToStart && (state.startConfirmed === false && state.startSummary ? <StartConfirm summary={state.startSummary} />
         : <a className="ob-btn ob-primary" href="/">{t("开始使用")}</a>)}
       {/* Two ways on from here, said once: the button looked like the end of the interview (2026-10-18 walkthrough). */}
@@ -151,8 +115,8 @@ export function StageView({ state, stage, complete, onChanged }: {
       {shown === "week" && <WeekView week={state.week} draft={state.skeleton ?? []} lines={state.lines} />}
       {shown === "map" && <DivergenceView hypotheses={state.profile?.hypotheses} dimensions={state.profile?.dimensions} insights={insightsOf(state)}
         ratings={state.insightRatings} initial={dimensionForStage(stage)} {...(rules ? { points: state.profile?.points ?? [] } : {})}
-        detail={(dimension) => dimension === "D4" ? viewOnce("compass", <CompassView profile={state.profile} />)
-          : dimension === "D1" || dimension === "D7" ? viewOnce("energy", <EnergyView profile={state.profile} />) : dimension === "D5" ? <LinesView state={state} onChanged={onChanged} />
+        detail={(dimension) => dimension === "D4" ? <CompassView profile={state.profile} />
+          : dimension === "D1" || dimension === "D7" ? <EnergyView profile={state.profile} /> : dimension === "D5" ? <LinesView state={state} onChanged={onChanged} />
           : dimension === "D8" ? <LifelineView theme={state.profile?.careerTheme} turns={state.profile?.turningPoints} next={state.profile?.futureScript} />
           : dimension === "D9" ? <LoopView hypotheses={state.profile?.hypotheses} /> : null} />}
       {shown === "map" && <ScaleReadings readings={state.scaleReadings} />}
@@ -170,12 +134,6 @@ const insightsOf = (state: OnboardingState) => state.messages.flatMap((message) 
   // A round's later cards are rated under `<seq>.<n>` (2026-11-14).
   return [content?.insight, ...(content?.moreInsights ?? [])].flatMap((card, index) => card?.text ? [{ seq: index ? `${message.seq}.${index}` : message.seq, text: card.text }] : []);
 });
-
-/** The five kinds of start item (`interviewChecklist`, `start: true`), by the prefix of their ids. */
-const START_GROUPS = [
-  { prefix: "line_desc", label: "每条主线的描述" }, { prefix: "line_goal", label: "长期目标（本人选定）" }, { prefix: "hard_schedule", label: "固定日程" },
-  { prefix: "availability", label: "每周可用时间" }, { prefix: "line_project", label: "每条主线的当前项目与截止" }
-];
 
 async function post(body: Record<string, unknown>): Promise<boolean> {
   const response = await fetch("/api/profile", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => undefined);

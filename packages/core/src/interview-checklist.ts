@@ -28,9 +28,10 @@ export type ChecklistItem = {
    */
   ask?: string;
   /**
-   * One of the five things that must stand before the person starts using the app (decided 2026-10-12, `docs/loop-and-scout.md` §7): a
-   * description of every line, the weekly hours, a hard line's fixed schedule, a current project per line with its deadline (or 「没有截止」),
-   * and a long-term goal the person adopted. These accept only the person's word or a file, never an assumption.
+   * One of the two things that must stand before the person starts using the app (D10, 2026-11-22): at least one line and at least one
+   * milestone, because scheduling cannot do without them. Everything else — a line's description and goal, the weekly hours, a fixed
+   * schedule, a deadline, the near-term work — is still asked, but the person decides when to start (「开始使用」 can be pressed at any
+   * time, and the model says what is still thin). The five start items of 2026-10-12 and the scale cards of 2026-10-31 no longer hold it.
    */
   start?: true;
   /**
@@ -62,11 +63,8 @@ export type ChecklistInput = {
   /** Files only the person can place; null where this is not known (the worker). */
   unfiledFiles: number | null;
   portraitConfirmed: boolean;
-  /**
-   * The profile module's cards (flow v2, docs/profile-and-agent-kit.md): how many of the bank's items are answered or skipped. Absent for
-   * an interview that started on the earlier flow, which has no cards.
-   */
-  profileCards?: { settled: number; total: number } | undefined;
+  /** Milestones on the board (the store's): one is enough for the start, as a current project or a confirmed `milestone` fact is. */
+  milestones?: number | undefined;
   /** The portrait's sections (`situation`, `compass`, `energy`) the extraction wrote from at least one numbered sentence. */
   groundedSections?: string[] | undefined;
   /** The language of each item's label and detail (default Chinese). */
@@ -167,10 +165,17 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
     ...(unbacked.length ? { ask: t(PORTRAIT_PARTS.find((part) => part.label === unbacked[0])!.ask) } : {}) });
   items.push({ id: "portrait_confirmed", group: "画像", label: t("本人确认画像符合自己"), done: input.portraitConfirmed,
     detail: input.portraitConfirmed ? "" : t("在画像页读完后选「符合」，或说明哪里不对"), owner: "person" });
-  // The profile module comes first and is not skipped (decided 2026-10-31): its cards are a start item. Skipping one card counts as answering it.
-  const cards = input.profileCards;
-  if (cards) items.push({ id: "profile_cards", group: "画像", label: t("画像模块的卡片题已答完"), done: cards.settled >= cards.total,
-    detail: cards.settled >= cards.total ? "" : t("还有 {{count}} 题未答", { count: cards.total - cards.settled }), owner: "interview", start: true });
+  // The scale is a page of its own before the first round (2026-11-22) and holds nothing up: the profile_cards start item is gone.
+
+  // The two start items (D10): scheduling needs a line to put work on and a milestone to work towards. A current project of a line (not
+  // its default one) is a milestone in the making, as a `milestone` fact the person confirmed is.
+  items.push({ id: "start_line", group: "主线", label: t("至少有一条主线"), done: input.lines.length > 0,
+    detail: input.lines.length ? "" : t("还没有主线"), owner: "interview", start: true, ask: t("眼下你同时在推进哪几件长期的事？") });
+  const milestoneNow = (input.milestones ?? 0) > 0 || input.projects.some((project) => !isDefaultProject(project.id))
+    || input.facts.some((fact) => fact.slot === "milestone" && confirmedFact(fact));
+  items.push({ id: "start_milestone", group: "主线", label: t("至少有一个里程碑"), done: milestoneNow,
+    detail: milestoneNow ? "" : t("还没有一个要做成的阶段性结果"), owner: "interview", start: true,
+    ask: t("接下来几个月，你最想做成的一件具体的事是什么？大概什么时候？") });
 
   for (const line of input.lines) {
     const described = input.descriptions[line.id];
@@ -180,10 +185,10 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
       || input.facts.some((fact) => fact.identityId === line.id && !fact.projectId && confirmedFact(fact) && DESCRIBES_LINE.test(fact.slot) && Boolean(fact.value?.trim()));
     items.push({ id: `line_desc:${line.id}`, group: "主线", label: t("「{{line}}」有个性化描述与长期目标候选", { line: line.label }),
       done: describedNow && candidates,
-      detail: !describedNow ? t("尚无描述") : !candidates ? t("尚无长期目标的候选词") : "", owner: "interview", start: true,
+      detail: !describedNow ? t("尚无描述") : !candidates ? t("尚无长期目标的候选词") : "", owner: "interview",
       ask: !describedNow ? t("「{{line}}」这条线眼下在做什么？", { line: line.label }) : t("在「{{line}}」这条线上，三五年后你希望成为什么样的人？", { line: line.label }) });
     items.push({ id: `line_goal:${line.id}`, group: "主线", label: t("「{{line}}」已选定至少一个长期目标", { line: line.label }), done: line.goals.length > 0,
-      detail: line.goals.length ? "" : t("从候选中采用或自己写一个"), owner: "person", start: true });
+      detail: line.goals.length ? "" : t("从候选中采用或自己写一个"), owner: "person" });
   }
 
   const projectLine = (project: string) => input.projects.find((item) => item.id === project || item.name === project)?.identityId
@@ -197,14 +202,14 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
     // `person`/`fixed_schedule_class`, the item stayed open for 32 rounds and she was asked for her timetable a second time).
     const stated = input.facts.some((fact) => (fact.identityId === line.id || lineProjects.has(fact.projectId) || (fact.identityId === "person" && hardLines.length === 1))
       && confirmedFact(fact) && statesSchedule(fact));
-    // A start item: an assumed schedule does not count (dates still waiting in a batch do — the person supplied the file that has them).
+    // An assumed schedule does not count (dates still waiting in a batch do — the person supplied the file that has them).
     const done = fixed.length > 0 || stated;
     items.push({ id: `hard_schedule:${line.id}`, group: "日程", label: t("「{{line}}」的每周固定安排已收集", { line: line.label }), done,
-      detail: done ? "" : t("每周固定要占的时间尚未收集"), owner: "interview", start: true,
+      detail: done ? "" : t("每周固定要占的时间尚未收集"), owner: "interview",
       ask: t("「{{line}}」每周哪几天、几点到几点是固定占着的？比如工作日 10:00–19:30、周一上午 10:30–11:30 例会。", { line: line.label }) });
   }
   items.push({ id: "availability", group: "日程", label: t("已提出建议的可用时段"), done: input.availability,
-    detail: input.availability ? "" : t("固定日程之外，每周哪些时段可以安排工作"), owner: "interview", start: true,
+    detail: input.availability ? "" : t("固定日程之外，每周哪些时段可以安排工作"), owner: "interview",
     ask: t("固定安排之外，每周大概哪些时段可以用来做自己的事？") });
   const pending = input.dates.filter((entry) => entry.pending).length;
   if (pending) items.push({ id: "dates_confirmed", group: "日程", label: t("文件与口述中的日期已确认"), done: false,
@@ -224,12 +229,12 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
       detail: done ? "" : current.length
         ? t("缺截止（或说明没有截止）：{{projects}}", { projects: input.locale === "en" ? joinList(input.locale, current.map((project) => project.name)) : current.map((project) => project.name).join("、") })
         : t("尚无当前项目"),
-      owner: "interview", start: true,
+      owner: "interview",
       ask: current.length ? t("「{{project}}」大概什么时候要完成？没有截止也可以直接说。", { project: current[0]!.name })
         : t("「{{line}}」这条线眼下在做的一件事是什么？大概什么时候要完成，没有截止也可以说。", { line: line.label }) });
   }
 
-  // What each line has to finish this week or next (2026-11-20, §3.6, a start item): one thing the person named, their 「没有」, or 「这条线先
+  // What each line has to finish this week or next (2026-11-20, §3.6; no longer a start item since 2026-11-22): one thing the person named, their 「没有」, or 「这条线先
   // 不规划」. What they name becomes a task the moment it is said (`nearTermCaptures` in the worker).
   for (const line of input.lines) {
     const lineProjects = new Set(input.projects.filter((project) => project.identityId === line.id).map((project) => project.id));
@@ -237,7 +242,7 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
       && (fact.slot === "near_term" || fact.slot === "skipped"));
     const done = said || input.nearTermSettled?.[line.id] === true;
     items.push({ id: `near_term:${line.id}`, group: "项目", label: t("「{{line}}」近两周要做完的事已说明", { line: line.label }), done,
-      detail: done ? "" : t("这周到下周已经定了要做完的事（没有也可以说）"), owner: "interview", start: true,
+      detail: done ? "" : t("这周到下周已经定了要做完的事（没有也可以说）"), owner: "interview",
       ask: t("「{{line}}」这周到下周有哪几件已经定了要做完的事？没有也可以直接说。", { line: line.label }) });
   }
 
@@ -246,23 +251,24 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
     const dated = input.dates.some((entry) => entry.project === project.id || entry.project === project.name);
     const course = (Boolean(courseCodeOf(project.name) ?? courseCodeOf(project.id)) && !COURSE_PART.test(project.name)) || own.some((fact) => fact.slot === "grading");
     const missing = PROJECT_SLOTS.filter(([slot, label]) => !(own.some((fact) => slot.test(fact.slot)) || (label === "截止日期" && dated))).map(([, label]) => label);
-    // A course's grading and class times: deferred, asked when its task is planned.
+    // How a graded project is judged and when it meets: deferred, asked when its task is planned. The words are the same for a course, a
+    // certification or a client's review (2026-11-22: the person is not assumed to be a student).
     const courseMissing: string[] = [];
-    if (course && !own.some((fact) => fact.slot === "grading")) courseMissing.push("评分占比");
-    // A course meets: its weekly class times are the frame of the person's week (a course whose meetings nobody asked about left a hole).
+    if (course && !own.some((fact) => fact.slot === "grading")) courseMissing.push("怎么评定");
+    // A project that meets: its weekly times are the frame of the person's week (one whose meetings nobody asked about left a hole).
     const meets = input.dates.some((entry) => entry.recurring && (entry.project === project.id || entry.project === project.name))
       || own.some((fact) => MEETING_SLOTS.test(fact.slot) || (VAGUE_SCHEDULE.test(fact.value ?? "") && statesSchedule(fact)));
-    if (course && !meets) courseMissing.push("上课时间");
+    if (course && !meets) courseMissing.push("固定时间");
     const projectAsk = t("「{{project}}」要做成什么样，做到哪一步了？", { project: project.name });
     items.push({ id: `project:${project.id}`, group: "项目", label: t("「{{project}}」目标、截止与进展证据", { project: project.name }),
       done: !missing.length, detail: missing.length ? t("缺：{{items}}", { items: list(missing) }) : "", owner: "interview",
       deferred: true as const, ...(missing.length ? { ask: projectAsk } : {}) });
-    if (course) items.push({ id: `project_course:${project.id}`, group: "项目", label: t("「{{project}}」评分占比与上课时间", { project: project.name }),
+    if (course) items.push({ id: `project_course:${project.id}`, group: "项目", label: t("「{{project}}」怎么评定与固定时间", { project: project.name }),
       done: !courseMissing.length, detail: courseMissing.length ? t("缺：{{items}}", { items: list(courseMissing) }) : "", owner: "interview",
       deferred: true as const,
-      // One question asks one thing: the grading first, the class times once it is known.
-      ...(courseMissing.length ? { ask: courseMissing[0] === "评分占比" ? t("「{{project}}」的成绩是怎么算的？各部分各占多少？", { project: project.name })
-        : t("「{{project}}」每周什么时候上课？", { project: project.name }) } : {}) });
+      // One question asks one thing: how it is judged first, the fixed times once that is known.
+      ...(courseMissing.length ? { ask: courseMissing[0] === "怎么评定" ? t("「{{project}}」最后由谁、按什么来评定？", { project: project.name })
+        : t("「{{project}}」每周有哪些固定要到场的时间？", { project: project.name }) } : {}) });
   }
 
   if (input.unfiledFiles !== null) items.push({ id: "files_filed", group: "文件", label: t("上传的文件都已归属项目"), done: input.unfiledFiles === 0,
@@ -270,24 +276,17 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
   return items;
 }
 
-/** The portrait sections that ground each deep part of the interview: the part has its minimum once one of them rests on the person's words. */
-const PART_SECTIONS: Record<string, string[]> = { situation: ["situation"], compass: ["compass"], energy: ["energy", "method"] };
-/** The parts that collect the start items themselves: they need no minimum of their own. */
-const FRONT_PARTS = new Set(["orientation", "lines", "details"]);
 /**
- * The deep parts of the interview without their minimum (W-269, 2026-11-14 walkthrough: compass had one round, energy two, situation
- * none, and the interview said 「可以开始使用」 in round 10 and went back for them from round 14): a part no round has been in yet, or
- * whose portrait section has nothing of the person's on record (`portrait_grounded`). Until each has its minimum the dialogue is told
- * the start standard does not stand. `stagesSeen` are the stages of the rounds already written.
+ * The deep parts of the interview a start would still be held for: none since 2026-11-22 (D10). From W-269 (2026-11-14) until then a part
+ * no round had been in, or whose portrait section had nothing of the person's on record, kept the start standard from standing; now the
+ * person decides when to start, and what is still thin is said when they press 「开始使用」 (the extraction's `thin` note). Kept as a
+ * function so the dialogue's callers need no change.
  */
-export function partsUncovered(input: { stageOrder: readonly string[]; stagesSeen: readonly string[]; items: readonly ChecklistItem[] }): string[] {
-  const seen = new Set(input.stagesSeen);
-  const ungrounded = new Set(input.items.find((item) => item.id === "portrait_grounded")?.sections ?? []);
-  const grounded = (stage: string) => { const sections = PART_SECTIONS[stage] ?? []; return !sections.length || sections.some((section) => !ungrounded.has(section)); };
-  return input.stageOrder.filter((stage) => !FRONT_PARTS.has(stage) && (!seen.has(stage) || !grounded(stage)));
+export function partsUncovered(_input: { stageOrder: readonly string[]; stagesSeen: readonly string[]; items: readonly ChecklistItem[] }): string[] {
+  return [];
 }
 
-/** Whether the five start items all stand: the person may use the app. The portrait is not required. */
+/** Whether the start items stand (D10: a line and a milestone): the person may use the app. The portrait is not required. */
 export const readyToStart = (items: ChecklistItem[]) => items.filter((item) => item.start).every((item) => item.done);
 /** The start items still open, in checklist order. */
 export const startMissing = (items: ChecklistItem[]) => items.filter((item) => item.start && !item.done);

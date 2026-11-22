@@ -847,7 +847,11 @@ function cleanPointChanges(list: unknown[], researchUrls?: string[]): PointChang
       quotes: (Array.isArray(item!.quotes) ? item!.quotes : []).filter((quote) => typeof quote?.ref === "string" && typeof quote.text === "string" && quote.text.trim()),
       external: (Array.isArray(item!.external) ? item!.external : []).filter((entry) => typeof entry?.text === "string" && isWebUrl(entry.url)
         && (!allowed || allowed.has(entry.url.trim()))).map((entry) => ({ text: entry.text.trim(), url: entry.url.trim() })),
-      why: str(item!.why, 300) }];
+      why: str(item!.why, 300),
+      // D9 (2026-11-22): a note's dimension, 【自报】, literature and the note it contradicts; `applyPointChanges` checks them.
+      ...(str(item!.dimension, 4) ? { dimension: str(item!.dimension, 4) } : {}), ...(item!.selfReported === true ? { selfReported: true } : {}),
+      ...(Array.isArray(item!.literature) ? { literature: item!.literature.filter((entry): entry is string => typeof entry === "string") } : {}),
+      ...(str(item!.contradicts, 12) ? { contradicts: str(item!.contradicts, 12) } : {}) }];
   });
 }
 

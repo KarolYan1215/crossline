@@ -1,158 +1,114 @@
 import { describe, expect, test } from "vitest";
 import {
-  administrationNote, cardBank, cardsFor, cardsSettled, cardWordsHead, instrumentScores, mergeInstrumentAnswers, pendingItems, PROFILE_ITEMS,
-  readCardAnswers, readInstrumentAnswers, readScaleAnswers, scaleAnswerLine, settledItems, type InstrumentAnswers, type ItemAnswer
+  administrationNote, cardBank, cardsFor, facetScores, FACET_LABEL, instrumentScores, mergeInstrumentAnswers, neoPercentile, PROFILE_ITEMS,
+  readInstrumentAnswers, readScaleAnswers, scaleAnswerLine, settledItems, type InstrumentAnswers, type ItemAnswer
 } from "./profile-instruments";
 import { SCHWARTZ_VALUES } from "./portrait";
 import { claimPrivacy, claimProblem, readPrivacyChoices, visibleClaims, type ProfileClaim } from "./profile-report";
 
-const at = "2026-10-31T10:00:00.000Z";
+const at = "2026-11-22T10:00:00.000Z";
 const tap = (itemId: string, score: number): ItemAnswer => ({ itemId, score, by: "tapped", at });
 const map = (itemId: string, score: number): ItemAnswer => ({ itemId, score, by: "mapped", confidence: 0.7, refs: [3], at });
-const all = (instrument: string, score: number, by: (id: string, score: number) => ItemAnswer = tap) =>
-  Object.fromEntries(PROFILE_ITEMS.filter((item) => item.instrument === instrument).map((item) => [item.id, by(item.id, score)])) as InstrumentAnswers;
+const all = (instrument: string, score: number | ((id: string) => number)) =>
+  Object.fromEntries(PROFILE_ITEMS.filter((item) => item.instrument === instrument)
+    .map((item) => [item.id, tap(item.id, typeof score === "number" ? score : score(item.id))])) as InstrumentAnswers;
+const item = (id: string) => PROFILE_ITEMS.find((candidate) => candidate.id === id)!;
 
-describe("the item bank", () => {
-  test("holds Mini-IPIP's 20 items four per domain with the published reverse keys, 18REST's two per type, SWLS's five and six value pairs", () => {
-    const ipip = PROFILE_ITEMS.filter((item) => item.instrument === "mini_ipip");
-    expect(ipip).toHaveLength(20);
-    for (const domain of ["E", "A", "C", "N", "O"]) expect(ipip.filter((item) => item.dimension === domain)).toHaveLength(4);
-    expect(ipip.filter((item) => item.reverse).map((item) => Number(item.id.slice(5))).sort((a, b) => a - b))
-      .toEqual([6, 7, 8, 9, 10, 15, 16, 17, 18, 19, 20]);
-    const rest = PROFILE_ITEMS.filter((item) => item.instrument === "rest18");
-    expect(rest).toHaveLength(12);
-    for (const type of ["R", "I", "A", "S", "E", "C"]) expect(rest.filter((item) => item.dimension === type)).toHaveLength(2);
-    expect(PROFILE_ITEMS.filter((item) => item.instrument === "swls")).toHaveLength(5);
-    const named = new Set(PROFILE_ITEMS.filter((item) => item.instrument === "values").flatMap((item) => item.dimension.split("|")));
-    expect([...named].sort()).toEqual(SCHWARTZ_VALUES.map((value) => value.name).sort());
-    expect(new Set(PROFILE_ITEMS.map((item) => item.id)).size).toBe(PROFILE_ITEMS.length);
-  });
-});
-
-describe("cards", () => {
-  test("a round offers at most three items, at most three a card, one instrument each, and never an item already answered or skipped", () => {
-    const first = cardsFor("compass", new Set());
-    expect(first.map((card) => [card.instrument, card.items.length])).toEqual([["mini_ipip", 3]]);
-    const settled = new Set([...first.flatMap((card) => card.items.map((item) => item.id))]);
-    const next = cardsFor("compass", settled);
-    expect(next.map((card) => card.instrument)).toEqual(["mini_ipip", "values"]);
-    expect(next.flatMap((card) => card.items)).toHaveLength(3);
-    expect(next.flatMap((card) => card.items).some((item) => settled.has(item.id))).toBe(false);
-    const done = new Set(PROFILE_ITEMS.filter((item) => item.stage === "compass").map((item) => item.id));
-    expect(cardsFor("compass", done)).toEqual([]);
+describe("the item bank (IPIP-NEO-120 and TwIVI, 2026-11-22)", () => {
+  test("holds Johnson's 120 items, 24 per domain and 4 per facet, and TwIVI's 20 portraits, two per Schwartz value", () => {
+    const neo = PROFILE_ITEMS.filter((entry) => entry.instrument === "ipip_neo_120");
+    expect(neo).toHaveLength(120);
+    for (const domain of ["N", "E", "O", "A", "C"]) expect(neo.filter((entry) => entry.dimension === domain)).toHaveLength(24);
+    for (const facet of Object.keys(FACET_LABEL)) expect(neo.filter((entry) => entry.facet === facet)).toHaveLength(4);
+    expect(Object.keys(FACET_LABEL)).toHaveLength(30);
+    // The order cycles N E O A C, facets one to six (Johnson 2014).
+    expect(neo.slice(0, 6).map((entry) => entry.facet)).toEqual(["N1", "E1", "O1", "A1", "C1", "N2"]);
+    // Spot checks against the published key: 「Use others for my own ends」 is A2 minus, 「Worry about things」 N1 plus, 「Act without thinking」 C6 minus.
+    expect(item("neo-9")).toMatchObject({ facet: "A2", reverse: true, en: "Use others for my own ends", points: 5 });
+    expect(item("neo-1")).toMatchObject({ facet: "N1", reverse: false });
+    expect(item("neo-120")).toMatchObject({ facet: "C6", reverse: true });
+    expect(neo.filter((entry) => entry.reverse)).toHaveLength(55);
+    const twivi = PROFILE_ITEMS.filter((entry) => entry.instrument === "twivi");
+    expect(twivi).toHaveLength(20);
+    for (const value of SCHWARTZ_VALUES) expect(twivi.filter((entry) => entry.dimension === value.name)).toHaveLength(2);
+    expect(twivi.every((entry) => entry.points === 6 && !entry.reverse)).toBe(true);
+    // Items 1 and 11 measure conformity, 10 and 20 security (Sandy et al.'s key).
+    expect([item("twivi-1").dimension, item("twivi-11").dimension, item("twivi-10").dimension, item("twivi-20").dimension]).toEqual(["遵从", "遵从", "安全", "安全"]);
+    expect(new Set(PROFILE_ITEMS.map((entry) => entry.id)).size).toBe(140);
+    expect(PROFILE_ITEMS.every((entry) => entry.text && entry.en)).toBe(true);
   });
 
-  test("items a stage never got to come first in a later stage, and never share a card with the later stage's", () => {
-    const narrative = new Set(PROFILE_ITEMS.filter((item) => item.stage === "narrative").map((item) => item.id));
-    const leftOver = [...narrative].pop()!;
-    const settled = new Set([...narrative].filter((id) => id !== leftOver));
-    const cards = cardsFor(["narrative", "compass"], settled);
-    expect(cards[0]!.items.map((item) => item.id)).toEqual([leftOver]);
-    expect(cards[0]!.stage).toBe("narrative");
-    expect(cards[1]!.stage).toBe("compass");
-    expect(cardsFor(["narrative", "compass"], settled, 1)).toHaveLength(1);
-    expect(cardsSettled(settled)).toEqual({ settled: narrative.size - 1, total: PROFILE_ITEMS.length });
-  });
-
-  test("the interview asks a short set of whole dimensions before the start, not all 43 items (W-186)", () => {
-    const short = cardBank("short");
-    expect(PROFILE_ITEMS).toHaveLength(43);
-    expect(short).toHaveLength(14);
-    // Whole dimensions only, so each one the short set asks can still be scored.
-    for (const item of short) if (item.instrument !== "values")
-      expect(short.filter((other) => other.dimension === item.dimension)).toHaveLength(PROFILE_ITEMS.filter((other) => other.instrument === item.instrument && other.dimension === item.dimension).length);
+  test("the interview asks no cards any more: the scale is a page of its own", () => {
+    expect(cardsFor("compass", new Set())).toEqual([]);
+    expect(cardBank("short")).toEqual([]);
     expect(cardBank("all")).toBe(PROFILE_ITEMS);
-    // Its cards and its start item count the short set: once those 14 are answered nothing is left to offer or to hold the start.
-    const done = new Set(short.map((item) => item.id));
-    expect(cardsSettled(done, "short")).toEqual({ settled: 14, total: 14 });
-    expect(cardsFor(["narrative", "compass", "energy", "situation"], done, undefined, undefined, "short")).toEqual([]);
-    expect(cardsFor("compass", new Set(), undefined, undefined, "short").flatMap((card) => card.items).every((item) => short.includes(item))).toBe(true);
-    expect(cardsSettled(done).settled).toBe(14);
   });
 });
 
 describe("answers", () => {
-  test("a tap is read straight out of the reply, and only for items the round offered", () => {
-    const item = PROFILE_ITEMS.find((candidate) => candidate.id === "ipip-1")!;
-    const pair = PROFILE_ITEMS.find((candidate) => candidate.id === "value-2")!;
-    const reply = [scaleAnswerLine(item, 4), scaleAnswerLine(pair, 1), "【其他】选择：A", "【随便】点选：3/5"].join("\n");
-    expect(scaleAnswerLine(pair, 1)).toContain("（去试新鲜、有挑战的事）");
-    // 2 and 4 say which pole they lean to, so a value is never read the wrong way round.
-    expect(scaleAnswerLine(pair, 2)).toMatch(new RegExp(`点选：2/5（偏向「${pair.anchors[0]}」）$`));
-    expect(scaleAnswerLine(pair, 4)).toMatch(new RegExp(`点选：4/5（偏向「${pair.anchors[2]}」）$`));
-    expect(readScaleAnswers(scaleAnswerLine(pair, 4), ["value-2"], at)).toEqual([tap("value-2", 4)]);
-    expect(readScaleAnswers(reply, ["ipip-1", "value-2"], at)).toEqual([tap("ipip-1", 4), tap("value-2", 1)]);
-    expect(readScaleAnswers(reply, ["value-2"], at)).toEqual([tap("value-2", 1)]);
+  test("a TwIVI item takes six points, an IPIP item five; the tap line round-trips", () => {
+    const kept = mergeInstrumentAnswers({}, [tap("twivi-6", 6), tap("neo-1", 6), tap("neo-2", 5), tap("ghost", 3)]);
+    expect(Object.keys(kept).sort()).toEqual(["neo-2", "twivi-6"]);
+    expect(scaleAnswerLine(item("twivi-6"), 6)).toBe("【Ta 喜欢冒险，总在寻找新的历险。】点选：6/6（非常像我）");
+    expect(readScaleAnswers([scaleAnswerLine(item("twivi-6"), 6), scaleAnswerLine(item("neo-1"), 2), "【其他】点选：3/5"].join("\n"), ["twivi-6", "neo-1"], at))
+      .toEqual([tap("twivi-6", 6), tap("neo-1", 2)]);
   });
 
-  test("a card's taps are scores, words in its box wait for the extraction, and a card passed over is skipped", () => {
-    const [first] = cardsFor("compass", new Set());
-    const [second] = cardsFor("compass", new Set(first!.items.map((item) => item.id)));
-    const [a, b, c] = first!.items;
-    const reply = [scaleAnswerLine(a!, 2), `${cardWordsHead(first!)}：看场合，一般不太主动`, "其他回答"].join("\n");
-    const answers = readCardAnswers(reply, [first!, second!], at);
-    expect(answers).toEqual([tap(a!.id, 2), { itemId: b!.id, by: "pending", at }, { itemId: c!.id, by: "pending", at },
-      ...second!.items.map((item) => ({ itemId: item.id, by: "skipped", at }))]);
-    // A turn that answers nothing of the round (a file added) leaves the cards for later.
-    expect(readCardAnswers("我添加了这些文件：a.pdf。", [first!, second!], at)).toEqual([]);
-    // A bare head with nothing after it says nothing.
-    expect(readCardAnswers(cardWordsHead(first!), [first!], at).filter((answer) => answer.by === "pending")).toEqual([]);
-    const kept = mergeInstrumentAnswers({}, answers);
-    expect(pendingItems(kept).map((item) => item.id)).toEqual([b!.id, c!.id]);
-    // The extraction's mapping replaces the pending answer; a later skip does not undo the mapping.
-    const mapped = mergeInstrumentAnswers(kept, [map(b!.id, 2), { itemId: c!.id, by: "skipped", at }]);
-    expect(mapped[b!.id]).toEqual(map(b!.id, 2));
-    expect(mapped[c!.id]).toEqual({ itemId: c!.id, by: "pending", at });
-  });
-
-  test("the person's tap is never replaced by a mapping, and a skip never replaces an answer", () => {
-    let kept = mergeInstrumentAnswers({}, [tap("ipip-1", 4), map("ipip-6", 2), { itemId: "ipip-11", by: "skipped", at }]);
-    kept = mergeInstrumentAnswers(kept, [map("ipip-1", 1), { itemId: "ipip-6", by: "skipped", at }, map("ipip-11", 5), tap("nope", 3), tap("ipip-16", 9)]);
-    expect(kept["ipip-1"]).toEqual(tap("ipip-1", 4));
-    expect(kept["ipip-6"]).toEqual(map("ipip-6", 2));
-    expect(kept["ipip-11"]).toEqual(map("ipip-11", 5));
-    expect(Object.keys(kept).sort()).toEqual(["ipip-1", "ipip-11", "ipip-6"]);
-    expect(settledItems(kept).has("ipip-11")).toBe(true);
-    expect(readInstrumentAnswers(JSON.stringify({ ...kept, ghost: tap("ghost", 1) }))).toEqual(kept);
+  test("the person's tap is never replaced by a mapping, and a skip never replaces an answer; old card answers are not read", () => {
+    let kept = mergeInstrumentAnswers({}, [tap("neo-1", 4), map("neo-6", 2), { itemId: "neo-11", by: "skipped", at }]);
+    kept = mergeInstrumentAnswers(kept, [map("neo-1", 1), { itemId: "neo-6", by: "skipped", at }, map("neo-11", 5)]);
+    expect(kept["neo-1"]).toEqual(tap("neo-1", 4));
+    expect(kept["neo-6"]).toEqual(map("neo-6", 2));
+    expect(kept["neo-11"]).toEqual(map("neo-11", 5));
+    expect(settledItems(kept).has("neo-11")).toBe(true);
+    // The 43-item cards' answers (`ipip-1`, `value-2`) of an older ledger are not items any more.
+    expect(readInstrumentAnswers(JSON.stringify({ ...kept, "ipip-1": tap("ipip-1", 3), "value-2": tap("value-2", 1) }))).toEqual(kept);
     expect(readInstrumentAnswers("not json")).toEqual({});
   });
 });
 
 describe("scores", () => {
-  test("reverse keys are applied: agreeing with every extraversion item lands in the middle, a consistent extravert at the top", () => {
-    const flat = instrumentScores(all("mini_ipip", 5), "mini_ipip").find((score) => score.dimension === "E")!;
-    expect(flat.score).toBe(50);
-    const extravert = mergeInstrumentAnswers({}, [tap("ipip-1", 5), tap("ipip-6", 1), tap("ipip-11", 5), tap("ipip-16", 1)]);
-    const e = instrumentScores(extravert, "mini_ipip").find((score) => score.dimension === "E")!;
-    expect(e).toMatchObject({ label: "外向性", score: 100, tapped: 4, mapped: 0, administration: "tapped" });
-    expect(instrumentScores(extravert, "mini_ipip").find((score) => score.dimension === "A")!.score).toBeNull();
+  test("reverse keys are applied per facet: agreeing with all four E1 items sums to the middle, a consistent answer to the top", () => {
+    const e1 = PROFILE_ITEMS.filter((entry) => entry.facet === "E1");
+    const agree = mergeInstrumentAnswers({}, e1.map((entry) => tap(entry.id, 5)));
+    expect(facetScores(agree).find((facet) => facet.facet === "E1")).toMatchObject({ sum: 12, answered: 4 });
+    const friendly = mergeInstrumentAnswers({}, e1.map((entry) => tap(entry.id, entry.reverse ? 1 : 5)));
+    expect(facetScores(friendly).find((facet) => facet.facet === "E1")).toMatchObject({ sum: 20, percentile: neoPercentile("E1", 20) });
   });
 
-  test("a dimension with more than half mapped, or one skipped item, gets no number; half mapped still does", () => {
-    const halfMapped = mergeInstrumentAnswers({}, [tap("ipip-1", 4), tap("ipip-6", 2), map("ipip-11", 4), map("ipip-16", 2)]);
-    const half = instrumentScores(halfMapped, "mini_ipip").find((score) => score.dimension === "E")!;
-    expect(half).toMatchObject({ score: 75, administration: "mixed" });
-    expect(administrationNote(half)).toBe("2 题点选、2 题由文字折算");
-    const mostly = mergeInstrumentAnswers({}, [tap("ipip-1", 4), map("ipip-6", 2), map("ipip-11", 4), map("ipip-16", 2)]);
-    expect(instrumentScores(mostly, "mini_ipip").find((score) => score.dimension === "E")!.score).toBeNull();
-    const skipped = mergeInstrumentAnswers({}, [tap("ipip-1", 4), tap("ipip-6", 2), tap("ipip-11", 4), { itemId: "ipip-16", by: "skipped", at }]);
-    const s = instrumentScores(skipped, "mini_ipip").find((score) => score.dimension === "E")!;
-    expect(s.score).toBeNull();
-    expect(administrationNote(s)).toBe("3 题点选、1 题跳过");
+  test("a facet with one item missing is prorated, with two it has no score, and its domain none either", () => {
+    const n1 = PROFILE_ITEMS.filter((entry) => entry.facet === "N1");
+    const three = mergeInstrumentAnswers({}, n1.slice(0, 3).map((entry) => tap(entry.id, 4)));
+    expect(facetScores(three).find((facet) => facet.facet === "N1")!.sum).toBe(16);
+    const two = mergeInstrumentAnswers({}, [...n1.slice(0, 2).map((entry) => tap(entry.id, 4)), { itemId: n1[2]!.id, by: "skipped" as const, at }, { itemId: n1[3]!.id, by: "skipped" as const, at }]);
+    expect(facetScores(two).find((facet) => facet.facet === "N1")!.sum).toBeNull();
+    const domains = instrumentScores({ ...all("ipip_neo_120", 3), ...two }, "ipip_neo_120");
+    expect(domains.find((score) => score.dimension === "N")!.score).toBeNull();
+    expect(domains.find((score) => score.dimension === "E")).toMatchObject({ raw: 12, percentile: neoPercentile("E", 12), tapped: 24 });
+    expect(administrationNote(domains.find((score) => score.dimension === "N")!)).toBe("22 题点选、2 题跳过");
   });
 
-  test("a value pair scores both of its values from one answer, and a value in two pairs averages them", () => {
-    const answers = mergeInstrumentAnswers({}, [tap("value-2", 1), tap("value-6", 5)]);
-    const scores = Object.fromEntries(instrumentScores(answers, "values").map((score) => [score.dimension, score.score]));
-    expect(scores["刺激"]).toBe(100);
-    // 安全 loses value-2 fully (0) and value-6 fully (0): the person leaned to 刺激 and 自主.
-    expect(scores["安全"]).toBe(0);
-    expect(scores["自主"]).toBeNull();
-    expect(instrumentScores(answers, "values")).toHaveLength(10);
+  test("percentiles read against the published norm: the norm's mean is the 50th, a standard deviation up about the 84th", () => {
+    expect(neoPercentile("N", 11.10)).toBe(50);
+    expect(neoPercentile("C2", 13.23 + 4.31)).toBe(84);
+    expect(neoPercentile("O", 4)).toBe(1);
+    expect(neoPercentile("O", 20)).toBe(99);
+    expect(neoPercentile("X9", 12)).toBeNull();
   });
 
-  test("SWLS is one dimension of five items", () => {
-    expect(instrumentScores(all("swls", 4), "swls")).toEqual([expect.objectContaining({ dimension: "swls", label: "生活满意度", score: 75, items: 5 })]);
+  test("TwIVI: a value is the mean of its two items, centred on the person's own mean, and ranked among the ten", () => {
+    // Stimulation (6, 16) high, power (9, 19) low, everything else 3: the person's mean is 3.1.
+    const answers = all("twivi", (id) => ["twivi-6", "twivi-16"].includes(id) ? 6 : ["twivi-9", "twivi-19"].includes(id) ? 1 : 3);
+    const scores = instrumentScores(answers, "twivi");
+    const of = (name: string) => scores.find((score) => score.dimension === name)!;
+    expect(scores).toHaveLength(10);
+    expect(of("刺激")).toMatchObject({ raw: 6, rank: 1, centered: 2.9 });
+    expect(of("权力")).toMatchObject({ raw: 1, rank: 10, centered: -2.1 });
+    expect(of("仁慈")).toMatchObject({ raw: 3, centered: -0.1 });
+    // Fewer than 16 of the 20 answered: values are scored, but not centred.
+    const few = mergeInstrumentAnswers({}, [tap("twivi-6", 6), tap("twivi-16", 5)]);
+    expect(instrumentScores(few, "twivi").find((score) => score.dimension === "刺激")).toMatchObject({ raw: 5.5, rank: 1 });
+    expect(instrumentScores(few, "twivi").find((score) => score.dimension === "刺激")!.centered).toBeUndefined();
   });
 });
 
@@ -166,7 +122,7 @@ describe("claims and privacy", () => {
     expect(claimProblem(claim({}))).toBeNull();
     expect(claimProblem(claim({ basis: [] }))).toBe("CLAIM_BASIS_MISSING");
     expect(claimProblem(claim({ kind: "measured" }))).toBe("CLAIM_MEASURE_MISSING");
-    expect(claimProblem(claim({ kind: "measured", basis: [{ instrument: "mini_ipip", items: ["ipip-3"], administration: "tapped" }] }))).toBeNull();
+    expect(claimProblem(claim({ kind: "measured", basis: [{ instrument: "ipip_neo_120", items: ["neo-5"], administration: "tapped" }] }))).toBeNull();
     expect(claimProblem(claim({ kind: "observed", basis: [{ behaviour: "准时交付", window: "" }] }))).toBe("CLAIM_WINDOW_MISSING");
     expect(claimProblem(claim({ confidence: 1.2 }))).toBe("CLAIM_CONFIDENCE_RANGE");
   });

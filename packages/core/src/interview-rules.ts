@@ -76,7 +76,7 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     code: { file: `${CORE}/onboarding-pace.ts`, symbol: "mentionsSelfHarm", test: `${WORKER}/onboarding-session.test.ts` } },
 
   // Start standard and the person's own actions.
-  { id: "IR-013", layer: "L0", verdict: "keep", status: "active", rule: "开始标准的各项都齐了才能开始（闸门、409）",
+  { id: "IR-013", layer: "L0", verdict: "keep", status: "active", rule: "开始标准（至少一条主线、至少一个里程碑，D10）齐了才能开始（闸门、409）",
     code: { file: `${CORE}/interview-checklist.ts`, symbol: "readyToStart", test: `${CORE}/interview-checklist.test.ts` } },
   // Counted over rewordings; a third asking comes back to the model instead of being dropped (P2b-3a).
   { id: "IR-014", layer: "L0", verdict: "return", status: "active", rule: "同一件事最多问两次",

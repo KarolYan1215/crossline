@@ -38,6 +38,7 @@ import { PLAN_EXPLAINER_OUTPUT_SCHEMA } from "./plan-explainer-schema";
 import { PORTRAIT_GAP_SCHEMA, PORTRAIT_SCHEMA } from "./portrait";
 import { PROGRESS_ASSESSMENT_SCHEMA, STEP_PLAN_SCHEMA, VALIDATION_REVIEW_SCHEMA } from "./steps";
 import { DELIVERABLE_CHECK_SCHEMA } from "./deliverables";
+import { SCALE_ANALYSIS_SCHEMA } from "./profile-scale";
 import { TASK_TITLES_SCHEMA } from "./task-title";
 import { DICTATION_CORRECTION_SCHEMA } from "./dictation";
 import { TASK_MERGE_REVIEW_SCHEMA } from "./task-merge";
@@ -78,7 +79,7 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   // Tavily). Only the research thread, which is nothing but web lookups, needs it.
   "crossline-onboarding": { label: "访谈", schemas: ["ONBOARDING_DIALOGUE_SCHEMA"] },
   // Reads earlier sentences through its lookups (`search_evidence`, `read_sentences`).
-  "crossline-onboarding-extract": { label: "访谈整理", schemas: ["ONBOARDING_EXTRACT_SCHEMA"], tools: true },
+  "crossline-onboarding-extract": { label: "访谈整理", schemas: ["ONBOARDING_EXTRACT_SCHEMA", "SCALE_ANALYSIS_SCHEMA"], tools: true },
   // A research thread of the interview (contract C): looks things up on the web and reads the person's own material through the lookups.
   "crossline-onboarding-research": { label: "访谈调研", schemas: ["ONBOARDING_RESEARCH_SCHEMA"], tools: true, webSearch: true },
   "crossline-milestone-architect": { label: "里程碑设计", schemas: ["MILESTONE_PROPOSAL_SCHEMA"] },
@@ -214,7 +215,7 @@ const CONFORMANCE_SCHEMAS: Record<string, Record<string, unknown>> = {
   OPPORTUNITY_WATCHES_SCHEMA, OPPORTUNITY_READING_SCHEMA, VISA_READING_SCHEMA, QUOTE_READING_SCHEMA,
   FORM_FILL_SCHEMA, FORM_CHECK_SCHEMA, FORM_OBSERVE_SCHEMA, DICTATION_CORRECTION_SCHEMA, WORKFLOW_TURN_SCHEMA, TIME_ATTRIBUTION_SCHEMA,
   // Appended, not sorted in: a case's position is its id's order in the conformance run, which recorded fixtures index by.
-  METHOD_RESEARCH_SCHEMA, DELIVERABLE_CHECK_SCHEMA
+  METHOD_RESEARCH_SCHEMA, DELIVERABLE_CHECK_SCHEMA, SCALE_ANALYSIS_SCHEMA
 } as unknown as Record<string, Record<string, unknown>>;
 
 /** How many times a critical Skill's schema is run: at 3 runs, "repair rate ≤ 5%" means no repair at all. */

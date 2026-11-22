@@ -88,6 +88,7 @@ import { createWeeklyInsight } from "./weekly-insight-runner";
 import { createOnboardingSessionRunner, finishInterview } from "./onboarding-session";
 import { researchRunnerFor } from "./onboarding-research";
 import { createOnboardingExtractor, EXTRACT_LANES, extractionRunning, requestExtraction } from "./onboarding-extract";
+import { runScaleAnalysis, scaleAnalysisOwed } from "./scale-analysis";
 import { extractText, reextractForLayout } from "./extract";
 import { WHISPER_MODEL, createTranscriber, createWhisperEngine, modelsDirectory } from "./transcribe";
 import { recordingPass, recordingsOn, transcribeConcurrency } from "./recordings";
@@ -479,6 +480,10 @@ async function firstDraftsPass(workspaceId: string, checkedAt = new Date().toISO
 /** Starts the interview's extraction when one of the workspace's conversations has replies or files waiting and is due (not backing off). */
 async function onboardingExtractPass(workspaceId: string): Promise<void> {
   if (!codexSupervisor || paused(workspaceId, "planning")) return;
+  // The scale's analysis (2026-11-22, scale-analysis.ts): owed once the person says the scale is done; core work like the extraction.
+  if (scaleAnalysisOwed(analysisStore, workspaceId) && spendAllows(await spendFor(workspaceId), "core")) {
+    enterUsageWorkspace(workspaceId); void runScaleAnalysis(analysisStore, workspaceId, repoRoot, accountClient(workspaceId)).catch(() => undefined);
+  }
   // The start-on-use handle: a guest's runtime that went idle after the reply is started again, or the retry fails for want of a client.
   const extractor = createOnboardingExtractor(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId));
   // Each lane on its own (the ledger, the portrait's sections and its inferences): one that is running or has nothing due is left alone.

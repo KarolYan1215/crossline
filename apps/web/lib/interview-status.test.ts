@@ -11,11 +11,12 @@ afterEach(() => { vi.unstubAllEnvs(); globalThis.crosslineStore?.close(); global
 const ws = TEST_CTX.workspaceId;
 const SOON = new Date("2026-10-08T02:00:00Z"), DAY_LATER = new Date("2026-10-09T03:00:00Z");
 
-function setup(nextAction: "ask" | "ready_for_milestones" = "ask") {
+function setup(nextAction: "ask" | "ready_for_milestones" = "ask", projects = true) {
   // The example board meets the start standard; these tests set it up themselves.
   vi.stubEnv("CROSSLINE_SEED_EXAMPLES", "");
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
-  for (const [id, name] of [["ece555", "ECE 555"], ["ece548", "ECE 548"]] as const) {
+  // A project is a milestone for the start standard (D10, 2026-11-22): without them the account is not ready to start.
+  for (const [id, name] of projects ? [["ece555", "ECE 555"], ["ece548", "ECE 548"]] as const : []) {
     store.saveProject({ id, ownerId: "o", workspaceId: ws, identityId: "research", name, summary: "", status: "active", createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z" });
     store.upsertProfileFact({ workspaceId: ws, identityId: "research", projectId: id, slot: "deadline", value: "2026-12-15", status: "confirmed", sourceRef: "reply-1", sourceQuote: "2026-12-15", updatedAt: "2026-10-01T00:00:00Z" });
   }
@@ -45,18 +46,16 @@ test("W-247: the stage is the furthest part reached, of the interview's own part
   expect(interviewStatus(TEST_CTX).ended).toBe(true);
 });
 
-test("while the interview runs its questions stay in it; nothing about it is on 待决事项", () => {
+test("while the interview runs its round lists the model's questions and the app's own; a line and a project meet the start (D10)", () => {
   setup();
   const status = interviewStatus(TEST_CTX);
-  expect(status).toMatchObject({ started: true, complete: false, parked: false, readyToStart: false, stage: "lines", stageIndex: 2, stageCount: 5, ended: false });
+  expect(status).toMatchObject({ started: true, complete: false, readyToStart: true, stage: "lines", stageIndex: 2, stageCount: 5, ended: false });
   // The model's round and the app's own questions: both courses' class times.
   expect(status.questions.map((question) => question.id)).toEqual(["q-meetings", "gap-meetings-ece555", "gap-meetings-ece548"]);
-  const asks = collectAsks(TEST_CTX, SOON);
-  expect(asks.some((ask) => ["interview_open", "interview_question", "source_project"].includes(ask.kind))).toBe(false);
 });
 
 test("未达可开始时访谈问题不进待决事项，哪怕一天没回复", () => {
-  setup();
+  setup("ask", false);
   expect(interviewStatus(TEST_CTX)).toMatchObject({ parked: false, readyToStart: false });
   expect(interviewStatus(TEST_CTX).startMissing.length).toBeGreaterThan(0);
   const asks = collectAsks(TEST_CTX, DAY_LATER);
