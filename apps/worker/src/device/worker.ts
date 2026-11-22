@@ -10,7 +10,7 @@ import { agentHistoryPass } from "../agent-history";
 import { extractText } from "../extract";
 import { runtimeOwner } from "../owner";
 import { recordingPass, recordingsOn, transcribeConcurrency } from "../recordings";
-import { addFolder, personNames, previewFolder, removeFolder, setFolderLines, setFolderRules, syncFolders } from "../source-folders";
+import { addFolder, importScreenedFiles, personNames, previewFolder, removeFolder, setFolderLines, setFolderRules, syncFolders, type ScreenListed } from "../source-folders";
 import { createTranscriber, createWhisperEngine, modelsDirectory } from "../transcribe";
 import { startNodeAgent } from "../node/agent";
 import { createNodeBrowsers } from "../node/browser";
@@ -104,14 +104,27 @@ export async function runDeviceWorker(options: DeviceWorkerOptions): Promise<voi
     } finally { transcribing = false; }
   };
 
-  const folderDeps = (workspaceId: string) => ({ dataDir, home: homedir(), readText: extractText, audio: recordingsOn(store, workspaceId) });
+  // On demand (D3): what a folder held when it was authorized is listed, screened by the site's model and only then read in; what is
+  // written there afterwards is read as it arrives (source-folders.ts `importScreenedFiles`).
+  const folderDeps = (workspaceId: string) => ({ dataDir, home: homedir(), readText: extractText, audio: recordingsOn(store, workspaceId), onDemand: true });
+  const screen: ScreenListed = async (folder, files) => {
+    if (!link.token) return undefined;
+    const response = await fetchImpl(new URL("/api/device/folder-screen", link.url), { method: "POST", signal: AbortSignal.timeout(180_000),
+      headers: { "content-type": "application/json", authorization: `Bearer ${link.token}`, "x-crossline-device": label },
+      body: JSON.stringify({ folder, files }) }).catch(() => undefined);
+    if (!response?.ok) return undefined;
+    const answer = await response.json().catch(() => undefined) as { ok?: boolean; keep?: unknown } | undefined;
+    if (answer?.ok && Array.isArray(answer.keep)) return answer.keep.filter((item): item is string => typeof item === "string");
+    return answer?.ok === false ? "unavailable" : undefined;
+  };
   let readingFolders = false;
   const folders = async () => {
     if (!owner || readingFolders) return;
     readingFolders = true;
     try {
       const outcomes = await syncFolders(store, owner, folderDeps(owner)).catch(() => []);
-      if (outcomes.some((item) => item.read || item.removed)) log({ type: "device.folders_read", outcomes });
+      const screened = await importScreenedFiles(store, owner, folderDeps(owner), screen).catch(() => 0);
+      if (outcomes.some((item) => item.read || item.removed) || screened) log({ type: "device.folders_read", outcomes, screened });
       queue(sourceItems(store, owner, state));
       void flush();
       void transcribe();

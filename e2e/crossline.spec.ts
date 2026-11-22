@@ -644,21 +644,20 @@ test("未达可开始标准时打开今日页回到访谈，并写明还差什�
     await page.goto("/");
     await expect(page).toHaveURL(`${baseURL}/`);
     const store = openStore();
-    let label = "";
     let restore = "";
     try {
       const workspaceId = store.listWorkspaces().map((item) => item.id).find((id) => !before.has(id));
       if (!workspaceId) throw new Error("the new account has no workspace");
       restore = store.getSetting(workspaceId, "lines.v1") ?? "";
-      // The start standard is a line and a milestone (D10, 2026-11-22): with no line of the person's, Today sends them back.
-      label = "至少有一条主线";
+      // Since D10 (2026-11-22) the start needs only a line of the person's own and a milestone; a line's goal no longer holds it. With
+      // every line removed, nothing the system stands in for an account without lines counts as the person's line.
       store.setSetting(workspaceId, "lines.v1", "[]");
       await page.goto("/");
       await expect(page).toHaveURL(/\/onboarding/);
-      // The interview says what is missing, in the right column's ring: here, a line.
+      // The interview says what is missing, in the right column: here, a line.
       const missing = page.getByRole("region", { name: "开始使用的进度" });
       await expect(missing).toContainText("开始使用前还差 1 项");
-      await expect(missing).toContainText(label);
+      await expect(missing).toContainText("至少有一条主线");
       store.setSetting(workspaceId, "lines.v1", restore);
     } finally { store.close(); }
     await page.goto("/");

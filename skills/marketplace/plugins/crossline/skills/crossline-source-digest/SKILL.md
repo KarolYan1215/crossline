@@ -1,6 +1,6 @@
 ---
 name: crossline-source-digest
-description: Decide whether pairs of the person's files that look alike are versions of one document, pick the latest from modification times and the versions' own signals, and write what the interview reads in place of the older one — a summary and what the latest changed.
+description: Decide whether pairs of the person's files that look alike are versions of one document, pick the latest from modification times and the versions' own signals, and write what the interview reads in place of the older one — a summary and what the latest changed; and summarize each conversation of an AI chat export the person gave, which the interview reads in place of the export.
 ---
 
 # Crossline Source Digest
@@ -19,6 +19,16 @@ Return raw JSON only: `{pairs: [{a, b, sameDocument, latestId, olderSummary, dif
 - `differences` (when `sameDocument`): what the latest changed relative to the older one — added, removed or changed parts, with dates and numbers verbatim where they changed (「截止日从 3 月 1 日改为 3 月 15 日」). Say plainly when the change is only formatting.
 - When `sameDocument` is false: `latestId`, `olderSummary` and `differences` are empty strings.
 - `why`: one short clause naming what decided it.
+
+## AI 对话记录 (chat exports)
+
+A second kind of input: `{version: "crossline.chat-digest.v1", source, segments}`. The person gave an export of their conversations with an AI assistant (ChatGPT, Codex, Claude Code). Code has already kept only what the person typed — system prompts, instruction files, tool output and every assistant reply are gone — and masked keys and ID numbers. Each segment is one conversation: `id`, `heading` (its date and title) and `said` (the person's messages, `- ` per message, possibly cut).
+
+Return raw JSON only: `{segments: [{id, summary}]}`, one entry per segment asked, `id` copied exactly.
+
+- `summary`: two to four sentences on what the person was working on, asking or deciding in this conversation, read from their own words: the project, course, product or question named; what they wanted done or understood; any date, number, constraint, preference or plan they stated (verbatim where it matters: 「3 月 15 日前投出」). The interview reads these to know the person's work and ways of working without reading every message, so keep what says something about the person, their goals and their situation, and leave out how the assistant answered (it is not there).
+- Only what the messages say: never guess what the assistant replied or how it ended. A conversation of pasted code or logs with little of the person's own words is said to be that in one sentence (「主要贴了 Python 报错日志，在调试数据清洗脚本」).
+- Write it in objective third person (「本人」 in Chinese), not as advice.
 
 ## Language
 

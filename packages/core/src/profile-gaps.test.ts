@@ -175,12 +175,6 @@ test("a course the calendar repeats every week is not asked when it meets, and t
   expect(profileGaps({ ...input, calendarRecurring: ["ECE548 Lecture"] }).some((gap) => gap.code === "COURSE_MEETINGS")).toBe(false);
 });
 
-test("a step question the task's own files answer is recognised; one only the person knows is not", async () => {
-  const { readableFromMaterial } = await import("./profile-gaps");
-  for (const text of ["作业 3 题面及题目数？", "作业提交方式？", "协作与 AI 使用规则？", "评分标准是什么？", "报告的字数要求？"]) expect(readableFromMaterial(text)).toBe(true);
-  for (const text of ["当前完成状态？", "当前 A− 安全分数线？", "哪几讲已经掌握？"]) expect(readableFromMaterial(text)).toBe(false);
-});
-
 test("a line with no goal chosen gets its candidates as a question of the round, and the taps choose it", () => {
   const gaps = profileGaps({ ...base, goalPickers: [{ lineId: "research", candidates: ["严谨", "器件物理", "严谨", " ", "独立"] }, { lineId: "startup", candidates: ["稳"] }] });
   const goal = gaps.filter((gap) => gap.code === "LINE_GOAL");

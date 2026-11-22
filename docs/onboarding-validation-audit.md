@@ -130,6 +130,8 @@ AI 访谈产品的用户研究里，最常见的直接不满是「缺少回应�
 - 访谈里出量表卡的三条测试（`onboarding-session.test.ts`）：访谈里不再出卡，量表在自己的页面。
 - 卡片框里的文字代替点选（`readCardAnswers` 的「待答」）：框只是补充，没点的题记为跳过，不从文字估分（§二.2）。
 - 右栏的 `minutesLeft` 时长估计和 `START_GROUPS` 分组：开始项只剩两条，估时没有依据（D13）。
+- `profile-gaps.ts` 的 `FROM_MATERIAL` / `readableFromMaterial`（R2-B）与它在 `profile-gaps.test.ts`、`i18n-core-b.test.ts` 的测试：按题文里的「题面」「提交方式」「AI 规则」等词判「材料能答」，换个说法就漏、别的线的同名词就误判。改由 step planner 自己的 `ask` 判断（Skill 第 4 节：材料能答的写 `ask: false` 并按材料给 `assume`）；`step-planner.ts` 与 `asks.ts` 不再按题文挑题。它不在 `interview-rules.ts` 登记表里，无条目可删。
+- 「至少有一条主线」不再算系统代填的内置四条（R2-B）：没有 `lines.v1` 时 `identityPacksFor` 用内置四条顶上，`start_line` 因此对一条主线都没说过的账号也算齐。现在只算本人列出的主线（`interviewChecklistFor`）。
 
 ## 4. 新增的规矩（之后每一步都按它验收）
 

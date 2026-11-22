@@ -4,6 +4,9 @@ import { unfiledFilesIn } from "./file-belonging";
 import { latestFileDates } from "./index";
 import type { CrosslineStore } from "./index";
 
+/** The lines the person listed (`LINE_SETTING` of @crossline/identity-packs, which this package does not depend on). */
+const LISTED_LINES_SETTING = "lines.v1";
+
 type DateRow = { id: string; project?: string; kind?: string; sourceRef?: string; date?: string; to?: string;
   title?: string; weekdays?: number[]; startTime?: string; endTime?: string };
 
@@ -47,7 +50,9 @@ export function interviewChecklistFor(store: CrosslineStore, workspaceId: string
   // The scale holds nothing up since 2026-11-22 (D10): it is a page of its own before the first round, and the start needs only a line and
   // a milestone.
   return interviewChecklist({
-    lines,
+    // Only lines the person listed count: with no `lines.v1` (identity-packs' LINE_SETTING) the built-in four stand in, and they are
+    // nobody's answer, so 「至少有一条主线」 stayed done for an account that never named one.
+    lines: store.getSetting(workspaceId, LISTED_LINES_SETTING) === undefined ? [] : lines,
     descriptions: Object.fromEntries(Object.entries(profiles).map(([id, value]) => [id, { description: value.description ?? "", candidates: (value.attributes ?? []).length || (value.goalCandidates ?? []).length }])),
     profile,
     facts: store.listProfileFacts(workspaceId).map(({ identityId, projectId, slot, status, sourceRef, value }) => ({ identityId, projectId, slot, status, sourceRef, value })),

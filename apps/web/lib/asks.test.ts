@@ -804,7 +804,8 @@ test("a note beside an option fills the field that option asks for, and is kept 
   expect(store.listWorkOrders(ws).find((order) => order.id === "wo")!.state).toBe("archived");
 });
 
-test("a step question the task's own files answer is not asked; the same question from two tasks of one project is one card", () => {
+// Whether the files settle a question is the planner's `ask` (2026-11-22): a file on record no longer hides a question by its wording.
+test("a step question the planner asks stays asked when files arrive; the same question from two tasks of one project is one card", () => {
   const store = setup();
   for (const id of ["hw3", "hw4"]) store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research", projectId: "ece555", milestoneId: "", intent: id,
     state: "approved", riskTier: "routine", estimate, payload: {} });
@@ -817,7 +818,7 @@ test("a step question the task's own files answer is not asked; the same questio
   expect(cards()[0]!.options.find((option) => option.id === "edit")!.fields!.map((field) => field.label)).toEqual(["1. 作业提交方式？", "2. 当前完成状态？"]);
   store.saveSourceDocument({ id: "syl", ownerId: owner, workspaceId: ws, kind: "text", fileName: "syllabus.pdf", mediaType: "text/plain", sha256: "s", uri: "file://s",
     extractedText: "…", extractionStatus: "done", projectId: "ece555", createdAt: "2026-10-01T00:00:00Z" } as never);
-  expect(cards().map((ask) => ask.title.split("：")[1])).toEqual(["当前完成状态？"]);
+  expect(cards().map((ask) => ask.id)).toEqual(["stepq:p:ece555"]);
 });
 
 test("an event whose day has passed asks no step question (2026-11-17 live walk: a talk eleven days gone asked for its start time)", () => {

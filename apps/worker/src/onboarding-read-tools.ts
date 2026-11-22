@@ -31,7 +31,13 @@ const page = (lines: string[], at: number, what: string): string => {
   return shown.length ? `${what}，第 ${index + 1}/${pages} 页（page 从 0 起）：\n${shown.join("\n")}` : `${what}：没有记录。`;
 };
 
-export function interviewReadTools(store: CrosslineStore, workspaceId: string, sessionId: string): SkillTools {
+/**
+ * `opened`: the files this turn's model read through `read_file` or `read_folder_file`. The session marks them shown, so the next turn
+ * does not announce a file the model already opened as new (a folder file read on demand becomes a stored document, which the next turn
+ * used to list as 「新文件」).
+ */
+export function interviewReadTools(store: CrosslineStore, workspaceId: string, sessionId: string): SkillTools & { opened: Set<string> } {
+  const opened = new Set<string>();
   const specs: SkillTools["specs"] = [
     { name: "read_ledger", description: "读访谈账本的一部分：questions（问过的每道题和本人的回答）、facts（记下的事实）、hypotheses（假设日志）、research（调研线程和结论）、scale（量表分数、本人补充、自述的其他测试、量表分析和待验证的假设）、notes（整理层按维度写下的笔记，含【自报】与矛盾）。按页返回。",
       inputSchema: { type: "object", properties: { section: { type: "string", enum: [...LEDGER_SECTIONS] }, page: { type: "integer", minimum: 0 } },
@@ -61,15 +67,17 @@ export function interviewReadTools(store: CrosslineStore, workspaceId: string, s
       return listing.text;
     }
     if (name === "read_folder_file" && folders) {
-      const opened = await readFolderFile(store, workspaceId, folders, String(value.folder ?? ""), String(value.path ?? ""));
-      if (!opened.ok) throw new Error(opened.message);
-      if (opened.doc.extractionStatus !== "done") throw new Error(`《${opened.doc.fileName}》没有可读的文字${opened.doc.extractionNote ? `：${opened.doc.extractionNote}` : ""}。`);
-      return pageOf(opened.doc, value.offset, true);
+      const found = await readFolderFile(store, workspaceId, folders, String(value.folder ?? ""), String(value.path ?? ""));
+      if (!found.ok) throw new Error(found.message);
+      if (found.doc.extractionStatus !== "done") throw new Error(`《${found.doc.fileName}》没有可读的文字${found.doc.extractionNote ? `：${found.doc.extractionNote}` : ""}。`);
+      opened.add(found.doc.id);
+      return pageOf(found.doc, value.offset, true);
     }
     if (name === "read_file") {
       const id = String(value.id ?? "");
       const doc = store.listSourceDocuments(workspaceId).find((item) => item.id === id && item.extractionStatus === "done");
       if (!doc) throw new Error(`没有 id 为「${id}」的已读取文件。`);
+      opened.add(doc.id);
       return pageOf(doc, value.offset);
     }
     if (name !== "read_ledger") throw new Error(`没有名为 ${name} 的工具`);
@@ -89,6 +97,6 @@ export function interviewReadTools(store: CrosslineStore, workspaceId: string, s
       default: throw new Error(`section 只能是 ${LEDGER_SECTIONS.join("、")}。`);
     }
   };
-  return { specs, call };
+  return { specs, call, opened };
 }
 /* i18n-ignore-end */

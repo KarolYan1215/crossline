@@ -12,6 +12,7 @@ import type { CrosslineStore, StoredSourceDocument } from "@crossline/db";
 import { identityLines } from "./lines";
 import { ownerOf } from "./owner";
 import { supersededDocumentIds } from "./source-versions";
+import { chatDigestedIds } from "./chat-digest";
 import { sayToPerson } from "./workflow-smith";
 import { tOfWorkspace } from "./locale";
 
@@ -44,12 +45,13 @@ export function transcriptsAwaitingDigest(store: CrosslineStore, workspaceId: st
 }
 
 /**
- * The documents the interview reads through a note instead of in full: raw recording transcripts (their digests) and older versions of a
- * document (their 「旧版摘要」, source-versions.ts). The originals stay stored and readable by id.
+ * The documents the interview reads through a note instead of in full: raw recording transcripts (their digests), older versions of a
+ * document (their 「旧版摘要」, source-versions.ts) and AI conversation exports once summarized (their 「对话摘要」, chat-digest.ts). The
+ * originals stay stored and readable by id.
  */
 export function transcriptDocumentIds(store: CrosslineStore, workspaceId: string): Set<string> {
   return new Set([...store.listEvents(workspaceId, { type: RECORDING_TRANSCRIBED_EVENT }).map((event) => String((event.payload as RecordingTranscribed).documentId ?? "")),
-    ...supersededDocumentIds(store, workspaceId)]);
+    ...supersededDocumentIds(store, workspaceId), ...chatDigestedIds(store, workspaceId)]);
 }
 
 const startedAtOf = (doc: StoredSourceDocument) => /约 (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) 开始/.exec(doc.extractedText)?.[1] ?? doc.createdAt.slice(0, 16).replace("T", " ");

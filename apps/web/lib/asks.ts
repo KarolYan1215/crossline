@@ -2,7 +2,7 @@ import "server-only";
 import { recordOp, retractedEventIds, withUndo } from "./undo";
 import {
   ACCOUNT_CLASS_LABEL, ATTENTION_SNAPSHOT, BACKGROUND_BLOCKER, CALENDAR_LINES, degradedService, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
-  localStamp, prepStepRetried, readableFromMaterial, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
+  localStamp, prepStepRetried, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
   validateAskChoice, withFrozen, type AccessContext, type Ask, type AskField, type AskItem, type AskOption, type AskPreview, type AskSnooze,
   attendedText, isPreparationOnlyMilestone, onPersonsBoard, outcomeCriteriaVerdict, preparesOf, workOwner, decisionFor, sameTitle, titlesWorthALook, type TimedItem,
   MILESTONE_RISK_KIND_LABEL, MILESTONE_RISK_LEVEL_LABEL, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskBufferDays, riskCriteriaKeys, riskLevelOf,
@@ -1245,9 +1245,6 @@ function openStepQuestions({ store, ctx, today }: Source): StepQuestionEntry[] {
     && !passedEvent(order)).map((order) => [order.id, order]));
   const answered = new Set(store.listProfileFacts(ctx.workspaceId).filter((fact) => fact.slot.startsWith(STEP_ANSWER_SLOT)).map((fact) => `${fact.projectId}|${fact.slot}`));
   const asked = new Set<string>();
-  // What a task's own files answer (the problem set, how it is handed in, the AI rule) is read from them, never asked: the worker's task
-  // pass writes it as an assumption, and it is left out here already so it never shows meanwhile.
-  const withFiles = new Set(store.listSourceDocuments(ctx.workspaceId).map((doc) => doc.projectId).filter(Boolean));
   let starts: Record<string, string> = {};
   try { starts = JSON.parse(store.getSetting(ctx.workspaceId, ORDER_STARTS_SETTING) ?? "{}") as Record<string, string>; } catch { /* none recorded */ }
   const soon = new Date(Date.parse(`${today}T00:00:00Z`) + QUESTION_LEAD_DAYS * 86_400_000).toISOString().slice(0, 10);
@@ -1257,7 +1254,6 @@ function openStepQuestions({ store, ctx, today }: Source): StepQuestionEntry[] {
     return plan.questions.filter((question) => {
       if (question.ask !== true) return false;
       const key = `${order.projectId}|${stepAnswerSlot(question.text)}`;
-      if (withFiles.has(order.projectId) && readableFromMaterial(question.text)) return false;
       return !answered.has(key) && !asked.has(key) && Boolean(asked.add(key));
     }).map((question) => {
       // Asked questions are answered together in the weekly review, and come forward one or two days before the step that needs them

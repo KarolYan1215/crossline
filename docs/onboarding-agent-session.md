@@ -469,8 +469,10 @@
   - `lines`、`schedule`、`research`、`profile_sections`。
 - `search_evidence`、`read_sentences`：和整理子代理用的是同一套。
 - `read_file{id, offset}`。
-- `list_folder{folder?, dir?, page?}`、`read_folder_file{folder, path}`（2026-11-22）：本机授权文件夹不再整体导入，只在授权根目录内列目录、读文件；越界和指向外面的链接拒绝，密钥和私人证件单据仍不读；读过的文件此时才入账本。托管版没有这两个工具，文件夹仍先筛后导入。
+- `list_folder{folder?, dir?, page?}`、`read_folder_file{folder, path}`（2026-11-22）：本机授权文件夹不再整体导入，只在授权根目录内列目录、读文件；越界和指向外面的链接拒绝，密钥和私人证件单据仍不读；读过的文件此时才入账本。托管版没有这两个工具，文件夹仍先筛后导入；连着托管站的设备也是先把文件清单（路径、大小、日期）交托管站的模型筛，再只导入留下的（`POST /api/device/folder-screen`）。
+- 模型这一轮用 `read_file` / `read_folder_file` 打开过的文件算已告知：下一轮不再列为「新文件」，并照常排进整理（R2-B）。
 - 旧版文件（近似重复里较早的那份）不进访谈，换成「…（旧版摘要）.md」；需要逐字核对时 `read_file` 读原件。
+- AI 对话记录逐段摘要好以后，访谈读「…（对话摘要）.md」，不再读整份导出；要引用本人原话时 `read_file` 读原件（D14，`chat-digest.ts`）。
 
 **压缩保底**
 

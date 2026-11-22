@@ -11,7 +11,7 @@ import { advanceWorkOrder, validateCommandEnvelope, validateSuccessCriteria } fr
 import { ASSUMPTION_PREFIX, interviewChecklist } from "./interview-checklist";
 import { openAccessVerdict } from "./manualbook-schema";
 import { portraitLabels, typeFromScores } from "./portrait-type";
-import { answerLine, answeredGapFacts, profileGaps, readAnswerLine, readableFromMaterial, undatedKey } from "./profile-gaps";
+import { answerLine, answeredGapFacts, profileGaps, readAnswerLine, undatedKey } from "./profile-gaps";
 import { licenseVerdict } from "./public-skills";
 import { plainEstimateWords } from "./text-hygiene";
 import { scheduleLabel, stepLeavesMachine } from "./workflows";
@@ -124,10 +124,7 @@ describe("heuristics read English as well as Chinese", () => {
     expect(readAnswerLine("选择：甲；乙。补充：周五")).toEqual({ picked: ["甲", "乙"], other: "周五" });
   });
 
-  test("questions the task's own material answers, and undated items", () => {
-    expect(readableFromMaterial("How do I submit homework 3?")).toBe(true);
-    expect(readableFromMaterial("作业提交方式？")).toBe(true);
-    expect(readableFromMaterial("Which topic matters most to you?")).toBe(false);
+  test("undated items", () => {
     expect(undatedKey("Submit the ECE 555 final project report")).toBe(undatedKey("ECE 555 final project report due"));
   });
 
