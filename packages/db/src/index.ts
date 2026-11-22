@@ -1513,10 +1513,11 @@ export class CrosslineStore {
     return Number(this.#db.pragma("user_version", { simple: true }));
   }
 
-  capture(input: Omit<StoredCapture, "state" | "audit" | "attempt">, idempotencyKey: string): string {
+  /** `via`: the outside agent that wrote it through the MCP server (docs/mcp-server.md), kept on the ledger event as its source. */
+  capture(input: Omit<StoredCapture, "state" | "audit" | "attempt">, idempotencyKey: string, via?: string): string {
     return this.#db.transaction(() => {
       const event = this.appendEvent({ ...input, idempotencyKey, type: "capture.created", entityId: input.id,
-        payload: { title: input.title, context: input.context, mode: "manual" } });
+        payload: { title: input.title, context: input.context, mode: "manual", ...(via ? { via: "mcp", agent: via } : {}) } });
       if (event.inserted) this.#prepare(
         "INSERT INTO captures (id, owner_id, workspace_id, title, context, state, audit_json, attempt) VALUES (?, ?, ?, ?, ?, 'captured', '{}', 0)"
       ).run(input.id, input.ownerId, input.workspaceId, input.title, input.context);

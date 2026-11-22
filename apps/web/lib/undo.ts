@@ -71,11 +71,14 @@ export const QUIET_UNDONE_SETTING = "opportunity.quietUndone";
 
 /** Records an operation that has just happened. Returns the op so a route can hand its id to the toast. */
 /** `bySystem`: the system did it by itself, so undoing it is a lesson (`learnFromUndo`). */
-export function recordOp(ctx: AccessContext, label: string, inverse: Inverse, extra: { bySystem?: boolean } = {}): Op {
+export function recordOp(ctx: AccessContext, rawLabel: string, inverse: Inverse, extra: { bySystem?: boolean } = {}): Op {
   const id = `op-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const at = new Date().toISOString();
+  // A change an outside agent made through the MCP server says so in its label, and keeps the agent's name (docs/mcp-server.md).
+  const via = ctx.authMethod === "mcp" && ctx.via ? ctx.via : undefined;
+  const label = via ? tOf(ctx)("{{label}}（经 {{via}}）", { label: rawLabel, via }) : rawLabel;
   getStore().appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `op.applied:${id}`,
-    type: "op.applied", entityId: id, payload: { label: label.slice(0, 160), inverse, ...(extra.bySystem ? { bySystem: true } : {}) } });
+    type: "op.applied", entityId: id, payload: { label: label.slice(0, 160), inverse, ...(extra.bySystem ? { bySystem: true } : {}), ...(via ? { via: "mcp", agent: via } : {}) } });
   return { id, label, at, inverse };
 }
 

@@ -390,6 +390,48 @@ function say(ctx: AccessContext, text: string, buttons: NudgeButton[], nudge: Om
 }
 
 /**
+ * The day at a glance, the one reading behind the day's opener and every outside reader of 「今天排了什么」 (the MCP server's
+ * `crossline_today`, docs/mcp-server.md): today's fixed arrangements and placed work as plan blocks (ids kept, so a reader can name a
+ * block to record), open work due within three days, this week's listed asks with those that only want a fact apart, and the same
+ * day as the opener card's data.
+ */
+export async function dayAtGlance(ctx: AccessContext, now = new Date()) {
+  const store = getStore();
+  const locale = localeFor(ctx);
+  const today = planToday(ctx, now);
+  const plan = await loadCurrentPlan(ctx);
+  const todays = plan.blocks.filter((block) => (block.day ?? today) === today).sort((a, b) => a.start.localeCompare(b.start));
+  const fixed = todays.filter((block) => !block.id.startsWith("scheduled:") && !block.id.startsWith("proposed:") && !block.id.startsWith("optional:")
+    && !(block.id.startsWith("graph_calendar:") && isCancelledEvent(block.title)));
+  const work = todays.filter((block) => block.id.startsWith("scheduled:"));
+  const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
+  const soon = store.listWorkOrders(ctx.workspaceId).filter((order) => ["approved", "preparing", "ready_for_human", "active"].includes(order.state) && onPersonsBoard(order))
+    .map((order) => ({ order, due: (order.payload as { dueDate?: string }).dueDate || anchors.get(order.milestoneId) || "" }))
+    .filter((item) => item.due && item.due >= today && item.due <= addDays(today, 3)).sort((a, b) => a.due.localeCompare(b.due));
+  // This week's, the same count as Today's stack and 待确认: the ones that can wait are not today's to mention.
+  const asks = thisWeek(listed(openAsks(ctx, now)));
+  // Facts only the person can report, apart from the choices (2026-11-21): the card and the button count them separately.
+  const records = asks.filter((ask) => askNature(ask.kind) === "record");
+  const first = asks[0];
+  // The same day as data, for the card Today's conversation and the return page draw (the text above stays for push and older pages).
+  const lineOfOrder = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order.identityId]));
+  const filing = (() => { try { return calendarFiling(ctx); } catch { return null; } })();
+  const withLine = <T extends object>(item: T, line: string | undefined): T & { line?: string } => line ? { ...item, line } : item;
+  const opener: OpenerView = {
+    day: today, label: dayLabel(today, locale), timeZone: effectiveSchedulePreferences(ctx).preferences.timeZone,
+    fixed: fixed.map((block) => withLine({ start: block.start, end: block.end, title: block.title }, calendarLineOf(filing, block.title))),
+    work: [...work.map((block) => withLine({ start: block.start, end: block.end, title: block.task ?? block.title, ...(block.step ? { step: block.step } : {}) },
+      lineOfOrder.get(block.id.split(":")[1]!))),
+      // What today's plan no longer holds because its time passed undone, kept dashed until 04:00 tomorrow.
+      ...missedItems(ctx, [], {}, now).filter((item) => item.day === today).map((item) => withLine({ start: item.start, end: item.end, title: item.title,
+        ...(item.step ? { step: item.step } : {}), missed: true }, lineOfOrder.get(item.workOrderId ?? "")))].sort((a, b) => a.start.localeCompare(b.start)),
+    soon: soon.slice(0, 6).map((item) => withLine({ title: taskTitleOf(item.order), due: item.due }, item.order.identityId)),
+    asks: { count: asks.length, records: records.length, ...(first ? { top: withLine({ title: first.title, urgency: first.urgency }, first.line) } : {}) }
+  };
+  return { today, fixed, work, soon, asks, records, opener };
+}
+
+/**
  * The day's first words, said when the day's conversation is first opened: the fixed arrangements, the work placed, what bears on a
  * deadline, and the most urgent decision with its own options as buttons (the rest are a link away).
  */
@@ -415,19 +457,7 @@ export async function ensureOpener(ctx: AccessContext, now = new Date(), force =
     const changed = Date.parse(store.latestEventAt(ctx.workspaceId, OPENER_PLAN_EVENTS) ?? "") > read;
     if (acted || (!changed && now.getTime() - read < OPENER_REFRESH_MS)) return false;
   }
-  const plan = await loadCurrentPlan(ctx);
-  const todays = plan.blocks.filter((block) => (block.day ?? today) === today).sort((a, b) => a.start.localeCompare(b.start));
-  const fixed = todays.filter((block) => !block.id.startsWith("scheduled:") && !block.id.startsWith("proposed:") && !block.id.startsWith("optional:")
-    && !(block.id.startsWith("graph_calendar:") && isCancelledEvent(block.title)));
-  const work = todays.filter((block) => block.id.startsWith("scheduled:"));
-  const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
-  const soon = store.listWorkOrders(ctx.workspaceId).filter((order) => ["approved", "preparing", "ready_for_human", "active"].includes(order.state) && onPersonsBoard(order))
-    .map((order) => ({ order, due: (order.payload as { dueDate?: string }).dueDate || anchors.get(order.milestoneId) || "" }))
-    .filter((item) => item.due && item.due >= today && item.due <= addDays(today, 3)).sort((a, b) => a.due.localeCompare(b.due));
-  // This week's, the same count as Today's stack and 待确认: the ones that can wait are not today's to mention.
-  const asks = thisWeek(listed(openAsks(ctx, now)));
-  // Facts only the person can report, apart from the choices (2026-11-21): the card and the button count them separately.
-  const records = asks.filter((ask) => askNature(ask.kind) === "record");
+  const { fixed, work, soon, asks, records, opener } = await dayAtGlance(ctx, now);
   const md = (day: string) => locale === "en" ? monthDay(locale, day) : `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
   // The text version (push, older pages) stays a few short lines: two of each with names cut short, the rest counted. The card drawn
   // from `opener` below carries the whole day.
@@ -456,21 +486,6 @@ export async function ensureOpener(ctx: AccessContext, now = new Date(), force =
       records.length ? t("待记录 {{count}}", { count: records.length }) : ""].filter(Boolean).join(" · "), href: "/approvals" }] : []),
     { kind: "href", label: t("打开计划"), href: "/plan" }
   ];
-  // The same day as data, for the card Today's conversation and the return page draw (the text above stays for push and older pages).
-  const lineOfOrder = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order.identityId]));
-  const filing = (() => { try { return calendarFiling(ctx); } catch { return null; } })();
-  const withLine = <T extends object>(item: T, line: string | undefined): T & { line?: string } => line ? { ...item, line } : item;
-  const opener: OpenerView = {
-    day: today, label: dayLabel(today, locale), timeZone: effectiveSchedulePreferences(ctx).preferences.timeZone,
-    fixed: fixed.map((block) => withLine({ start: block.start, end: block.end, title: block.title }, calendarLineOf(filing, block.title))),
-    work: [...work.map((block) => withLine({ start: block.start, end: block.end, title: block.task ?? block.title, ...(block.step ? { step: block.step } : {}) },
-      lineOfOrder.get(block.id.split(":")[1]!))),
-      // What today's plan no longer holds because its time passed undone, kept dashed until 04:00 tomorrow.
-      ...missedItems(ctx, [], {}, now).filter((item) => item.day === today).map((item) => withLine({ start: item.start, end: item.end, title: item.title,
-        ...(item.step ? { step: item.step } : {}), missed: true }, lineOfOrder.get(item.workOrderId ?? "")))].sort((a, b) => a.start.localeCompare(b.start)),
-    soon: soon.slice(0, 6).map((item) => withLine({ title: taskTitleOf(item.order), due: item.due }, item.order.identityId)),
-    asks: { count: asks.length, records: records.length, ...(first ? { top: withLine({ title: first.title, urgency: first.urgency }, first.line) } : {}) }
-  };
   if (existing) {
     const text = lines.join("\n");
     const same = (existing.payload.card as Card | undefined)?.clarify?.question === text && JSON.stringify(existing.payload.opener) === JSON.stringify(opener);

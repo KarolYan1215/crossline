@@ -9,6 +9,7 @@ import { recordingOverview } from "../../lib/recordings";
 import { TelemetryCard } from "./telemetry-card";
 import { AutostartCard } from "./autostart-card";
 import { DeviceCard } from "./device-card";
+import { McpCard } from "./mcp-card";
 import { autostartAvailable, readAutostart } from "../../lib/autostart";
 import { isLocalInstall } from "../../lib/install-mode";
 import { isHostedBeta } from "../../lib/hosting";
@@ -157,7 +158,7 @@ export default async function SettingsPage({ searchParams }: { searchParams?: Pr
   const sections: SettingsSection[] = [
     { id: "general", label: t("通用"), alerts: alertsIn(["#phone"]), parts: [{ id: "phone", label: t("手机访问与推送") }, ...(hosted ? [{ id: "device", label: t("这台电脑") }] : [])] },
     { id: "calendar", label: t("日历与连接"), alerts: alertsIn(["#calendar", "#calendar-subscriptions", "#mail", "#model"]),
-      parts: [{ id: "calendar-subscriptions", label: t("订阅日历") }, { id: "mail", label: t("邮箱") }, { id: "import", label: t("从其他工具导入") }, { id: "model", label: t("模型连接") }] },
+      parts: [{ id: "calendar-subscriptions", label: t("订阅日历") }, { id: "mail", label: t("邮箱") }, { id: "import", label: t("从其他工具导入") }, { id: "mcp", label: t("在其他 AI 里用 Crossline") }, { id: "model", label: t("模型连接") }] },
     { id: "notify", label: t("时间与提醒"), parts: [{ id: "travel", label: t("出行") }] },
     { id: "automation", label: t("自动化与助手"), parts: [{ id: "outputs", label: t("助手产出") }] },
     { id: "background", label: t("后台任务") },
@@ -209,7 +210,7 @@ export default async function SettingsPage({ searchParams }: { searchParams?: Pr
         <section id="calendar" className="st-section" aria-labelledby="st-calendar"><h2 id="st-calendar" className="ds-serif">{t("日历与连接")}</h2>
           <ModuleSteps steps={stepsIn("calendar")} />
           <CalendarModule ctx={ctx} />
-          <div className="st-modules"><div id="mail"><MailAccounts accountEmail={sessionEmail} /></div><div id="import"><ImportCard /></div></div>
+          <div className="st-modules"><div id="mail"><MailAccounts accountEmail={sessionEmail} /></div><div id="import"><ImportCard /></div><McpCard /></div>
           <ConnectionsSection />
         </section>
 

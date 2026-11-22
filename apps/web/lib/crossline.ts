@@ -1599,7 +1599,7 @@ export function addCapturedTaskWithId(
   idempotencyKey: string
 ): string {
   getStore().capture({ id, ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
-    title: input.title, context: input.context ?? "" }, idempotencyKey);
+    title: input.title, context: input.context ?? "" }, idempotencyKey, ctx.authMethod === "mcp" ? ctx.via : undefined);
   return id;
 }
 

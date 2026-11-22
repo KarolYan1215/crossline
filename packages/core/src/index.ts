@@ -607,3 +607,4 @@ export * from "./personal-design";
 export * from "./instructions";
 export * from "./self-check";
 export * from "./interview-completeness";
+export * from "./mcp";

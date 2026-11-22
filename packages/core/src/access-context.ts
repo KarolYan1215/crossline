@@ -19,8 +19,11 @@ export type AccessContext = {
     objectId?: string;
   };
   /** `device-token`: a phone shortcut's bearer token, scoped to one kind of write (docs/energy-and-ecosystem.md §5). */
-  authMethod: "session" | "tailscale-binding" | "system-job" | "device-token";
+  /** `mcp`: an outside agent (Claude, ChatGPT, Codex) calling the MCP server with a token the person made for it (docs/mcp-server.md). */
+  authMethod: "session" | "tailscale-binding" | "system-job" | "device-token" | "mcp";
   requestId: string;
+  /** With `authMethod: "mcp"`: the name the person gave the token (「Claude Code」), recorded on every change made through it. */
+  via?: string;
   /**
    * The language this request is served in (docs/i18n.md): the browser's cookie, else the workspace's setting, else Chinese. Absent on
    * contexts made by jobs; readers fall back to the workspace's setting (`localeFor` in the web, `readLocale` in the worker).
