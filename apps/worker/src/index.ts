@@ -59,7 +59,7 @@ import { energyAdvicePass } from "./energy-advice";
 import { dedupePass } from "./dedupe";
 import { deliverableCheckPass, newFolderFiles } from "./deliverable-check";
 import { guestCodexHomes, importCodexMemories } from "./codex-memory-import";
-import { createTaskTitler, untitledTasks } from "./task-titler";
+import { createTaskTitler, unreadTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
 import { createTimeDraftPass } from "./time-drafts";
 import { createInsightCompiler, linesAwaitingMineSkill } from "./insight-compiler";
@@ -263,11 +263,11 @@ async function curatorPass(workspaceId: string, checkedAt: string): Promise<void
   } finally { curating.delete(workspaceId); }
 }
 
-/** Names tasks written before short names existed, a batch a tick, while the quota is normal. */
+/** Names tasks written before short names existed and reads whether each is going to something (`attends`), a batch a tick, while the quota is normal. */
 const titling = new Set<string>();
 async function titlePass(workspaceId: string, checkedAt: string): Promise<void> {
   if (paused(workspaceId, "planning")) return;
-  if (titling.has(workspaceId) || !codexSupervisor || !untitledTasks(analysisStore, workspaceId).length) return;
+  if (titling.has(workspaceId) || !codexSupervisor || !unreadTasks(analysisStore, workspaceId).length) return;
   if (!spendAllows(await spendFor(workspaceId), "discretionary")) return;
   titling.add(workspaceId);
   try {

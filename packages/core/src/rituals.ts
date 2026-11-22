@@ -52,7 +52,7 @@ export type CommitTask = {
   dueDay?: string;
   /** The person already worked on it (a timer ran, a step is done). */
   started: boolean;
-  /** An event to attend whose day has passed (`isAttending`): only 「不参加了」 is offered for it (W-258, the owner's decision of 2026-11-11). */
+  /** An event to attend whose day has passed (`attendedText`): only 「不参加了」 is offered for it (W-258, the owner's decision of 2026-11-11). */
   passedEvent?: boolean;
   /** The importance (0–100) of the milestone it serves. */
   weight: number;

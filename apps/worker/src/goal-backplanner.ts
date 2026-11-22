@@ -2,7 +2,7 @@ import { personProfileFor } from "./planning-profile";
 import { drillBackingFor } from "./drill-backing";
 import { randomUUID } from "node:crypto";
 import { assignBackplanOwners, BACKPLAN_SCHEMA, screenBackplanDrills, foldInfoRequests, goalSettingKey, isWorkOwner, mentionsExternalAction, producedArtifacts, rollingBackplan, usedArtifacts,
-  validateBackplan, withCourse, workOwner, type BackplanAnswer as Answer, type MissingInput } from "@crossline/core";
+  validateBackplan, workOwner, type BackplanAnswer as Answer, type MissingInput } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { handOffArtifacts, linkArtifactWork, readStoredArtifactPlan, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
 
@@ -224,7 +224,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
     for (const step of planned) {
       const mine = (task: { id: string }) => core(task.id) === (step.owner === "person");
       const fold = decideFold(open.filter(mine), { id: `backplan:${key}:${step.id}`, identityId: milestone.identityId, projectId: milestone.projectId!, milestoneId: milestone.id,
-        title: withCourse(step.title, milestone.projectId), intent: step.intent, state: "awaiting_plan_approval", dueDate: "", milestoneDeadline: deadline,
+        title: step.title, intent: step.intent, state: "awaiting_plan_approval", dueDate: "", milestoneDeadline: deadline,
         progress: 0, hasStepPlan: false, started: false, dependsOn: [], owner: step.owner }, step.extendsTaskId ?? "", done.filter(mine), localeOf(store, workspaceId));
       if (fold) folds.set(step.id, fold);
     }
@@ -241,7 +241,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
         identityId: milestone.identityId, projectId: milestone.projectId!, milestoneId: milestone.id,
         intent: step.intent, state: "awaiting_plan_approval", riskTier,
         estimate: { ...step.estimate, source: "llm_prior", observationCount: 0, confidence: "low" },
-        payload: { title: withCourse(step.title, milestone.projectId), family: step.family,
+        payload: { title: step.title, family: step.family,
           // Who does it (docs/work-split.md): the assistant's preparation and the questions stay off the person's board and calendar
           // (`onPersonsBoard`) and point at the core task they serve; a question carries what to ask.
           owner: step.owner, ownerReason: step.ownerReason, ...(person ? {} : { prepares: ids.get(step.prepares) ?? "" }),
@@ -272,7 +272,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
       for (const draft of drafts) absorbParts(store, workspaceId, draft.id);
       for (const [stepId, fold] of folds) {
         const step = planned.find((item) => item.id === stepId)!;
-        recordFold(store, workspaceId, fold, { id: `backplan:${key}:${stepId}`, title: withCourse(step.title, milestone.projectId), intent: step.intent, source: "backplan" });
+        recordFold(store, workspaceId, fold, { id: `backplan:${key}:${stepId}`, title: step.title, intent: step.intent, source: "backplan" });
         // The kept task now serves this milestone too, so the milestone is not split again for want of open work.
         const keep = store.listWorkOrders(workspaceId).find((order) => order.id === fold.keep);
         const serves = ((keep?.payload ?? {}) as { alsoServes?: string[] }).alsoServes ?? [];

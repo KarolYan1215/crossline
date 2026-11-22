@@ -97,7 +97,7 @@ test("the backplanner does not write again what the person just finished (W-30)"
   const runtime = fakeRuntime([JSON.stringify(answer)], "crossline:crossline-goal-backplanner");
   expect((await createGoalBackplanner(store, ws, "C:\\repo", () => runtime.rpc)("m3")).state).toBe("proposed");
   const created = store.listWorkOrders(ws).filter((item) => item.milestoneId === "m3");
-  expect(created.map((item) => (item.payload as { title: string }).title)).toEqual(["ECE 548 给试用门店发上线通知"]);
+  expect(created.map((item) => (item.payload as { title: string }).title)).toEqual(["给试用门店发上线通知"]);
   expect(created[0]!.payload).toMatchObject({ dependsOn: ["done"] });
   expect(store.listEvents(ws, { type: "task.duplicate_prevented" })[0]?.payload).toMatchObject({ kind: "done", keep: "done" });
 });
@@ -126,11 +126,11 @@ test("a captured part keeps its earlier day as a sub-deadline of the whole, whic
   order("part", "作业 3 的前两题", { state: "preparing", payload: { dueDate: "2026-11-05" } });
   expect(foldNewTask(store, ws, "part")).toMatchObject({ kind: "extends", part: true, keep: "whole" });
   expect(store.getWorkOrder(ws, "part")!.state).toBe("archived");
-  expect(store.getWorkOrder(ws, "whole")!.payload).toMatchObject({ dueDate: "2026-11-09", partDeadlines: [{ title: "ECE 548 作业 3 的前两题", dueDate: "2026-11-05" }] });
+  expect(store.getWorkOrder(ws, "whole")!.payload).toMatchObject({ dueDate: "2026-11-09", partDeadlines: [{ title: "作业 3 的前两题", dueDate: "2026-11-05" }] });
   expect(store.listEvents(ws, { type: "task.steps_replan_requested", entityId: "whole" }).map((event) => (event.payload as { feedback: string }).feedback))
     .toEqual([expect.stringContaining("须在 2026-11-05 前完成")]);
   expect(taskWindow(store, ws, store.getWorkOrder(ws, "whole")!, new Date("2026-11-03T15:00:00Z")))
-    .toMatchObject({ dueBy: "2026-11-09", partDeadlines: [{ title: "ECE 548 作业 3 的前两题", dueDate: "2026-11-05" }] });
+    .toMatchObject({ dueBy: "2026-11-09", partDeadlines: [{ title: "作业 3 的前两题", dueDate: "2026-11-05" }] });
   // Another homework's part stands on its own.
   order("hw4", "作业 4 的前两题", { state: "preparing", payload: { dueDate: "2026-11-05" } });
   expect(foldNewTask(store, ws, "hw4")).toBeUndefined();

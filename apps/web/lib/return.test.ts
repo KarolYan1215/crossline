@@ -129,7 +129,7 @@ test("proposals and drafts nobody touched for fourteen days are archived, recove
   // Today nothing is fourteen days old.
   expect(cleanStale(TEST_CTX, new Date())).toEqual({ ok: true, orders: [], milestones: [] });
   const later = new Date(Date.now() + 15 * DAY);
-  expect(returnView(TEST_CTX, new Date().toISOString(), later).stale).toEqual({ orders: [{ id: "old", title: "ECE 555 旧提议" }], milestones: [{ id: "draft-old", title: "ECE 555 期中 85 分" }] });
+  expect(returnView(TEST_CTX, new Date().toISOString(), later).stale).toEqual({ orders: [{ id: "old", title: "旧提议" }], milestones: [{ id: "draft-old", title: "ECE 555 期中 85 分" }] });
   expect(cleanStale(TEST_CTX, later)).toEqual({ ok: true, orders: ["old"], milestones: ["draft-old"] });
   expect(store.getWorkOrder(ws, "old")!.state).toBe("archived");
   expect(store.listMilestones(ws).find((item) => item.id === "draft-edited")!.status).toBe("draft");

@@ -1,5 +1,5 @@
 import "server-only";
-import { archetypeById, completionRule, preparesOf, STEP_ANSWER_SLOT, stepAnswerSlot, finishedSteps, proposalReady, producedArtifacts, relevantDocuments, staleDateMentions, stepDatesFollowingDue, taskProgress, taskTitleOf, usedArtifacts, type AccessContext, type FamiliarityLevel, type Preparation, type SuccessCriterion,
+import { archetypeById, attendedText, completionRule, preparesOf, STEP_ANSWER_SLOT, stepAnswerSlot, finishedSteps, proposalReady, producedArtifacts, relevantDocuments, staleDateMentions, stepDatesFollowingDue, taskProgress, taskTitleOf, usedArtifacts, type AccessContext, type FamiliarityLevel, type Preparation, type SuccessCriterion,
   sessionWorkedMinutes, type EvidenceQuestionTemplate } from "@crossline/core";
 import { doneKinds, dueDateReader, familiarityBook, familiarityFor, listAgentTasks, mailLinksOf, needStatesOf, preparationOf, readStoredArtifactPlan, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
   type StoredBackgroundFact, type StoredStepPlan, type StoredTaskStep } from "@crossline/db";
@@ -108,6 +108,8 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
       window: { ...(payload.notBefore ? { notBefore: payload.notBefore } : {}), ...(dueBy ? { dueBy } : {}) },
       // The description names a day that has passed while the task is due later: the page says the deadline moved (W-155).
       ...(dueBy && staleDateMentions(order.intent, today, dueBy).length ? { dueMoved: dueBy } : {}),
+      // Going to something at its own time (the titler's `attends`): once its day passes it is not work for today.
+      ...(attendedText(order) ? { attends: true as const } : {}),
       ...((links) => links.length ? { mailLinks: links } : {})(mailLinksOf(store, workspaceId, order.id)),
       ...((report) => report ? { fromReport: report } : {})(reportOfTask(store, workspaceId, order.id)),
       ...(plan ? { stepPlan: { archetypeLabel: ((label) => label ? t(label) : plan.archetypeId)(archetypeById(plan.archetypeId)?.label), quantity: plan.quantity, rationale: plan.rationale,
@@ -172,6 +174,8 @@ export type TaskDetail = {
   /** The task's name: a short action from its verb. `intent` is the description. */
   title: string;
   intent: string;
+  /** Going to something at its own time (a talk, an exam sitting), as the titler read it (`attendedText`). */
+  attends?: true;
   state: string;
   riskTier: "routine" | "milestone" | "high_risk";
   estimate: ReturnType<typeof resolvedEstimate>;

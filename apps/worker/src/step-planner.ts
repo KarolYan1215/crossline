@@ -5,7 +5,7 @@ import {
   normalizeStepPlan, readableFromMaterial, STEP_ANSWER_SLOT, stepAnswerSlot, stepPlanWarnings, unverifiedUnits, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
   PROGRESS_ASSESSMENT_SCHEMA, validateProgressAssessment, type ProgressAssessment, type StepPlan, type StepWarning, type ValidationReview,
   FINER_SPLIT_FEEDBACK, FAMILIARITY_INSTRUCTIONS, FAMILIARITY_JUDGE, stepsNeedingFinerSplit, readModelCompletion, onPersonsBoard, preparesOf, type FinerSplit, type StepTrouble, type SuccessCriterion,
-  assumedAnswer, questionNeededDay, taskTitleOf, carryOverSteps, remapFrozenSteps, parseFrozen, FROZEN_SETTING
+  assumedAnswer, questionNeededDay, taskTitleOf, carryOverSteps, remapFrozenSteps, parseFrozen, FROZEN_SETTING, MILESTONE_RISKS_SETTING, milestoneReadingOf, parseMilestoneRisks
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { aiToolsFor, createRefBook, familiarityBook, familiarityFor, lessonsFor, listAgentTasks, ownerPreferencesFor, projectAgentOutputs, withRef, type CrosslineStore, type RefBook, type StoredWorkOrder } from "@crossline/db";
@@ -301,15 +301,19 @@ export function requestGranularityReplans(store: CrosslineStore, workspaceId: st
 export const IMPORTANT_WEIGHT = 60;
 
 /**
- * Whether a task is important by rule (docs/review-2026-10-13.md §11): graded coursework read from the course's own files (a homework or
- * exam date pair), or work for a milestone the scheduler weighs at 60 or more (the web records the weights in `milestone.weights`). Since
- * 2026-11-20 it decides only whether the plan is researched on the web first; which questions reach the person is the model's `ask`.
+ * Whether a task is important (docs/review-2026-10-13.md §11): work for a milestone weighed at 60 or more — the person's own weight (the
+ * web records it in `milestone.weights`), else the milestone reviewer's (`MilestoneReading.weight`, 2026-11-22; the rule that made every
+ * homework date pair important is gone with the point score). Since 2026-11-20 it decides only whether the plan is researched on the web
+ * first; which questions reach the person is the model's `ask`.
  */
 export function importantByRule(store: CrosslineStore, workspaceId: string, order: { milestoneId: string; payload?: unknown }): boolean {
-  if ((order.payload as { datePair?: unknown } | undefined)?.datePair) return true;
+  if (!order.milestoneId) return false;
   let weights: Record<string, number> = {};
   try { weights = JSON.parse(store.getSetting(workspaceId, "milestone.weights") ?? "{}") as Record<string, number>; } catch { /* none recorded */ }
-  return Boolean(order.milestoneId) && (weights[order.milestoneId] ?? 0) >= IMPORTANT_WEIGHT;
+  const own = weights[order.milestoneId];
+  const weight = typeof own === "number" ? own
+    : milestoneReadingOf(parseMilestoneRisks(store.getSetting(workspaceId, MILESTONE_RISKS_SETTING))[order.milestoneId])?.weight;
+  return (weight ?? 0) >= IMPORTANT_WEIGHT;
 }
 
 export function createStepPlanner(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined,

@@ -27,7 +27,8 @@ export function courseCodeOf(project: string | undefined): string | undefined {
 
 /**
  * A name that says which course it is about (decided 2026-10-08: 「课堂期末考试」 on the calendar named no course, and two courses each have
- * one). When the item belongs to a project with a course code and its name does not already carry it, the code goes in front.
+ * one). When the item belongs to a project with a course code and its name does not already carry it, the code goes in front. Only the
+ * file-date extraction still uses it (`date-schema.ts`); every model that names a task is told to name its course itself (2026-11-22).
  */
 export function withCourse(title: string, project: string | undefined): string {
   const code = courseCodeOf(project);
@@ -37,44 +38,29 @@ export function withCourse(title: string, project: string | undefined): string {
 }
 
 /**
- * The name to show: the stored short title, or — for a task written before titles existed — the first clause of its description; with
- * the course code in front when the task belongs to a course and its name leaves it out.
+ * The name to show: the stored short title, or — for a task written before titles existed — the first clause of its description. The
+ * models that name tasks put the course in the name themselves; no code is added in front any more (2026-11-22).
  */
 export function taskTitleOf(order: { intent: string; payload?: unknown; projectId?: string }): string {
   const stored = (order.payload as { title?: unknown } | undefined)?.title;
-  return withCourse(typeof stored === "string" && stored.trim() ? stored.trim() : cleanTaskTitle(order.intent), order.projectId);
+  return typeof stored === "string" && stored.trim() ? stored.trim() : cleanTaskTitle(order.intent);
 }
 
-/** The titler's answer (Skill `crossline-task-titler`): a short name for each task it was given, by id. */
-export type TaskTitles = { titles: Array<{ id: string; title: string }> };
+/**
+ * The titler's answer (Skill `crossline-task-titler`), by id: a short name for each task, and whether the task is going to something at
+ * its own time (`attends`: a talk, a rehearsal, an interview, an exam sitting), which replaced the verb list (「参加/出席…」) on 2026-11-22.
+ */
+export type TaskTitles = { titles: Array<{ id: string; title: string; attends?: boolean }> };
 export const TASK_TITLES_SCHEMA = { type: "object", additionalProperties: false, required: ["titles"], properties: {
-  titles: { type: "array", maxItems: 40, items: { type: "object", additionalProperties: false, required: ["id", "title"], properties: {
-    id: { type: "string", minLength: 1, maxLength: 128 }, title: { type: "string", minLength: 1, maxLength: 60 } } } } } } as const;
+  titles: { type: "array", maxItems: 40, items: { type: "object", additionalProperties: false, required: ["id", "title", "attends"], properties: {
+    id: { type: "string", minLength: 1, maxLength: 128 }, title: { type: "string", minLength: 1, maxLength: 60 }, attends: { type: "boolean" } } } } } } as const;
 
-/** Keeps a name for each known task (cleaned to the title rule); unknown ids and empty names are dropped, never refused. */
+/** Keeps a name and the reading for each known task (the name cleaned to the title rule); unknown ids and empty answers are dropped, never refused. */
 export function validateTaskTitles(value: unknown, ids: string[]): TaskTitles {
   const answer = value as TaskTitles | undefined;
   if (!answer || !Array.isArray(answer.titles)) throw new Error("TASK_TITLES_SCHEMA_INVALID");
   const known = new Set(ids);
-  return { titles: answer.titles.filter((item) => item && known.has(item.id)).map((item) => ({ id: item.id, title: cleanTaskTitle(String(item.title ?? "")) }))
-    .filter((item) => item.title) };
-}
-
-/** A milestone that is itself a sitting: an exam, a quiz, a defence or a talk. Work towards it is useless once it has begun. */
-const SITTING = /考试|期中|期末|测验|小测|答辩|展示|汇报|quiz|exam|midterm|final|defen[cs]e|presentation/iu;
-
-/**
- * When work towards a milestone that is a sitting must be done on its deadline day: the start of that day's earliest fixed block of the
- * same course (the class meeting the exam is held in, or the exam itself). Without it the deadline was 23:59, and on the real account
- * the evening after a midterm was filled with practice for it (2026-10-27). `undefined` when the milestone is no sitting, names no
- * course, or no fixed block of that course falls on the day.
- */
-/** Whether a milestone is a sitting (an exam, a defence, a talk): once its day has passed, preparing for it is over. */
-export const isSittingMilestone = (milestoneTitle: string) => SITTING.test(milestoneTitle);
-
-export function sittingStartOn(milestoneTitle: string, day: string, blocks: Array<{ day?: string; start: string; title: string }>): string | undefined {
-  const code = courseCodeOf(milestoneTitle);
-  if (!code || !SITTING.test(milestoneTitle)) return undefined;
-  return blocks.filter((block) => block.day === day && /^\d{2}:\d{2}$/.test(block.start) && courseCodeOf(block.title) === code)
-    .map((block) => block.start).sort()[0];
+  return { titles: answer.titles.filter((item) => item && known.has(item.id)).map((item) => ({ id: item.id, title: cleanTaskTitle(String(item.title ?? "")),
+    ...(typeof item.attends === "boolean" ? { attends: item.attends } : {}) }))
+    .filter((item) => item.title || item.attends !== undefined) };
 }

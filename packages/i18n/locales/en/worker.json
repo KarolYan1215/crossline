@@ -402,7 +402,6 @@
   "{{count}} 周内容量或步骤依赖不足_other": "Not enough capacity, or steps still waiting on others, within {{count}} weeks",
   "p85 情景晚于已确认截止时间": "The cautious case finishes after the confirmed deadline",
   "{{title}}要一口气做完，按保守估计需要 {{p85}} 分钟，但最长的连续空档只有 {{longest}} 分钟；已按 {{longest}} 分钟预留（预期用时 {{p50}} 分钟）": "{{title}} has to be done in one go and cautiously needs {{p85}} min, but the longest free stretch is {{longest}} min; {{longest}} min have been reserved (expected {{p50}} min)",
-  "{{title}}本周已留 45 分钟进度，完整作业仍待排入": "{{title}} has 45 min of progress this week; the full task is still to be scheduled",
   "{{title}}需要连续 {{minutes}} 分钟，但最长的连续空档只有 {{longest}} 分钟；可以补充更长的可用时间，或确认它其实可以分几次做": "{{title}} needs {{minutes}} min in one stretch, but the longest free stretch is {{longest}} min; add longer available time, or confirm it can be done in several sittings",
   "{{title}}需要连续 {{minutes}} 分钟": "{{title}} needs {{minutes}} min in one stretch",
   "{{title}}无法在已确认截止时间前排入": "{{title}} cannot be scheduled before its confirmed deadline",

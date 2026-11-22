@@ -169,15 +169,15 @@ function decidedProposals(reports: StoredDiligenceReport[], identityId: string):
 }
 
 /**
- * What the person said limits the answer: facts in a slot that names a constraint, or whose words rule something out — in Chinese or in
- * English, since the person writes in either.
+ * The facts recorded as constraints (a slot that names one). What else the person said rules something out (「不能花钱买课」「I can't work
+ * on weekends」) is the model's to read from `facts`, which it is given in full (Skill `crossline-due-diligence`): the word list that used to
+ * pick such sentences out was dropped on 2026-11-22.
  */
-// i18n-ignore-start: matched against what the person said
+// i18n-ignore-start: slot names, not the person's words
 const CONSTRAINT_SLOT = /constraint|limit|约束|限制/;
-const CONSTRAINT_WORDS = /无法|不能|不要|不做|不给|\b(can'?t|cannot|won'?t|don'?t|do not|will not|never|unable|not able to)\b/i;
 // i18n-ignore-end
 export function statedConstraints(facts: Array<{ slot: string; value: string }>): string[] {
-  return facts.filter((fact) => CONSTRAINT_SLOT.test(fact.slot) || CONSTRAINT_WORDS.test(fact.value)).map((fact) => fact.value).slice(0, 8);
+  return facts.filter((fact) => CONSTRAINT_SLOT.test(fact.slot)).map((fact) => fact.value).slice(0, 8);
 }
 
 export function createDiligenceRunner(store: CrosslineStore, workspaceId: string, cwd: string,
@@ -231,7 +231,7 @@ export function createDiligenceRunner(store: CrosslineStore, workspaceId: string
         .map(({ id, name, summary }) => ({ id, name, summary })),
       facts: [...facts, ...personFacts].map((fact) => ({ id: profileFactId(fact), projectId: fact.projectId, slot: fact.slot, value: fact.value, status: fact.status }))
         .concat(lineDescriptionFact(store, workspaceId, identityId)),
-      // Whatever the person said limits the answer: stated constraints are facts in the slots that name them.
+      // Facts recorded as constraints; any other fact that rules something out is read from `facts` by the model.
       constraints: statedConstraints(facts),
       alreadyDecided: decidedProposals(reports, identityId)
     };

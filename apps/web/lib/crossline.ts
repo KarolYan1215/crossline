@@ -7,7 +7,7 @@ import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { approveArtifactRelationsFor, assistantAvailable, CrosslineStore, openNeedsOf, recordPersonNote, type EvidenceClaimInput, type StoredMilestone, type StoredWorkOrder } from "@crossline/db";
 import { availableSlots, deriveCapacity, requiredApproval, validateAvailability, DEFAULT_AVAILABILITY,
   defaultMilestoneTemplates, computeMilestoneConfidence, PRODUCTIVE, type ActivityCategory, validateSuccessCriteria, goalSettingKey, ANALYSIS_CONTEXT_VERSION, calibrationReport, calibratedEstimate,
-  type CalibrationReport, presetImportance, sittingStartOn, taskTitleOf, type ImportancePreset, restoreTargetOf,
+  type CalibrationReport, presetFromReading, milestoneReadingOf, taskTitleOf, type ImportancePreset, restoreTargetOf,
   type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion, type ChecklistAnswer, FIXED_EVENTS, fixedEventBlocks, type FixedEvent, readTravelState, travelBlocks,
   MAIL_EVENTS_SETTING, mailEventsOnSchedule, readMailEvents,
   DELAY_SETTING, FROZEN_SETTING, SHIFT_MINUTES, parseFrozen, settleFrozen, shiftFrozen, withFrozen, withoutFrozen, type FrozenBlock, type RealityChange } from "@crossline/core";
@@ -148,7 +148,7 @@ export function saveGoalSettings(ctx: AccessContext, id: string, input: { import
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
     idempotencyKey: `goal:settings:${id}:${randomUUID()}`, type: "goal.settings_confirmed", entityId: id,
     payload: { milestoneVersion: milestone.version, previous, next,
-      ...(typeof input.weight === "number" ? { presetWeight: importancePresets(ctx, { withHistory: false }).get(id)?.weight ?? null } : {}) } });
+      ...(typeof input.weight === "number" ? { presetWeight: importancePresets(ctx).get(id)?.weight ?? null } : {}) } });
   return { ok: true };
 }
 
@@ -156,39 +156,19 @@ export function saveGoalSettings(ctx: AccessContext, id: string, input: { import
 export const IMPORTANT_WEIGHT = 60;
 
 /**
- * The system's suggested importance for every live milestone (`presetImportance`): its line's place in the person's order (hard
- * constraint, rank, or parallel), the relations through it, what is at stake, and how the person has moved this line's sliders before. Derived on read.
+ * The system's suggested importance for every live milestone: the milestone reviewer's weight (`MilestoneReading`, 2026-11-22), which
+ * reads the line's place in the person's order, the relations through it, what is at stake and how the person moved this line's sliders
+ * before; 50 before a review. Derived on read.
  */
-export function importancePresets(ctx: AccessContext, options: { withHistory?: boolean } = {}): Map<string, ImportancePreset> {
-  const store = getStore();
-  const facts = store.listProfileFacts(ctx.workspaceId);
-  const standing = new Map(linePacks(ctx).map((pack) => [pack.id, { rank: pack.rank ?? null, hard: Boolean(pack.hard) }]));
-  const milestones = store.listMilestones(ctx.workspaceId).filter((item) => item.status !== "archived");
-  const relations = store.listMilestoneRelations(ctx.workspaceId).filter((item) => item.status === "approved" || item.status === "candidate");
-  const degree = (id: string) => relations.filter((item) => item.fromMilestoneId === id || item.toMilestoneId === id).length;
-  const maxRelations = Math.max(0, ...milestones.map((item) => degree(item.id)));
-  const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
-  const graded = new Set(facts.filter((item) => item.slot === "grading" || item.slot === "target_grade").map((item) => item.projectId));
-  const today = planToday(ctx);
-  const lineOf = new Map(milestones.map((item) => [item.id, item.identityId]));
-  const adjustments = new Map<string, Map<string, number>>();
-  if (options.withHistory !== false) {
-    for (const event of store.listEvents(ctx.workspaceId, { type: "goal.settings_confirmed" })) {
-      const payload = event.payload as { next?: { weight?: number }; presetWeight?: number | null };
-      const line = lineOf.get(event.entityId);
-      if (!line || typeof payload.next?.weight !== "number" || typeof payload.presetWeight !== "number") continue;
-      const own = adjustments.get(line) ?? new Map<string, number>();
-      own.set(event.entityId, payload.next.weight - payload.presetWeight);
-      adjustments.set(line, own);
-    }
-  }
-  return new Map(milestones.map((item) => {
-    const deadline = readGoalSettings(ctx, item.id)?.confirmedDeadline ?? anchors.get(item.id) ?? null;
-    return [item.id, presetImportance({ standing: standing.get(item.identityId) ?? { rank: null, hard: false }, line: item.identityId, relations: degree(item.id), maxRelations,
-      graded: Boolean(item.projectId && graded.has(item.projectId)),
-      daysToDeadline: deadline ? Math.round((Date.parse(`${deadline}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86_400_000) : null,
-      pastAdjustments: [...(adjustments.get(item.identityId)?.values() ?? [])], locale: localeFor(ctx) })];
-  }));
+export function importancePresets(ctx: AccessContext): Map<string, ImportancePreset> {
+  const stored = milestoneRisksOf(ctx);
+  return new Map(getStore().listMilestones(ctx.workspaceId).filter((item) => item.status !== "archived")
+    .map((item) => [item.id, presetFromReading(milestoneReadingOf(stored[item.id]))]));
+}
+
+/** The milestone reviews as stored (`MILESTONE_RISKS_SETTING`), read once a minute per ledger change. */
+function milestoneRisksOf(ctx: AccessContext) {
+  return memoByLedger(getStore(), `milestone-risks:${ctx.workspaceId}`, 60_000, () => parseMilestoneRisks(getStore().getSetting(ctx.workspaceId, MILESTONE_RISKS_SETTING)));
 }
 
 const presetCache = new Map<string, { at: number; value: Map<string, ImportancePreset> }>();
@@ -2198,19 +2178,11 @@ function approvedAnchorDays(ctx: AccessContext): Map<string, string> {
   return days;
 }
 
-/** Milestone titles and the calendar's own blocks, read once per ledger change for every planner task. */
+/** Milestone titles, read once per ledger change for every planner task. */
 function milestoneTitleOf(ctx: AccessContext, milestoneId: string): string {
   return memoByLedger(getStore(), `milestone-titles:${ctx.workspaceId}`, 60_000,
     () => new Map(getStore().listMilestones(ctx.workspaceId).map((milestone) => [milestone.id, milestone.title]))).get(milestoneId) ?? "";
 }
-function fixedBlocksOf(ctx: AccessContext): PersistedScheduleBlock[] {
-  return memoByLedger(getStore(), `fixed-blocks:${ctx.workspaceId}`, 60_000, () => {
-    const marks = calendarMarks(ctx);
-    return ((getStore().listPlanVersions(ctx.workspaceId)[0]?.payload as { blocks?: PersistedScheduleBlock[] } | undefined)?.blocks ?? [])
-      .filter((block) => block.day && !(block.id.startsWith("graph_calendar:") && isCancelledEvent(marks, block.title)));
-  });
-}
-
 /**
  * The calendar classifier's marks by title (`rest`, `cancelled`; 2026-11-22), read from the stored filing whatever lines it was made
  * against: unlike a line, a mark does not go stale when the lines change.
@@ -2260,8 +2232,10 @@ const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
     ...(() => {
       const day = [milestoneDue,
         dueDate && /^\d{4}-\d{2}-\d{2}$/.test(dueDate) ? dueDate : undefined].filter((value): value is string => Boolean(value)).sort()[0];
-      // Work towards a sitting (an exam held in that day's class) is due when the sitting begins, not at midnight.
-      const sitting = day && day === milestoneDue && order.milestoneId ? sittingStartOn(milestoneTitleOf(ctx, order.milestoneId), day, fixedBlocksOf(ctx)) : undefined;
+      // Work towards a sitting (an exam held in that day's class) is due when the sitting begins, not at midnight: the milestone
+      // reviewer's `sitting` and `startsAt`, read from that day's fixed events (2026-11-22, no longer a course code and an exam word).
+      const reading = day && day === milestoneDue && order.milestoneId ? milestoneReadingOf(milestoneRisksOf(ctx)[order.milestoneId]) : undefined;
+      const sitting = reading?.sitting && reading.startsAt ? reading.startsAt : undefined;
       return day ? { deadline: toZonedInstant(day, sitting ?? "23:59", zone) } : {};
     })(),
     ...(release ? { notBefore: toZonedInstant(release, "00:00", zone) } : {}),

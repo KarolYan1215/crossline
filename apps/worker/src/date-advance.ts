@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import {
-  advanceResults, conservativeFinish, onPersonsBoard, taskTitleOf, daysBetween, engagementTier, isSittingMilestone, monthDay, overdueTarget, RESULT_EXPIRE_DAYS, RESULT_REVIEW_DAYS, shiftWithChain, tFor, type Locale
+  advanceResults, conservativeFinish, onPersonsBoard, taskTitleOf, daysBetween, engagementTier, MILESTONE_RISKS_SETTING, milestoneReadingOf, monthDay, parseMilestoneRisks, overdueTarget, RESULT_EXPIRE_DAYS, RESULT_REVIEW_DAYS, shiftWithChain, tFor, type Locale
 } from "@crossline/core";
 import { localeOf } from "./locale";
 import { designKnob, DUE_ADVANCED_EVENT, listAgentTasks, overdueStartedTasks, SILENT_TASK_SHIFTS_MAX, reviewAgentTask, settleAgentResult, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
@@ -178,12 +178,13 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
   const priorShifts = new Map<string, number>();
   for (const event of store.listEvents(workspaceId, { type: "date.advanced" }))
     for (const item of (event.payload as { shifted?: Array<{ id?: string }> }).shifted ?? []) if (item.id) priorShifts.set(item.id, (priorShifts.get(item.id) ?? 0) + 1);
+  const readings = parseMilestoneRisks(store.getSetting(workspaceId, MILESTONE_RISKS_SETTING));
   for (const milestone of approved) {
     const deadline = deadlineOf(milestone.id);
-    // An exam or a defence on a date that does not move is over once its day has passed: preparing for it is put away (anything being
+    // An exam or a defence on a date that does not move (the milestone reviewer's `sitting`, no longer a word in its title) is over once its day has passed: preparing for it is put away (anything being
     // timed stays), and the question is how it went, not whether to 补做 (2026-10-28: the day after the ECE 548 midterm its practice
     // was still Today's first card, and the ask recommended making it up).
-    if (deadline && deadline < today && fixed(milestone) && isSittingMilestone(milestone.title)) {
+    if (deadline && deadline < today && fixed(milestone) && milestoneReadingOf(readings[milestone.id])?.sitting === true) {
       for (const order of open.filter((item) => item.milestoneId === milestone.id && item.state !== "active"))
         sittingPrep.push({ order, why: t("考试 {{day}} 已过，备考不再安排", { day: md(deadline, locale) }) });
       if (daysBetween(deadline, today) <= SITTING_ASK_DAYS && !judged.has(milestone.id)) {

@@ -1,4 +1,3 @@
-import { isAttending } from "@crossline/core";
 import type { TaskDetail } from "../../lib/task-detail";
 import { tFor, type Locale } from "../../lib/i18n";
 import { shortDate } from "./format";
@@ -8,7 +7,7 @@ import { shortDate } from "./format";
  * picture of the steps, what the task waits for, and which of the page's four questions it answers — 现在 (do it today), 接下来 (it has
  * a time ahead), 在等 (it waits for a decision, an input, material or the gate) or 任务库 (its milestone is beyond the window).
  */
-export type CardDetail = Pick<TaskDetail, "state" | "paused" | "stepPlan" | "window" | "blocker" | "materialBlocker"> & Partial<Pick<TaskDetail, "preparing" | "title">>;
+export type CardDetail = Pick<TaskDetail, "state" | "paused" | "stepPlan" | "window" | "blocker" | "materialBlocker"> & Partial<Pick<TaskDetail, "preparing" | "title" | "attends">>;
 type Step = NonNullable<TaskDetail["stepPlan"]>["steps"][number];
 export type TaskSlotLike = { day: string; start: string; end: string };
 
@@ -88,7 +87,7 @@ export function waitReason(detail: CardDetail, today: string, locale?: Locale): 
   // An event to attend whose day has passed is not work for today (W-274: 8 of the 16 under 「现在」 were 「参加…」 2–18 days gone). It
   // waits for the person to say whether they went; nothing is closed for them (the owner's rule of 2026-11-05: a passed date is not
   // decided by default; 2026-11-11: the old orders are not migrated).
-  if (detail.title && isAttending(detail.title) && detail.window.dueBy && detail.window.dueBy < today)
+  if (detail.attends && detail.window.dueBy && detail.window.dueBy < today)
     return { kind: "passed", label: t("活动已过 · 去了就点完成，没去就归档") };
   const step = currentStep(detail);
   if (step && !step.schedulable) {

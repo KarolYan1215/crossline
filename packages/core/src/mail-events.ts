@@ -21,38 +21,16 @@ export const MAIL_EVENTS_KEEP = 120;
 export const MAIL_EVENT_ASKS = 4;
 
 /**
- * Going to something — a talk, a rehearsal, a forum, an exam sitting — said with the verb first. It has a day and a time and is over when
- * that passes; it is never work to place in free hours (W-253, W-256: nine 「参加…」 tasks from mail sat in the owner's plan as overdue,
- * and an exam as a movable half hour). Preparing for it (「复习…，并参加小测」) starts with another verb and stays work.
- */
-const ATTENDING = /^\s*(参加|出席|参观|观看|旁听|attend\b|join\b)/i;
-export function isAttending(text: string): boolean {
-  return ATTENDING.test(text);
-}
-
-/**
- * A task's words that say it is going to something: its description, else its short title (both verb-first when they are). The description
- * is free text and does not always start with the verb — 「于 11 月 5 日 11:00 参加…」「通过 Zoom 参加…」 — while the title does
- * (2026-11-17 live walk: such tasks showed 「活动已过」 on the task list, from the title, yet their cards still recommended a retry).
+ * Going to something — a talk, a rehearsal, a forum, an exam sitting. It has a day and a time and is over when that passes; it is never
+ * work to place in free hours (W-253, W-256: nine 「参加…」 tasks from mail sat in the owner's plan as overdue, and an exam as a movable
+ * half hour). Preparing for it (「复习…，并参加小测」) stays work. The task titler reads it for every task (`payload.attends`, Skill
+ * `crossline-task-titler`, 2026-11-22), replacing the verb list (「参加/出席/参观…」) that missed 「于 11 月 5 日参加…」 and 「通过 Zoom 参加…」.
+ * A task not read yet is not an event: it stays ordinary work until the titler has read it. Returns the task's name when it is one.
  */
 export function attendedText(order: { intent: string; payload?: unknown }): string | undefined {
-  if (isAttending(order.intent)) return order.intent;
-  const title = (order.payload as { title?: unknown } | undefined)?.title;
-  return typeof title === "string" && isAttending(title) ? title : undefined;
-}
-
-const LEADING_DAY = /^\s*(\d{1,2}\s*月\s*\d{1,2}\s*[日号]|\d{1,2}\/\d{1,2})\s*(上午|中午|下午|傍晚|晚上|晚间|早上)?\s*(在\s*)?/;
-/**
- * What is attended, as a list names it: without the verb, the day (said beside it from the task's own date) and 「在…举行的」, so the part
- * that tells one event from another comes first. Cut from the front, 「参加 11 月 6 日在 Lev…」 named nothing (2026-11-11). Only the first
- * clause: what follows (「，并保留参会记录。」) is about the task, not the event.
- */
-export function attendedName(text: string): string {
-  const rest = text.trim().replace(ATTENDING, "").replace(LEADING_DAY, "").trim();
-  const held = /^.*?(举行|召开|举办)的\s*(.+)$/.exec(rest);
-  const name = (held?.[2] ?? rest).trim();
-  const clause = name.search(/[，。；;！？]/);
-  return (clause > 0 ? name.slice(0, clause) : name).trim() || text.trim();
+  const payload = (order.payload ?? {}) as { attends?: unknown; title?: unknown };
+  if (payload.attends !== true) return undefined;
+  return typeof payload.title === "string" && payload.title.trim() ? payload.title.trim() : order.intent;
 }
 
 /** What the triage model read about an event in the mail; empty strings and 0 when the mail is not one. */

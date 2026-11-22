@@ -35,9 +35,24 @@ export const MILESTONE_RISK_RETRY_MS = 24 * 3_600_000;
 export const MILESTONE_RISK_NOTE_MAX = 60;
 export const MILESTONE_RISK_MAX = 4;
 
+/**
+ * The reviewer's reading of a milestone besides its risks (2026-11-22, replacing the point score in `importance.ts` and the 「考试/答辩…」
+ * word list in `task-title.ts`): how much it matters (`weight` 0–100, the slider's preset, and at 60 or more its tasks are important) and
+ * why, and whether it is a sitting — an exam, a defence, a talk held at a set time — with the time it starts on its day when the
+ * same-day events show it (`startsAt` "HH:MM", else ""). Work towards a sitting is due when it starts and is over once its day has passed.
+ */
+export type MilestoneReading = { weight: number; weightWhy: string; sitting: boolean; startsAt: string };
+
 export type StoredMilestoneRisk =
-  | { fingerprint: string; at: string; source: "model"; risks: MilestoneRisk[] }
-  | { fingerprint: string; at: string; failed: string };
+  | { fingerprint: string; at: string; source: "model"; risks: MilestoneRisk[]; reading?: MilestoneReading;
+      /** Written by the reviewer that weighs milestones (2026-11-22); an older review without it is read once more for the weight. */
+      weighed?: true }
+  | { fingerprint: string; at: string; failed: string; reading?: MilestoneReading };
+
+/** The reviewer's reading kept for a milestone, from any review of it (an edit does not make the weight unknown); undefined before one. */
+export function milestoneReadingOf(stored: StoredMilestoneRisk | undefined): MilestoneReading | undefined {
+  return stored?.reading;
+}
 
 export function parseMilestoneRisks(raw: string | null | undefined): Record<string, StoredMilestoneRisk> {
   try {
@@ -157,17 +172,25 @@ const short = (title: string) => title.length > 14 ? `${title.slice(0, 13)}…` 
 // ── The model's review ──────────────────────────────────────────────────────────────────────────────────────────────
 
 export type MilestoneRiskContext = {
-  version: "crossline.milestone-risk.v1";
+  version: "crossline.milestone-risk.v2";
   today: string;
   /** The hours a week the person has for all lines, when known. */
   weeklyHours: number | null;
   /** The milestones to review: new drafts, and approved ones never reviewed. */
   milestones: Array<{ id: string; status: string; line: string; lineLabel: string; project: string; title: string; deadline: string | null; daysLeft: number | null;
-    criteria: string[]; rationale: string; dependsOn: Array<{ title: string; deadline: string | null }>; ruleFindings: MilestoneRisk[] }>;
+    criteria: string[]; rationale: string; dependsOn: Array<{ title: string; deadline: string | null }>; ruleFindings: MilestoneRisk[];
+    /** For the weight: the line's place in the person's order (rank 1 = base, null = parallel; hard = a hard constraint). */
+    standing: { rank: number | null; hard: boolean };
+    /** Cross-line relations through this milestone; whether its project counts toward a grade the person stated. */
+    relations: number; graded: boolean;
+    /** The person's past slider moves on this line: their weight minus the preset at the time. */
+    pastAdjustments: number[];
+    /** Fixed events on the deadline day (classes, the exam itself), for `sitting` and `startsAt`. */
+    sameDayEvents: Array<{ start: string; end: string; title: string }> }>;
   /** Every other live milestone, so a review sees what competes for the same weeks. */
   others: Array<{ line: string; title: string; deadline: string | null; status: string }>;
 };
-export type MilestoneRiskAnswer = { milestones: Array<{ milestoneId: string; risks: MilestoneRisk[] }> };
+export type MilestoneRiskAnswer = { milestones: Array<{ milestoneId: string; risks: MilestoneRisk[]; reading?: MilestoneReading }> };
 
 const object = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
 export const MILESTONE_RISK_SCHEMA = object({
@@ -177,7 +200,11 @@ export const MILESTONE_RISK_SCHEMA = object({
       level: { type: "string", enum: [...MILESTONE_RISK_LEVELS] },
       kind: { type: "string", enum: [...MILESTONE_RISK_KINDS] },
       note: { type: "string", minLength: 2, maxLength: MILESTONE_RISK_NOTE_MAX }
-    }) }
+    }) },
+    weight: { type: "integer", minimum: 0, maximum: 100 },
+    weightWhy: { type: "string", maxLength: 120 },
+    sitting: { type: "boolean" },
+    startsAt: { type: "string", maxLength: 5 }
   }) }
 });
 
@@ -212,8 +239,28 @@ export function validateMilestoneRisks(value: unknown, context: MilestoneRiskCon
   return kept;
 }
 
+/** The reviewer's weight and sitting for each milestone given that has a usable weight (`MilestoneReading`). */
+export function readMilestoneReadings(value: unknown, context: MilestoneRiskContext): Map<string, MilestoneReading> {
+  const answer = value as { milestones?: Array<{ milestoneId?: string; weight?: unknown; weightWhy?: unknown; sitting?: unknown; startsAt?: unknown }> } | undefined;
+  const known = new Set(context.milestones.map((item) => item.id));
+  const out = new Map<string, MilestoneReading>();
+  for (const item of Array.isArray(answer?.milestones) ? answer!.milestones : []) {
+    if (!item?.milestoneId || !known.has(item.milestoneId) || out.has(item.milestoneId) || typeof item.weight !== "number" || !Number.isFinite(item.weight)) continue;
+    const sitting = item.sitting === true;
+    const startsAt = sitting && typeof item.startsAt === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(item.startsAt) ? item.startsAt : "";
+    out.set(item.milestoneId, { weight: Math.round(Math.min(100, Math.max(0, item.weight))),
+      weightWhy: cleanNote(String(item.weightWhy ?? "")).slice(0, 120), sitting, startsAt });
+  }
+  return out;
+}
+
+/** The answer as stored: each milestone's risks, with the reading when there is one. */
+export function withReadings(risks: Map<string, MilestoneRisk[]>, readings: Map<string, MilestoneReading>): MilestoneRiskAnswer {
+  return { milestones: [...risks].map(([milestoneId, list]) => ({ milestoneId, risks: list, ...(readings.has(milestoneId) ? { reading: readings.get(milestoneId)! } : {}) })) };
+}
+
 /** Repairs spent: keep what was answered; the rest is retried after `MILESTONE_RISK_RETRY_MS`. */
 export function keepMilestoneRisks(value: unknown, context: MilestoneRiskContext): MilestoneRiskAnswer | undefined {
   const kept = readAnswer(value, context);
-  return kept.size ? { milestones: [...kept].map(([milestoneId, risks]) => ({ milestoneId, risks })) } : undefined;
+  return kept.size ? withReadings(kept, readMilestoneReadings(value, context)) : undefined;
 }

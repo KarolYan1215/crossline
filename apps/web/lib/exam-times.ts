@@ -1,5 +1,5 @@
 import "server-only";
-import { dateItemAttributes, parseTimeRange, urgencyFor, withCourse, type AccessContext, type Ask, type DateCandidate } from "@crossline/core";
+import { dateItemAttributes, parseTimeRange, urgencyFor, type AccessContext, type Ask, type DateCandidate } from "@crossline/core";
 import { ensureSeeded, getStore, type PersistedScheduleBlock } from "./crossline";
 import type { Translate } from "./i18n";
 
@@ -48,7 +48,7 @@ function untimedSittings(ctx: AccessContext, today: string): Array<{ key: string
 
 export function examTimeAsks({ ctx, today, t }: { ctx: AccessContext; today: string; t: Translate }): Ask[] {
   return untimedSittings(ctx, today).map(({ key, item, course }) => {
-    const title = withCourse(item.title, course);
+    const title = item.title;
     return { id: `exam-time:${key}`, kind: "exam_time" as const, entityId: key, urgency: urgencyFor(item.date, today), dueDay: item.date,
       raisedAt: `${item.date}T00:00:00.000Z`, fingerprint: key, important: true,
       title: t("「{{title}}」几点到几点？", { title }),

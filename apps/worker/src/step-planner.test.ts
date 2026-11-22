@@ -182,11 +182,13 @@ test("the model decides which questions reach the person (ask); the rest are ass
   expect(prompts.some((prompt) => prompt.includes("没有代价的就按 assume 做"))).toBe(true);
   expect(fact(fresh, "字体用哪种？")).toMatchObject({ status: "inferred" });
 
-  // Graded coursework read from the course's files is still researched on the web first.
+  // Work for a milestone the reviewer weighed at 60 or more is still researched on the web first (no rule makes every date pair important).
   const graded = new CrosslineStore(":memory:");
   seed(graded);
   const order = graded.getWorkOrder(workspaceId, "wo")!;
-  graded.saveWorkOrder({ ...order, payload: { ...(order.payload as object), datePair: { release: "2026-10-06", due: "2026-10-14" }, humanCore: [{ id: "h", intent: "解题" }] } });
+  graded.saveWorkOrder({ ...order, payload: { ...(order.payload as object), humanCore: [{ id: "h", intent: "解题" }] } });
+  graded.setSetting(workspaceId, "milestones.risks", JSON.stringify({ m: { fingerprint: "f", at: "2026-10-01T00:00:00.000Z", source: "model", risks: [],
+    reading: { weight: 75, weightWhy: "计入课程成绩", sitting: false, startsAt: "" } } }));
   answer = plan([]);
   expect((await createStepPlanner(graded, workspaceId, "C:\repo", () => runtime.rpc)("wo")).state).toBe("planned");
   expect(prompts.at(-1)).toContain('"research":true');

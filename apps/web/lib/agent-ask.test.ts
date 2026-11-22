@@ -91,7 +91,7 @@ test("a stuck run for an event whose day has passed recommends 不做了 and wai
   // 2026-11-17 live walk: 「于 11 月 5 日 11:00 参加…」 recommended a retry twelve days after the talk.
   store.saveWorkOrder({ id: "talk", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "ece555", milestoneId: "",
     intent: "于 10 月 5 日 11:00 参加与 ECE 555 相关的光子学讲座", state: "active", riskTier: "routine", estimate,
-    payload: { dueDate: "2026-10-05", title: "参加 ECE 555 相关讲座" } });
+    payload: { dueDate: "2026-10-05", title: "参加 ECE 555 相关讲座", attends: true } });
   for (const id of ["talk-1", "talk-2", "talk-3"]) run(store, id, { title: "准备讲座", workOrderId: "talk" }, LOST);
   const [ask] = agentAsks();
   expect(ask).toMatchObject({ entityId: "talk-3", urgency: "later" });

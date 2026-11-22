@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { cleanTaskTitle, courseCodeOf, sittingStartOn, taskTitleOf, validateTaskTitles, withCourse } from "./task-title";
+import { cleanTaskTitle, courseCodeOf, taskTitleOf, validateTaskTitles, withCourse } from "./task-title";
 
 test("a task's name is one short action; a long sentence is cut at its first clause", () => {
   expect(cleanTaskTitle("完成 ECE 555 作业 2。")).toBe("完成 ECE 555 作业 2");
@@ -11,9 +11,12 @@ test("a task's name is one short action; a long sentence is cut at its first cla
   expect(taskTitleOf({ intent: "长句", payload: { title: "整理 ECE 548 复习提纲" } })).toBe("整理 ECE 548 复习提纲");
 });
 
-test("the titler's answer keeps names for known tasks only", () => {
+test("the titler's answer keeps names and readings for known tasks only", () => {
   expect(validateTaskTitles({ titles: [{ id: "a", title: "完成作业 2。" }, { id: "zz", title: "x" }, { id: "b", title: "  " }] }, ["a", "b"]))
     .toEqual({ titles: [{ id: "a", title: "完成作业 2" }] });
+  // A task with a name already is read for `attends` alone; the reading is kept even without a new name.
+  expect(validateTaskTitles({ titles: [{ id: "a", title: "参加组会", attends: true }, { id: "b", title: " ", attends: false }] }, ["a", "b"]))
+    .toEqual({ titles: [{ id: "a", title: "参加组会", attends: true }, { id: "b", title: "", attends: false }] });
 });
 
 test("a name about a course carries its code, taken only from a project that is not marked uncertain", () => {
@@ -36,11 +39,3 @@ test("a project marked uncertain in English names no course either", () => {
   expect(courseCodeOf("课程待确认（可能为 ECE 548）")).toBeUndefined();
 });
 
-test("work towards an exam is due when that day's class of the same course starts", () => {
-  const blocks = [{ day: "2026-10-27", start: "13:00", title: "ECE 548 课程" }, { day: "2026-10-27", start: "11:00", title: "导师 1V1" },
-    { day: "2026-10-28", start: "09:00", title: "ECE 548 课程" }];
-  expect(sittingStartOn("ECE 548 期中考试 1 达到 A− 支撑线", "2026-10-27", blocks)).toBe("13:00");
-  expect(sittingStartOn("ECE 548 作业 3 提交", "2026-10-27", blocks)).toBeUndefined();
-  expect(sittingStartOn("ECE 555 期中考试", "2026-10-27", blocks)).toBeUndefined();
-  expect(sittingStartOn("ECE 548 期中考试 1", "2026-10-29", blocks)).toBeUndefined();
-});

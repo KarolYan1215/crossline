@@ -75,8 +75,8 @@ test("what the run reports back is recognised in either language (heuristics rea
   expect(isLoginNeeded("整理收藏")).toBe(false);
 });
 
-test("constraints the person stated are found in Chinese and in English", () => {
+test("constraints are the facts recorded as one; a sentence that rules something out is the model's to read from the facts (no word list)", () => {
   const facts = [{ slot: "budget", value: "不能花钱买课" }, { slot: "time", value: "I can't work on weekends" }, { slot: "note", value: "Likes mornings" },
-    { slot: "hard_limit", value: "20 hours a week" }];
-  expect(statedConstraints(facts)).toEqual(["不能花钱买课", "I can't work on weekends", "20 hours a week"]);
+    { slot: "hard_limit", value: "20 hours a week" }, { slot: "constraint_money", value: "预算 0" }];
+  expect(statedConstraints(facts)).toEqual(["20 hours a week", "预算 0"]);
 });

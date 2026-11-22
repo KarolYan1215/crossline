@@ -230,6 +230,9 @@ test("an exam whose day has passed puts its preparation away and asks how it wen
   // A course (its grading on record) and a midterm two days ago, with practice still open and one being timed.
   store.upsertProfileFact({ workspaceId: ws, identityId: "media", projectId: "ece548", slot: "grading", value: "期中 25%", status: "confirmed", sourceRef: "doc", sourceQuote: "", updatedAt: "2026-10-01T00:00:00Z" });
   milestone("ECE 548 期中考试 1 达到 A− 支撑线", "ece548", "2026-10-19");
+  // The milestone reviewer read it as a sitting (no word in the title decides it any more).
+  store.setSetting(ws, "milestones.risks", JSON.stringify({ "ECE 548 期中考试 1 达到 A− 支撑线": { fingerprint: "f", at: "2026-10-01T00:00:00.000Z", source: "model", risks: [],
+    reading: { weight: 80, weightWhy: "", sitting: true, startsAt: "13:00" } } }));
   order("t-practice", "ECE 548 期中考试 1 达到 A− 支撑线", "approved", "ece548");
   order("t-proposal-prep", "ECE 548 期中考试 1 达到 A− 支撑线", "awaiting_plan_approval", "ece548");
   order("t-timing", "ECE 548 期中考试 1 达到 A− 支撑线", "active", "ece548");

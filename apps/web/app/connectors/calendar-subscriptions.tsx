@@ -85,7 +85,7 @@ export function CalendarSubscriptions({ onChanged }: { onChanged?: () => void })
     <button type="button" className="ob-btn primary-button" disabled={busy} onClick={() => void pasteAndAdd()}>{busy ? t("读取中…") : t("粘贴并接入")}</button>
     <form className="calendar-subscriptions-form" onSubmit={(event) => { event.preventDefault(); if (link.trim()) void add(); }}>
       <input type="url" inputMode="url" value={link} onChange={(event) => setLink(event.target.value)} placeholder={t("或手动粘贴：webcal://… 或 https://…ics")} aria-label={t("日历订阅链接")} disabled={busy} />
-      <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder={t("名称（可选，如「课表」）")} aria-label={t("日历名称")} maxLength={40} disabled={busy} />
+      <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder={t("名称（可选，如「工作日程」）")} aria-label={t("日历名称")} maxLength={40} disabled={busy} />
       <button type="submit" className="ob-btn secondary-button" disabled={busy || !link.trim()}>{t("接入")}</button>
     </form>
     {message && <p role="status" className="muted">{message}</p>}

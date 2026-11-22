@@ -152,8 +152,8 @@ test("a Skill the provider has not passed, in a workspace with no Codex sign-in,
 
 test("conformance: each case runs on the provider through the repair loop, and the record lands in the ledger", async () => {
   const runtime = fakeRuntime([
-    JSON.stringify({ titles: [{ id: "t1", title: "x".repeat(80) }] }),      // too long: sent back
-    JSON.stringify({ titles: [{ id: "t1", title: "整理笔记" }] }),
+    JSON.stringify({ titles: [{ id: "t1", title: "x".repeat(80), attends: false }] }),      // too long: sent back
+    JSON.stringify({ titles: [{ id: "t1", title: "整理笔记", attends: false }] }),
     JSON.stringify({ items: [{ kind: "note", text: "a" }, { kind: "task", title: "b", minutes: 30 }, { kind: "note", text: "c" }], note: null })
   ], "crossline:crossline-conformance");
   const providers = createModelProviderService({ store, secrets, gateway, signedIn: () => false, client: async () => runtime.rpc, cwd: "C:\\repo", now: () => clock,

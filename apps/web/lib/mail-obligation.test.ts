@@ -61,7 +61,7 @@ test("a required event from a new source is asked with 去 recommended and why; 
 function syllabus(store: CrosslineStore) {
   store.saveProject({ id: "ece548", ownerId: "o", workspaceId: ws, identityId: "research", name: "ECE 548", summary: "", status: "active", createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z" });
   store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "dates:1", type: "dates.extracted", entityId: "b1", payload: { documentIds: [], recurring: [],
-    dates: [{ id: "midterm2", title: "Midterm-2", project: "ece548", date: "2026-11-24", startTime: "", endTime: "", kind: "exam", sourceRef: "src-1", quote: "Nov 24: Midterm-2", confidence: "high", note: "" },
+    dates: [{ id: "midterm2", title: "ECE 548 Midterm-2", project: "ece548", date: "2026-11-24", startTime: "", endTime: "", kind: "exam", sourceRef: "src-1", quote: "Nov 24: Midterm-2", confidence: "high", note: "" },
       { id: "hw5", title: "HW5 due", project: "ece548", date: "2026-11-20", startTime: "", endTime: "", kind: "homework_due", sourceRef: "src-1", quote: "Nov 20: HW5 due", confidence: "high", note: "" },
       { id: "elsewhere", title: "Quiz", project: "unknown course", date: "2026-11-25", startTime: "", endTime: "", kind: "quiz", sourceRef: "src-1", quote: "Nov 25: Quiz", confidence: "high", note: "" }],
     undated: [] } });
