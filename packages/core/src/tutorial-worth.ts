@@ -1,4 +1,3 @@
-import { infoRequestTraits } from "./info-request";
 import type { FamiliarityLevel } from "./familiarity";
 import { tFor, type Locale, type Translate } from "./i18n";
 
@@ -42,7 +41,8 @@ export type PreparationLevel = "none" | "steps" | "tutorial";
 export type Preparation = { level: PreparationLevel; reason: string };
 
 type Step = { executor: string; schedulable: boolean; status: string; role?: string; product?: string; estimate: { p50Minutes: number } };
-type Task = { title: string; intent: string; p50Minutes: number; archetypeId?: string };
+/** `infoRequest`: the task only gets a fact (its Skill's `request`, `orderInfoRequest`). */
+type Task = { title: string; intent: string; p50Minutes: number; archetypeId?: string; infoRequest?: boolean };
 
 const minutesIn = (t: Translate) => (value: number) => value >= 60 ? t("{{hours}} 小时", { hours: Math.round(value / 6) / 10 }) : t("{{minutes}} 分钟", { minutes: Math.round(value) });
 
@@ -50,7 +50,7 @@ const minutesIn = (t: Translate) => (value: number) => value >= 60 ? t("{{hours}
 export function taskPreparation(task: Task, steps?: readonly Step[], history: { doneBefore?: string; familiarity?: FamiliarityLevel } = {}, locale?: Locale): Preparation {
   const t = tFor(locale);
   const minutes = minutesIn(t);
-  if (infoRequestTraits({ title: task.title, intent: task.intent, p50Minutes: task.p50Minutes }).match)
+  if (task.infoRequest)
     return { level: "none", reason: t("只是问一件事或发一条消息，不备教程。") };
   if (steps?.length && !steps.some((step) => step.executor !== "agent"))
     return { level: "none", reason: t("这件事由助手完成，本人只需看结果，不备教程。") };

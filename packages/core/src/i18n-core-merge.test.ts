@@ -21,9 +21,9 @@ import { noteMarkdown } from "./xhs-notes";
  */
 describe("text main added, in English and unchanged in Chinese", () => {
   test("who does a piece of work, and what the assistant is handed", () => {
-    expect(workOwner({ title: "提交作业 3" }).reason).toBe("要对外发出、提交、联系、出席或付款，只能本人做");
-    expect(workOwner({ title: "提交作业 3" }, "en").reason).toBe("Sending, submitting, contacting, attending or paying is yours alone");
-    expect(workOwner({ title: "确认交付格式", owner: "assistant" }, "en")).toMatchObject({ owner: "ask", question: "\"确认交付格式\": what is your 格式? A sentence or two is enough." });
+    expect(workOwner({ title: "提交作业 3", owner: "assistant" }).reason).toBe("要对外发出、提交、联系、出席或付款，只能本人做");
+    expect(workOwner({ title: "提交作业 3", owner: "assistant" }, "en").reason).toBe("Sending, submitting, contacting, attending or paying is yours alone");
+    expect(workOwner({ title: "确认交付格式", owner: "ask" }, "en")).toMatchObject({ owner: "ask", question: "What information or files does \"确认交付格式\" need from you?" });
     const ask = { id: "o", intent: "x", state: "approved", projectId: "p", payload: { owner: "ask" } };
     expect(planAssistantTask(ask, { projectIsCourse: false })).toEqual({ fit: false, reason: "这件事先等本人回答一个问题，再交给助手。" });
     expect(planAssistantTask(ask, { projectIsCourse: false, locale: "en" })).toEqual({ fit: false, reason: "This waits for your answer to one question before it goes to the assistant." });

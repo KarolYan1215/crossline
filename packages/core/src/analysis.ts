@@ -2,7 +2,9 @@ import type { WorkOrder } from "./index";
 import { trimLeakedTail } from "./text-hygiene";
 import { quoteSupportsDate } from "./date-schema";
 import { cleanTaskTitle, withCourse } from "./task-title";
-import { infoRequestTraits } from "./info-request";
+import type { ModelInfoRequest } from "./info-request";
+import { needsPersonProblem, type NeedsPerson } from "./auto-approval";
+import { AGENT_CATEGORIES, type AgentCategory } from "./agent-dispatch";
 import { COMPLETION_FIELD, readModelCompletion, type ModelCompletion } from "./completion";
 import { backedDrillForms, stripDrillForms } from "./drill-forms";
 import { tFor, type Locale } from "./i18n";
@@ -108,6 +110,14 @@ export type AnalysisProposal = Omit<WorkOrder, "id" | "ownerId" | "workspaceId" 
    * Absent on answers recorded before it.
    */
   usedRefs?: string[];
+  /** Getting a fact from someone or looking it up (`info-request.ts`); kind "none" for ordinary work. Absent on answers recorded before it. */
+  request?: ModelInfoRequest;
+  /** Whether approving it is the person's call (`auto-approval.ts`), quoting the work's own words. Absent on older answers: eligible. */
+  needsPerson?: NeedsPerson;
+  /** The assistant's work category (`agent-dispatch.ts`); "" when the Skill named none. Absent on older answers. */
+  category?: AgentCategory | "";
+  /** Whether it is graded coursework, so the assistant only explains (`agent-dispatch.ts`). Absent on older answers: the project decides. */
+  graded?: boolean;
 };
 
 type Schema = { type: string; properties?: Record<string, Schema>; required?: string[]; additionalProperties?: false;
@@ -162,7 +172,13 @@ export const ANALYSIS_OUTPUT_SCHEMA = object({
   // An open task (from `existingTasks`) that already covers this capture's work, which this capture only adds to; "" for new work.
   extendsTaskId: optionalText,
   // The short ids of the preferences (「[p3] …」) the proposal really rests on; [] when none.
-  usedRefs: array({ type: "string", minLength: 1, maxLength: 20 }, 0, 20)
+  usedRefs: array({ type: "string", minLength: 1, maxLength: 20 }, 0, 20),
+  // Getting a fact: ask a named person, or look it up; "none" for everything else (info-request.ts).
+  request: object({ kind: choice("none", "ask_person", "look_up"), who: optionalText, fact: optionalText }),
+  // Approving it is the person's call: a decision only they make, or an access only they hold, quoting the work's words.
+  needsPerson: object({ kind: choice("none", "decision", "access"), quote: optionalText }),
+  category: choice("", ...Object.keys(AGENT_CATEGORIES)),
+  graded: bool
 });
 
 // Only the JSON Schema subset used above is accepted; unknown keys fail closed.
@@ -248,6 +264,12 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext,
     ...(!("completion" in withBreakdown) ? { completion: { mode: "self_evident", reason: "", why: "legacy", question: "", askAfterHours: 0 } } : {}),
     ...(!("extendsTaskId" in withBreakdown) ? { extendsTaskId: "" } : {}),
     ...(!("usedRefs" in withBreakdown) ? { usedRefs: [] } : {}),
+    // Answers recorded before the request, needsPerson, category and graded fields (2026-11-22): read as "no request", "eligible",
+    // "no category" and "the project decides" — the fields are removed again below, so the readers' own defaults apply.
+    ...(!("request" in withBreakdown) ? { request: { kind: "none", who: "", fact: "" } } : {}),
+    ...(!("needsPerson" in withBreakdown) ? { needsPerson: { kind: "none", quote: "" } } : {}),
+    ...(!("category" in withBreakdown) ? { category: "" } : {}),
+    ...(!("graded" in withBreakdown) ? { graded: false } : {}),
     ...(!("title" in withBreakdown) ? { title: cleanTaskTitle(String((withBreakdown as { intent?: unknown }).intent ?? "")) || t("未命名任务") } : {})
   } : {};
   const candidate = Object.keys(legacyExtras).length ? { ...(withBreakdown as object), ...legacyExtras } : withBreakdown;
@@ -373,9 +395,17 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext,
       t("分析被拒绝：以下引用不是原文逐字内容，无法核对 —— {{items}}。可重新分析。", { items: quoted(fabricated.map((s) => s.quote)) }).slice(0, 400);
     throw error;
   }
-  // Getting a fact from someone (info-request.ts): the assistant may draft the message, but sending it is the person's, an external act.
-  const request = infoRequestTraits({ title: proposal.title, intent: proposal.intent, p50Minutes: proposal.estimate.p50Minutes }).request;
-  const sends = request?.kind === "ask_person" ? proposal.automationParts.filter((part) => /(发送|发出|寄出|send)/i.test(part.intent) && !/(草稿|起草|draft)/i.test(part.intent)) : [];
+  // Whether approving it is the person's call (auto-approval.ts): a decision or an access quotes the work's own words, verbatim.
+  const needsProblem = needsPersonProblem(proposal.needsPerson, [proposal.title, proposal.intent, context.capture.title, context.capture.context,
+    ...proposal.humanCore.map((part) => part.intent), ...proposal.automationParts.map((part) => part.intent), ...proposal.materialContract.map((item) => item.description)]);
+  if (needsProblem) {
+    const error = new Error("ANALYSIS_NEEDS_PERSON_INVALID");
+    (error as Error & { detail?: string }).detail = needsProblem;
+    throw error;
+  }
+  // Getting a fact from someone (the Skill's `request`, info-request.ts): the assistant may draft the message, but sending it is the
+  // person's, an external act.
+  const sends = proposal.request?.kind === "ask_person" ? proposal.automationParts.filter((part) => /(发送|发出|寄出|send)/i.test(part.intent) && !/(草稿|起草|draft)/i.test(part.intent)) : [];
   if (sends.length) {
     const error = new Error("ANALYSIS_INFO_REQUEST_SENT_BY_SYSTEM");
     (error as Error & { detail?: string }).detail =

@@ -7,7 +7,7 @@ description: Turn one line the person captured into a task proposal — its name
 
 The person typed one line into the input box (or shared it from the phone, or accepted a research suggestion). This Skill reads it and writes the **task proposal**. In most cases it takes effect at once and appears as a task card on Today and the 任务 page: the title on the card and the calendar, the contract lines as its checklist, the person's part and the assistant's part. The step planner splits it into steps afterwards, and the assistant may take the automatable part. Nothing is performed here and nothing is sent.
 
-Return raw JSON only: `{identityId, projectId, milestoneId, title, intent, family, automationParts[], humanCore[], materialContract[], evidenceContract[], estimate, estimateBreakdown[], riskTier, dates[], waitingOn, byproducts[], completion, extendsTaskId, blockers[]}`.
+Return raw JSON only: `{identityId, projectId, milestoneId, title, intent, family, automationParts[], humanCore[], materialContract[], evidenceContract[], estimate, estimateBreakdown[], riskTier, dates[], waitingOn, byproducts[], completion, extendsTaskId, request, needsPerson, category, graded, blockers[]}`.
 
 ## Input `crossline.analysis.v2`
 
@@ -32,7 +32,7 @@ Return raw JSON only: `{identityId, projectId, milestoneId, title, intent, famil
 
 ## The person's part and the assistant's part
 
-`humanCore[]` (at least one) holds judgement, authorship, relationships and accountable decisions: understanding, solving, deciding, writing the argument, talking to people, sending. `automationParts[]` holds what is reversible and local: search, extraction, comparison, formatting, a local draft. Collecting, compiling, sorting, summarising and checking material against a list are always `automationParts`, never the person's; reviewing what the assistant made is not a `humanCore` entry (the acceptance gate judges it). Judge this by what each part produces, not by the kind of goal. Every entry of both carries a `quote` copied **verbatim** from `capture.title`, `capture.context` or an `availableInputs[].text`: an exact substring. A paraphrase, a translation or a milestone title is refused. When no literal fragment supports a split, leave it out.
+`humanCore[]` (at least one) holds judgement, authorship, relationships and accountable decisions: understanding, solving, deciding, writing the argument, talking to people, sending. `automationParts[]` holds what is reversible and local: search, extraction, comparison, formatting, a local draft. Collecting, compiling, sorting, summarising and checking material against a list are always `automationParts`, never the person's; reviewing what the assistant made is not a `humanCore` entry (the acceptance gate judges it). Judge this by what each part produces, not by the kind of goal: records of money (statements, transactions, holdings) are always the assistant's, built from what is recorded automatically, never something to ask the person to upload. The app takes your split as it stands, except that anything that leaves the machine (sending, submitting, contacting, attending, paying) is always the person's. Every entry of both carries a `quote` copied **verbatim** from `capture.title`, `capture.context` or an `availableInputs[].text`: an exact substring. A paraphrase, a translation or a milestone title is refused. When no literal fragment supports a split, leave it out.
 
 `interruptible` on a `humanCore` entry is true unless the work truly needs one unbroken sitting (a live session, a talk, one experiment run that cannot pause). A six-hour analysis is several sittings; marking it false makes the planner look for one six-hour gap, which almost never exists.
 
@@ -69,9 +69,17 @@ A description that restates policy, explains reasoning, contains `{}[]` or runs 
 
 `waitingOn` is `{who, what, expectedDate, quote}` when the work cannot start until someone else delivers (「师兄会给我真实测量数据」), with the same rules for the day; all four empty strings when it waits for nobody. The app keeps the work off the schedule until then and asks the person on that day, so 「等数据」 is never a step.
 
+## Approval, the assistant's kind of work, grading
+
+- `needsPerson` — `{kind, quote}`: whether approving this task is the person's own call. `decision` when it carries a choice only they make (which offer to take, which topic, how much to spend), `access` when it needs something only they hold (a login, an account, a password, their own records); `none` otherwise, with `quote` "". `quote` is the exact words of the capture, `title`, `intent`, a part's `intent` or a contract `description` that show it; the app checks it word for word. Ordinary work with `none` may be approved by the app on its own.
+- `category` — the kind of work in `automationParts`: `data_code_sim` (data, code, simulation), `read_research_organize` (reading, research, summarising, sorting), `draft_text` (drafting text, never sent), `files_calendar_prep` (files and calendar preparation), `media_edit` (editing audio, video or images, never published); "" when there are no automation parts or none fits.
+- `graded` — true when the task is coursework or anything else marked for a grade: the assistant then only explains and checks and never makes anything that could be handed in.
+
 ## Getting a fact from someone
 
 A request for a fact has four marks: its only purpose is one fact, file or confirmation someone else holds (an exam's scope, a rubric, a format rule, a version, a date); its product is a message plus the reply; the person's own time is at most 15 minutes; other work waits for the answer. When the capture is only such a request (「问助教作业 3 的提交格式」), keep it that small: `p50Minutes` at most 15, `family: "preparation"`, `automationParts` drafts the message (recipient, subject, body) and never sends it, `humanCore` is the person checking the draft and sending it, and `evidenceContract` is one required item, 「已发出的邮件与对方的答复」. When the capture names real work and a fact to get first (「先问清评分标准再写报告」), the request is the first `humanCore` entry (15 minutes) with the draft in `automationParts`, never a separate proposal. An automation part that sends is refused.
+
+`request` is `{kind, who, fact}`: `ask_person` when the whole task is only such a request to somebody, `look_up` when it is only looking one fact up in a document, a site or the person's own account, `none` for every other task (a request inside real work is `none`: it is a part of that work). `who` is who answers ("" when unknown), `fact` the fact in a few words. A task marked `ask_person` must not have an automation part that sends.
 
 ## Byproducts for other lines
 
@@ -89,6 +97,7 @@ When an `existingTasks` entry already covers this capture's work (the same homew
 - `quality` — what was made cannot be judged at a glance (a draft, a design, a persuasive post): `needs_assessment`, `question` asks how it went, about 2 hours.
 - `exploration` — exploring with no definite product: `needs_assessment`, `question` asks what came of it, about 2 hours.
 - Everything else (handing in, homework, sending, attending, filing, looking up, solving, practising, preparing for an exam) is `self_evident`, with `reason` "", `question` "", `askAfterHours` 0.
+- A task that is only the formal last act — handing in, sending or publishing what is already made (「提交 ECE 548 作业 4」, 「把方案发送给导师」) — is `self_evident` even when what it hands over was hard to judge; 「完成 ECE 548 作业 4」 is the work itself and judged as such. Only something sent off to be judged (a journal submission, an application) is `result_pending`.
 
 `why` is one sentence on the judgement. Never ask the person about it.
 

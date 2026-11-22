@@ -1,22 +1,21 @@
-import { infoRequestTraits, type InfoRequest } from "./info-request";
+import type { InfoRequest } from "./info-request";
 import { tFor, type Locale } from "./i18n";
 
 /**
  * The daily self-check that merges near-identical open tasks (the owner's decision of 2026-10-15: the real board held 「整理 ECE 548 复习
- * 材料」 next to two 「汇集 ECE 548 复习材料」, one per exam, and a standalone 「确认…」 for every exam). Rules first; only a pair the rules
- * cannot settle goes to a small model (`crossline-validation-reviewer`, `TASK_MERGE_REVIEW_SCHEMA`), and only while the quota and the
- * person's engagement allow.
+ * 材料」 next to two 「汇集 ECE 548 复习材料」, one per exam, and a standalone 「确认…」 for every exam). Code only draws the candidates; whether
+ * two tasks are the same work is the model's (`crossline-validation-reviewer`, `TASK_MERGE_REVIEW_SCHEMA`), and only while the quota and
+ * the person's engagement allow (2026-11-22: the synonym lists, course-code stripping and similarity thresholds that used to decide it
+ * are gone).
  *
- * Two kinds of merge:
- * - **duplicate**: same line, same project, and the titles say the same thing once course codes, punctuation and synonymous verbs
- *   (汇集 / 汇总 / 收集 / 整理, 确认 / 核实 / 取得 …) are set aside — character-bigram Dice ≥ `TITLE_SAME` (0.6) with the intents agreeing
- *   (Dice ≥ `INTENT_UNSURE`, 0.35) or the titles near-equal (≥ `TITLE_CERTAIN`, 0.85). Different numbers in the titles (作业 2 / 作业 3)
- *   or due days more than a week apart are never the same, nor are tasks serving different milestones whose deadlines are more than 21
- *   days apart (decided 2026-10-15: a midterm's material is not the final's; not even sent to the model). Titles from `TITLE_UNSURE`
- *   (0.4) up that the rule does not settle go to the model.
- * - **info request**: a standalone request for a fact (`info-request.ts`) is folded into the task it serves — the one that names it as a
- *   dependency, else the main task of the same milestone, else of the same project — as that task's first step. Requests with nothing to
- *   serve in one milestone are merged into one (one email can ask both).
+ * Three kinds of merge:
+ * - **duplicate**: code settles only titles that are identical once spaces, punctuation and case are set aside. Any other pair on the
+ *   same line, project and side whose titles or intents share enough to be worth a look (`CANDIDATE`, character-bigram Dice) goes to the
+ *   reviewer, which merges it or not. Code still rules out what is structural: due days more than a week apart, and tasks serving
+ *   different milestones whose deadlines are more than 21 days apart (decided 2026-10-15: a midterm's material is not the final's).
+ * - **info request**: a standalone request for a fact (the `request` its Skill wrote, `info-request.ts`) is folded into the task it
+ *   serves — the one that names it as a dependency, else the main task of the same milestone, else of the same project — as that task's
+ *   first step. Requests with nothing to serve in one milestone are merged into one (one email can ask both).
  * - **part**: a task whose title names a part of an open task (`partOf`: 「作业 3 的前两题」 of 「完成 ECE 555 作业 3」) goes into it; the
  *   part's earlier due day becomes a sub-deadline of the whole (W-194).
  *
@@ -30,6 +29,8 @@ export type MergeTask = {
    * alike the titles — the assistant's 「汇集期中规则」 prepares the person's 「规划期中复习」, it is not the same task. Absent: the person's.
    */
   owner?: "person" | "assistant" | "ask";
+  /** The fact this task only gets (its Skill's `request`, `orderInfoRequest`); absent or null for ordinary work. */
+  request?: InfoRequest | null;
 };
 const sideOf = (task: MergeTask) => task.owner ?? "person";
 /**
@@ -39,11 +40,8 @@ const sideOf = (task: MergeTask) => task.owner ?? "person";
 export type MergeGroup = { kind: "duplicate" | "info_request"; keep: string; absorb: string[]; reason: string; requests: Record<string, InfoRequest>; part?: boolean };
 export type MergePair = { a: string; b: string; why: string };
 
-export const TITLE_SAME = 0.6;
-export const TITLE_UNSURE = 0.4;
-/** Titles this close are the same work whatever the intents say. */
-export const TITLE_CERTAIN = 0.85;
-export const INTENT_UNSURE = 0.35;
+/** Titles or intents sharing this much are worth the reviewer's look; it only draws candidates, it never merges. */
+export const CANDIDATE = 0.4;
 const FAR_DEADLINES_DAYS = 21;
 const DUE_APART_DAYS = 7;
 
@@ -52,26 +50,13 @@ const ABSORBABLE = new Set(["awaiting_plan_approval", "approved", "preparing", "
 const KEEPABLE = new Set([...ABSORBABLE, "active"]);
 const STATE_RANK: Record<string, number> = { active: 4, ready_for_human: 3, preparing: 2, approved: 1, awaiting_plan_approval: 0 };
 
-const COURSE = /[A-Z]{2,5}\s?\d{3}/gi;
-/* i18n-ignore-start: words compared with titles the person or a model wrote, never shown */
-const SYNONYMS: Array<[RegExp, string]> = [
-  [/汇集|汇总|收集|整合|搜集|归集/g, "整理"], [/核实|核对|取得|获取|明确|查明|弄清/g, "确认"], [/资料|素材/g, "材料"], [/目录|列表|名单/g, "清单"],
-  [/考查|考核/g, "考试"], [/建立|编制|制作/g, "建立"],
-  // The same in English, matched once spaces are gone (the text is lowercased first).
-  [/gather|compile|collect|assemble|aggregate|consolidate|organi[sz]e|sortout/g, "organize"], [/verify|obtain|clarify|findout|lookup/g, "confirm"],
-  [/resources|sources|notes|material(?!s)/g, "materials"], [/catalog(ue)?|index|list(?!en)/g, "checklist"], [/assessment|test(?!ing)/g, "exam"],
-  [/create|prepare|make|build|setup/g, "build"]
-];
-/* i18n-ignore-end */
-/** English words that carry nothing a title compares on, like 的. */
+/** A course code, which a part's number is read without (「ECE 555 作业 3」 is homework 3). */
+const COURSE = /[A-Z]{2,5}\s?\d{3}/gi;/** English words that carry nothing a title compares on, like 的. */
 const FILLER = /\b(the|of|for|on|to|and)\b/gi;
-/** A title as compared: no course code, no punctuation or spaces, no 的 (or "the", "of"…), synonymous verbs and nouns made one. */
+/** A title as compared: no punctuation or spaces, no 的 (or "the", "of"…), lowercased. Which words mean the same is the reviewer's. */
 export function normalizeTaskTitle(title: string): string {
-  let text = title.replace(COURSE, "").replace(FILLER, " ").replace(/[\s\p{P}\p{S}]+/gu, "").replace(/的/g, "").toLowerCase(); // i18n-ignore
-  for (const [pattern, word] of SYNONYMS) text = text.replace(pattern, word);
-  return text;
-}
-const bigrams = (text: string) => { const out = new Map<string, number>(); for (let i = 0; i < text.length - 1; i++) out.set(text.slice(i, i + 2), (out.get(text.slice(i, i + 2)) ?? 0) + 1); return out; };
+  return title.replace(FILLER, " ").replace(/[\s\p{P}\p{S}]+/gu, "").replace(/的/g, "").toLowerCase(); // i18n-ignore
+}const bigrams = (text: string) => { const out = new Map<string, number>(); for (let i = 0; i < text.length - 1; i++) out.set(text.slice(i, i + 2), (out.get(text.slice(i, i + 2)) ?? 0) + 1); return out; };
 /** Dice similarity of two texts' character bigrams (0–1); one-character texts compare equal or not at all. */
 export function textSimilarity(a: string, b: string): number {
   if (!a || !b) return 0;
@@ -108,21 +93,23 @@ export function partOf(part: MergeTask, whole: MergeTask): boolean {
 
 const days = (a: string, b: string) => Math.abs(Date.parse(`${a}T12:00:00Z`) - Date.parse(`${b}T12:00:00Z`)) / 86_400_000;
 
-/** What the rules say about two tasks: the same work, not, or the model's to decide. */
+/**
+ * What code says about two tasks: the same work only when the titles are identical as compared, never when the structure keeps them apart,
+ * and otherwise a candidate for the reviewer (`unsure`) or nothing worth a look. Which differently worded titles mean the same work —
+ * 汇集 / 整理, 作业 2 / 作业 3 — is the reviewer's call.
+ */
 export function comparePair(a: MergeTask, b: MergeTask, locale?: Locale): { verdict: "same" | "unsure" | "different"; why: string; score: number } {
   const t = tFor(locale);
   if (a.identityId !== b.identityId || a.projectId !== b.projectId) return { verdict: "different", why: t("不同主线或项目"), score: 0 };
   if (sideOf(a) !== sideOf(b)) return { verdict: "different", why: t("一个是本人的工作，一个是助手的准备或问题"), score: 0 };
-  if (numbersOf(a.title) !== numbersOf(b.title)) return { verdict: "different", why: t("标题中的编号不同"), score: 0 };
   if (a.dueDate && b.dueDate && days(a.dueDate, b.dueDate) > DUE_APART_DAYS) return { verdict: "different", why: t("截止日相差一周以上"), score: 0 };
-  const score = textSimilarity(normalizeTaskTitle(a.title), normalizeTaskTitle(b.title));
-  const intents = textSimilarity(normalizeTaskTitle(a.intent), normalizeTaskTitle(b.intent));
   if (a.milestoneId !== b.milestoneId && a.milestoneDeadline && b.milestoneDeadline && days(a.milestoneDeadline, b.milestoneDeadline) > FAR_DEADLINES_DAYS)
     return { verdict: "different", why: t("服务的里程碑截止相差三周以上"), score: 0 };
-  // Short titles share bigrams easily (整理复习提纲 / 整理复习材料 is 0.6): a rule match needs the intents to agree too, or near-equal titles.
-  const agrees = intents >= INTENT_UNSURE || score >= TITLE_CERTAIN;
-  if (score >= TITLE_SAME && agrees) return { verdict: "same", why: t("标题规范化后相似度 {{score}}，说明相似度 {{intents}}", { score, intents }), score };
-  if (score >= TITLE_UNSURE) return { verdict: "unsure", why: t("标题相似度 {{score}}、说明相似度 {{intents}}", { score, intents }), score };
+  const titleA = normalizeTaskTitle(a.title), titleB = normalizeTaskTitle(b.title);
+  if (titleA && titleA === titleB) return { verdict: "same", why: t("标题相同"), score: 1 };
+  const score = textSimilarity(titleA, titleB);
+  const intents = textSimilarity(normalizeTaskTitle(a.intent), normalizeTaskTitle(b.intent));
+  if (score >= CANDIDATE || intents >= CANDIDATE) return { verdict: "unsure", why: t("标题相似度 {{score}}、说明相似度 {{intents}}", { score, intents }), score };
   return { verdict: "different", why: t("标题相似度 {{score}}", { score }), score };
 }
 
@@ -143,8 +130,7 @@ export function planMerges(tasks: MergeTask[], sameByModel: ReadonlySet<string> 
   const taken = new Set<string>();
   const groups: MergeGroup[] = [];
   // 1. Requests for a fact go into the task they serve.
-  const requests = live.filter((task) => absorbable(task)).map((task) => ({ task, traits: infoRequestTraits({ title: task.title, intent: task.intent, ...(locale ? { locale } : {}) }) }))
-    .filter((item) => item.traits.match);
+  const requests = live.filter((task) => absorbable(task) && task.request).map((task) => ({ task, traits: { request: task.request } }));
   const requestIds = new Set(requests.map((item) => item.task.id));
   const servers = live.filter((task) => !requestIds.has(task.id));
   const leftover: typeof requests = [];

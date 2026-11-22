@@ -54,7 +54,9 @@ describe("duplicates and suggestions", () => {
     state: "approved", dueDate: "", milestoneDeadline: "", progress: 0, hasStepPlan: false, started: false, dependsOn: [] });
   test("an imported item matches an open task by the merge rules, in its line or, with none chosen, in any", () => {
     const open = [task("notes", "整理 ECE 555 课堂笔记"), task("hw3", "完成 ECE 555 作业 3")];
-    expect(importDuplicateOf({ title: "汇集 ECE 555 课堂笔记", notes: "", lineId: "research", due: "" }, open)?.id).toBe("notes");
+    expect(importDuplicateOf({ title: "整理 ECE 555 课堂笔记", notes: "", lineId: "research", due: "" }, open)?.id).toBe("notes");
+    // A synonym (汇集 / 整理) is the triage model's to judge (2026-11-22); the rule only settles the same title.
+    expect(importDuplicateOf({ title: "汇集 ECE 555 课堂笔记", notes: "", lineId: "research", due: "" }, open)).toBeUndefined();
     expect(importDuplicateOf({ title: "整理 ECE 555 课堂笔记", notes: "", lineId: "media", due: "" }, open)).toBeUndefined();
     expect(importDuplicateOf({ title: "完成 ECE 555 作业 4", notes: "", lineId: "", due: "" }, open)).toBeUndefined();
     expect(ruleSuggestion({ kind: "text", externalId: "x", title: "整理 ECE 555 课堂笔记", notes: "", due: "", labels: [], list: "", done: false, createdAt: "" }, "", open))

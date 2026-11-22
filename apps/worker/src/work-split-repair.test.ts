@@ -51,35 +51,38 @@ function board() {
   order("done", "整理 ECE 548 作业要求", "mid", { state: "accepted" });
 }
 
-test("the reading: compiling goes to the assistant pointed at the core task it prepares, what needs the person's data becomes a question", () => {
+test("the reading: an order written before owners is not judged by its wording; only its stored steps can move it (2026-11-22)", () => {
   board();
   const plan = planWorkSplit(store, ws, now);
-  const moves = Object.fromEntries(plan.moves.map((move) => [move.order.id, [move.owner, move.prepares]]));
-  expect(moves).toMatchObject({ rules: ["assistant", "plan"], scores: ["ask", "plan"], contacts: ["assistant", ""], samples: ["assistant", ""],
-    // The real ledger's chore (2026-10-22): the current grades are the person's to hand over.
-    gaplist: ["ask", ""] });
-  expect(plan.person.map((item) => item.order.id)).toContain("plan");
-  expect(plan.untouched.map((item) => item.order.id)).toContain("doing");
-  expect(plan.moves.some((move) => ["owned", "done", "doing"].includes(move.order.id))).toBe(false);
+  // 「汇集…」「整理…」 no longer hand a task to the assistant by its verb: the owner is what the Skill that wrote it said, else the person's.
+  expect(plan.moves).toEqual([]);
+  expect(plan.person.map((item) => item.order.id)).toEqual(expect.arrayContaining(["rules", "scores", "plan", "contacts", "samples", "gaplist"]));
+  expect(plan.untouched.map((item) => item.order.id)).toEqual(expect.arrayContaining(["doing", "timed"]));
+  expect(plan.person.some((item) => ["owned", "done", "doing"].includes(item.order.id))).toBe(false);
   expect(Object.fromEntries(plan.prepOnly.map((item) => [item.id, item.next?.id ?? ""]))).toEqual({ pack: "", gap: "final" });
-  // The startup milestone lost its only (gathering) work; the course's next milestone carries the gap milestone; the plan keeps the midterm.
-  expect(plan.backplan.map((item) => item.id).sort()).toEqual(["final", "pilot"]);
+  // Every milestone keeps a task of the person's (the course's final has one under way), so none is worked backwards again.
+  expect(plan.backplan).toEqual([]);
 });
 
 test("the reorganisation: payloads rewritten once, merges run, backplans requested, one message with an undo of the previous payloads", async () => {
   board();
+  // Plans whose open steps the step planner gave the assistant: those tasks go to the assistant whole.
+  steps("rules", [["下载往年卷", "agent"], ["汇总考试规则", "agent"]]);
+  steps("contacts", [["汇总门店联系方式", "agent"]]);
+  steps("samples", [["汇总开头句式", "agent"]]);
   const merge = vi.fn(async () => 1);
   const outcome = (await workSplitRepair(store, ws, { now, mergeNow: merge }))!;
-  expect(outcome).toMatchObject({ assistant: 3, ask: 2, merged: 1 });
+  expect(outcome).toMatchObject({ assistant: 3, ask: 0, merged: 1 });
   expect(merge).toHaveBeenCalledOnce();
   const get = (id: string) => store.listWorkOrders(ws).find((item) => item.id === id)!;
   expect(onPersonsBoard(get("rules"))).toBe(false);
   expect(get("rules").payload).toMatchObject({ owner: "assistant", prepares: "plan", reorganized: WORK_SPLIT_REPAIR_MARKER });
-  expect(get("scores").payload).toMatchObject({ owner: "ask", prepares: "plan", question: expect.stringContaining("成绩") });
+  expect((get("scores").payload as { owner?: string }).owner).toBeUndefined();
   expect(onPersonsBoard(get("plan"))).toBe(true);
   expect(get("rules").state).toBe("approved");
   const reruns = store.listEvents(ws, { type: "goal.backplan_rerun_requested" }).map((event) => event.entityId).sort();
-  expect(reruns).toEqual(["final", "pilot"]);
+  // The startup milestone lost its only task to the assistant.
+  expect(reruns).toEqual(["pilot"]);
   const op = store.listEvents(ws, { type: "op.applied" }).at(-1)!.payload as { bySystem: boolean; inverse: { kind: string; entries: Array<{ id: string; payload: unknown; state: string }> } };
   expect(op).toMatchObject({ bySystem: true, inverse: { kind: "work_order.payload" } });
   expect(op.inverse.entries.find((entry) => entry.id === "rules")).toMatchObject({ payload: { title: "汇集 ECE 548 期中考试规则与往年卷" }, state: "approved" });
@@ -104,39 +107,38 @@ const steps = (orderId: string, list: Array<[string, "human" | "agent", ("done" 
   });
 };
 
-test("progress the assistant made is no reason to leave a chore with the person; progress the person made is, and its open steps are judged again", () => {
+test("progress the assistant made is no reason to leave a chore with the person; progress the person made is, and its open steps keep their stored owner", () => {
   milestone("mid", "research", "ece548", "2026-11-05");
   // Only the assistant's step is done: still a chore, moved, and what was done goes with it.
   order("hw-list", "整理 ECE 548 作业清单", "mid");
   steps("hw-list", [["汇总讲义里的作业要求", "agent", "done"], ["核对作业截止日", "human"]]);
-  // The person ticked a step themselves: theirs as a whole; its compiling step moves to the assistant.
+  // The person ticked a step themselves: theirs as a whole; its open step stays as the plan wrote it (no verb list, 2026-11-22).
   order("papers", "汇集当前论文材料", "mid");
   steps("papers", [["读第一篇论文的方法部分", "human", "done"], ["下载其余三篇论文", "human"]]);
   const plan = planWorkSplit(store, ws, now);
   expect(plan.moves.find((move) => move.order.id === "hw-list")).toMatchObject({ owner: "assistant", priorWork: { done: ["汇总讲义里的作业要求"] } });
   expect(plan.untouched.find((item) => item.order.id === "papers")?.why).toBe("本人做过其中的步骤");
-  expect(plan.steps.find((split) => split.order.id === "papers")?.changes).toEqual([expect.objectContaining({ title: "下载其余三篇论文", from: "human", to: "agent" })]);
+  expect(plan.steps.find((split) => split.order.id === "papers")).toBeUndefined();
 });
 
-test("the open steps of the person's task are judged again: chores to the assistant, the person's data a question, a review folded; all chores moves the task", async () => {
+test("the open steps of the person's task are judged again: the plan's owners stand, a review is folded; all the assistant's moves the task", async () => {
   milestone("mid", "research", "ece548", "2026-11-05");
   order("plan", "根据已汇集的规则和往年卷规划期中复习", "mid");
-  steps("plan", [["形成 ECE 548 各计分组成的当前成绩与待定状态清单", "human"], ["核对助手整理的规则清单", "human"], ["按规则规划每天的复习题量", "human"]]);
+  // The step planner gave the grade list to the assistant; the review after it only checks that output.
+  steps("plan", [["形成 ECE 548 各计分组成的当前成绩与待定状态清单", "agent"], ["核对助手整理的往年卷清单", "human"], ["按规则规划每天的复习题量", "human"]]);
   order("prep", "准备 ECE 548 期中复习", "mid");
-  steps("prep", [["下载往年卷", "human"], ["汇总往年卷题型", "human"]]);
+  steps("prep", [["下载往年卷", "agent"], ["汇总往年卷题型", "agent"]]);
   const reading = planWorkSplit(store, ws, now);
   const split = reading.steps.find((item) => item.order.id === "plan")!;
-  expect(split.changes.map((change) => [change.title, change.from, change.to])).toEqual([
-    ["核对助手整理的规则清单", "human", "folded"], ["形成 ECE 548 各计分组成的当前成绩与待定状态清单", "human", "agent"]]);
-  expect(split.questions.map((question) => question.text)).toEqual([expect.stringContaining("当前成绩")]);
+  expect(split.changes.map((change) => [change.title, change.from, change.to])).toEqual([["核对助手整理的往年卷清单", "human", "folded"]]);
+  expect(split.questions).toEqual([]);
   expect(reading.moves.find((move) => move.order.id === "prep")).toMatchObject({ owner: "assistant", code: "steps" });
   const outcome = (await workSplitRepair(store, ws, { now }))!;
-  expect(outcome).toMatchObject({ steps: 2, tasksWithSteps: 1 });
+  expect(outcome).toMatchObject({ steps: 1, tasksWithSteps: 1 });
   const stored = store.getStepPlan(ws, "plan")!;
   expect(stored.steps.map((step) => [step.title, step.executor, step.schedulable])).toEqual([
     ["形成 ECE 548 各计分组成的当前成绩与待定状态清单", "agent", false], ["按规则规划每天的复习题量", "human", true]]);
   expect(stored.steps[1]!.firstAction).toMatch(/^先用 10 分钟扫一眼/);
-  expect(stored.questions).toHaveLength(1);
   const op = store.listEvents(ws, { type: "op.applied" }).at(-1)!.payload as { inverse: { kind: string; items: Array<{ kind: string; plans?: Array<{ workOrderId: string; plan: { steps: unknown[] } }> }> } };
   expect(op.inverse.kind).toBe("batch");
   expect(op.inverse.items.find((item) => item.kind === "step_plan.restore")!.plans![0]).toMatchObject({ workOrderId: "plan", plan: { steps: [{}, {}, {}] } });

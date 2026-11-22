@@ -11,12 +11,12 @@ const ownerId = TEST_CTX.principalId;
 function setup() {
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
   ensureSeeded(TEST_CTX);
-  const add = (id: string, intent: string, riskTier: "routine" | "high_risk") => store.saveWorkOrder({
+  const add = (id: string, intent: string, riskTier: "routine" | "high_risk", extra: Record<string, unknown> = {}) => store.saveWorkOrder({
     id, ownerId, workspaceId: TEST_CTX.workspaceId, identityId: "research", projectId: "research-default",
     milestoneId: "research-starter", intent, state: "awaiting_plan_approval", riskTier,
     estimate: { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40,
       source: "llm_prior", observationCount: 0, confidence: "low" },
-    payload: { localDraft: true, family: "preparation" }
+    payload: { localDraft: true, family: "preparation", ...extra }
   });
   return { store, add };
 }
@@ -71,8 +71,8 @@ test("rejection blocks the candidate and high risk never auto approves", () => {
   const { store, add } = setup();
   add("reject", "整理本地记录", "routine");
   add("external", "发送邮件给外部", "routine");
-  // Held for the login only the person can give (「交易」 alone held it until the 2026-11-11 rule change).
-  add("property", "登录券商账户导出交易记录", "high_risk");
+  // Held for the login only the person can give, as the Skill that wrote it says (`needsPerson`, 2026-11-22).
+  add("property", "登录券商账户导出交易记录", "high_risk", { needsPerson: { kind: "access", quote: "登录券商账户" } });
   setPermissionMode(TEST_CTX, true);
   const candidates = permissionCandidates(TEST_CTX);
   // The person's own send takes effect since 2026-11-11 (only the assistant's waits); high risk still never does.

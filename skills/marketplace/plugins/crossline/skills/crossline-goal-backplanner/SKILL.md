@@ -57,11 +57,16 @@ Judge by what the item produces, never by the line or the kind of goal (a course
 - `assistant` — a static artefact made from existing information: collecting, compiling, sorting, summarising, excerpting, checking against a list, an inventory, a ledger, a template, a calculation or simulation run on a plan the person already gave. `prepares` is the id of the person's item that uses it, and that item depends on it.
 - `ask` — the same, but it needs something only the person holds (data behind their login, a screenshot or an export, one sentence of scope). `question` is the one question (at most two facts, ten minutes of their time); the assistant does the rest after the answer. `prepares` as above.
 
-Only `ask` items carry a `question`; `person` items have `prepares` "". Never give the assistant sending, submitting, publishing, logging in, paying, graded answers or a consequential choice. The app corrects an owner that contradicts these rules, and an answer with no core task of the person's is sent back. Two illustrations from different lines (not templates): for a course exam, 「汇集考试规则、往年卷与已出成绩」 (`ask` for the scores in the course portal) prepares 「按规则与已有成绩定出要补的部分并限时做完 1 套往年卷」 (`person`); for a research paper, 「按已定参数跑基线仿真」 (`assistant`) prepares 「判断要补哪些实验、怎么补、用哪个工具」 (`person`).
+Only `ask` items carry a `question`; `person` items have `prepares` "". Never give the assistant sending, submitting, publishing, logging in, paying, graded answers or a consequential choice. The app takes your `owner` as it stands; the only thing it overrules is an act that leaves the machine (sending, submitting, contacting, attending, paying), which is always the person's. So judge it here:
+
+- Records of money (statements, transactions, holdings, bills) are never `ask`: the assistant works from what is recorded automatically and the connected mailboxes, and marks what is missing. `assistant`.
+- Designing, judging, deciding and explaining are the person's even when the item reads like gathering (「判断要补哪些实验」 is `person`; 「汇集已有实验数据」 is `assistant`).
+- No item whose only work is to look over, check or approve what the assistant made: that look is part of the person's item the preparation serves.
+- An answer with no core task of the person's is sent back. Two illustrations from different lines (not templates): for a course exam, 「汇集考试规则、往年卷与已出成绩」 (`ask` for the scores in the course portal) prepares 「按规则与已有成绩定出要补的部分并限时做完 1 套往年卷」 (`person`); for a research paper, 「按已定参数跑基线仿真」 (`assistant`) prepares 「判断要补哪些实验、怎么补、用哪个工具」 (`person`).
 
 ## Each item
 
-`{id, title, intent, sourceQuote, rationale, dependsOn, estimate, energy, interruptible, family, riskTier, evidence, acquires, produces, uses, completion, extendsTaskId, owner, prepares, question}`:
+`{id, title, intent, sourceQuote, rationale, dependsOn, estimate, energy, interruptible, family, riskTier, evidence, acquires, produces, uses, completion, extendsTaskId, owner, prepares, question, request, needsPerson, category, graded}`:
 
 - `id` — unique in this answer (letters, digits, `-`, `_`). `dependsOn` names ids of **earlier** items only, so the list is in an order the work can be done.
 - `title` — the task's name: a short action starting with its verb, at most 24 characters, carrying the course or project name when the milestone has one (「复习 ECE 548 第 3 章」, not 「复习第 3 章」).
@@ -72,6 +77,10 @@ Only `ask` items carry a `question`; `person` items have `prepares` "". Never gi
 - `family` — `preparation` (gathering, setting up, reading in), `review` (checking, assessing, revising) or `deep_work` (making the thing itself); it pools the person's real durations to correct later estimates.
 - `riskTier` — `routine` (private and reversible), `milestone` (its result decides whether the milestone is reached: a graded hand-in, a submission), `high_risk` (anything that leaves the machine or is hard to undo: sending, publishing, paying, signing). External communication, money, legal commitments, publication and destructive changes are never `routine`.
 - `evidence` — what the person can show when it is done, as a short noun phrase; it becomes the task's checklist line: 「第 1–4 讲复习提纲文档」, 「1 套限时往年卷的得分」, 「3 个痛点及各自的访谈原话」.
+- `request` — `{kind, who, fact}`: `kind` `none` for ordinary work; `ask_person` when the item only gets one fact somebody else holds, `look_up` when it only looks one up (see below). `who` is who answers ("" when unknown), `fact` the one fact in a few words.
+- `needsPerson` — `{kind, quote}`: whether approving this item is the person's call. `decision` when it carries a choice only they make (which offer, which topic, how much to spend), `access` when it needs something only they hold (a login, an account, a password, their own records); `none` otherwise, with `quote` "". `quote` is the exact words of this item's `title`, `intent`, `sourceQuote`, `evidence` or `rationale` that show it; the app checks it word for word.
+- `category` — for an `assistant` or `ask` item, the kind of preparation: `data_code_sim` (data, code, simulation), `read_research_organize` (reading, research, summarising, sorting), `draft_text` (drafting text, never sent), `files_calendar_prep` (files and calendar preparation), `media_edit` (editing audio, video or images, never published); "" for a `person` item.
+- `graded` — true when the item is coursework or anything else marked for a grade: the assistant then only explains and checks and never makes anything that could be handed in.
 
 ## Missing inputs
 
@@ -87,7 +96,7 @@ Only `ask` items carry a `question`; `person` items have `prepares` "". Never gi
 
 ## A request for a fact is never an item
 
-A request for a fact has four marks: its only purpose is one fact, file or confirmation someone else holds (an exam's scope, a rubric, a format rule, a version, a date); its product is a message plus the reply; the person's own time is at most 15 minutes; other work waits for the answer. Put it in the `intent` of the task that needs it (「先向助教确认期中考查范围，再按范围整理 L1–L8 例题」), set that task's `acquires` when it obtains a missing input, and add 15 minutes to its estimate. The step planner makes it a drafted email the person checks and sends.
+A request for a fact has four marks: its only purpose is one fact, file or confirmation someone else holds (an exam's scope, a rubric, a format rule, a version, a date); its product is a message plus the reply; the person's own time is at most 15 minutes; other work waits for the answer. Put it in the `intent` of the task that needs it (「先向助教确认期中考查范围，再按范围整理 L1–L8 例题」), set that task's `acquires` when it obtains a missing input, and add 15 minutes to its estimate. The step planner makes it a drafted email the person checks and sends. When one has to stand on its own because nothing in this answer needs it yet, mark it with `request` (`ask_person` or `look_up`): the app folds it into the task it serves. Every other item has `request.kind` `none`.
 
 ## Work already on the board
 
@@ -107,6 +116,7 @@ A request for a fact has four marks: its only purpose is one fact, file or confi
 - `quality` — what was made cannot be judged at a glance (a draft, a design, a post meant to persuade): `needs_assessment`, `question` asks how it went, `askAfterHours` about 2.
 - `exploration` — exploring with no definite product: `needs_assessment`, `question` asks what came of it, `askAfterHours` about 2.
 - Everything else (handing in, finishing homework, sending, attending, filing, looking up, solving, practising, preparing for an exam) is `self_evident`, with `reason` "", `question` "", `askAfterHours` 0.
+- An item that is only the formal last act — handing in, sending or publishing what another item already made (「提交 ECE 548 作业 4」, 「把方案发送给导师」) — is `self_evident` even when what it hands over was hard to judge: the quality question belongs to the item that made it. Only something sent off to be judged (a submission to a journal, an application) keeps `result_pending`.
 
 `why` is one sentence on the judgement. The person can change it; never ask about it.
 

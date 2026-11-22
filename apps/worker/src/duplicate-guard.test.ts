@@ -19,7 +19,8 @@ test("a captured task the board already has is folded into it, an addition goes 
   store = new CrosslineStore(":memory:");
   order("mat", "汇集 ECE 548 复习材料", { intent: "汇集课程讲义、作业与样题，形成材料目录" });
   order("hw2", "完成 ECE 548 作业 2");
-  order("new1", "整理 ECE 548 复习材料", { state: "awaiting_plan_approval", intent: "汇集课程讲义、作业和样题，形成材料清单" });
+  // At creation code stops only the same title (2026-11-22); a differently worded near one is the daily merge's reviewer's call.
+  order("new1", "汇集 ECE 548 复习材料", { state: "awaiting_plan_approval", intent: "汇集课程讲义、作业和样题，形成材料清单" });
   order("new2", "补做作业 2 第 5 题", { state: "awaiting_plan_approval" });
   order("new3", "整理 ECE 548 复习提纲", { state: "awaiting_plan_approval", intent: "在周末前整理前几章的复习提纲" });
   expect(existingTasksFor(store, ws).map((task) => task.id)).toEqual(expect.arrayContaining(["mat", "hw2"]));
@@ -87,11 +88,12 @@ test("a homework from the course's dates the person already has is not written t
 test("the backplanner does not write again what the person just finished (W-30)", async () => {
   store = new CrosslineStore(":memory:");
   store.saveMilestone({ id: "m3", ownerId: "o", workspaceId: ws, identityId: "research", projectId: "ece548", title: "试用门店上线", status: "approved", version: 1 });
-  order("done", "核对5家试用门店的名单与联系人", { state: "accepted", milestoneId: "", intent: "核对5家试用门店的名单与联系人，补齐缺的电话" });
+  order("done", "ECE 548 核对5家试用门店的名单与联系人", { state: "accepted", milestoneId: "", intent: "核对5家试用门店的名单与联系人，补齐缺的电话" });
   store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "accepted:done", type: "work_order.transitioned", entityId: "done",
     payload: { from: "active", to: "accepted" } });
+  // The backplanner is shown `recentlyDone` and should not write it again; a differently worded copy is its miss, the same title is caught here.
   const answer = { steps: [
-    backplanStep({ title: "整理5家试用门店清单", intent: "整理5家试用门店的名单与联系人", sourceQuote: "试用门店上线" }),
+    backplanStep({ title: "核对5家试用门店的名单与联系人", intent: "整理5家试用门店的名单与联系人", sourceQuote: "试用门店上线" }),
     backplanStep({ id: "s2", title: "给试用门店发上线通知", intent: "给每家试用门店写上线通知", sourceQuote: "试用门店上线", dependsOn: ["s1"] })
   ], dateCandidates: [], blockers: [] };
   const runtime = fakeRuntime([JSON.stringify(answer)], "crossline:crossline-goal-backplanner");

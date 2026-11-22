@@ -13,7 +13,9 @@ beforeEach(() => {
 });
 afterEach(() => store.close());
 
-const proposal = { identityId: "research", projectId: "p", milestoneId: "m", intent: "Decide", family: "deep_work", automationParts: [], humanCore: [{ id: "h", intent: "Decide", energy: "medium", interruptible: true, quote: "Decide", rationale: "Judgment" }], materialContract: [], evidenceContract: [{ kind: "record", description: "Decision", why: "The decision is the deliverable", required: true }], estimate: { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior", observationCount: 0, confidence: "low" }, riskTier: "routine", blockers: [] };
+const proposal = { identityId: "research", projectId: "p", milestoneId: "m", intent: "Decide", family: "deep_work", automationParts: [], humanCore: [{ id: "h", intent: "Decide", energy: "medium", interruptible: true, quote: "Decide", rationale: "Judgment" }], materialContract: [], evidenceContract: [{ kind: "record", description: "Decision", why: "The decision is the deliverable", required: true }], estimate: { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior", observationCount: 0, confidence: "low" }, riskTier: "routine", blockers: [],
+  // Deciding is the person's call: the Skill says so (2026-11-22), so the proposal waits for approval instead of taking effect.
+  needsPerson: { kind: "decision", quote: "Decide" } };
 
 test("duplicate Analyze requests share one durable run and publish only a proposal", async () => {
   const { rpc, turns } = fakeRuntime([JSON.stringify(proposal)]);
@@ -92,7 +94,8 @@ test.each(degenerate)("a $fixture answer is $outcome all the way through to the 
   if (outcome === "kept with a warning") {
     // Asked to fix it twice first, then kept in corrected form and handed to the reviewer.
     expect(turns()).toBe(3);
-    expect(result.state).toBe("awaiting_plan_approval");
+    // Recorded before `needsPerson` (2026-11-22): nothing names a choice of the person's, so the proposal takes effect by itself.
+    expect(result.state).toBe("approved");
     const kept = store.listWorkOrders("personal-crossline")[0]!.payload as { materialContract: Array<{ description: string }>; evidenceContract: Array<{ description: string }> };
     for (const item of [...kept.materialContract, ...kept.evidenceContract]) {
       expect(item.description).not.toMatch(/[{}[\]]/);
@@ -103,7 +106,7 @@ test.each(degenerate)("a $fixture answer is $outcome all the way through to the 
     return;
   }
 
-  expect(result.state).toBe("awaiting_plan_approval");
+  expect(result.state).toBe("approved");
   const stored = store.listWorkOrders("personal-crossline")[0]!.payload as
     { materialContract: Array<{ why: string }>; evidenceContract: Array<{ description: string }> };
   // What actually landed in the row the approvals page renders — no padding, no echo, sentence intact.
@@ -118,7 +121,7 @@ test("a rejected answer is sent back with the reason, and the corrected one is a
   ]);
   const result = await analysis.createCaptureAnalyzer(store, "personal-crossline", "C:\repo")(rpc, "c");
 
-  expect(result).toMatchObject({ state: "awaiting_plan_approval" });
+  expect(result).toMatchObject({ state: "approved" });
   expect(turns()).toBe(2);
   // The repair turn has to carry what was wrong; without it the model is being asked to guess.
   expect(prompts()[1]).toContain("ANALYSIS_CONTRACT_TRUNCATED");

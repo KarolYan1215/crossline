@@ -100,6 +100,7 @@ AI 访谈产品的用户研究里，最常见的直接不满是「缺少回应�
 | `withoutEndHint` | 开始标准没齐时说「可以开始了」 | 回：拒收重写，不静默删句 |
 | 画像类型名 `typeSummaryProblem` | 「大学生」「甲方」「军师」也是普通词，一次误杀两次整份画像重写 | 放过普通名词用法；只拦「你是 XXX」这种自报类型；出错只重写这一段 |
 | `PORTRAIT_LINE_UNKNOWN` | 修两次还错就整份画像失败 | 剪掉那一项，不整份失败 |
+| 里程碑的课程语法 `GRADED`、`MILESTONE_TARGET_UNPROPOSED`/`NOT_CITED`、`MILESTONE_COURSE_PARTS_MISSING`（2026-11-22 删） | 只认中文与几个英文考试词，判不了「哪项计分」 | 删：课程规则写在 milestone architect Skill，由它判断哪项计分、要几个部分、引用目标成绩 |
 
 ### 3.5 由 app 出题和等待（删）
 

@@ -17,17 +17,43 @@ type Candidate = {
 };
 
 /**
- * The work itself is the person's choice or judgement: choosing, deciding, settling a time or a person with someone. The same words
- * the assistant's whole-task handover refuses on (`PERSONS_CALL` in agent-dispatch.ts), plus fixing a time or a person, which is a
- * commitment made with someone else. Read on what the work *is* (intent and title), never on the person's parts: those always hold
- * the judgement inside doing the work (「核验仿真结果」), and reading them made every task a decision.
+ * Whether approving the work is itself the person's call, as the model that wrote it reads it (2026-11-22; the title regexes
+ * `PERSONS_CALL` and `NEEDS_ACCESS` that guessed it are gone):
+ * - `decision`: the work *is* the person's choice or judgement — choosing, deciding, settling a time or a person with someone (a
+ *   commitment made with someone else). The judgement inside doing ordinary work (「核验仿真结果」) is not one.
+ * - `access`: it needs access only the person can grant or use — a login, a permission, a password, an account at a broker or bank.
+ * - `none`: neither.
+ * `quote` is the words of the work's own text (title, description, parts, materials) that say so, checked verbatim by the validator of
+ * the Skill that wrote it; "" for `none`.
  */
-const PERSONS_CALL = /选定|选出|挑选|决定|拍板|亲自|本人确认|确认人选|确定人选|(确认|确定|约定|商定|敲定).{0,16}(时间|日期|人选)|和.{0,8}(谈|聊|面谈)|\b(decide|choose|pick|select|shortlist)\b|\b(confirm|agree on|settle on|fix|arrange|book)\b.{0,24}\b(time|date|slot|meeting)\b|\b(talk|speak|meet) (to|with)\b/i;
+export type NeedsPersonKind = "none" | "decision" | "access";
+export type NeedsPerson = { kind: NeedsPersonKind; quote: string };
+export const NEEDS_PERSON_KINDS: readonly NeedsPersonKind[] = ["none", "decision", "access"];
+/** The `needsPerson` field of the work-writing Skills' schemas. Not `*_SCHEMA`: it is a part. */
+export const NEEDS_PERSON_FIELD = { type: "object", additionalProperties: false, required: ["kind", "quote"], properties: {
+  kind: { type: "string", enum: [...NEEDS_PERSON_KINDS] }, quote: { type: "string", maxLength: 200 } } } as const;
+export const NO_NEEDS_PERSON: NeedsPerson = { kind: "none", quote: "" };
+/** A model's `needsPerson` made usable; undefined when absent or malformed (work written before the field). */
+export function readNeedsPerson(value: unknown): NeedsPerson | undefined {
+  const raw = value as Partial<NeedsPerson> | undefined;
+  if (!raw || typeof raw !== "object" || !NEEDS_PERSON_KINDS.includes(raw.kind as NeedsPersonKind)) return undefined;
+  return { kind: raw.kind as NeedsPersonKind, quote: typeof raw.quote === "string" ? raw.quote.trim().slice(0, 200) : "" };
+}
 /**
- * Access only the person can grant or use: a login, a permission, a password, an account at a broker or bank. The system cannot get
- * past it, and the person decides whether to open it.
+ * What is wrong with a model's `needsPerson`, for a repair turn; null when it is fine. A `decision` or `access` must quote the words of
+ * the work's own text that say so, verbatim (whitespace aside): a reason nobody can point at is a guess.
  */
-const NEEDS_ACCESS = /授权|权限|登录|登入|密码|凭证|券商|银行|证券账户|(账户|账号)(数据|净值|结单|流水|余额|密码)|\b(login|log in|sign in|signin|password|credentials?|permissions?|access rights?|authori[sz]ation|authori[sz]e|brokerage|broker|bank)\b|\baccount (data|value|statement|balance|password)s?\b/i;
+export function needsPersonProblem(value: unknown, texts: readonly string[]): string | null {
+  const read = readNeedsPerson(value);
+  if (!read) return "needsPerson 缺失或格式不对：kind 是 none、decision 或 access，quote 是字符串"; // i18n-ignore: a repair message to the model
+  if (read.kind === "none") return null;
+  const squash = (text: string) => text.replace(/\s+/g, "");
+  const quote = squash(read.quote);
+  if (!quote) return `needsPerson.kind 是 ${read.kind}，quote 却是空的：引用任务自己的文字里说明这一点的那几个字`; // i18n-ignore: a repair message
+  if (!texts.some((text) => squash(text).includes(quote)))
+    return `needsPerson.quote「${read.quote}」不在任务的标题、说明或材料里：逐字引用原文，没有这样的原文就写 none`; // i18n-ignore: a repair message
+  return null;
+}
 
 /**
  * Whether a proposal takes effect without the person, keeping a one-click undo for a day. Default effect, the exception asks (the
@@ -35,10 +61,10 @@ const NEEDS_ACCESS = /授权|权限|登录|登入|密码|凭证|券商|银行|�
  * 确认」). A proposal only puts work on the person's plan; nothing in it runs outside the machine, and it is undone in one click. So
  * it waits for a click only when approving it is itself a decision the person must make:
  *
- * - the work is the person's own choice or judgement (choosing, deciding, settling a time or a person with someone);
+ * - the work is the person's own choice or judgement (choosing, deciding, settling a time or a person with someone; `needsPerson`);
  * - (until 2026-11-11 also when the work reached outside the machine — sent, published, submitted, paid. The person's decision of
  *   2026-11-11: the person does that step themselves, so only the assistant's own final send waits; see the `assistant` branch;)
- * - it needs access only the person can grant (a login, a permission, a broker or bank account);
+ * - it needs access only the person can grant (a login, a permission, a broker or bank account; `needsPerson`);
  * - the person took back an automatic approval of it before (their undo is a decision; `revoked`);
  * - it was heard in a recording (`RECORDING_CAPTURE_PREFIX`): with no speaker separation, a television or another person's promise can
  *   read as the person's own, so what was only heard waits for them (2026-10-20, after Bee was found taking TV dialogue for conversation).
@@ -53,23 +79,21 @@ export function autoApprovalEligible(order: Candidate & { id?: string }, options
   if (order.state !== "awaiting_plan_approval") return { eligible: false, reason: t("不在待批准状态") };
   if (options.revoked) return { eligible: false, reason: t("本人撤销过自动生效，需本人批准") };
   if (order.id?.startsWith(RECORDING_CAPTURE_PREFIX)) return { eligible: false, reason: t("从录音里听到的，说话人未经确认，需本人确认") };
-  const payload = (order.payload ?? {}) as { title?: string; seeded?: boolean; humanCore?: Array<{ intent?: string }>;
-    materialContract?: Array<{ description?: string; required?: boolean }> };
+  const payload = (order.payload ?? {}) as { seeded?: boolean };
   if (payload.seeded) return { eligible: false, reason: t("示例任务，不自动生效") };
   // A question to the person (docs/work-split.md): the assistant takes the work once it is answered, not before.
   if ((order.payload as { owner?: unknown } | undefined)?.owner === "ask") return { eligible: false, reason: t("先等本人回答问题，再由助手做") };
   // The assistant's own preparation (docs/work-split.md): nothing in it is the person's to decide, so it takes effect and the assistant
-  // takes it — unless what it names is the person's after all (sending, a choice, graded answers), which `workOwner` says again here.
+  // takes it — unless it is an act that leaves the machine (sending, submitting, paying), which `workOwner` keeps with the person.
   if ((order.payload as { owner?: unknown } | undefined)?.owner === "assistant") {
     const verdict = workOwner(order, options.locale);
     return verdict.owner === "person" ? { eligible: false, reason: t("{{reason}}，需本人确认", { reason: verdict.reason }) } : { eligible: true, reason: t("助手的准备工作，不占本人时间，默认生效") };
   }
-  const what = `${payload.title ?? ""} ${order.intent}`;
-  const parts = (payload.humanCore ?? []).map((part) => part.intent ?? "");
-  if (PERSONS_CALL.test(what)) return { eligible: false, reason: t("这件事本身是本人的选择或决定，需本人确认") };
-  // Access before the external words: those also name a broker (「券商」), and a broker statement is held for the login it needs.
-  const needs = (payload.materialContract ?? []).filter((item) => item.required !== false).map((item) => item.description ?? "");
-  if ([what, ...parts, ...needs].some((text) => NEEDS_ACCESS.test(text))) return { eligible: false, reason: t("需要本人授权或登录才能进行，需本人确认") };
+  // The model that wrote the work said whether approving it is the person's call (`needsPerson`). Work written before the field has none
+  // and takes effect like any other: default effect, the exception asks.
+  const needs = readNeedsPerson((order.payload as { needsPerson?: unknown } | undefined)?.needsPerson);
+  if (needs?.kind === "decision") return { eligible: false, reason: t("这件事本身是本人的选择或决定，需本人确认") };
+  if (needs?.kind === "access") return { eligible: false, reason: t("需要本人授权或登录才能进行，需本人确认") };
   // Sending, submitting, publishing, paying or contacting someone is no reason here: in the person's own work the person does it, and
   // approving only puts it on their week (the person's decision of 2026-11-11, W-257: a homework waited ten days for approval because
   // its last step was 「提交」). Only the assistant's own outward act waits for the person — the `owner: "assistant"` branch above.

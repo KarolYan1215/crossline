@@ -6,7 +6,9 @@ const step = (minutes: number, executor = "human", role = "solve", schedulable =
 test("small tasks, requests for a fact and the assistant's errands get no tutorial; course homework does (W-17)", () => {
   // The walkthrough's 17-minute send.
   expect(tutorialWorthIt({ title: "把门店名单发给陈默", intent: "把整理好的名单发给陈默", p50Minutes: 17 }, [step(10), step(7)])).toBe(false);
-  expect(taskPreparation({ title: "向助教确认作业 3 的提交方式", intent: "发邮件问助教", p50Minutes: 60 }).level).toBe("none");
+  expect(taskPreparation({ title: "向助教确认作业 3 的提交方式", intent: "发邮件问助教", p50Minutes: 60, infoRequest: true }).level).toBe("none");
+  // Whether it is a request is its Skill's `request` (2026-11-22), not the title's words.
+  expect(taskPreparation({ title: "向助教确认作业 3 的提交方式", intent: "发邮件问助教", p50Minutes: 60 }).level).toBe("steps");
   // The owner's real ECE 555 homework 3: read, solve, check, check, submit.
   expect(tutorialWorthIt({ title: "完成 ECE 555 作业 3", intent: "解 5 道题", p50Minutes: 240, archetypeId: "problem_set" },
     [step(20, "agent", "read"), step(15, "human", "read"), step(45), step(25, "human", "check"), step(30, "human", "check"), step(15, "human", "submit")])).toBe(true);

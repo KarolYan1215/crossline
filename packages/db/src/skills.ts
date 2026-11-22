@@ -1,5 +1,5 @@
 import {
-  AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, AI_TOOLS_SETTING, NODE_COMPUTE_SETTING, NODE_STATUS_SETTING, RUNTIME_OWNER_SETTING, GROWN_LIBRARY_SETTING, SKILL_LIBRARY_SETTING, allAiTools, detectedAiTools, personAiTool, readPersonAiTools, categoryFromWording, grownSkillFilesKey, grownSkillId, isScriptFile, mineSkillSettingKey, publicSkillFilesKey, scriptsAllowable, scriptsDigest, scriptsRunnable,
+  AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, AI_TOOLS_SETTING, NODE_COMPUTE_SETTING, NODE_STATUS_SETTING, RUNTIME_OWNER_SETTING, GROWN_LIBRARY_SETTING, SKILL_LIBRARY_SETTING, allAiTools, detectedAiTools, personAiTool, readPersonAiTools, grownSkillFilesKey, grownSkillId, isScriptFile, mineSkillSettingKey, publicSkillFilesKey, scriptsAllowable, scriptsDigest, scriptsRunnable,
   readGrownLibrary, readMineSkill, keptOnReset, grownKeptSettingKeys, readSkillLibrary, tFor, GROWN_VERSIONS_KEPT, WORKFLOW_FEEDBACK_EVENT, grownVersionsKey, agreedScopeOf, widensAgreed,
   type AgreedScope, type AiTool, type GrownSkillRecord, type WorkflowAccess, type GrownSkillVersion, type WorkflowManifest, type PublicSkillRecord, type StoredMineSkill, type Weekday, type WorkflowSchedule
 } from "@crossline/core";
@@ -225,9 +225,8 @@ export function createReminderWorkflow(store: CrosslineStore, workspaceId: strin
 /** The person asked, in words, for a workflow (「以后每周五把素材剪成一条 vlog」): recorded for the worker's next growing pass. Returns its id. */
 export function requestWorkflow(store: CrosslineStore, workspaceId: string, text: string, lineId: string, ownerId: string): string {
   const id = `wfreq-${randomUUID().slice(0, 8)}`;
-  const category = categoryFromWording(text);
   store.appendEvent({ ownerId, workspaceId, idempotencyKey: `workflow.requested:${id}`, type: "workflow.requested", entityId: id,
-    payload: { text: text.slice(0, 1000), lineId, ...(category ? { category } : {}) } });
+    payload: { text: text.slice(0, 1000), lineId } });
   return id;
 }
 

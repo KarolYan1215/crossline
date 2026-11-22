@@ -21,7 +21,9 @@ afterEach(() => { store.close(); rmSync(root, { recursive: true, force: true });
 const estimate = { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior" as const, observationCount: 0, confidence: "low" as const };
 const order = (id: string, ai: string[], state = "approved") => {
   store.saveWorkOrder({ id, ownerId: "o", workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "", intent: `任务 ${id}`, state, riskTier: "routine", estimate,
-    payload: { automationParts: ai.map((intent, i) => ({ id: `a${i}`, intent })), humanCore: [{ id: "h", intent: "自己决定" }], materialContract: [] } });
+    payload: { automationParts: ai.map((intent, i) => ({ id: `a${i}`, intent })), humanCore: [{ id: "h", intent: "自己决定" }], materialContract: [],
+      // The kind of work is the analysis Skill's `category` (2026-11-22); these orders are all reading and organising.
+      category: "read_research_organize" } });
   // Its work starts within the hour: the worker's pass prepares only for work starting within two days.
   const starts = JSON.parse(store.getSetting(ws, "schedule.orderStarts") ?? "{}") as Record<string, string>;
   store.setSetting(ws, "schedule.orderStarts", JSON.stringify({ ...starts, [id]: new Date(Date.now() + 3_600_000).toISOString() }));
@@ -93,9 +95,10 @@ test("a result that leaves something for the person waits for their review inste
   expect(listAgentTasks(store, ws)[0]).toMatchObject({ status: "needs_review", needsHuman: 1 });
 });
 
-test("wording that points at no kind needs the person to choose one; choosing one is enough", () => {
+test("an order whose Skill named no kind needs the person to choose one; choosing one is enough", () => {
   store.setSetting(ws, "agent.categories", "{}");
   order("wo-1", ["推进这件事"]);
+  store.saveWorkOrder({ ...store.listWorkOrders(ws).find((item) => item.id === "wo-1")!, payload: { ...(store.listWorkOrders(ws).find((item) => item.id === "wo-1")!.payload as object), category: "" } });
   const { svc } = service({ script: false });
   expect(svc.dispatch(ws, "wo-1")).toMatchObject({ state: "blocked", code: "CATEGORY_REQUIRED" });
   expect(svc.dispatch(ws, "wo-1", "draft_text")).toMatchObject({ state: "needs_category_approval", category: "draft_text" });
@@ -168,7 +171,8 @@ test("the assistant keeps working while the quota is only tight (economy): 90% o
 test("a delegated errand's accepted result is handed in as the order's evidence", async () => {
   store.saveWorkOrder({ id: "wo-d", ownerId: "o", workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "m", intent: "整理 NeuroSim 输入规范笔记",
     state: "approved", riskTier: "routine", estimate,
-    payload: { automationParts: [], humanCore: [{ id: "h", intent: "整理 NeuroSim 输入规范笔记" }], family: "preparation", materialContract: [],
+    // The assistant's own item (its `owner`), a reading-and-organising one (its `category`): handed over whole.
+    payload: { owner: "assistant", category: "read_research_organize", automationParts: [], humanCore: [{ id: "h", intent: "整理 NeuroSim 输入规范笔记" }], family: "preparation", materialContract: [],
       evidenceContract: [{ kind: "file", description: "一份输入规范笔记", required: true }] } });
   approveCategory(store, ws, "read_research_organize");
   const { svc } = service();
@@ -177,8 +181,8 @@ test("a delegated errand's accepted result is handed in as the order's evidence"
   const task = listAgentTasks(store, ws)[0]!;
   // A clean result that asks nothing of the person is taken as accepted by itself, and handed in at once.
   expect(task).toMatchObject({ delegated: true, status: "accepted" });
-  expect(store.listWorkOrders(ws).find((o) => o.id === "wo-d")!.state).toBe("evidence_review");
-  expect(reviewAgentTask(store, ws, task.taskId, "accepted")).toMatchObject({ ok: true });
+  // The assistant's own preparation needs no gate of the person's: its evidence is accepted with it.
+  expect(store.listWorkOrders(ws).find((o) => o.id === "wo-d")!.state).toBe("accepted");
   const claims = store.listEvidenceClaims(ws).filter((claim) => claim.workOrderId === "wo-d");
   expect(claims).toHaveLength(1);
   expect(claims[0]!.uri).toMatch(/^file:.*n\.md$/);

@@ -37,23 +37,23 @@ export const AGENT_CATEGORY_EXPLAINED: Record<AgentCategory, string> = {
 };
 
 /**
- * Ordered: a tie goes to the earlier kind, because code and data are the most specific words. Each list reads Chinese and English
- * wording alike: an English workspace's analyses and steps are written in English.
+ * The kind of work, as the Skill that wrote it says (`category`, 2026-11-22: the keyword lists that counted words to guess it are gone).
+ * "" when it names none: the person chooses at dispatch, and nothing starts by itself. Not `*_SCHEMA`: it is a part of other schemas.
  */
-const KEYWORDS: Array<[AgentCategory, RegExp]> = [
-  // Before code: 「用脚本剪视频」 is editing, and the words for it are the more specific ones.
-  ["media_edit", /剪辑|剪视频|剪片|粗剪|精剪|成片|视频|音频|配音|字幕|转码|封面图|裁图|抠图|ffmpeg|vlog|\b(video|videos|audio|footage|voice-?over|subtitles?|captions?|transcod\w*|thumbnails?|cover image|crop\w*|rough cut|final cut)\b/i],
-  ["data_code_sim", /代码|脚本|程序|编程|仿真|模拟|数据|绘图|画图|图表|可视化|python|matlab|neurosim|spice|netlist|matplotlib|调试|重构|单元测试|批处理|跑一遍|拟合|\b(code|coding|scripts?|program\w*|simulat\w*|data|dataset|plot\w*|charts?|graphs?|visuali[sz]\w*|debug\w*|refactor\w*|unit tests?|batch|curve fit\w*)\b/i],
-  ["read_research_organize", /阅读|读一?[遍下]|文献|调研|检索|搜索|查找|查证|核实|整理|摘要|总结|笔记|资料|对照|清单|综述|梳理|纪要|\b(read|reading|literature|papers?|research|search\w*|look up|verify|verif\w+|fact-?check\w*|organi[sz]e\w*|summar\w+|notes|sources|compare|comparison|checklist|survey|minutes)\b/i],
-  ["draft_text", /起草|草稿|撰写|拟写|润色|改写|邮件|报告|帖子|文案|申请材料|说明书|提纲|\b(draft\w*|write|writing|polish\w*|rewrite|rewriting|emails?|reports?|(?:social|blog) posts?|copywriting|application materials?|outline)\b/i],
-  ["files_calendar_prep", /归档|重命名|文件夹|整理文件|日程|会前|备齐|备料|准备材料|检查表|模板|\b(archive|archiving|renam\w+|folders?|organi[sz]e files|schedul\w+|calendar|before the meeting|prepare materials|templates?)\b/i]
-];
-
-/** The kind of work a sentence points at (the first keyword list it matches), or undefined when it points at none. */
-export const categoryFromWording = (text: string): AgentCategory | undefined => KEYWORDS.find(([, pattern]) => pattern.test(text))?.[0];
-
-const PERSONS_CALL = /选定|选出|挑选|决定|拍板|亲自|本人确认|和.{0,8}(谈|聊|面谈)|\b(choose|choosing|chose|select|selecting|pick|picking|decide|deciding|decision|in person|personally|sign off)\b|\b(talk|speak|meet)s? (to|with)\b/i;
-const GRADED = /作业|小测|测验|考试|期中|期末|课程项目|大作业|实验报告|homework|\bhw\s?\d|quiz|exam|midterm|final project|\blab\b|assignment|take-?home/i;
+export const CATEGORY_FIELD = { type: "string", enum: ["", ...Object.keys(AGENT_CATEGORIES)] } as const;
+/** The model's `category` on a work order, or undefined when it named none (or the order was written before the field). */
+export const categoryOf = (payload: unknown): AgentCategory | undefined => {
+  const value = (payload as { category?: unknown } | undefined)?.category;
+  return isAgentCategory(value) ? value : undefined;
+};
+/**
+ * Whether the work is graded and handed in for a mark (`graded`, the Skill's judgement): the assistant then gives learning aid only.
+ * Work written before the field is read by its project: a course's work counts as graded, the careful side.
+ */
+const gradedOf = (payload: unknown, context: AssistantContext): boolean => {
+  const value = (payload as { graded?: unknown } | undefined)?.graded;
+  return typeof value === "boolean" ? value : context.projectIsCourse;
+};
 
 export type DispatchableOrder = {
   id: string; intent: string; state: string; projectId: string;
@@ -88,17 +88,13 @@ export function planAssistantTask(order: DispatchableOrder, context: AssistantCo
   if (payload.owner === "assistant") return assistantOwned(order, ai, context);
   if (!ai.length) return payload.owner === "person" ? { fit: false, reason: t("这是本人的核心工作，由本人做；助手只做它的准备。") } : delegateWhole(order, human, context);
 
-  const wording = ai.map((part) => part.intent!).join("；");
-  const scored = KEYWORDS.map(([category, pattern]) => ({ category, hits: (wording.match(new RegExp(pattern.source, `${pattern.flags.replace("g", "")}g`)) ?? []).length }));
-  const best = scored.filter((entry) => entry.hits > 0).sort((a, b) => b.hits - a.hits)[0];
-
-  const text = `${order.intent} ${wording} ${human.map((part) => part.intent).join(" ")} ${context.milestoneTitle ?? ""}`;
-  const graded = context.projectIsCourse && GRADED.test(text);
+  const category = categoryOf(payload);
+  const graded = gradedOf(payload, context);
   const contract = Array.isArray(payload.materialContract) ? (payload.materialContract as Array<{ description?: string }>).map((item) => item.description).filter(Boolean) : [];
   return {
     fit: true,
-    category: best?.category,
-    why: best ? t("AI 部分的描述指向「{{category}}」。", { category: t(AGENT_CATEGORIES[best.category]) }) : t("可自动部分未明确对应某一类工作，需本人选择。"),
+    category,
+    why: category ? t("AI 部分的描述指向「{{category}}」。", { category: t(AGENT_CATEGORIES[category]) }) : t("可自动部分未明确对应某一类工作，需本人选择。"),
     // The task handed to the assistant is an instruction to a model, kept in one language.
     /* i18n-ignore-start */
     what: [`目标：${order.intent}`, `请完成其中可由 AI 准备的部分：${ai.map((part, i) => `${i + 1}) ${part.intent}`).join("；")}`,
@@ -111,24 +107,17 @@ export function planAssistantTask(order: DispatchableOrder, context: AssistantCo
   };
 }
 
-const categoryOf = (text: string): AgentCategory | undefined => KEYWORDS
-  .map(([category, pattern]) => ({ category, hits: (text.match(new RegExp(pattern.source, `${pattern.flags.replace("g", "")}g`)) ?? []).length }))
-  .filter((entry) => entry.hits > 0).sort((a, b) => b.hits - a.hits)[0]?.category;
-
 /** The learning-aid note for graded coursework: what the assistant may and may not make for it (an instruction to the assistant). */
 const GRADED_NOTE = "这是带评分的课程工作：只做学习辅助（讲解、你自己设计的练习、检查本人写的、整理资料），不要生成可提交的答案、代码、报告或图表。"; // i18n-ignore
 
 /**
- * An errand small and internal enough to hand over whole (see the file comment), for an order written before owners: what it produces
- * decides (`workOwner`, docs/work-split.md), not its family, its milestone's title or the words of the course it belongs to. Sending,
- * submitting, publishing, logging in, paying, graded answers, a consequential choice and the person's own practice or design stay theirs.
+ * An errand small and internal enough to hand over whole (see the file comment), for an order with no automatable parts named: who does
+ * it is the owner on record (`workOwner`, docs/work-split.md) — an order written before owners is the person's, and a choice or a
+ * judgement is the person's by the Skill that wrote it. Sending, submitting, publishing and paying stay theirs whatever the record says.
  */
 function delegateWhole(order: DispatchableOrder, human: Part[], context: AssistantContext): AssistantPlan {
   const t = tFor(context.locale);
   if (mentionsExternalAction(order.intent, ...human.map((part) => part.intent))) return { fit: false, reason: t("这件事要对外（发送、提交、发布等），不整件交给助手。") };
-  // Choosing, deciding, doing it in person: the step *is* the person's judgement. One real run was handed 「选定一项创始人正在处理的
-  // 真实事项」 and chose for them — and chose the app itself.
-  if (PERSONS_CALL.test(order.intent)) return { fit: false, reason: t("该步骤需本人选择或决定，不整件交给助手。") };
   const verdict = workOwner(order, context.locale);
   if (verdict.owner !== "assistant") return { fit: false, reason: verdict.owner === "ask" ? t("这件事需要本人先提供信息。") : t("{{reason}}，不整件交给助手。", { reason: verdict.reason }) };
   return wholePlan(order, context, t("这是一件从已有信息就能做出的准备工作，整件交给助手做，做完的文件直接作为证据交验收。"));
@@ -154,11 +143,11 @@ function wholePlan(order: DispatchableOrder, context: AssistantContext, why: str
   const evidence = Array.isArray(payload.evidenceContract)
     ? (payload.evidenceContract as Array<{ description?: string }>).map((item) => item.description).filter(Boolean) : [];
   const parts = ai.map((part) => part.intent!).filter((text) => text.trim() && text.trim() !== order.intent.trim());
-  const graded = context.projectIsCourse && GRADED.test(order.intent);
+  const graded = gradedOf(order.payload, context);
   const answer = typeof payload.answer === "string" && payload.answer.trim() ? payload.answer.trim() : "";
   const question = typeof payload.question === "string" ? payload.question.trim() : "";
   return {
-    fit: true, category: categoryOf(`${order.intent} ${parts.join(" ")}`) ?? "read_research_organize", delegated: true, graded, notes: graded ? GRADED_NOTE : "",
+    fit: true, category: categoryOf(order.payload) ?? "read_research_organize", delegated: true, graded, notes: graded ? GRADED_NOTE : "",
     why,
     // The task handed to the assistant is an instruction to a model, kept in one language.
     /* i18n-ignore-start */

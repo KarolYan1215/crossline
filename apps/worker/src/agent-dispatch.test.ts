@@ -10,13 +10,15 @@ beforeEach(() => { store = new CrosslineStore(":memory:"); ws = store.createPrin
 afterEach(() => store.close());
 
 const estimate = { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior" as const, observationCount: 0, confidence: "low" as const };
-const order = (id: string, intent: string, ai: string[], over: { state?: string; projectId?: string } = {}) => store.saveWorkOrder({
+const order = (id: string, intent: string, ai: string[], over: { state?: string; projectId?: string; category?: string } = {}) => store.saveWorkOrder({
   id, ownerId: "o", workspaceId: ws, identityId: "research", projectId: over.projectId ?? "p", milestoneId: "", intent, state: over.state ?? "approved", riskTier: "routine", estimate,
-  payload: { automationParts: ai.map((text, i) => ({ id: `a${i}`, intent: text })), humanCore: [{ id: "h", intent: "在 Virtuoso 里画图并自己提交" }], materialContract: [] }
+  // The kind of work is the analysis Skill's `category` (2026-11-22), not read from the wording.
+  payload: { automationParts: ai.map((text, i) => ({ id: `a${i}`, intent: text })), humanCore: [{ id: "h", intent: "在 Virtuoso 里画图并自己提交" }], materialContract: [],
+    ...(over.category ? { category: over.category } : {}) }
 });
 
 test("a work order becomes a task: the AI parts as the job, the files given for the project as read-only inputs", () => {
-  order("wo-aaaa1111", "熟悉 Cadence", ["整理 6T SRAM 知识点清单并做对照笔记"]);
+  order("wo-aaaa1111", "熟悉 Cadence", ["整理 6T SRAM 知识点清单并做对照笔记"], { category: "read_research_organize" });
   store.saveSourceDocument({ id: "d1", ownerId: "o", workspaceId: ws, projectId: "p", kind: "pdf", fileName: "s.pdf", mediaType: "application/pdf", sha256: "x", uri: "file:///C:/Users/karol/Downloads/s.pdf",
     extractedText: "", extractionStatus: "done", createdAt: "2026-10-05T00:00:00.000Z" });
   const result = taskFromWorkOrder(store, ws, "wo-aaaa1111");
@@ -54,7 +56,7 @@ test("owned work (docs/work-split.md): the assistant's item is handed over whole
 });
 
 test("a kind of work that has not been approved is asked about, not started, and the order waits", () => {
-  order("wo-1", "写脚本画图", ["写 Python 脚本清洗数据并画图"]);
+  order("wo-1", "写脚本画图", ["写 Python 脚本清洗数据并画图"], { category: "data_code_sim" });
   expect(dispatchCandidates(store, ws)).toEqual([]);
   expect(pendingCategoryRequests(store, ws)).toMatchObject([{ category: "data_code_sim", workOrderId: "wo-1" }]);
   approveCategory(store, ws, "data_code_sim");
@@ -62,7 +64,7 @@ test("a kind of work that has not been approved is asked about, not started, and
 });
 
 test("a declined kind is left alone, a paused assistant starts nothing, and an order already tried is not tried again", () => {
-  order("wo-1", "写脚本画图", ["写 Python 脚本清洗数据并画图"]);
+  order("wo-1", "写脚本画图", ["写 Python 脚本清洗数据并画图"], { category: "data_code_sim" });
   approveCategory(store, ws, "data_code_sim");
   setPaused(store, ws, true);
   expect(dispatchCandidates(store, ws)).toEqual([]);

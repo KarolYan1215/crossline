@@ -23,7 +23,9 @@
 | 助手 | 从已有信息产出静态产物：收集、汇集、整理、汇总、摘录、核对、盘点、编目、建台账、起草模板、按本人给定的方案跑计算或仿真 | 助手直接做；作为某个本人核心任务的前置，结果出现在该任务的「已备好」，不上任务板 |
 | 本人给信息后助手做 | 同上，但需要只有本人持有的东西（账户里的数据、截图、导出、一句口径）| 一个问题（≤2 个、本人用时 ≤10 分钟，否则拆开）进待决事项，答完助手接着做，不出任务卡 |
 
-判定用两层：生成时模型给出 `owner`（倒推、收集分析、拆步骤的输出都带），再由确定性规则 `workOwner` 校正——按产出的性质（静态产物 vs 本人的能力、判断、结果、对外动作）而不是按领域；规则只会把工作从本人移给助手，或把需要本人信息的拆成问题，永远不会把对外、登录、付款、带评分的答案、有后果的决定交给助手。
+判定交给模型（2026-11-22）：生成时模型给出 `owner`（倒推、收集分析、拆步骤的输出都带），各自 Skill 写明怎么判断（钱的记录归助手不问本人、设计判断归本人、只验收助手产出的不单列）；代码不再按标题用词改判。`workOwner` 只留一条底线：对外发出、提交、联系、出席、付款、交易（`ACTS`）的工作不论模型怎么说都归本人。没有记录 owner 的旧工作单算本人的。
+
+> 下文 §4–§5 里「`workOwner` 按动词校正」「`review_only`」「`taskTitle`」「GRADED/LEARN」等规则记录的是 2026-10-21 至 11-20 的做法，已于 2026-11-22 删除，留作历史。
 
 ## 3. 生成端
 
@@ -151,7 +153,7 @@
   - 倒推（`screenBackplanDrills`，goal-backplanner 写入前）：同样剪掉标题、描述、证据里的那句，只剩这种形式的任务删掉；引文（`sourceQuote`）保持原文。里程碑标准是模型写的，不算本人依据。
   - 捕获分析（`validateAnalysisProposal`）：依据是捕获原话、本人给的文件、偏好和画像结论；标题、描述、本人部分、证据里没有依据的剪掉，引文不动。
   - worker 取依据：`apps/worker/src/drill-backing.ts`。
-- **分类不变**：`work-owner.ts` 的 GRADED/LEARN、`milestone-plan.ts` 的计分判断仍然读「作业、考试、往年卷、背诵」这些词来判断谁做、哪项计分，只读不写，不会往任务里加练习形式。
+- **分类**：2026-11-22 起 `work-owner.ts` 的 GRADED/LEARN 和 `milestone-plan.ts` 的计分词表都已删除，谁做、哪项计分由模型判断（倒推与分析的 `graded` 字段、milestone architect 的课程规则）。
 - **访谈**：画像加第四部分「做事方法」（`interview-checklist.ts` 的 `PORTRAIT_PARTS`，槽位 `METHOD_SLOT`：`method_exam_prep`、`method_learning`、`method_writing` 等），在能量部分问 2–3 题：考核或截止前怎么准备、怎么学新东西和回头看、怎么写和讲。没有画像小节代表它，只有记录在案的事实能勾上，所以没问到之前访谈不算完。答不上来只记「假设：没有固定方法」。`planningProfile` 把 `method_*` 排在工作方式的前面，每个规划 Skill 都看得到。
 - 测试：`drill-forms.test.ts`、`steps.test.ts`、`analysis.test.ts`、`interview-checklist.test.ts`、`planning-profile.test.ts`；worker 回放 `testing/fixtures/step-plan-drill-form-from-identity.txt`（按旧示例重建的回答）走完 worker → 校验 → 落库。
 - 机主账本里已有的订正类任务由协调会话清理，这里不动。

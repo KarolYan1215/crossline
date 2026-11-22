@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import {
-  MAIL_DRAFT_NOTE, draftBodyOf, isMailReminderTitle, draftFileText, mailReplyQuiet, replyDraftsOn, validateMailReplyDraft, validateMailTriage, type MailReplyDraft
+  MAIL_DRAFT_NOTE, draftBodyOf, draftFileText, mailReplyQuiet, replyDraftsOn, validateMailReplyDraft, validateMailTriage, type MailReplyDraft
 } from "./mail";
 
 test("a reply with no wait behind it is a message that needs the person's answer; a named wait must still be open", () => {
@@ -43,8 +43,10 @@ test("messages about drafts follow the nudges' quiet rules", () => {
   expect(replyDraftsOn("off")).toBe(false);
 });
 
-test("a mail to-do that only asks to look at something is a reminder", () => {
-  expect(isMailReminderTitle("核查 Render 公告涉及应用")).toBe(true);
-  expect(isMailReminderTitle("核查 Crossline beta 失败")).toBe(true);
-  expect(isMailReminderTitle("10/30 前交 ECE 555 HW4")).toBe(false);
+test("a mail that only asks to look at something is the triage Skill's `reminder` kind, in any language, and needs a title", () => {
+  const item = (kind: string, title: string) => ({ uid: 1, kind, title, waitingId: "", why: "", serves: "", known: "", courseStaff: false, due: "",
+    money: { event: "", amount: 0, amountLabel: "", currency: "", merchant: "", category: "", occurredOn: "", refs: [], last4: "", instrument: "" },
+    trip: { city: "", country: "", from: "", to: "", quote: "" } });
+  expect(validateMailTriage({ items: [item("reminder", "Check an unrecognised charge on the Chase card")] }, [1], []).items[0]!.kind).toBe("reminder");
+  expect(() => validateMailTriage({ items: [item("reminder", " ")] }, [1], [])).toThrow("MAIL_TRIAGE_INVALID");
 });

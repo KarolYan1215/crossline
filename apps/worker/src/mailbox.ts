@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   MAIL_ACCOUNTS_SETTING, MAIL_TRIPS_SETTING, mailTripPlace, readMailTrips, withMailTrip, MAIL_CHECK_MINUTES, MAIL_INBOX_PER_PASS, MAIL_LOG_KEEP, MAIL_LOG_SETTING, MAIL_TRIAGE_SCHEMA, readMailAccounts, readMailLog,
-  isMailReminderTitle, linksFromMail, mailLinksKey, mailMessageKey, moneyEventFromMail, senderName, MAIL_CHECK_NUDGE_KIND, validateMailTriage, type MailAccount, type MailLogEntry, type MailTriage,
+  linksFromMail, mailLinksKey, mailMessageKey, moneyEventFromMail, senderName, MAIL_CHECK_NUDGE_KIND, validateMailTriage, type MailAccount, type MailLogEntry, type MailTriage,
   type MoneyReading, MAIL_EVENTS_SETTING, mailEventFrom, structureEvidence, readMailEvents, withMailEvent, MAIL_EVENT_RULES_SETTING, readMailEventRules,
   mailEventClash, mailEventsOnSchedule, FIXED_EVENTS, type FixedEvent
 } from "@crossline/core";
@@ -318,8 +318,8 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
       log.push({ accountId: message.accountId, uid: message.uid, from: message.from, subject: message.subject, date: message.date, kind: "needs_reply", title: item.why.slice(0, 140), at, key });
       continue;
     }
-    // A mail to-do that only asks to look at something (a charge, a payment, a notice) is said once as a reminder, not planned as a task.
-    if (kind === "todo" && isMailReminderTitle(item.title)) {
+    // A mail that only asks to look at something (a charge, a payment, a notice; the Skill's `reminder`) is said once, not planned as a task.
+    if (kind === "reminder") {
       const title = item.title.trim().slice(0, 120);
       sayToPerson(deps.store, workspaceId, t("邮件提醒：{{title}}。{{noted}}来自 {{from}}「{{subject}}」。不是本人操作的话在对应 App 或官网里处理，不要点邮件里的链接。",
         { title, noted: money.said, from: senderName(message.from), subject: message.subject.slice(0, 80) }),

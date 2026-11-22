@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import {
-  AGENT_CATEGORIES, GROW_AFTER_ACCEPTED, GROWN_SKILL_IDLE_DAYS, PUBLIC_SKILL_REVIEW_SCHEMA, accessProfileSlug, categoryFromWording, finalVerdict, grownSkillFilesKey, grownSkillId,
+  AGENT_CATEGORIES, GROW_AFTER_ACCEPTED, GROWN_SKILL_IDLE_DAYS, PUBLIC_SKILL_REVIEW_SCHEMA, accessProfileSlug, finalVerdict, grownSkillFilesKey, grownSkillId,
   grownSkillName, scanForDeclaredAccess, scanSkillFiles, scheduleLabel, skillFrontmatter, textTerms, reassignedSteps, validatePublicSkillReview, validateWorkflowManifest,
   workflowAccess, workflowDue, agentChainKey, retryDue, type AgentCategory, type AgentChain, type GrownSkillRecord, type PublicSkillReview, type WorkflowAccess,
   REPORT_ITEMS_FILE, REPORT_ITEMS_MAX, REPORT_ITEM_TITLE_MAX, VERIFY_PENDING_SETTING, XHS_HOME, type WorkflowManifest, type WorkflowOrigin, type SkillScan
@@ -124,7 +124,8 @@ export function growCandidates(store: CrosslineStore, workspaceId: string, now =
     const text = String(payload.text ?? "").trim();
     // A request on no known line is not guessed onto the first one; it waits (the input box now always names one).
     const lineId = lines.some((line) => line.id === payload.lineId) ? payload.lineId! : undefined;
-    const category = payload.category && payload.category in AGENT_CATEGORIES ? payload.category as AgentCategory : categoryFromWording(text) ?? "files_calendar_prep";
+    // The growing run writes the workflow's own kind into its manifest; the request only says which kind of run grows it.
+    const category = payload.category && payload.category in AGENT_CATEGORIES ? payload.category as AgentCategory : "files_calendar_prep";
     const chain = retryOf.get(event.entityId);
     const retry = chain ? retryContext(store, workspaceId, chain.key) : undefined;
     return text && lineId ? { lineId, category, origin: { kind: "asked", text, requestId: event.entityId }, text, examples: [], ...(retry?.text ? { retry } : {}) } : undefined;

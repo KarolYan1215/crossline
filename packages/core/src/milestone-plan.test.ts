@@ -95,15 +95,12 @@ describe("measurable, not just done", () => {
     plan: { key: "k", stage: 1, deadline: "2026-12-07", outcome: "拿到好成绩", derivation: "总评 A 要 90 分，其余部分预计 92，所以这一项至少 85，再留 3 分余量", baseline: "尚未开始", target: "演示完成并拿到导师明确的下一步指示", stakeholders: [], sourceFactIds: ["f"], dependsOn: [] }
   }];
 
-  test("finishing an exam is not a target: a graded milestone needs a score line, and the refusal says how to give one", () => {
-    expect(() => validatePlans(make("ECE 555 期末考试完成并被课程方记录", [{ evidenceOf: "outcome", measure: { kind: "artifact" } }]), profile, new Set())).toThrow("MILESTONE_NOT_MEASURABLE");
-    try { validatePlans(make("ECE 555 期末考试取得成绩", [{ evidenceOf: "outcome", measure: { kind: "artifact" } }]), profile, new Set()); } catch (error) {
-      expect((error as Error & { detail?: string }).detail).toContain("分数线");
-      expect((error as Error & { detail?: string }).detail).toContain("assumptions");
-    }
+  test("whether a milestone is graded and needs a score line is the architect's call, not a title regex (2026-11-22)", () => {
+    // The course grammar (exam, quiz, homework → a threshold) is in the crossline-milestone-architect Skill now; code only asks for
+    // one criterion that can be checked without judgement.
+    expect(() => validatePlans(make("ECE 555 期末考试完成并被课程方记录", [{ evidenceOf: "outcome", measure: { kind: "artifact" } }]), profile, new Set())).not.toThrow();
     expect(() => validatePlans(make("ECE 555 期末考试取得 85 分以上", [{ evidenceOf: "outcome", measure: { kind: "threshold", unit: "分", comparator: "gte", value: 88, bareLine: 85 } }]), profile, new Set())).not.toThrow();
   });
-
   test("a milestone whose criteria are all judgement calls is refused even when nothing in it is graded", () => {
     expect(() => validatePlans(make("向导师演示 SRAM 仿真结果并得到下一步指示", [{ evidenceOf: "outcome", measure: { kind: "judgement" } }]), profile, new Set())).toThrow("MILESTONE_NOT_MEASURABLE");
     expect(() => validatePlans(make("向导师演示 SRAM 仿真结果并得到下一步指示", [{ evidenceOf: "outcome", measure: { kind: "judgement" } }, { evidenceOf: "output", measure: { kind: "artifact" } }]), profile, new Set())).not.toThrow();
@@ -185,13 +182,9 @@ describe("a course is its graded parts", () => {
     plan: { key, stage, deadline, outcome: "拿到好成绩", derivation: "总评 A 要 90 分，其余部分预计 92，所以这一项至少 85，再留 3 分余量", baseline: "尚未开始", target: "平均正确率不低于 80%", stakeholders: [], sourceFactIds: ["research/ece555/goal", "research/ece555/target_grade"], dependsOn }
   });
 
-  test("a course with quizzes, homework and an exam cannot come back with only the exam", () => {
-    expect(() => validatePlans([part("f", 1, "ECE 555 期末考试取得 85 分以上", "2026-12-07")], profile, new Set())).toThrow("MILESTONE_COURSE_PARTS_MISSING");
-    try { validatePlans([part("f", 1, "ECE 555 期末考试取得 85 分以上", "2026-12-07")], profile, new Set()); } catch (error) {
-      expect((error as Error & { detail?: string }).detail).toMatch(/小测 2 个.*作业 1 个.*考试 1 个/);
-    }
+  test("how many graded parts a course needs is the architect's call: code no longer counts them (2026-11-22)", () => {
+    expect(() => validatePlans([part("f", 1, "ECE 555 期末考试取得 85 分以上", "2026-12-07")], profile, new Set())).not.toThrow();
   });
-
   test("one milestone per graded part, in date order, is accepted", () => {
     expect(() => validatePlans([
       part("q", 1, "ECE 555 小测平均正确率不低于 80%", "2026-11-23"),
@@ -237,46 +230,19 @@ describe("worked backwards from the outcome, with room left", () => {
   });
 });
 
-describe("numbers come from a target on the record, proposed from the person's goals if they have none", () => {
-  const grading = { id: "research/ece555/grading", identityId: "research", projectId: "ece555", slot: "grading", value: "作业 20%、小测 30%、项目 25%、期末 25%", status: "confirmed" as const };
-  const target = (status: "confirmed" | "inferred") => ({ id: "research/ece555/target_grade", identityId: "research", projectId: "ece555", slot: "target_grade", value: "总评 A−（≥ 90）", status });
-  const profileWith = (facts: Profile["facts"]): Profile => ({ today: "2026-10-03", requiredIdentities: [], projects: [{ id: "ece555", identityId: "research", name: "ECE 555" }], facts });
-  const profile = profileWith([grading, target("confirmed")]);
-  const exam = (sourceFactIds: string[]) => [{
+test("a target proposed in the same answer may be cited before it is written", () => {
+  const grading = { id: "research/ece555/grading", identityId: "research", projectId: "ece555", slot: "grading", value: "作业 20%、期末 25%", status: "confirmed" as const };
+  const on: Profile = { today: "2026-10-03", requiredIdentities: [], projects: [{ id: "ece555", identityId: "research", name: "ECE 555" }], facts: [grading] };
+  const answer = [{
     identityId: "research", projectId: "ece555", title: "ECE 555 课堂期末考试取得 88 分以上",
     successCriteria: [{ evidenceOf: "outcome", measure: { kind: "threshold", unit: "分", comparator: "gte", value: 88, bareLine: 85 } }],
-    plan: { key: "k", stage: 1, deadline: "2026-12-07", baseline: "尚未开始", target: "期末拿到不低于 88 分", stakeholders: [], sourceFactIds, dependsOn: [],
+    plan: { key: "k", stage: 1, deadline: "2026-12-07", baseline: "尚未开始", target: "期末拿到不低于 88 分", stakeholders: [], dependsOn: [],
+      sourceFactIds: ["research/ece555/grading", "research/ece555/target_grade"],
       outcome: "ECE 555 总评 A−（≥ 90）", derivation: "总评 90；期末占 25%，其余预计 94 → 期末至少 85（bareLine），留 3 分余量设 88" }
   }];
-  const proposal = [{ projectId: "ece555", value: "总评 A−（≥ 90）", why: "他要继续读博，这门课只需稳妥不必满分，时间留给论文" }];
-  const code = (answer: ReturnType<typeof exam>, on: Profile, proposals: typeof proposal | [] = []) => {
-    try { validatePlans(answer, on, new Set(), proposals); } catch (error) { return (error as Error).message; } return "ok";
-  };
-
-  test("a course with no target on record and none proposed in the answer is sent back with what to propose", () => {
-    expect(code(exam(["research/ece555/grading"]), profileWith([grading]))).toBe("MILESTONE_TARGET_UNPROPOSED");
-  });
-
-  test("a target proposed in the same answer is enough, once the milestone cites it", () => {
-    const bare = profileWith([grading]);
-    expect(code(exam(["research/ece555/grading"]), bare, proposal)).toBe("MILESTONE_TARGET_NOT_CITED");
-    expect(code(exam(["research/ece555/grading", "research/ece555/target_grade"]), bare, proposal)).toBe("ok");
-  });
-
-  test("a target already on record, the model's earlier proposal or the person's own, is used as it is and has to be cited", () => {
-    for (const status of ["inferred", "confirmed"] as const) {
-      const on = profileWith([grading, target(status)]);
-      expect(code(exam(["research/ece555/grading"]), on)).toBe("MILESTONE_TARGET_NOT_CITED");
-      expect(code(exam(["research/ece555/grading", "research/ece555/target_grade"]), on)).toBe("ok");
-    }
-  });
-
-  test("a graded part the file marks TBD still needs its milestone", () => {
-    const parts = { ...profile, dates: [{ project: "ece555", kind: "quiz", date: "2026-10-09", title: "Quiz 2" }], undated: [{ project: "ece555", kind: "project_due", title: "Final Project Report" }] };
-    expect(code(exam(["research/ece555/grading", "research/ece555/target_grade"]), parts)).toBe("MILESTONE_COURSE_PARTS_MISSING");
-  });
+  expect(() => validatePlans(answer, on, new Set(), [{ projectId: "ece555", value: "总评 A−（≥ 90）", why: "他要继续读博" }])).not.toThrow();
+  expect(() => validatePlans(answer, on, new Set())).toThrow("MILESTONE_SOURCE_UNKNOWN");
 });
-
 test("a score line earlier in a chain may not stand above the chain's final one (a 7.0 mock before a 6.5 exam)", () => {
   const score = (value: number) => ({ successCriteria: [{ statement: `总分达到 ${value}`, evidenceOf: "outcome",
     measure: { kind: "threshold", unit: "分", comparator: "gte", value, bareLine: value - 0.5 } }] });

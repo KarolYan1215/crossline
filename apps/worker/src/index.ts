@@ -37,7 +37,6 @@ import { repairDuplicateImports, repairFrozenRace } from "./calendar-repair";
 import { repairLineAttributes } from "./attribute-repair";
 import { returnTidy } from "./return-tidy";
 import { workSplitRepair } from "./work-split-repair";
-import { mailReminderRepair, moneyAskRepair } from "./mail-reminder-repair";
 import { MAIL_INTAKE_REPAIR, mailIntakeRepair } from "./mail-intake-repair";
 import { mailRecordsRepair } from "./mail-records-repair";
 import { moneyReportPass } from "./money-report";
@@ -982,12 +981,8 @@ async function workspaceTick(workspace: { id: string }, checkedAt: string): Prom
     .catch((error) => { console.warn(JSON.stringify({ type: "repair.work_split_failed", workspaceId: workspace.id, error: String(error), checkedAt })); return undefined; });
   if (split) console.info(JSON.stringify({ type: "repair.work_split", workspaceId: workspace.id, assistant: split.assistant, ask: split.ask, merged: split.merged,
     backplan: split.backplan.length, prepOnly: split.prepOnly.length, checkedAt }));
-  // Once: to-dos from mail that only ask to look at something become reminders in the bell (mail-reminder-repair.ts).
+  // Once: bookkeeping read from mail before its rules is tidied (mail-records repair).
   try {
-    const reminded = mailReminderRepair(analysisStore, workspace.id);
-    if (reminded.length) console.info(JSON.stringify({ type: "repair.mail_reminders", workspaceId: workspace.id, archived: reminded.length, checkedAt }));
-    const money = moneyAskRepair(analysisStore, workspace.id);
-    if (money.length) console.info(JSON.stringify({ type: "repair.money_asks", workspaceId: workspace.id, moved: money.length, checkedAt }));
     const records = mailRecordsRepair(analysisStore, workspace.id);
     if (records.voided || records.refunds || records.merged) console.info(JSON.stringify({ type: "repair.mail_records", workspaceId: workspace.id, ...records, checkedAt }));
   } catch (error) { console.warn(JSON.stringify({ type: "repair.mail_reminders_failed", workspaceId: workspace.id, error: String(error), checkedAt })); }

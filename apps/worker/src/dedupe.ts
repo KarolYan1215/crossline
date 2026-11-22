@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  TASK_MERGE_REVIEW_SCHEMA, infoRequestSteps, isWorkOwner, planMerges, scopeRenames, spendAllows, taskTitleOf, textSimilarity, normalizeTaskTitle, validateTaskMergeReview, workOwner, tFor,
+  TASK_MERGE_REVIEW_SCHEMA, infoRequestSteps, isWorkOwner, orderInfoRequest, planMerges, scopeRenames, spendAllows, taskTitleOf, textSimilarity, normalizeTaskTitle, validateTaskMergeReview, workOwner, tFor,
   type WorkOwner, type BackgroundKind, type BackgroundSpend, type InfoRequest, type MergeGroup, type MergeTask, type TaskMergeReview
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
@@ -48,7 +48,9 @@ export function mergeTasks(store: CrosslineStore, workspaceId: string): MergeTas
       progress: plan ? plan.steps.filter((step) => step.status !== "planned").reduce((sum, step) => sum + step.share, 0) : 0,
       hasStepPlan: Boolean(plan), started: started.has(order.id), dependsOn: payload.dependsOn ?? [],
       // Who does it, as the backplanner reads it: the recorded owner, else what the work produces (docs/work-split.md). Merges stay on one side.
-      owner: isWorkOwner((order.payload as { owner?: unknown } | undefined)?.owner) ? (order.payload as { owner: WorkOwner }).owner : workOwner(order).owner };
+      owner: isWorkOwner((order.payload as { owner?: unknown } | undefined)?.owner) ? (order.payload as { owner: WorkOwner }).owner : workOwner(order).owner,
+      // A request for a fact, as the Skill that wrote it said (`payload.request`); older orders have none and are ordinary work.
+      request: orderInfoRequest(order) };
   });
 }
 

@@ -17,6 +17,9 @@ import { COMPLETION_FIELD, readModelCompletion, type ModelCompletion } from "./c
 import { tFor, type Locale } from "./i18n";
 import { textWidth } from "./text-width";
 import { isWorkOwner, workOwner, WORK_OWNERS, type WorkOwner, type WorkOwnerCode } from "./work-owner";
+import { NO_REQUEST, REQUEST_FIELD, type ModelInfoRequest } from "./info-request";
+import { NEEDS_PERSON_FIELD, NO_NEEDS_PERSON, needsPersonProblem, readNeedsPerson, type NeedsPerson } from "./auto-approval";
+import { CATEGORY_FIELD, isAgentCategory, type AgentCategory } from "./agent-dispatch";
 import { backedDrillForms, screenDrillItems, stripDrillForms, stripDrillSentences } from "./drill-forms";
 export type BackplanStep = { id: string; title: string; intent: string; sourceQuote: string; rationale: string; dependsOn: string[];
   estimate: { p25Minutes: number; p50Minutes: number; p85Minutes: number };
@@ -41,7 +44,18 @@ export type BackplanStep = { id: string; title: string; intent: string; sourceQu
   /** For the assistant's items and the questions: the id of the person's core item this prepares, "" when none. */
   prepares?: string;
   /** For `ask`: the one question to the person (at most two facts, ten minutes of theirs), "" otherwise. */
-  question?: string };
+  question?: string;
+  /**
+   * Whether the item is only a request for a fact (`info-request.ts`): who answers it and the fact; kind "none" for ordinary work. The
+   * model's call since 2026-11-22. Optional for answers recorded before it; the schema requires it.
+   */
+  request?: ModelInfoRequest;
+  /** Whether approving the item is the person's call (`auto-approval.ts`), with the quote that says so. Optional for recorded answers. */
+  needsPerson?: NeedsPerson;
+  /** For the assistant's items: the kind of work (`AGENT_CATEGORIES`), "" for the person's. Optional for recorded answers. */
+  category?: AgentCategory | "";
+  /** Graded work handed in for a mark: the assistant gives learning aid only. Optional for recorded answers. */
+  graded?: boolean };
 /** The cross-line artifacts a milestone's tasks produce and use: from its anchor's `outputs`/`inputs`, less what existing work covers. */
 export type BackplanArtifacts = { produce: string[]; use: string[] };
 export type BackplanBlocker = { code: string; message: string; what: string; whoHas: string };
@@ -72,7 +86,8 @@ export const BACKPLAN_SCHEMA = object({ steps: { type: "array", items: object({
   family: { type: "string", enum: ["preparation", "review", "deep_work"] },
   riskTier: { type: "string", enum: ["routine", "milestone", "high_risk"] }, evidence: str, acquires: str,
   produces: str, uses: { type: "array", items: str }, completion: COMPLETION_FIELD, extendsTaskId: str,
-  owner: { type: "string", enum: [...WORK_OWNERS] }, prepares: str, question: str
+  owner: { type: "string", enum: [...WORK_OWNERS] }, prepares: str, question: str,
+  request: REQUEST_FIELD, needsPerson: NEEDS_PERSON_FIELD, category: CATEGORY_FIELD, graded: { type: "boolean" }
 }) }, dateCandidates: { type: "array", items: object({ date: str, quote: str }) },
   blockers: { type: "array", items: object({ code: str, message: str, what: str, whoHas: str }) } });
 
@@ -138,6 +153,17 @@ export function validateBackplan(value: unknown, sources: string[], dateSources 
     step.owner = isWorkOwner(step.owner) ? step.owner : "person";
     step.prepares = typeof step.prepares === "string" ? step.prepares.trim() : "";
     step.question = typeof step.question === "string" ? step.question.trim().slice(0, 200) : "";
+    // The model's readings of the item (2026-11-22). An answer recorded before them has none: ordinary work, nothing for the person to
+    // decide, no kind named, not graded. A decision or an access must quote the item's own words.
+    const request = step.request as Partial<ModelInfoRequest> | undefined;
+    step.request = request && ["none", "ask_person", "look_up"].includes(String(request.kind))
+      ? { kind: request.kind!, who: String(request.who ?? "").trim().slice(0, 60), fact: String(request.fact ?? "").trim().slice(0, 200) } : { ...NO_REQUEST };
+    if (step.needsPerson === undefined) step.needsPerson = { ...NO_NEEDS_PERSON };
+    const needs = needsPersonProblem(step.needsPerson, [step.title, step.intent, step.sourceQuote, step.evidence, step.rationale]);
+    if (needs) throw new Error(`BACKPLAN_NEEDS_PERSON_INVALID: ${step.id} 的 ${needs}`); // i18n-ignore: a repair message to the backplanner
+    step.needsPerson = readNeedsPerson(step.needsPerson)!;
+    step.category = isAgentCategory(step.category) ? step.category : "";
+    step.graded = step.graded === true;
     seen.add(step.id);
   }
   // The person's core work comes first (docs/work-split.md §3): an answer that is all preparation is sent back to name it.
@@ -176,27 +202,17 @@ export type OwnedBackplanStep<T extends BackplanStep = BackplanStep> = T & { own
   prepares: string; question: string };
 
 /**
- * Settles who does each item (docs/work-split.md §2–3): `workOwner` corrects the model's owner; an item that only reviews the assistant's
- * output or writes an acceptance checklist is dropped (the gate judges the assistant's work, and the person glances at it when the core
- * task begins), its dependants taking its dependencies; the assistant's preparation and the questions point at the person's core item
- * they serve (`prepares`: the model's choice when it names a person's item, else the first person's item that waits on it, else the next
- * one in order). An assistant item that ended up holding a request for a fact (`infoRequests`, folded in by `foldInfoRequests`) is a
- * question: the person gets the answer from someone and passes it on.
+ * Settles who does each item (docs/work-split.md §2–3): the model's owner, with an act that leaves the machine kept with the person
+ * (`workOwner`); the assistant's preparation and the questions point at the person's core item they serve (`prepares`: the model's choice
+ * when it names a person's item, else the first person's item that waits on it, else the next one in order). An assistant item that ended
+ * up holding a request for a fact (`infoRequests`, folded in by `foldInfoRequests`) is a question: the person gets the answer from someone
+ * and passes it on. A review-only item is the model's not to write (the Skill says so); code no longer guesses one from its words.
  */
 export function assignBackplanOwners<T extends BackplanStep & { infoRequests?: Array<{ what: string; who: string }> }>(input: readonly T[], locale?: Locale):
-  { steps: Array<OwnedBackplanStep<T>>; dropped: Array<{ id: string; title: string; reason: string }> } {
+  { steps: Array<OwnedBackplanStep<T>> } {
   const t = tFor(locale);
-  const dropped: Array<{ id: string; title: string; reason: string }> = [];
-  let steps = input.map((step) => ({ ...step, dependsOn: [...step.dependsOn] }));
+  const steps = input.map((step) => ({ ...step, dependsOn: [...step.dependsOn] }));
   const verdicts = new Map(steps.map((step) => [step.id, workOwner(step, locale)]));
-  for (const step of [...steps]) {
-    const verdict = verdicts.get(step.id)!;
-    if (verdict.code !== "review_only") continue;
-    steps = steps.filter((item) => item.id !== step.id);
-    for (const other of steps) if (other.dependsOn.includes(step.id))
-      other.dependsOn = [...new Set([...other.dependsOn.filter((id) => id !== step.id), ...step.dependsOn])];
-    dropped.push({ id: step.id, title: step.title, reason: verdict.reason });
-  }
   const owned = steps.map((step): OwnedBackplanStep<T> => {
     const verdict = verdicts.get(step.id)!;
     const request = verdict.owner === "assistant" ? step.infoRequests?.[0] : undefined;
@@ -218,7 +234,7 @@ export function assignBackplanOwners<T extends BackplanStep & { infoRequests?: A
     step.prepares = owned.find((item) => person.has(item.id) && waitsOn(item.id, step.id))?.id
       ?? owned.slice(index + 1).find((item) => person.has(item.id))?.id ?? owned.find((item) => person.has(item.id))?.id ?? "";
   }
-  return { steps: owned, dropped };
+  return { steps: owned };
 }
 
 /**

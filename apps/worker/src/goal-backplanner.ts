@@ -144,8 +144,9 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
           + "named by what they produce), then the preparation each needs as the assistant's items (owner assistant, prepares = that core item's id) "
           + "or a short question to the person (owner ask). A person's item becomes one task card on the 任务 page (one deliverable, 30 to 480 minutes, named " // i18n-ignore: model-facing
           + "with its course or project) that the step planner splits into steps afterwards; a request for a fact is never an item. Read existingTasks and "
-          + "recentlyDone first: never write work they cover, and an item that only adds to an open task sets extendsTaskId. Never set a goal, a deadline "
-          + "or criteria.",
+          + "recentlyDone first: never write work they cover, and an item that only adds to an open task sets extendsTaskId. Give every item its "
+          + "request, needsPerson (quoting the item's own words), category and graded as the Skill says; the owner you give stands. Never set a goal, "
+          + "a deadline or criteria.",
         // The prompt cache (docs/token-economy.md §2.5): how the person works, then the line's and the project's work and material, then
         // this milestone and the date; the mode and the artifact rules for this run after the input.
         stableKeys: ["version", "personProfile", "existingTasks", "recentlyDone", "facts", "materials", "milestone", "artifacts"],
@@ -207,8 +208,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
       stripped: drill.stripped, dropped: drill.dropped }));
     const { steps: shaped } = foldInfoRequests(drill.items);
     // Who does each item (docs/work-split.md): the person's core tasks, the assistant's preparation for them, questions to the person.
-    // A review-only item is dropped: the gate judges the assistant's work.
-    const { steps: owned, dropped } = assignBackplanOwners(shaped, localeOf(store, workspaceId));
+    const { steps: owned } = assignBackplanOwners(shaped, localeOf(store, workspaceId));
     const noCore = owned.length > 0 && !owned.some((step) => step.owner === "person");
     // Rolling keeps the person's next core task with what it waits on and its preparation; with no core task, the first items.
     const planned = options.rolling ? rollingBackplan(owned, ROLLING_STEPS) : owned;
@@ -254,6 +254,10 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
           ...(step.infoRequests?.length ? { infoRequests: step.infoRequests } : {}),
           // How finishing it is taken, as the backplanner judged it (`completion.ts`).
           ...(step.completion ? { completion: step.completion } : {}),
+          // The backplanner's readings (2026-11-22): whether approving it is the person's call (`auto-approval.ts`), the kind of the
+          // assistant's work and whether it is graded (`agent-dispatch.ts`), and whether it is only a request for a fact (`info-request.ts`).
+          ...(step.needsPerson ? { needsPerson: step.needsPerson } : {}), ...(step.category ? { category: step.category } : {}),
+          ...(typeof step.graded === "boolean" ? { graded: step.graded } : {}), ...(step.request && step.request.kind !== "none" ? { request: step.request } : {}),
           automationParts: person ? [] : [part],
           humanCore: person ? [{ ...part, energy: step.energy, interruptible: step.interruptible }] : [],
           materialContract: [], evidenceContract: [{ kind: "record", description: step.evidence,
@@ -266,7 +270,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
       type: "goal.backplan_proposed", entityId: milestone.id,
       payload: { milestoneVersion: milestone.version, workOrderIds, ...(options.rolling ? { rolling: true, round: rounds } : {}),
         ...(missing.length ? { missing } : {}), ...(folds.size ? { folded: [...folds].map(([stepId, fold]) => ({ stepId, into: fold.keep, kind: fold.kind })) } : {}),
-        ...(dropped.length ? { reviewDropped: dropped } : {}), ...(noCore ? { noCore: true } : {}),
+        ...(noCore ? { noCore: true } : {}),
         dateCandidates: result.output.dateCandidates, source: SKILL } });
     if (inserted) {
       for (const draft of drafts) absorbParts(store, workspaceId, draft.id);
