@@ -85,7 +85,7 @@ import { createMilestoneConversation, createMilestoneProposer, createRelationRev
 import { createGoalBackplanner, milestonesAwaitingBackplan } from "./goal-backplanner";
 import { createPlanExplainer } from "./plan-explainer-runner";
 import { createWeeklyInsight } from "./weekly-insight-runner";
-import { createOnboardingSessionRunner, finishInterview } from "./onboarding-session";
+import { createOnboardingSessionRunner, enqueueInterview, finishInterview, steerInterview } from "./onboarding-session";
 import { researchRunnerFor } from "./onboarding-research";
 import { createOnboardingExtractor, EXTRACT_LANES, extractionRunning, requestExtraction } from "./onboarding-extract";
 import { extractText, reextractForLayout } from "./extract";
@@ -1957,6 +1957,8 @@ if (!capabilitySecret) {
         .finally(() => { void milestoneRiskPass(workspaceId).catch(() => undefined); }),
     continueMilestoneConversation: (_client, threadId, message, signal, workspaceId) =>
       createMilestoneConversation(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))(threadId, message, signal),
+    onboardingInsert: async (sessionId, text, mode, workspaceId) => mode === "steer"
+      ? steerInterview(analysisStore, workspaceId, sessionId, text) : enqueueInterview(analysisStore, workspaceId, sessionId, text),
     onboardingTurn: (_client, sessionId, text, _signal, workspaceId, reread) =>
       createOnboardingSessionRunner(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))({ sessionId, text, ...(reread ? { reread: true } : {}) })
         // The interview just finished: the first drafts start now, not at the next tick up to fifteen minutes later, while 主线 said

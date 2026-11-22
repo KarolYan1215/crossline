@@ -8,17 +8,19 @@ import { DiligencePanel } from "./diligence-panel";
 import { cardsFor, readCardAnswers } from "@crossline/core";
 
 /** The interview v3 (docs/onboarding-v3.md): the opening card, the stage pictures and the time left. */
-test("the opening states the premise and the three parts, then asks the lines — no six-level lecture, no tone or tier (2026-11-12)", () => {
+test("the opening is a preparation page: lines, then material (résumé first), then a calendar — no tone, tier or time estimate (2026-11-22)", () => {
   const html = renderToStaticMarkup(<OpeningCard linesKnown={false} knownLines={[]} busy={false} hasMaterials={false} onStart={() => {}} />);
   expect(html).toContain("开发者的话");
   expect(html).toContain("在AI时代夺回属于人类的部分");
   expect(html).toContain("——Y.K.");
-  expect(html).toContain("不限时长和轮数");
+  expect(html.indexOf("列出主线")).toBeLessThan(html.indexOf("放入材料"));
+  expect(html.indexOf("放入材料")).toBeLessThan(html.indexOf("连接日历"));
+  expect(html).toContain("简历放第一份");
+  expect(html).toContain("最多 1000 轮");
   expect(html).toContain("结束并出报告");
-  expect(html).toContain("画像这一部分不能跳过");
-  // An observation comes when there is one to give, not every round: the promise matches what the dialogue does (W-269).
+  expect(html).not.toContain("约 30 分钟");
+  expect(html).not.toContain("画像这一部分不能跳过");
   expect(html).not.toContain("每一轮都会给你一条");
-  expect(html).toContain("有把握的时候，会给你一条关于你自己的观察");
   // The tone is built in and the tiers are gone (decisions 10–11): neither is asked.
   expect(html).not.toContain("你希望我怎么跟你说话");
   expect(html).not.toContain("冷静客观");

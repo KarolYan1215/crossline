@@ -40,3 +40,15 @@ test("no call back while the page is in front", async () => {
   expect((await turn()).status).toBe(200);
   expect(sendPush).not.toHaveBeenCalled();
 });
+
+test("a message sent while a round runs goes to the supervisor with its mode, and calls nobody back (D17)", async () => {
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  store.setSetting(TEST_CTX.workspaceId, "presence.visibleAt", new Date(Date.now() - 5 * 60_000).toISOString());
+  supervisor.mockImplementationOnce(async () => ({ state: "queued", sessionId: "s1", queued: 1 }) as never);
+  const response = await (await import("./route")).POST(new Request("http://127.0.0.1/api/onboarding/turn",
+    { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: "s1", text: "还有一件", mode: "queue" }) }));
+  expect(await response.json()).toMatchObject({ state: "queued" });
+  const calls = supervisor.mock.calls as unknown as Array<[unknown, string, { body: string }]>;
+  expect(JSON.parse(calls.at(-1)![2].body)).toMatchObject({ sessionId: "s1", mode: "queue" });
+  expect(sendPush).not.toHaveBeenCalled();
+});

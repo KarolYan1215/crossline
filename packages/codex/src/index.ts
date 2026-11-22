@@ -538,6 +538,11 @@ export async function startCodexSupervisor(options: {
    * everything it learned live in the ledger, so the browser holds only a session id. */
   onboardingTurn?: (client: CodexRpcBoundary, sessionId: string, text: string, signal: AbortSignal,
     workspaceId: string, reread: boolean) => Promise<unknown>;
+  /**
+   * A message the person sends while a round of the interview runs (D17, 2026-11-22): `queue` waits for the round after it, `steer` goes
+   * into the running round (Codex `turn/steer`). Answered at once; the running round's request carries the queued ones on.
+   */
+  onboardingInsert?: (sessionId: string, text: string, mode: "queue" | "steer", workspaceId: string) => Promise<unknown>;
   /** The person's 「结束并出报告」 (2026-11-12): the interview ends, the extraction finishes and the portrait is written in the background. */
   onboardingFinish?: (client: CodexRpcBoundary, sessionId: string, workspaceId: string) => Promise<unknown>;
   /** The person's answer to, or follow-up in, one of the interview's research threads: goes to that thread alone. */
@@ -1277,6 +1282,11 @@ export async function startCodexSupervisor(options: {
         const sessionId = String(body?.sessionId ?? "");
         if (!/^[a-zA-Z0-9_-]{1,128}$/.test(sessionId)) {
           sendJson(response, 400, { blocker: { code: "ONBOARDING_TURN_INVALID", message: say("缺少会话 id") } });
+          return;
+        }
+        const mode = body?.mode === "queue" ? "queue" as const : body?.mode === "steer" ? "steer" as const : undefined;
+        if (profileTurns.has(callerWorkspaceId) && mode && options.onboardingInsert && String(body?.text ?? "").trim()) {
+          await sendJsonWhenReady(response, () => options.onboardingInsert!(sessionId, String(body?.text ?? "").slice(0, 16_000), mode, callerWorkspaceId));
           return;
         }
         if (profileTurns.has(callerWorkspaceId)) {

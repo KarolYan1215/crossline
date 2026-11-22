@@ -105,6 +105,11 @@ export type SkillRunOptions<T> = {
    */
   keepThread?: boolean;
   developerInstructions: string;
+  /**
+   * The JSON schema the final message must follow; `undefined` is a free-text run (the interview's dialogue since 2026-11-22, the way
+   * Codex itself answers): the final message is handed to `validateOutput` as the string it is, no turn carries a schema, and a turn
+   * without one is one the person can steer (`steerTurn`).
+   */
   outputSchema: unknown;
   /** Validated before the turn starts; whatever it returns is what gets sent. */
   prepareInput: (input: unknown) => unknown;
@@ -177,7 +182,12 @@ export type SkillRunOptions<T> = {
    * provider only when its conformance record shows it calling one (`ProviderRouting.functionCalls`). Otherwise they are not offered
    * and the run's input is `withoutTools(input)`: the passages code picked, in full. `onMode` is told which it was.
    */
-  optionalTools?: { tools: SkillTools; instructions: string; withoutTools: (input: unknown) => unknown; onMode?: (mode: "tools" | "fallback") => void };
+  optionalTools?: { tools: SkillTools; instructions: string; withoutTools: (input: unknown) => unknown; onMode?: (mode: "tools" | "fallback") => void;
+    /**
+     * With the tools the run answers in free text (`outputSchema` dropped): what the schema's fields carried goes through the tools.
+     * Without them (a provider that has not shown it calls functions) the schema stays: the minimal fallback for a weaker model.
+     */
+    freeText?: boolean };
   /**
    * Codex's code mode for a run with `tools` (2026-10-19, the owner: turn the runtime's own features over to use): the model may write
    * JavaScript that runs in the runtime's V8 isolate — no file system, network or process of its own — to compute and to call the run's
@@ -243,6 +253,11 @@ export type SkillRunOptions<T> = {
    * new thread, and `audit.resumed` says which happened. The caller's prompt carries what the last run did either way.
    */
   resumeThreadId?: string;
+  /**
+   * With `resumeThreadId`: a thread the runtime no longer has ends the run as SKILL_THREAD_LOST instead of starting a new one (the
+   * interview's cold resume, 2026-11-22: only a rollout that is really gone is rebuilt from the ledger, by the caller, who knows what to tell it).
+   */
+  resumeOnly?: boolean;
 };
 
 /**
@@ -392,6 +407,7 @@ function withOptionalTools<T>(options: SkillRunOptions<T>, input: unknown, conte
   const { optionalTools: _resolved, ...rest } = options;
   if (!context.functionCalls) { optional.onMode?.("fallback"); return { options: rest, input: optional.withoutTools(input) }; }
   optional.onMode?.("tools");
+  if (optional.freeText) rest.outputSchema = undefined;
   const own = options.tools;
   return { input, options: { ...rest, developerInstructions: `${options.developerInstructions}\n\n${optional.instructions}`,
     tools: { specs: [...(own?.specs ?? []), ...optional.tools.specs.filter((spec) => !own?.specs.some((mine) => mine.name === spec.name))],
@@ -701,6 +717,7 @@ export type ContinueTurnOptions<T> = {
   cwd: string;
   /** Local image files the person attached to this message (a screenshot), shown with it. */
   images?: string[];
+  /** As `SkillRunOptions.outputSchema`: `undefined` is a free-text turn. */
   outputSchema: unknown;
   /** The thread's language, as `SkillRunOptions.locale`: the output schema's length limits and the blocker the person reads follow it. */
   locale?: Locale;
@@ -1146,6 +1163,8 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
 
   /** Models routinely wrap JSON in a ```json fence even when told to return JSON only: a transport habit, not invented content. */
   const parse = (answer: string): unknown => {
+    // A free-text run: the final message is the answer, as the model wrote it.
+    if (run.outputSchema === undefined) return answer.trim();
     const body = answer.trim().replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```$/, "");
     try { return cleanAnswerStrings(JSON.parse(body)); }
     catch (error) {
@@ -1207,8 +1226,10 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
       const answer = await runTurnOrRetryStall(attempt === 0 ? run.firstPrompt
         : `Your previous answer was rejected by the receiving layer: ${rejection?.message}`
           + `${(rejection as Detailed | undefined)?.detail ? ` — ${(rejection as Detailed).detail}` : ""}\n\n`
-          + "Return the corrected JSON object in full. Change only what the rejection names; do not "
-          + "explain, apologise, or add commentary outside the JSON.", attempt === 0 ? run.images ?? [] : []);
+          + (run.outputSchema === undefined
+            ? "Write your answer again in full. Change only what the rejection names; do not explain or apologise."
+            : "Return the corrected JSON object in full. Change only what the rejection names; do not "
+              + "explain, apologise, or add commentary outside the JSON."), attempt === 0 ? run.images ?? [] : []);
       let parsed: unknown;
       try {
         parsed = parse(answer);
@@ -1244,6 +1265,18 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
       }
     }
   } finally { unsubscribe(); }
+}
+
+/**
+ * The person's words put into a turn that is running (Codex `turn/steer`, 2026-11-22: the interview's 「插入本轮」). Only a turn with no
+ * output schema can be steered, and only the turn named (`expectedTurnId`): one that has ended since refuses, and the caller queues the
+ * words for the next turn instead. Resolves false when the runtime refused.
+ */
+export async function steerTurn(client: CodexRpcBoundary, threadId: string, turnId: string, text: string): Promise<boolean> {
+  try {
+    const answer = record(await client.request("turn/steer", { threadId, expectedTurnId: turnId, input: [{ type: "text", text, text_elements: [] }] }));
+    return typeof answer?.turnId === "string";
+  } catch { return false; }
 }
 
 /** Turns whatever ended a run into the blocker the person sees, and stops the turn if one is still going. */
@@ -1473,7 +1506,8 @@ export const RUN_NOTE_LEAD = "Instructions for this run only (they extend the de
 export function firstPromptTexts(skillName: string, extraSkills: readonly string[], prepared: unknown,
   options: { stableKeys?: readonly string[] | undefined; runNote?: string | undefined } = {}): string[] {
   const note = options.runNote?.trim();
-  return [`$${skillName}\n\n${JSON.stringify(cacheOrderedInput(prepared, options.stableKeys))}`,
+  // A string is a message as it is (a resumed conversation's next line); anything else the run's JSON input.
+  return [`$${skillName}\n\n${typeof prepared === "string" ? prepared : JSON.stringify(cacheOrderedInput(prepared, options.stableKeys))}`,
     ...(extraSkills.length ? [extraSkills.map((name) => `$${name}`).join(" ")] : []),
     ...(note ? [`${RUN_NOTE_LEAD}\n${note}`] : [])];
 }
@@ -1541,6 +1575,7 @@ async function openRunThread<T>(client: CodexRpcBoundary, scope: Scope, options:
   } catch (error) {
     if (!isThreadLost(error)) throw error;
     console.info(JSON.stringify({ type: "skill.resume_lost", skill: options.skillName, threadId: resumeId }));
+    if (options.resumeOnly) fail("SKILL_THREAD_LOST");
     audit.resumed = false;
     return startIsolatedThread(scope, options, context);
   }

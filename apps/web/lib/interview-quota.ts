@@ -40,10 +40,10 @@ export async function interviewQuota(ctx: AccessContext, options: { usageLimitHi
   const invite = inviteState(ctx);
   const status = interviewStatus(ctx);
   const rounds = roundsOf(ctx, status.sessionId);
-  if (invite.sponsored) return { verdict: "ok", message: "", remainingRounds: 0, invite };
+  if (invite.sponsored) return { verdict: "ok", message: "", invite };
   const account = await chatgptPlan(ctx);
   // Another model's API, or no ChatGPT account at all: nothing to say about a ChatGPT quota.
-  if (account.type !== "chatgpt") return { verdict: "ok", message: "", remainingRounds: 0, invite };
+  if (account.type !== "chatgpt") return { verdict: "ok", message: "", invite };
   const outlook = interviewQuotaOutlook({ plan: account.plan, signal: await readQuota(ctx), trace: readTrace(ctx), roundsDone: rounds,
     complete: status.complete, locale: localeFor(ctx), ...(options.usageLimitHit ? { usageLimitHit: true } : {}) });
   return { ...outlook, ...(account.plan ? { plan: account.plan } : {}), invite };

@@ -31,6 +31,8 @@ export type AgentScript = (tools: {
 
 type Answer = string | ((prompts: string[]) => string);
 export function fakeRuntime(answers: Answer[], skillName: string | string[], options: { lostThreads?: string[]; unloadedThreads?: string[]; delayMs?: number; stallTurns?: number[];
+  /** Threads the runtime unloaded but keeps on disk (a restart): a `turn/start` on one is "not found" until a `thread/resume` loads it. */
+  coldThreads?: string[];
   /**
    * Answers for threads whose first prompt contains `match` (a Skill run beside another, e.g. the interview's extraction), each route
    * with its own queue; a thread keeps the route its first turn chose. Threads no route matches take `answers`.
@@ -63,11 +65,17 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
   resumeParams: () => Array<Record<string, unknown>>;
   /** Every runtime call in order, by method (to check that a compaction came between two turns). */
   calls: () => string[];
+  /** The `turn/start` parameters the runner sent, in order (whether a turn carried an output schema, its model and effort). */
+  turnParams: () => Array<Record<string, unknown>>;
+  /** The `turn/steer` parameters the runner sent, in order. */
+  steers: () => Array<Record<string, unknown>>;
 } {
   const unsubscribed: string[] = [];
   const resumes: string[] = [];
   const resumeParams: Array<Record<string, unknown>> = [];
   const calls: string[] = [];
+  const turnParams: Array<Record<string, unknown>> = [];
+  const steers: Array<Record<string, unknown>> = [];
   let compactions = 0;
   // As the real runtime does: a connection gets a thread's events only while subscribed (thread/start, thread/resume); a turn
   // started on a thread it unsubscribed from still runs, silently.
@@ -80,6 +88,7 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
   const prompts: string[] = [];
   const inputs: string[][] = [];
   const starts: Array<Record<string, unknown>> = [];
+  const warmed = new Set<string>();
   const pendingAsks = new Map<string, (value: Record<string, unknown>) => void>();
   let askId = 0;
   const configCalls: Array<{ method: string; params: Record<string, unknown> }> = [];
@@ -106,7 +115,9 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
       }
       resumes.push(id); resumeParams.push(request.params ?? {}); subscribed.add(id);
     }
-    if (request.method === "turn/start" && options.lostThreads?.includes(String(request.params?.threadId))) {
+    if (request.method === "thread/resume") warmed.add(String(request.params?.threadId));
+    if (request.method === "turn/start" && (options.lostThreads?.includes(String(request.params?.threadId))
+      || (options.coldThreads?.includes(String(request.params?.threadId)) && !warmed.has(String(request.params?.threadId))))) {
       queueMicrotask(() => rpc.receiveLine(JSON.stringify({ id: request.id, error: { code: -32600, message: `thread not found: ${String(request.params?.threadId)}` } })));
       return;
     }
@@ -129,6 +140,7 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
       : request.method === "thread/compact/start" ? {}
       : request.method === "thread/start"
         ? { thread: { id: threadId }, approvalPolicy: "untrusted", sandbox: { type: "readOnly" }, instructionSources: [], ...(options.threadResponse ?? {}) }
+        : request.method === "turn/steer" ? { turnId: String(request.params?.expectedTurnId ?? "") }
         : { turn: { id: `turn-${turns + 1}`, status: "inProgress" } };
     queueMicrotask(() => rpc.receiveLine(JSON.stringify({ id: request.id, result })));
     // As the real runtime does: a compaction is a turn of its own, with a `contextCompaction` item.
@@ -142,8 +154,10 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
         rpc.receiveLine(JSON.stringify({ method: "turn/completed", params: { threadId: thread, turn: { id: turnId, status: "completed" } } }));
       }, options.delayMs ?? 1);
     }
+    if (request.method === "turn/steer") steers.push(request.params ?? {});
     if (request.method === "turn/start") {
       turns += 1;
+      turnParams.push(request.params ?? {});
       const turnId = `turn-${turns}`;
       // What the runner actually sent, so a test can assert that a repair turn carried the rejection.
       const input = request.params?.input;
@@ -190,7 +204,8 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
     }
   });
   return { rpc, turns: () => turns, prompts: () => prompts, inputs: () => inputs, interrupts: () => interrupts, threadStarts: () => starts, configCalls: () => configCalls,
-    unsubscribed: () => unsubscribed, resumes: () => resumes, resumeParams: () => resumeParams, calls: () => calls };
+    unsubscribed: () => unsubscribed, resumes: () => resumes, resumeParams: () => resumeParams, calls: () => calls,
+    turnParams: () => turnParams, steers: () => steers };
 }
 
 const FIXTURES = path.join(import.meta.dirname, "fixtures");

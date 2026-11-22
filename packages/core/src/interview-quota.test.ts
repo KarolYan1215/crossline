@@ -21,7 +21,10 @@ test("a Free account is warned before it is measured, told how many rounds are l
   expect(unmeasured.message).toContain("开发者提供的模型");
   const trace = [1, 2, 3].map((round) => quotaReading(signal(10 * round + 20), round, at)!);
   const short = interviewQuotaOutlook({ plan: "free", signal: signal(50), trace, roundsDone: 3, complete: false });
-  expect(short).toMatchObject({ verdict: "insufficient", perRound: 10, roundsLeft: 5, remainingRounds: 9 });
+  expect(short).toMatchObject({ verdict: "insufficient", perRound: 10, roundsLeft: 5 });
+  // No round count is expected of the interview (2026-11-22): the message says what the quota carries, nothing about what is left to do.
+  expect(short.message).not.toMatch(/通常还要|约 \d+ 轮/u);
+  expect(short).not.toHaveProperty("remainingRounds");
   expect(interviewQuotaOutlook({ plan: "plus", signal: signal(12), trace: [1, 2].map((round) => quotaReading(signal(round), round, at)!), roundsDone: 2, complete: false }).verdict).toBe("ok");
   expect(interviewQuotaOutlook({ plan: "free", signal: signal(100), trace, roundsDone: 3, complete: false }).verdict).toBe("spent");
   expect(interviewQuotaOutlook({ plan: "free", signal: signal(30), trace: [], roundsDone: 3, complete: false, usageLimitHit: true }).verdict).toBe("spent");

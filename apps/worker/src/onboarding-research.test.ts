@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { PROFILE_FRAMEWORK, type ResearchThread } from "@crossline/core";
-import { createResearchRunner, newResearchQuestions, profileBrief, readResearch, RESEARCH_OPEN_MAX, RESEARCH_RUNS_PER_STEP, RESEARCH_SKILL, researchFindings, researchForDialogue } from "./onboarding-research";
+import { createResearchRunner, newResearchQuestions, profileBrief, readResearch, RESEARCH_SKILL, researchFindings, researchForDialogue } from "./onboarding-research";
 import { fakeRuntime } from "./testing/fake-runtime";
 
 let store: CrosslineStore;
@@ -19,10 +19,10 @@ const thread = (over: Partial<ResearchThread>): ResearchThread => ({ id: "r1", q
   createdAt: "2026-11-12T00:00:00.000Z", updatedAt: "2026-11-12T00:00:00.000Z", ...over });
 const threadsNow = () => readResearch(store, workspaceId, "s");
 
-test("a new question opens a thread only when its words are new and fewer than the open maximum run", () => {
-  const open = Array.from({ length: RESEARCH_OPEN_MAX - 1 }, (_, index) => thread({ id: `r${index}`, question: `问题 ${index}` }));
+test("a new question opens a thread whenever its words are new, however many are open (2026-11-22: research is not rationed)", () => {
+  const open = Array.from({ length: 6 }, (_, index) => thread({ id: `r${index}`, question: `问题 ${index}` }));
   const fresh = newResearchQuestions(open, [{ ...asked, question: "问题 0？" }, asked, { ...asked, question: "另一个问题" }]);
-  expect(fresh.map((item) => item.question)).toEqual([asked.question]);
+  expect(fresh.map((item) => item.question)).toEqual([asked.question, "另一个问题"]);
 });
 
 test("a thread that asks waits for the person; their answer goes to that thread alone and a sourced conclusion closes it", async () => {
@@ -43,13 +43,16 @@ test("a thread that asks waits for the person; their answer goes to that thread 
   expect(researchForDialogue(threadsNow())).toEqual([{ id: done.id, question: asked.question, status: "done", conclusion: done.conclusion }]);
 });
 
-test("a thread with neither a conclusion nor a question runs again, and after its runs closes with what it found", async () => {
-  const { rpc, prompts, threadStarts } = fakeRuntime(Array.from({ length: RESEARCH_RUNS_PER_STEP }, () => turn({ message: "公开 JD 太少，查不到比例。" })), RESEARCH_SKILL);
+test("a thread with neither a conclusion nor a question runs again while it finds something new, then closes with what it found", async () => {
+  const found = (n: number) => turn({ message: "公开 JD 太少，查不到比例。", sources: [{ title: `JD ${n}`, url: `https://example.com/jd/${n}` }] });
+  // Five runs that each bring a new source (more than the old fixed four), one that brings none, and the closing run.
+  const { rpc, prompts, threadStarts } = fakeRuntime([found(1), found(2), found(3), found(4), found(5), turn({ message: "公开 JD 太少，查不到比例。" })], RESEARCH_SKILL);
   createResearchRunner(store, workspaceId, "C:\\repo", () => rpc).start("s", [asked]);
   await vi.waitFor(() => expect(threadsNow()[0]?.status).toBe("done"));
-  expect(threadsNow()[0]!.messages).toHaveLength(RESEARCH_RUNS_PER_STEP);
-  // Only the last run is told it is the last, so it concludes with what it has (C25); the run carries the portrait framework.
-  expect(prompts().map((prompt) => prompt.includes('"lastRun":true'))).toEqual([...Array.from({ length: RESEARCH_RUNS_PER_STEP - 1 }, () => false), true]);
+  expect(threadsNow()[0]!.messages).toHaveLength(7);
+  expect(threadsNow()[0]!.sources).toHaveLength(5);
+  // Only the run after the one that found nothing is told it is the last (C25); the run carries the portrait framework.
+  expect(prompts().map((prompt) => prompt.includes('"lastRun":true'))).toEqual([false, false, false, false, false, false, true]);
   expect(String(threadStarts()[0]?.developerInstructions)).toContain(PROFILE_FRAMEWORK);
   expect(researchForDialogue(threadsNow())[0]).toMatchObject({ status: "done", found: "公开 JD 太少，查不到比例。" });
   expect(researchForDialogue(threadsNow())[0]).not.toHaveProperty("conclusion");

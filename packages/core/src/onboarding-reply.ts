@@ -25,24 +25,8 @@ export function safetyReplyOnly(reply: string): string {
   return `${reply.slice(0, cut)}${questions.join("")}`.trim();
 }
 
-/** Dates, times, counts and amounts as written: what a research conclusion is made of. */
-const FIGURE = /\d{1,4}\s*(?:年|月|日|号|点|时|小时|天|周|%|％|万|元|岁|人)/gu;
-const squeeze = (text: string) => text.replace(/\s/gu, "");
-
-/**
- * How many figures of a research conclusion a reply may repeat: one conclusion that changes the next step needs two at most (「8 点前到岗、
- * 18 点后离行」); replay 10's rounds 14 and 15, which listed the threads, had six and three.
- */
-export const RESEARCH_FIGURES_MAX = 2;
-
-/**
- * The figures of the finished research threads the reply repeats, each once. The Skill says a reply keeps one conclusion that changes
- * the next step and leaves the dates and thresholds to the right column; replay 10 still put every firm's deadline into three replies.
- */
-export function researchCopied(reply: string, findings: string[]): string[] {
-  const found = new Set(findings.flatMap((text) => (text.match(FIGURE) ?? []).map(squeeze)));
-  return [...new Set((reply.match(FIGURE) ?? []).map(squeeze))].filter((figure) => found.has(figure));
-}
+// `researchCopied` (a reply listing a research thread's figures was sent back) was removed on 2026-11-22: a belief checked on the spot is
+// answered with its data and links (「你的认知｜判定｜数据与纠偏」), which is what the person asked for.
 
 /** A date the reply says something is set for: 「定在 11 月 17 日」. */
 const SET_FOR = /(?:定在|定于|安排在|放在|约在|就在|改到|挪到)\s*(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]/gu;

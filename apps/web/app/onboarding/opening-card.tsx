@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { DOMAIN_PACKS, LINE_DOMAINS, lineNounFor, type LineDomain } from "@crossline/identity-packs";
 import { tFor, type Locale } from "../../lib/i18n";
 import { useLocale } from "../locale-context";
@@ -9,8 +9,10 @@ import { VoiceField } from "../ui/voice/voice-input";
 import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY } from "./onboarding-types";
 
 /**
- * The interview's first message (docs/onboarding-v3.md, decided 2026-10-14): the premise in plain words, how it runs and what it gives,
- * then one card of fact questions answered together — the lines, the one that cannot move, and the ones with a fixed schedule. It replaces
+ * The preparation page before the interview (2026-11-22, the owner): first the main lines, then the material (the résumé first), then the
+ * calendar, which can be skipped. Before that it was the interview's first message (docs/onboarding-v3.md, decided 2026-10-14): the premise
+ * in plain words, then one card of fact questions answered together — the lines, the one that cannot move, and the ones with a fixed
+ * schedule. It replaces
  * the old line-setup screen and the six-level lecture; the structure is shown at the end, drawn from what was said. Its answers are written
  * in code (lines) and sent as the first reply, so the interview quotes them like anything else said. The tone and the tier are no longer
  * asked (2026-11-12, decisions 10–11): the interview speaks plainly and has no tiers.
@@ -18,12 +20,12 @@ import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY } from "./onboarding-types";
  * The lite edition (decided 2026-10-19, docs/domain-lines.md) is asked first: 健康 and 财富 as domain lines plus, when there is one, the one
  * thing with a fixed schedule. It is not a mode: the answer only pre-fills the lines, and more can be added on the 主线 page at any time.
  */
-const COMMON_LINES = ["研究者", "学生", "工程师", "创业者", "创作者", "投资者", "设计师", "教师", "职员", "自由职业者"];
+const COMMON_LINES = ["研究者", "工程师", "创业者", "创作者", "投资者", "设计师", "教师", "职员", "自由职业者"];
 const DOMAIN_NOUNS = LINE_DOMAINS.map((domain) => DOMAIN_PACKS[domain].noun);
 const ALL_EQUAL = "几条并重";
 const NO_FIXED = "都没有";
 /** The lite edition's usual fixed-schedule things, as people say them; the line itself is named for a person (`lineNounFor`). */
-const FIXED_ACTIVITIES = ["上班", "上学", "自由职业"];
+const FIXED_ACTIVITIES = ["上班", "自由职业"];
 
 export type Edition = "lite" | "full";
 export type OpeningAnswer = { edition: Edition; lines: string[]; domains: Record<string, LineDomain>; base: string; fixed: string[];
@@ -60,12 +62,16 @@ export function openingReply(answer: OpeningAnswer, withMaterials: boolean, loca
     t(withMaterials ? MATERIALS_FIRST_REPLY : NO_MATERIALS_REPLY)].join("\n");
 }
 
-export function OpeningCard({ linesKnown, knownLines, busy, hasMaterials, needsConnection = false, onStart }: {
+export function OpeningCard({ linesKnown, knownLines, busy, hasMaterials, needsConnection = false, onStart, onAddFiles, calendarSlot }: {
   /** The lines are already set (an account from before this card): nothing is asked, the card only starts the interview. */
   linesKnown: boolean; knownLines: string[]; busy: boolean; hasMaterials: boolean;
   /** No model connection yet: the card can be filled in, but the first round cannot run until the step above it is done. */
   needsConnection?: boolean;
   onStart: (answer: OpeningAnswer) => void;
+  /** Files picked in the material step, handed to the page's own upload. */
+  onAddFiles?: (files: FileList) => void;
+  /** The calendar step's own component (connecting a calendar, skippable); until there is one, the step only says it can wait. */
+  calendarSlot?: ReactNode;
 }) {
   const locale = useLocale();
   const t = tFor(locale);
@@ -115,13 +121,13 @@ export function OpeningCard({ linesKnown, knownLines, busy, hasMaterials, needsC
         <p>{t("做完之后，开始任务之前，你会得到一份独属于你的报告，欢迎诸君，在AI时代夺回属于人类的部分。")}</p>
         <p className="ob-opening-sign">——Y.K.</p>
       </details>
+      {/* The preparation, in the order the owner set (2026-11-22): the lines, the material, the calendar. */}
       <ol className="ob-opening-plan">
-        {/* The profile module comes first and is not skipped (decided 2026-10-31, docs/profile-and-agent-kit.md §四). */}
-        <li><b>{t("先认识你这个人")}</b><span>{t("一路走来的经历、在意什么、精力怎么起落、现在的处境。中间穿插几张点选卡片，点一下就行，也可以写一句话代替。有把握的时候，会给你一条关于你自己的观察，你来判断准不准。")}</span></li>
-        <li><b>{t("再排进日历")}</b><span>{t("你有哪些想成为的身份，各自正在做什么、大概什么时候截止；时间说个大概就行，材料里有的不再问。")}</span></li>
-        <li><b>{t("拿到结果")}</b><span>{t("画像报告和一周的骨架草稿。具体项目的细节，到拆任务时再补。")}</span></li>
+        <li><b>{t("列出主线")}</b><span>{t("你正在投入的几条主线。访谈中随时可以改。")}</span></li>
+        <li><b>{t("放入材料")}</b><span>{t("先放简历，再放计划、作品、日程这类文件。访谈先读材料，只问材料里没有的。")}</span></li>
+        <li><b>{t("连接日历")}</b><span>{t("可以跳过，之后在设置里连接。")}</span></li>
       </ol>
-      <p className="ob-opening-time">{t("不限时长和轮数：大部分时间是画像，其余把各条主线的事排进同一张日历。画像这一部分不能跳过，后面怎么安排都以它为准。开始使用所需的几项问清之后，随时可以按「结束并出报告」。左侧可以先放入简历、课表、课程大纲，访谈会先读材料，只问材料里没有的。")}</p>
+      <p className="ob-opening-time">{t("访谈从你的材料和回答出发：经历和处境、在意什么、精力怎么起落，再到每条主线五年后的样子、里程碑和第一批任务。不限时长，最多 1000 轮；开始使用所需的几项问清之后，随时可以按「结束并出报告」。")}</p>
     </div>
 
     {!linesKnown && <>
@@ -154,7 +160,7 @@ export function OpeningCard({ linesKnown, knownLines, busy, hasMaterials, needsC
               <input value={hard} maxLength={20} onChange={(event) => setLineName(event.target.value)} aria-label={t("这条线的名称")} />
             </label>
             <small className="ob-muted">{lineName === undefined && !derived.certain
-              ? t("请改成指人的称呼，例如职场人、学生、自由职业者")
+              ? t("请改成指人的称呼，例如职场人、自由职业者")
               : t("长期目标会写成「成为……的{{line}}」，可以改", { line: hard || "……" })}</small>
           </div>}
         </fieldset>
@@ -177,7 +183,7 @@ export function OpeningCard({ linesKnown, knownLines, busy, hasMaterials, needsC
         </div>
       </fieldset>}
       {edition === "full" && lines.length > 0 && <fieldset className="ob-question">
-        <legend>{t("哪些有固定日程，比如课表或坐班？")}<small>{t("最多两条；固定日程是一周的骨架，其余时间围绕它安排")}</small></legend>
+        <legend>{t("哪些有固定日程、不能挪？")}<small>{t("最多两条；固定日程是一周的骨架，其余时间围绕它安排")}</small></legend>
         <div className="ob-chips" role="group">
           {lines.map((label) => <button key={label} type="button" role="checkbox" aria-checked={chosenFixed.includes(label)} data-picked={chosenFixed.includes(label)}
             onClick={() => setFixed((list) => list.includes(label) ? list.filter((item) => item !== label) : list.length >= 2 ? list : [...list, label])}>{label}</button>)}
@@ -185,6 +191,19 @@ export function OpeningCard({ linesKnown, knownLines, busy, hasMaterials, needsC
         </div>
       </fieldset>}
     </>}
+
+    <fieldset className="ob-question">
+      <legend>{t("材料")}<small>{t("简历放第一份")}</small></legend>
+      {hasMaterials && <p className="ob-muted">{t("已经放入的材料在左侧，访谈会先读。")}</p>}
+      {onAddFiles && <label className="ob-file-button">
+        <input type="file" multiple hidden onChange={(event) => { if (event.target.files?.length) onAddFiles(event.target.files); event.target.value = ""; }} />
+        {t("添加文件")}
+      </label>}
+    </fieldset>
+    <fieldset className="ob-question">
+      <legend>{t("日历")}<small>{t("可跳过")}</small></legend>
+      {calendarSlot ?? <p className="ob-muted">{t("现在不连也可以，之后在设置里连接。")}</p>}
+    </fieldset>
 
     <div className="ob-opening-go">
       <button type="button" className="ob-btn ob-primary" disabled={busy || !chosen.length || needsConnection}

@@ -81,10 +81,10 @@ export type TurnCoverage = { identityId: string; filled: string[]; missing: stri
 export const ONBOARDING_STAGES = ["narrative", "orientation", "lines", "situation", "compass", "energy", "details"] as const;
 export type OnboardingStage = (typeof ONBOARDING_STAGES)[number];
 /**
- * The order the stages run in (docs/profile-and-agent-kit.md §四, decided 2026-10-31). `v2` puts the profile module first — the life
- * story (`narrative`), values (`compass`), energy and the day, work and where they stand (`situation`), with the short instruments as
- * cards between them — and then fits Crossline to it (`orientation`, `lines`). A session started before keeps `v1`, so a section whose
- * stage it never ran is not closed as over. The flow is kept in the session's coverage (`coverage.flow`).
+ * The ledger's partitions of an interview, listed per flow (2026-11-22: the order the interview goes in is the Skill's, not the code's —
+ * crossline-onboarding/SKILL.md; the dialogue names the part a round is in with `mark_round`). The lists say which portrait sections a
+ * flow has and which one an interview is filed under before its first round; nothing walks them in order. A session started before
+ * 2026-10-31 keeps `v1`, so a section it never had is not closed as over. The flow is kept in the session's coverage (`coverage.flow`).
  */
 export type InterviewFlow = "v1" | "v2";
 export const INTERVIEW_FLOW_STAGES: Record<InterviewFlow, readonly OnboardingStage[]> = {
@@ -92,15 +92,6 @@ export const INTERVIEW_FLOW_STAGES: Record<InterviewFlow, readonly OnboardingSta
   v2: ["narrative", "compass", "energy", "situation", "orientation", "lines", "details"]
 };
 export const flowOf = (coverage: unknown): InterviewFlow => (coverage as { flow?: unknown } | null | undefined)?.flow === "v2" ? "v2" : "v1";
-/** The stages of the profile module in `v2`: the app's own fact questions wait until they are over. */
-export const PROFILE_MODULE_STAGES: ReadonlySet<OnboardingStage> = new Set<OnboardingStage>(["narrative", "compass", "energy", "situation"]);
-/** Whether a stage comes before another in a flow (an unknown stage counts as the flow's first). */
-export const stageIndexIn = (flow: InterviewFlow, stage: string): number => Math.max(0, INTERVIEW_FLOW_STAGES[flow].indexOf(stage as OnboardingStage));
-/**
- * The stages asked one deep question at a time (docs/onboarding-v3.md, decided 2026-10-14): what weighs most, why they work, what life is
- * for, what absorbs and drains them. The others gather facts in a batch of option cards.
- */
-export const DEEP_STAGES: ReadonlySet<OnboardingStage> = new Set<OnboardingStage>(["narrative", "situation", "compass", "energy"]);
 
 export * from "./profile-hypotheses";
 export * from "./profile-points";
@@ -211,10 +202,7 @@ export type OnboardingTurn = {
   progress?: TurnProgress;
   /** The model marks the round that answers a disclosure of self-harm (the Skill's 安全); the app also reads the reply itself (`mentionsSelfHarm`). */
   safety?: boolean;
-  /**
-   * The step the dialogue proposes next, one sentence shown under the reply with a 「好，往下」 button (2026-11-15, the owner: the interview
-   * paces itself, and says every round where it would go next). A next step, not the next stage.
-   */
+  /** A round stored between 2026-11-15 and 2026-11-22 proposed its next step here; no round writes it now (the reply asks its one question). */
   next?: string;
   /** The dialogue asks the app to put `LESSON_QUESTION` this round (2026-11-15): whether the person will talk about what a hard time taught them. */
   askLesson?: boolean;
@@ -616,8 +604,7 @@ function turnFields(ids?: TurnIds) {
     nextAction: { type: "string", enum: ["ask", "ready_for_milestones"] },
     // True for the round that answers a disclosure of self-harm (the Skill's 安全): no cards beside it, its reply ends at the help lines.
     safety: { type: "boolean" },
-    // The next step the dialogue proposes, one sentence; and whether the app should ask the lesson question this round.
-    next: { type: "string", maxLength: 200 },
+    // Whether the app should ask the lesson question this round.
     askLesson: { type: "boolean" },
     stage: { type: "string", enum: [...ONBOARDING_STAGES] },
     // The round's observation (contract A, 2026-11-12): an inference that may judge, resting on the person's verbatim words, with outside
@@ -672,7 +659,7 @@ function turnFields(ids?: TurnIds) {
  * and the next questions. The **extraction** — facts with their sentence numbers, projects, dates, line attributes, hours, the
  * portrait — is written by its own run in the background, so its repairs never hold the conversation up.
  */
-export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage", "insights", "progress", "research", "safety", "openItems", "next", "askLesson"] as const;
+export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage", "insights", "progress", "research", "safety", "openItems", "askLesson"] as const;
 export const EXTRACT_KEYS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles", "goalEdits", "availability", "settings", "profileSections", "itemScores",
   "hypotheses", "careers", "dimensions", "dropCareers", "pointChanges"] as const;
 export const onboardingDialogueSchema = (ids?: TurnIds) => object(pick(turnFields(ids), DIALOGUE_KEYS));
@@ -716,7 +703,7 @@ export function listsAtLimit(output: unknown, schema: unknown = ONBOARDING_EXTRA
   });
 }
 /** What the person waits for, and what is stored as the round. */
-export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage" | "insights" | "progress" | "research" | "safety" | "openItems" | "next" | "askLesson">;
+export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage" | "insights" | "progress" | "research" | "safety" | "openItems" | "askLesson">;
 /** What the background run writes to the ledger. */
 export type OnboardingExtraction = Pick<OnboardingTurn, "slotUpdates" | "projectsDetected" | "flywheelCandidates" | "lineProfiles" | "goalEdits"
   | "availability" | "settings" | "hypotheses" | "careers" | "dimensions" | "dropCareers" | "pointChanges"> & { fileDates?: DateExtraction; profileSections?: ProfileSections; itemScores?: ItemScore[] };
@@ -803,7 +790,7 @@ function checkTurn(value: unknown, known: KnownSources, minimumCandidates: numbe
       reject("ONBOARDING_OPTIONS_REQUIRED", `问题「${question.id}」是选择题，至少要给 2 个候选；难以回忆的内容要多给候选。`);
     }
   }
-  if (turn.nextAction === "ask" && !turn.questions.length && !turn.openItems?.length) reject("ONBOARDING_QUESTION_REQUIRED", "还没问完，这一轮必须至少提出一个问题（自己的 questions，或 openItems 里应用的待办题）。");
+  // A round no longer needs a question card (2026-11-22): its one main question is in the reply, in the model's own words.
   for (const line of turn.lineProfiles ?? []) {
     if (!identities.has(line.lineId) || line.lineId === PERSON_LINE) reject("ONBOARDING_IDENTITY_UNKNOWN", `主线描述里的主线「${line.lineId}」不存在。`);
     const problem = candidatesProblem(line.attributeCandidates ?? [], citable, minimumCandidates, known.lineLabels?.[line.lineId], known.attributesOnRecord?.[line.lineId] ?? 0);

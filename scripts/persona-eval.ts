@@ -29,7 +29,7 @@ import { configureModelGate, runCodexSkill, setProviderResolver, setUsageSink, s
   installUndiciAssertionGuard, threadProvider, withUsageWorkspace, type ProviderRouting, type SkillUsage } from "../packages/codex/src/index";
 import {
   ONBOARDING_INSIGHTS, PROFILE_CLAIMS_SETTING, PROFILE_INSTRUMENTS_SETTING, THIRD_PARTY_CAPABILITIES, cardWordsHead,
-  NEXT_ACCEPTED, composeGoal, instrumentClaims, interviewCompleteness, instrumentReadings, interviewComplete, parseSponsorModels, readInsightRatings, readInstrumentAnswers, readyToStart,
+  composeGoal, instrumentClaims, interviewCompleteness, instrumentReadings, interviewComplete, parseSponsorModels, readInsightRatings, readInstrumentAnswers, readyToStart,
   scaleAnswerLine, sponsorSpend, type AccessContext, type ProfileCard, type StoredLineProfile
 } from "../packages/core/src/index";
 import { CrosslineStore, interviewChecklistFor, rateInsight } from "../packages/db/src/index";
@@ -311,8 +311,8 @@ async function runPerson(name: string, opening: Opening) {
       const rated = (answer.insights ?? []).filter((item, at, all) => item.verdict && item.index < shownCards.length && all.findIndex((other) => other.index === item.index) === at);
       for (const item of rated) rateInsight(store, workspaceId, { sessionId: "eval", seq: last.seq, index: item.index,
         verdict: item.verdict === "partial" && !item.correction.trim() ? "off" : item.verdict as "fits" | "off" | "partial", ...(item.correction.trim() ? { correction: item.correction } : {}) });
-      // 「好，往下」 sends the answers with its line under them, as the page's button does (`NEXT_ACCEPTED`, read back by `nextTaken`).
-      text = [composeAnswers(batch, answers, answer.freeText), ...cardLines(cards, taps, words), ...(goOn ? [NEXT_ACCEPTED] : [])]
+      // No 「好，往下」 button since 2026-11-22: the persona answers in its own words.
+      text = [composeAnswers(batch, answers, answer.freeText), ...cardLines(cards, taps, words)]
         .filter((part) => part.trim()).join("\n") || "不确定。";
       earlier.push({ interviewer: turn.reply.slice(0, 600), me: text.slice(0, 600) });
       transcript.push("**回答**", "", text, ...rated.map((item) => `（洞察${shownCards.length > 1 ? ` ${item.index + 1}` : ""}：${item.verdict === "fits" ? "准" : item.verdict === "partial" ? `部分对：${item.correction}` : "不准"}）`), "");

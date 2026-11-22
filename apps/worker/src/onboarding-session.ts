@@ -6,12 +6,12 @@ import {
   PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, type TurnQuestion, keepOnboardingDialogue, droppedOnboardingItems, ONBOARDING_KEEP_EARLY_MAX, onboardingDialogueSchema,
   validateOnboardingDialogue, locateQuote,
   type ProfileGap, type ProfileModel, type OnboardingStage, ASSESS_RESULT_SETTING, TYPE_TABLE,
-  mentionsSelfHarm, safetyRound, sensitiveReplies, withoutDisclosures, disclosureEchoes, disclosureWords, interviewerWords, lessonAnswer, LESSON_QUESTION, nextTaken, wantsToStart, type LessonConsent, readTurnProgress, safetyReplyOnly, researchCopied, RESEARCH_FIGURES_MAX,
+  mentionsSelfHarm, safetyRound, sensitiveReplies, withoutDisclosures, disclosureEchoes, disclosureWords, interviewerWords, lessonAnswer, LESSON_QUESTION, type LessonConsent, readTurnProgress, safetyReplyOnly,
   inventedDates, type KnownSources, type OnboardingDialogue, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, ONBOARDING_LAST_FAILURE, readPartialTurn, type OnboardingProgress, calendarWeek,
-  tFor, flowOf, INTERVIEW_FLOW_STAGES, PROFILE_MODULE_STAGES, cardsFor, readCardAnswers, mergeInstrumentAnswers, readInstrumentAnswers,
-  settledItems, PROFILE_INSTRUMENTS_SETTING, type CardSet, type InterviewFlow, type ProfileCard, type ProfileStage, INTERVIEW_PACE, PART_LABEL, partsUncovered
+  tFor, flowOf, INTERVIEW_FLOW_STAGES, INTERVIEW_ROUND_LIMIT, ONBOARDING_STAGES, readCardAnswers, mergeInstrumentAnswers, readInstrumentAnswers,
+  PROFILE_INSTRUMENTS_SETTING, type InterviewFlow, type ProfileCard
 } from "@crossline/core";
-import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillProgress } from "@crossline/codex";
+import { continueSkillTurn, runCodexSkill, steerTurn, type CodexRpcBoundary, type SkillProgress, type SkillTools } from "@crossline/codex";
 import {
   EXTRACT_REREAD_SETTING, readExtractState, firstSentenceOf, markFinishing, interviewChecklistFor, interviewGapsFor, interviewLocale, lockInterviewLocale, queueExtractDocs, readExtractDocs, unfiledFilesIn,
   insightKey, type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument
@@ -23,7 +23,7 @@ import { checklistAnswered, interviewLedger, ledgerForModel, linesAnsweredUnread
 import { mergeTools } from "./ledger-index";
 import { SATURATED_RUNS, standingLines } from "./onboarding-standing";
 import { interviewReadTools, READ_TOOLS_INSTRUCTIONS } from "./onboarding-read-tools";
-import { CARD_TOOLS_INSTRUCTIONS, ECHO_RUN, cardTools, checkInsights, checkOpenItems, checkQuestions, checkResearch, emptyDraft, sharedRun, undecidedDay, withDraft,
+import { CARD_TOOLS_INSTRUCTIONS, cardTools, checkInsights, checkOpenItems, checkQuestions, checkResearch, emptyDraft, withDraft,
   type DateSubject } from "./onboarding-cards";
 import { correctionUnread, createOnboardingExtractor, extractionReached, requestAllLanes, requestExtraction, type ExtractLane } from "./onboarding-extract";
 import { DATES_UNRECORDED_EVENT, ONBOARDING_UNRECORDED_EVENT, personTimeZone, readProfileModel } from "./onboarding-persist";
@@ -35,8 +35,9 @@ import { DOMAIN_PACKS, domainGuides } from "@crossline/identity-packs";
 export const ONBOARDING_SKILL = "crossline:crossline-onboarding";
 
 /**
- * The interview Skill's stage checklists (2026-11-15, after replay 15: one Skill of some 120 rules was more than the dialogue model held):
- * SKILL.md keeps the resident core, and `stages/<stage>.md` beside it how each stage is asked, sent by code with the stage it is in.
+ * The interview Skill's part checklists (2026-11-15; since 2026-11-22 read on demand): SKILL.md keeps the order and the resident core,
+ * and `stages/<part>.md` beside it how each part is asked. The thread has no file access, so the dialogue reads one through
+ * `read_interview_state` with `part` when it moves into it; a fallback route (no tools) is sent it with the round instead.
  */
 const STAGE_GUIDES = path.resolve(import.meta.dirname, "../../../skills/marketplace/plugins/crossline/skills/crossline-onboarding/stages");
 /** A stage's checklist, or undefined when there is none (a copy without the Skill's files). */
@@ -47,11 +48,14 @@ export function stageGuide(stage: string): string | undefined {
 /** The dialogue's fields that speak to the person as 你; everything else it writes is third person. */
 const SECOND_PERSON = ["reply", "questions", "insights"];
 
-/** Each document is cut to this much text per turn. */
-const SOURCE_TEXT_PER_DOCUMENT = 14_000;
-const SOURCE_TEXT_TOTAL = 60_000;
-/** New files one turn reads at most; more wait for the next turn. */
-const SOURCES_PER_TURN = 12;
+/**
+ * What a first turn or a rebuilt thread is handed of the files, at most (2026-11-22: widened from 14k a file, 60k and 12 files, the owner:
+ * the interview reads the person's material as Codex would). A later turn only names the new files; `read_file` reads any of them in full.
+ */
+const SOURCE_TEXT_PER_DOCUMENT = 40_000;
+const SOURCE_TEXT_TOTAL = 200_000;
+/** New files one turn names at most; more wait for the next turn. */
+const SOURCES_PER_TURN = 30;
 /** How long the round that ends a line's own interview waits for the extraction (the main interview is ended by the person, `finishInterview`). */
 const FINISH_WAIT_MS = 90_000;
 // No round waits for the extraction any more (2026-11-14 audit): the three waits (60 s before a fact round, 30 s under a blocking app
@@ -65,11 +69,10 @@ const LEDGER_SHOWN = 15;
 // The scenario in brief, and nothing more: every rule and example is in the Skill. A second copy of the rules here drifted from it twice
 // (2026-10-19; again by 2026-10-31, when it also still said 「in Chinese」 under an English interview), so this names none of them.
 // i18n-ignore-start: instructions to the interview Skill (model-facing)
-export const INSTRUCTIONS = "你是 Crossline 首次访谈的访谈者。Skill crossline-onboarding 写了全部规则和例子，照它做。"
-  + "本人读你的 `reply`、回答你的问题卡、评价你的观察卡；另一个运行从同样的回答和文件里记录事实、日期、小时、目标属性和画像，"
-  + "所以你只写输出 schema 的字段。每轮输入告诉你访谈进行到哪里（`progress`、`abstract`、`questionLedger`、`checklist`、`lastRound`、"
-  + "`unrecorded`、`research`），提问前先读。需要联网深挖的问题写进 `research`，交给调研子任务；`research` 里还没有结论的话题不要碰。"
-  + "访谈只由本人按「结束并出报告」结束，你不要自己宣布结束。不要提议里程碑。";
+export const INSTRUCTIONS = "你是 Crossline 首次访谈的访谈者。Skill crossline-onboarding 写了全部规则和顺序，照它做。"
+  + "本人读你的回复、回答你放在旁边的卡、评价你的观察卡；另一个运行从同样的回答和文件里记录事实、日期、目标和画像，所以你不必复述要记下什么。"
+  + "访谈进行到哪里（进度、开始标准、问题记录、调研线程、量表读数）需要时自己读；和访谈直接相关、可以核实的信念当场用联网搜索核实，"
+  + "岔开的题目交给后台调研线程，访谈结束时汇报它们的结论。访谈只由本人结束，你不要自己宣布结束。";
 // i18n-ignore-end
 
 const extractModeOf = (options: { extract?: "background" | "await" | "off" }) => options.extract ?? "background";
@@ -146,12 +149,6 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
   /** The completion list as of now: the system's own record of what the interview still owes, never shown to the person. */
   const checklistNow = () => interviewChecklistFor(store, workspaceId, identityLines(store, workspaceId)
     .map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] })), { unfiledFiles: unfiled().length, today: todayIso() });
-  /** The profile cards are all the start standard still lacks: holding them from a person who wants to start would keep them from
-   * starting (replay 17, 2026-11-17: z and z2 asked to start from round 15 on, got no cards, and reached the 45-round cap). */
-  const onlyCardsLeft = () => {
-    const open = checklistNow().filter((item) => item.start && !item.done);
-    return open.length > 0 && open.every((item) => item.id === "profile_cards");
-  };
   // Start items first, then what the interview itself still owes; a project's details are deferred (asked when its task is planned).
   // An item's suggested question (`ask`) is offered to the dialogue until the person answered it; then the item waits for the extraction.
   const openChecklist = (limit = 8, skip: (item: { id: string; group: string; start?: boolean }) => boolean = () => false, sessionId?: string) => {
@@ -225,7 +222,21 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
   const readProfile = (): ProfileModel => readProfileModel(store, workspaceId);
   const extractor = createOnboardingExtractor(store, workspaceId, cwd, getClient);
 
-  return async function turn(input: { sessionId: string; text: string; reread?: boolean }): Promise<OnboardingTurnOutcome> {
+  /**
+   * One round, then each message the person queued while it ran (2026-11-22, D17: the worker's own queue, `enqueueInterview`), joined into
+   * the next round, until the queue is empty or a round stops.
+   */
+  async function turn(input: { sessionId: string; text: string; reread?: boolean }): Promise<OnboardingTurnOutcome> {
+    let outcome = await turnOnce(input);
+    for (let queued = takeQueued(store, workspaceId, input.sessionId); queued; queued = takeQueued(store, workspaceId, input.sessionId)) {
+      if (outcome.state === "blocked") { putBack(store, workspaceId, input.sessionId, queued); break; }
+      outcome = await turnOnce({ sessionId: input.sessionId, text: queued });
+    }
+    return outcome;
+  }
+  return turn;
+
+  async function turnOnce(input: { sessionId: string; text: string; reread?: boolean }): Promise<OnboardingTurnOutcome> {
     const client = getClient();
     const sessionId = input.sessionId;
     // A round that did not finish says why, and keeps saying it after a reload (2026-10-19: testers saw a bare 「这一轮还没有得到回答」
@@ -262,6 +273,9 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // A retry after a failed turn resends nothing: the person's message is already saved and still waiting.
     const last = messages.at(-1);
     const retrying = last?.role === "user" && (!text || String((last.content as { text?: string }).text ?? "") === text);
+    // At most `INTERVIEW_ROUND_LIMIT` of the person's messages a session (the owner, 2026-11-22), counted here as the turn starts.
+    if (!retrying && messages.filter((message) => message.role === "user").length >= INTERVIEW_ROUND_LIMIT)
+      return blocked("INTERVIEW_ROUND_LIMIT", said("这次访谈已经到 {{limit}} 轮的上限；可以结束并出报告，或开始一次新的访谈。", { limit: INTERVIEW_ROUND_LIMIT }));
     if (!retrying) {
       if (!text) return blocked("ONBOARDING_MESSAGE_EMPTY", said("请先写点什么，或选一个选项。"));
       store.appendOnboardingMessage({ sessionId, workspaceId, role: "user", content: { text }, createdAt: now });
@@ -395,14 +409,13 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // Every deep part of the interview has its minimum before the start standard is said to stand (W-269: compass had one round, energy
     // two, situation none, and 「可以开始使用」 came in round 10): a part no round has been in, or whose portrait section has nothing of the
     // person's yet, is still owed (`partsUncovered`). The pages' own gate (`readyToStart`) is unchanged.
-    const partsOwed = () => focusLine ? [] : partsUncovered({ stageOrder: stageOrderFor(flow), items: checklistNow(),
-      stagesSeen: messages.filter((message) => message.role === "assistant").map((message) => String((message.content as { stage?: string }).stage ?? "")) });
-    const partsOwedLabels = () => partsOwed().map((stage) => `访谈的「${PART_LABEL[stage as OnboardingStage] ?? stage}」部分（${stage}）还没谈到`); // i18n-ignore: model-facing
-    const startOpenNow = () => startOpen() || partsOwed().length > 0;
+    // The order of the interview's parts is the Skill's (2026-11-22): the start standard is the ledger's items alone, never 「parts not
+    // walked yet」 (`partsUncovered` held the start back until every deep part had a round).
+    const startOpenNow = () => startOpen();
     const startStandard = () => {
       if (focusLine) return {};
       const answered = new Set(openChecklist(Infinity, (item) => !item.start, sessionId).filter((item) => item.recording).map((item) => item.label));
-      const missing = [...checklistNow().filter((item) => item.start && !item.done).map((item) => item.label), ...partsOwedLabels()];
+      const missing = checklistNow().filter((item) => item.start && !item.done).map((item) => item.label);
       return { startStandard: { met: !startOpenNow(), missing: missing.filter((label) => !answered.has(label)), ...(answered.size ? { answered: [...answered] } : {}) } };
     };
     // The progress header (onboarding-standing.ts), first in every round's input: the rounds so far, the parts walked, since when the start
@@ -417,13 +430,11 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       const out: DateSubject[] = [];
       for (const { about, entry } of asked.reverse()) {
         if (!entry || (entry.status !== "answered" && entry.status !== "assumed") || out.some((item) => item.about === about)) continue;
-        out.push({ about, answer: entry.answer, undecided: undecidedDay(entry.answer) });
+        out.push({ about, answer: entry.answer });
       }
       return out;
     };
     const startMetRound = focusLine || startOpenNow() ? null : coverage.startMetRound ?? assistantRounds.length + 1;
-    /** The step the round before proposed, which the person took with the button or went past (2026-11-15). */
-    const lastNext = String((assistantRounds.at(-1)?.content as { next?: string } | undefined)?.next ?? "").trim();
     /** Facts the latest ledger extractions of this interview wrote, for the replies they read (`onboarding.extracted`). */
     const extractedFacts = () => store.listEvents(workspaceId, { type: "onboarding.extracted", entityId: sessionId })
       .map((event) => event.payload as { replies?: number; facts?: number; lane?: string })
@@ -441,10 +452,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
             .filter((verdict): verdict is "fits" | "partial" | "off" => verdict === "fits" || verdict === "partial" || verdict === "off");
           return { stage: content.stage ?? "", questions: content.questions?.length ?? 0, cards, verdicts };
         }),
-        stage: stageNow, stageOrder: stageOrderFor(flow), startMetRound, undecided: dateSubjects().filter((item) => item.undecided).map((item) => item.about),
-        ...(lastNext ? { lastNext: { text: lastNext, taken: nextTaken(replyText) } } : {}), facts: extractedFacts(),
-        ...(wantsToStart(replyText) ? { wantsToStart: onlyCardsLeft() && !partsOwed().length ? "cards_left" as const : true } : {}),
-        startMissing: [...checklistNow().filter((item) => item.start && !item.done).map((item) => item.label), ...partsOwedLabels()],
+        stage: stageNow, startMetRound, facts: extractedFacts(),
+        startMissing: checklistNow().filter((item) => item.start && !item.done).map((item) => item.label),
         profile: { dimensions: profile.dimensions, hypotheses: profile.hypotheses, careers: profile.careers }
       }) };
     };
@@ -487,24 +496,17 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       return { disclosure: `本人在 ${where} 谈到过一段艰难时期，原文已换成占位，不给你看。${note}` };
     };
     const rules = !focusLine && pointsRules(session.coverage);
-    /** The latest two replies, this one included: a card resting on them alone retells what was just said. */
-    const recentReplies = new Set(messages.filter((message) => message.role === "user").slice(-2).map((message) => `reply-${message.seq}`));
-    /** Cards shown since the dialogue last came into `stage`, before this round. */
-    const stageCards = (stage: string) => {
-      let count = 0;
-      for (let at = assistantRounds.length - 1; at >= 0; at -= 1) {
-        const content = assistantRounds[at]!.content as { stage?: string; insight?: { text?: string }; moreInsights?: Array<{ text?: string }> };
-        if (content.stage !== stage) break;
-        count += [content.insight, ...(content.moreInsights ?? [])].filter((card) => Boolean(card?.text)).length;
-      }
-      return count;
-    };
+    /**
+     * What the round wrote that broke a rule the app no longer sends back (2026-11-22: only safety, made-up dates, verbatim quotes, real
+     * links and disclosures go back to the model): recorded on `onboarding.round_edited` for the replays, never edited out.
+     */
+    const noted: string[] = [];
     const deskCheck = (output: OnboardingDialogue) => {
       const asked = checkQuestions(output.questions, { ledger: interviewLedger(store, workspaceId, sessionId), openItems: askable(), dates: dateSubjects(), today });
       const items = checkOpenItems(output.openItems ?? [], askable(), asked.accepted);
       const cards = safetyRound(output) ? { accepted: [], problems: (output.insights ?? []).length ? ["安全这一轮不出观察卡，insights 写 []。"] : [] }
         : checkInsights(output.insights ?? [], { replies, sensitive, focusLine: Boolean(focusLine), stage: output.stage ?? "", rules,
-          hypotheses: readProfile().hypotheses ?? [], earlier: earlierCards, recent: recentReplies, stageCards: stageCards(output.stage ?? "") });
+          hypotheses: readProfile().hypotheses ?? [] , earlier: earlierCards });
       const research = focusLine ? { accepted: [], problems: [] } : checkResearch(output.research ?? [], readResearch(store, workspaceId, sessionId));
       // A question or card that points back at a disclosure goes back to the model; the round answering one is the safety reply's to word.
       const echoes: string[] = [];
@@ -517,70 +519,88 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       const ownCards = cards.accepted.filter(({ card }) => {
         const echo = echoOf(`${card.text}\n${card.falsifier}`);
         if (echo) echoes.push(`观察卡「${card.text.slice(0, 30)}」${echo}：那段经历不作观察卡的材料，换一张或不出。`);
-        const scores = !echo && SCORE_TALK.test(`${card.text}\n${card.falsifier}`);
-        if (scores) echoes.push(`观察卡「${card.text.slice(0, 30)}」报了量表的分数或说法：读数由页面交还本人，卡上写这个倾向在日子里怎么表现，不写分数、「自评」或档位。`);
-        return !echo && !scores;
+        return !echo;
       });
       return { questions: [...ownQuestions, ...items.accepted], cards: ownCards, research: research.accepted,
         problems: [...asked.problems, ...items.problems, ...cards.problems, ...research.problems, ...echoes] };
     };
     /* i18n-ignore-end */
+    // The schema survives only for a route that does not call functions (a provider not yet shown to): there the round's fields are
+    // written in one JSON answer, the minimal fallback. Everywhere else the reply is the final message in free text (2026-11-22).
     const outputSchema = onboardingDialogueSchema(ids);
     // The card tools (P2b-3b): each item is checked as it is handed in, against the round's draft so far; the final answer's own fields
     // are merged after the draft and go through the same checks. A thread rebuilt after the runtime lost it starts a fresh draft.
     let draft = emptyDraft();
     let cardMode = coverage.cardTools;
-    const itemSchema = (key: "questions" | "insights" | "research") =>
-      ((outputSchema as { properties: Record<string, { items: Record<string, unknown> }> }).properties[key]!).items;
+    const property = (key: string) => (outputSchema as { properties: Record<string, Record<string, unknown>> }).properties[key]!;
+    const itemSchema = (key: "questions" | "insights" | "research") => property(key).items as Record<string, unknown>;
+    /** `mark_round`'s arguments: the round's own marks, each optional. */
+    const roundSchema = { type: "object", additionalProperties: false, properties: { stage: property("stage"), safety: property("safety"),
+      askLesson: property("askLesson"), progress: property("progress"), ready: { type: "boolean" } } };
     const stageNow = (session.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : INTERVIEW_FLOW_STAGES[flow][0]!);
-    // The stage's checklist goes with the round that starts in a stage the thread has no checklist of, and with every new thread.
+    // On a fallback route the part's checklist goes with the round that starts in a part the thread has no checklist of, and with every
+    // new thread; with tools the dialogue reads it when it wants (`read_interview_state` with `part`).
     const guideNow = stageGuide(stageNow);
     const guideFor = (newThread: boolean): { stageGuide?: string } => guideNow && (newThread || coverage.guide !== stageNow) ? { stageGuide: guideNow } : {};
+    // The interview's state, read when the dialogue wants it (2026-11-22): what every round's input used to carry as one large JSON.
+    /* i18n-ignore-start: the tool's description and answers are for the model */
+    const stateTool: SkillTools = {
+      specs: [{ name: "read_interview_state", description: "读访谈此刻的状态：进度头、开始标准、待办清单、应用的待问题（openItems）、问题记录、调研线程、量表读数、"
+        + "还没记下的回复、上一轮被退回的项、日历本周、主线。给 part（narrative、situation、compass、energy、orientation、lines、details）时只回那一部分的清单。",
+        inputSchema: { type: "object", additionalProperties: false, properties: { part: { type: "string", enum: [...ONBOARDING_STAGES] } } } }],
+      call: (_name, args) => {
+        const part = String((args as { part?: unknown } | undefined)?.part ?? "");
+        if (part) return stageGuide(part) ?? `没有「${part}」这一部分的清单。`;
+        return JSON.stringify(roundState());
+      }
+    };
+    /* i18n-ignore-end */
     // With them, the read tools (P3): the ledger and the files in full, page by page, where the context shows only part of them.
-    const tools = mergeTools(cardTools({ schemas: { question: itemSchema("questions"), insight: itemSchema("insights"), research: itemSchema("research") },
+    const tools = mergeTools(mergeTools(cardTools({ schemas: { question: itemSchema("questions"), insight: itemSchema("insights"), research: itemSchema("research"), round: roundSchema },
       ids: () => ids, draft: () => draft,
       check: (next) => deskCheck({ reply: "", coverage: [], nextAction: "ask", stage: stageNow, safety: false, ...next } as unknown as OnboardingDialogue).problems }),
-    interviewReadTools(store, workspaceId, sessionId));
-    // What the finished research threads found: a reply that lists their figures is sent back once (`researchCopied`); after the repairs
-    // run out it is kept as it is (`softAccept`), a round is not lost for it.
+    interviewReadTools(store, workspaceId, sessionId)), stateTool);
     const findings = () => researchNow().flatMap((item) => [item.conclusion ?? "", item.found ?? ""]).filter(Boolean);
     // Where a date in the reply may come from: what the person said, the research, the files, the facts on record (`inventedDates`).
     const givenTexts = () => [...messages.filter((message) => message.role === "user").map((message) => String((message.content as { text?: string }).text ?? "")),
       ...findings(), ...[...docs.values()].map((doc) => doc.extractedText), ...store.listProfileFacts(workspaceId).map((fact) => fact.value ?? "")];
     const setDates = (reply: string) => inventedDates(reply, givenTexts(), replyText, today);
+    /**
+     * The final message as a round: free text is the reply itself, with the round's marks and cards from the tools (`withDraft`); a JSON
+     * answer with a `reply` (the fallback route, or a model that still answers that way) is taken as the round's fields.
+     */
+    const asRound = (output: unknown): unknown => {
+      if (typeof output !== "string") return withDraft(output, draft);
+      const text = output.trim();
+      if (text.startsWith("{")) {
+        try {
+          const parsed = JSON.parse(text.replace(/^```(?:json)?\s*\n?/u, "").replace(/\n?```$/u, "")) as unknown;
+          // An object is an attempt at the structured round, so the validator judges it (an empty `{}` is not a reply).
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return withDraft(parsed, draft);
+        } catch { /* free text that happens to open with a brace */ }
+      }
+      return withDraft({ reply: text, questions: [], coverage: [], nextAction: "ask", stage: stageNow, safety: false, insights: [], research: [], openItems: [] }, draft);
+    };
     const validateOutput = (output: unknown) => {
-      const valid = validateOnboardingDialogue(withDraft(output, draft), known);
-      const copied = researchCopied(valid.reply, findings());
-      if (copied.length > RESEARCH_FIGURES_MAX) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
-        detail: `reply 逐条列了调研线程的细节（${copied.join("、")}）。它们在右栏的调研线程里；reply 只留改变下一步的那一条结论和它对本人意味着什么，一两句，不列日期、时间和门槛。` }); // i18n-ignore: model-facing repair note
+      const valid = validateOnboardingDialogue(asRound(output), known);
       const invented = setDates(valid.reply);
       if (invented.length) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
-        detail: `reply 说事情定在 ${invented.join("、")}，可本人没说过这个日期。日期由本人定：reply 里不写它，要定就在 questions 里用不带选项的 free 问本人想放在什么时候。` }); // i18n-ignore: model-facing repair note
-      // Before the start standard stands the end button refuses: a reply pointing at it, or saying the app can be used, goes back to the
-      // model (2026-11-14 audit: it used to be cut silently).
-      if (!focusLine && startOpenNow() && endHinted(valid.reply)) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
-        detail: "开始标准还没齐（见 startStandard.missing）：reply 不提「结束并出报告」，也不说已经可以开始使用；接着问缺的那几项。" }); // i18n-ignore: model-facing repair note
-      // The reply and the next step pointing back at a disclosure (2026-11-15): sent back, the safety round's own reply aside.
-      const echo = safetyRound(valid) ? "" : echoOf(valid.reply) || echoOf(valid.next ?? "");
+        detail: `reply 说事情定在 ${invented.join("、")}，可本人没说过这个日期。日期由本人定：回复里不写它，要定就问本人想放在什么时候。` }); // i18n-ignore: model-facing repair note
+      // The reply pointing back at a disclosure (2026-11-15): sent back, the safety round's own reply aside.
+      const echo = safetyRound(valid) ? "" : echoOf(valid.reply);
       if (echo) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
-        detail: `reply 或 next ${echo}。那段经历整场不复述：去掉那句，接着说别的。` }); // i18n-ignore: model-facing repair note
+        detail: `回复${echo}。那段经历整场不复述：去掉那句，接着说别的。` }); // i18n-ignore: model-facing repair note
       const lessonWhy = lessonRefused(valid);
       if (lessonWhy) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { detail: `askLesson 写 false：${lessonWhy}。` }); // i18n-ignore: model-facing repair note
-      // The scale's scores in the reply (2026-11-15, replay 15 quoted 「5/5」 and read one item the wrong way round): the page shows the
-      // readings; the dialogue says how a tendency shows in a day.
-      // The step the dialogue proposes, every round it asks (2026-11-15, the owner: the interview paces itself and says where it would go).
-      if (!safetyRound(valid) && valid.nextAction === "ask" && !valid.next?.trim()) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
-        detail: "next 是空的。每轮在 next 里写一句你提议的下一步（下一个步骤，不是下一个阶段），页面放在回复末尾，配「好，往下」按钮。" }); // i18n-ignore: model-facing repair note
-      if (SCORE_TALK.test(`${valid.reply}\n${valid.next ?? ""}`)) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
-        detail: "reply 或 next 报了量表的分数或说法（「n/5」「自评」「最重那一档」）。量表读数由页面交还本人，你手上是 scaleReadings 的读数：说这个倾向在本人的日子里怎么表现，不写分数和档位。" }); // i18n-ignore: model-facing repair note
-      // Each question, waiting item, card and research question through its check: what fails comes back with why, the rest stands.
+      // Each question, waiting item, card and research question through its check (verbatim quotes, real links, the ledger's askings):
+      // what fails comes back with why, the rest stands.
       const desk = deskCheck(valid);
       if (desk.problems.length) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { cards: true,
         detail: `这一轮有几项要改，其余照旧：\n- ${desk.problems.join("\n- ")}` }); // i18n-ignore: model-facing repair note
-      // The reply saying what a card beside it says (2026-11-15: replay 15 said one tension in both, nine times over).
-      const twice = desk.cards.map(({ card }) => sharedRun(valid.reply, card.text)).find((run) => run.length >= ECHO_RUN);
-      if (twice) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { cards: true,
-        detail: `reply 和观察卡说了同一段话（「${twice}」）。卡就摆在 reply 旁边：reply 不再说一遍，说卡之外的东西，或直接问。` }); // i18n-ignore: model-facing repair note
+      // Recorded, not sent back (2026-11-22): a reply saying the app can be used before the start standard stands (IR-035), or quoting the
+      // scale's scores (IR-136). The person decides when to start; the page shows the readings.
+      if (!focusLine && startOpenNow() && endHinted(valid.reply)) noteOnce("reply said the app can be used before the start standard stands");
+      if (SCORE_TALK.test(valid.reply)) noteOnce("reply quoted the scale's scores");
       // The person's reply names self-harm and the round is not the safety reply: sent back once, since the words may be about someone
       // else or a research topic, which the model can tell and the pattern cannot (2026-11-14 audit). Its second answer stands.
       if (mentionsSelfHarm(replyText) && !safetyRound(valid) && !safetyAsked) {
@@ -591,6 +611,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       return valid;
     };
     let safetyAsked = false;
+    const noteOnce = (what: string) => { if (!noted.includes(what)) noted.push(what); };
     /** The scale's readings in words (`instrumentReadings`), never the taps: what the dialogue reads of the cards (2026-11-15). */
     const scaleReadings = (): { scaleReadings?: string[] } => {
       if (focusLine) return {};
@@ -604,30 +625,25 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       if (lesson !== "unasked") return "这道题整场只问一次，已经问过了"; // i18n-ignore: model-facing
       return safetyRound(output) ? "安全这一轮不问它" : ""; // i18n-ignore: model-facing
     }
-    /** A reply or next step past the repairs, without the sentences that still point back at a disclosure (interview-rules IR-121). */
+    /** A reply past the repairs, without the sentences that still point back at a disclosure (interview-rules IR-121). */
     const withoutEchoes = (said: string) => (said.match(/[^。！？!?\n]+[。！？!?]?|\n+/gu) ?? []).filter((sentence) => !echoOf(sentence)).join("").trim();
     // A date nobody gave stays out of the reply even when the repairs ran out: the sentence that sets it is left out. The one silent edit
     // kept on the reply (interview-rules IR-006), because a made-up date read as the person's own plan is worse than a shorter reply.
     const withoutInventedDates = (reply: string) => (reply.match(/[^。！？!?\n]+[。！？!?]?|\n+/gu) ?? []).filter((sentence) => !setDates(sentence).length).join("").trim();
     const softAccept = (_rejection: Error, output: unknown) => {
-      const kept = keepOnboardingDialogue(withDraft(output, draft), known);
-      // Past the repairs a sentence pointing at a button that would refuse is left out too (interview-rules IR-035).
+      const kept = keepOnboardingDialogue(asRound(output), known);
       if (!kept) return kept;
       const quiet = safetyRound(kept);
-      return { ...kept, reply: withoutInventedDates(quiet ? kept.reply : withoutEchoes(!focusLine && startOpenNow() ? withoutEndHint(kept.reply) : kept.reply)),
-        ...(kept.next !== undefined && !quiet ? { next: withoutEchoes(kept.next) } : {}), ...(lessonRefused(kept) ? { askLesson: false } : {}) };
+      return { ...kept, reply: withoutInventedDates(quiet ? kept.reply : withoutEchoes(kept.reply)), ...(lessonRefused(kept) ? { askLesson: false } : {}) };
     };
     // A turn that only needs one or two questions dropped is kept now instead of rewritten in full by a repair; one that lists the research is not.
     const keepEarly = (rejection: Error, output: unknown) => {
       // The safety question and the items' own problems are the model's to answer, never settled by keeping the answer as it is.
       if ((rejection as Error & { safety?: boolean; cards?: boolean }).safety || (rejection as Error & { cards?: boolean }).cards) return undefined;
-      const merged = withDraft(output, draft);
+      const merged = asRound(output);
       const kept = keepOnboardingDialogue(merged, known);
-      return kept && droppedOnboardingItems(merged, kept) <= ONBOARDING_KEEP_EARLY_MAX
-        && researchCopied(kept.reply, findings()).length <= RESEARCH_FIGURES_MAX && !setDates(kept.reply).length
-        && (safetyRound(kept) || !(echoOf(kept.reply) || echoOf(kept.next ?? ""))) && !lessonRefused(kept)
-        && !SCORE_TALK.test(`${kept.reply}\n${kept.next ?? ""}`) && (safetyRound(kept) || kept.nextAction !== "ask" || Boolean(kept.next?.trim()))
-        && !(!focusLine && startOpenNow() && endHinted(kept.reply)) ? kept : undefined;
+      return kept && droppedOnboardingItems(merged, kept) <= ONBOARDING_KEEP_EARLY_MAX && !setDates(kept.reply).length
+        && (safetyRound(kept) || !echoOf(kept.reply)) && !lessonRefused(kept) ? kept : undefined;
     };
 
     // The public quick test's result, only when the person pressed 「使用该结果」 (apps/web/lib/assess-link.ts): corroboration for the
@@ -653,7 +669,6 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         facts: store.listProfileFacts(workspaceId).map(({ identityId, projectId, slot, value, status }) => ({ identityId, projectId, slot, value, status })),
         today, timeZone, sources: clipDocuments(documents), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}), ...(history ? { history } : {}), ...disclosureNote(), ...scaleReadings(), reply: { id: replyId, text: withoutTaps(replyText) },
         focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : INTERVIEW_FLOW_STAGES[flow][0]!)),
-        ...(focusLine ? {} : { stageOrder: stageOrderFor(flow) }),
         checklist: openChecklist(8, undefined, sessionId), ...startStandard(), ...openItems(),
         questionLedger: ledgerForModel(store, workspaceId, sessionId, LEDGER_SHOWN), ...pace(), ...roundNotes(),
         ...(workHistory().length ? { workHistory: workHistory() } : {}), ...(week.length ? { calendar: week } : {}),
@@ -667,11 +682,36 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       return runCodexSkill<OnboardingDialogue>(client, context, {
         skillName: ONBOARDING_SKILL, cwd, developerInstructions: withProfileFramework(INSTRUCTIONS), outputSchema, keepThread: true, locale, secondPerson: SECOND_PERSON, allowWebSearch: true,
         prepareInput: () => context, validateOutput, softAccept, keepEarly,
-        optionalTools: { tools, instructions: `${CARD_TOOLS_INSTRUCTIONS}\n${READ_TOOLS_INSTRUCTIONS}`, withoutTools: (input) => input, onMode: (mode) => { cardMode = mode; } },
+        optionalTools: { tools, instructions: `${CARD_TOOLS_INSTRUCTIONS}\n${READ_TOOLS_INSTRUCTIONS}`, withoutTools: (input) => input, onMode: (mode) => { cardMode = mode; }, freeText: true },
         compactPrompt: COMPACT_PROMPT,
-        onAudit: (audit) => { if (audit.threadId) threadId = audit.threadId; }, onProgress, onQueued,
+        onAudit, onProgress, onQueued,
         timeoutMs: 60 * 60_000
       });
+    };
+    /** The thread and the turn running now, for the person's 「插入本轮」 (`steerInterview`). */
+    const activeKey = `${workspaceId}:${sessionId}`;
+    function onAudit(audit: { threadId?: string; turnId?: string }) {
+      if (audit.threadId) threadId = audit.threadId;
+      if (audit.threadId && audit.turnId && client && cardMode === "tools") activeTurns.set(activeKey, { client, threadId: audit.threadId, turnId: audit.turnId });
+    }
+    /** Everything a later round's input carried as JSON, now read through `read_interview_state` (and sent whole on a fallback route). */
+    const roundState = () => ({ ...standing(), ...disclosureNote(), ...scaleReadings(), checklist: openChecklist(8, undefined, sessionId), ...startStandard(), ...openItems(),
+      questionLedger: ledgerForModel(store, workspaceId, sessionId, LEDGER_SHOWN), ...pace(), ...roundNotes(),
+      ...(week.length ? { calendar: week } : {}), ...(workHistory().length ? { workHistory: workHistory() } : {}),
+      ...(publicAssessment ? { publicAssessment } : {}), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}), research: researchNow(),
+      lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, goals: line.goals ?? [] })) });
+    /**
+     * A later round's input on a route with tools (2026-11-22): the person's words, then one line saying what is new — the files that
+     * came (read with `read_file`), a calendar that changed — and where the rest is. A disclosure's note stays in it: it is a safety rule.
+     */
+    const roundLine = (newSources: Array<{ id: string; fileName: string }>) => {
+      const parts = [replyId, // i18n-ignore-start: the round's note to the model
+        ...(newSources.length ? [`新文件 ${newSources.length} 份：${newSources.map((source) => `《${source.fileName}》(${source.id})`).join("、")}，用 read_file 读`] : []),
+        ...(waiting > 0 ? [`还有 ${waiting} 份文件排在后面`] : []),
+        ...(calendarChanged ? ["日历本周有变化"] : []),
+        "进度、开始标准、调研和其余状态用 read_interview_state 读"];
+      const note = disclosureNote().disclosure;
+      return `${withoutTaps(replyText)}\n\n〔${parts.join("｜")}〕${note ? `\n〔${note}〕` : ""}`; // i18n-ignore-end
     };
 
     // The wait, made visible (docs/onboarding-v3.md 「等待」): what the model is reading and has written so far, polled by the page and
@@ -721,23 +761,26 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         result = await rebuild();
       } else {
         // Later turns carry only what is new: the reply, any file that arrived since the last turn, and what the extraction recorded.
-        const newSources = clipDocuments(fresh);
-        // The completion list goes with every turn, so the model knows what it still owes without being told twice in prose.
-        const message = JSON.stringify({ ...standing(), ...guideFor(false), ...disclosureNote(), ...scaleReadings(), reply: { id: replyId, text: withoutTaps(replyText) }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(8, undefined, sessionId), ...startStandard(), ...openItems(),
-          ...(focusLine ? {} : { stageOrder: stageOrderFor(flow) }),
-          questionLedger: ledgerForModel(store, workspaceId, sessionId, LEDGER_SHOWN), ...pace(), ...roundNotes(),
-          ...(calendarChanged ? { calendar: week } : {}),
-          ...(publicAssessment ? { publicAssessment } : {}), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}), research: researchNow() });
+        const withTools = cardMode === "tools";
+        // With tools: the person's words and one line (`roundLine`); the state is read on demand. On a fallback route the round's state
+        // still goes as JSON, since that model cannot read it.
+        const message = withTools ? roundLine(fresh.map(([id, doc]) => ({ id, fileName: doc.fileName })))
+          : JSON.stringify({ ...guideFor(false), ...roundState(), reply: { id: replyId, text: withoutTaps(replyText) },
+            ...(fresh.length ? { newSources: clipDocuments(fresh) } : {}), ...(calendarChanged ? { calendar: week } : {}) });
         result = await continueSkillTurn<OnboardingDialogue>(client, session.codexThreadId, message, {
-          skillName: ONBOARDING_SKILL, cwd, locale, outputSchema, validateOutput, softAccept, keepEarly, allowWebSearch: true,
-          ...(cardMode === "tools" ? { tools } : {}),
-          onAudit: () => {}, onProgress, onQueued, timeoutMs: 60 * 60_000
+          skillName: ONBOARDING_SKILL, cwd, locale, outputSchema: withTools ? undefined : outputSchema, validateOutput, softAccept, keepEarly, allowWebSearch: true,
+          ...(withTools ? { tools } : {}),
+          onAudit, onProgress, onQueued, timeoutMs: 60 * 60_000
         });
-        // The runtime forgets a conversation when it restarts. The interview does not: the profile, the files and
-        // every message are in the ledger, so a new thread is told what was said and carries on from there.
+        // A thread the runtime unloaded (idle, or a restart) is resumed from its rollout on disk (`thread/resume`, 2026-11-22), keeping all
+        // it reasoned; only one whose rollout is gone is rebuilt from the ledger, which tells a new thread what was said.
+        if (!result.ok && result.blocker.code === "SKILL_THREAD_LOST" && withTools) result = await runCodexSkill<OnboardingDialogue>(client, message, {
+          skillName: ONBOARDING_SKILL, cwd, developerInstructions: withProfileFramework(INSTRUCTIONS), outputSchema: undefined, keepThread: true, locale,
+          secondPerson: SECOND_PERSON, allowWebSearch: true, prepareInput: (value) => value, validateOutput, softAccept, keepEarly, tools,
+          resumeThreadId: session.codexThreadId, resumeOnly: true, compactPrompt: COMPACT_PROMPT, onAudit, onProgress, onQueued, timeoutMs: 60 * 60_000 });
         if (!result.ok && result.blocker.code === "SKILL_THREAD_LOST") result = await rebuild();
       }
-    } finally { clearInterval(heartbeat); store.deleteSetting(workspaceId, progressKey); }
+    } finally { clearInterval(heartbeat); store.deleteSetting(workspaceId, progressKey); activeTurns.delete(activeKey); }
     if (!result.ok) return blocked(result.blocker.code, result.blocker.message, result.blocker.detail);
     // The main interview never ends itself (the owner, 2026-11-12): only the person's 「结束并出报告」 ends it, once the start standard stands
     // (`finishInterview`). A model that is done says so in its reply; the app adds no question of its own to the round (2026-11-14 audit:
@@ -757,26 +800,15 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const ending = result.output.nextAction === "ready_for_milestones";
     if (extractMode === "await") await caughtUp();
     else if (ending) await caughtUp(FINISH_WAIT_MS);
-    // The profile module's cards for this stage (flow v2): they count in the round's questions, so the model's give way to them.
-    // The item texts exist in Chinese only so far (our own translation, docs/profile-and-agent-kit.md §二): an English interview gets none.
-    const cardsLeft = !focusLine && flow === "v2" && locale !== "en"
-      ? cardsForRound(result.output.stage, settledItems(readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING))), INTERVIEW_PACE.cardItems, INTERVIEW_PACE.cards)
-      : [];
-    // Rating cards no longer take the round's question slots (the owner, 2026-11-12: 「量表题也不会占额度了」). The short set has no
-    // interest cards (想不想做), so none waits for a round of its own (onboarding-depth.ts).
-    // Nor beside the safety reply (2026-11-14 audit: a rating card could still show there).
-    // Nor to a person who just said they want to start (replay 16: z asked 「能直接排一周吗」 nine rounds running and got cards in five
-    // of six); the header tells the dialogue so, and the Skill has it say what is still missing instead. Unless the cards are all that
-    // is missing (replay 17): then they are what starting takes, and they come.
-    const holdCardsForStart = wantsToStart(replyText) && !(onlyCardsLeft() && !partsOwed().length);
-    const cards = result.output.nextAction === "ask" && !safetyRound(result.output) && !holdCardsForStart ? cardsLeft : [];
+    // No rating cards are put beside a round any more (2026-11-22): the scale is a whole page before the interview, its readings read
+    // through `read_interview_state`.
     // Which project a file that came with this reply belongs to: the app's own bookkeeping question, put beside the round as it wrote it.
     const freshDocs = new Set(sent.map(([, doc]) => doc.id));
     const filing = currentGaps().filter((gap) => gap.code === "FILE_UNFILED" && freshDocs.has(gap.documentId ?? "")
       && !desk.questions.some((question) => question.id === gap.question.id)).map((gap) => gap.question);
     // The lesson question, as the app wrote it, when the dialogue asked for it and may (`lessonRefused`): its answer is read next round.
     const lessonAsked = Boolean(result.output.askLesson) && !lessonRefused(result.output);
-    const roundOut = { ...result.output, questions: [...desk.questions, ...filing, ...(lessonAsked ? [LESSON_QUESTION] : [])], ...(cards.length ? { cards } : {}) };
+    const roundOut = { ...result.output, questions: [...desk.questions, ...filing, ...(lessonAsked ? [LESSON_QUESTION] : [])] };
     // The safety round's reply ends at its help lines (onboarding-reply.ts). The wording rules the app used to apply to the reply and the
     // questions behind the model's back (plain terms, 「还在记录」, a card said twice, 「除了前面讲过的那件」, the closing question after
     // 「没有了」) are the Skill's alone since the 2026-11-14 audit: each rewrite misread someone (「没什么好说的，但我最近很焦虑」 closed the
@@ -784,9 +816,9 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const output = { ...roundOut, reply: safetyRound(roundOut) ? safetyReplyOnly(roundOut.reply) : roundOut.reply };
     // What the person will not see of what the model wrote (only what still failed after the repairs), and what the app put beside it.
     const edits: RoundEdits = { removed: desk.problems.map((why) => ({ text: "", why: `not shown: ${why}` })), added: filing.map((question) => question.text) };
-    if (edits.removed.length || edits.added.length) store.appendEvent({ ownerId, workspaceId,
+    if (edits.removed.length || edits.added.length || noted.length) store.appendEvent({ ownerId, workspaceId,
       idempotencyKey: `onboarding:round-edited:${sessionId}:${replyId}:${heardAt}`, type: "onboarding.round_edited", entityId: sessionId,
-      payload: { replyId, ...edits } });
+      payload: { replyId, ...edits, ...(noted.length ? { noted } : {}) } });
     // Observation cards that passed their check (`checkInsights`). Under the points rules every card is one hypothesis of the log: one on
     // record by its id, or a new one added to the log here under the reply's number, so 准 / 不准 lands on what it rates. Cards ready together
     // come in one round and are answered one after another (the owner, 2026-11-14). Never beside the safety check.
@@ -832,26 +864,53 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       updatedAt: new Date().toISOString()
     });
     return { state: output.nextAction === "ready_for_milestones" ? "ready" : "asked", sessionId };
-  };
+  }
+}
+
+/** The turn running now per interview (`<workspace>:<session>`), while it runs on a route with tools: what 「插入本轮」 steers. */
+const activeTurns = new Map<string, { client: CodexRpcBoundary; threadId: string; turnId: string }>();
+/** Where the person's queued messages wait (D17): the worker's own queue, taken whole when the running round ends. */
+export const interviewQueueKey = (sessionId: string) => `onboarding.queue:${sessionId}`;
+export function readQueued(store: CrosslineStore, workspaceId: string, sessionId: string): Array<{ text: string; at: string }> {
+  try {
+    const value = JSON.parse(store.getSetting(workspaceId, interviewQueueKey(sessionId)) ?? "[]") as unknown;
+    return Array.isArray(value) ? value.filter((item): item is { text: string; at: string } => typeof item?.text === "string") : [];
+  } catch { return []; }
+}
+/** Queues the person's message for the round after the running one (`createOnboardingSessionRunner` takes it). */
+export function enqueueInterview(store: CrosslineStore, workspaceId: string, sessionId: string, text: string): { state: "queued"; sessionId: string; queued: number } {
+  const queued = [...readQueued(store, workspaceId, sessionId), { text: text.trim().slice(0, 16_000), at: new Date().toISOString() }];
+  store.setSetting(workspaceId, interviewQueueKey(sessionId), JSON.stringify(queued));
+  return { state: "queued", sessionId, queued: queued.length };
+}
+/** Every queued message, joined in the order they came, and the queue emptied; "" when none waits. */
+function takeQueued(store: CrosslineStore, workspaceId: string, sessionId: string): string {
+  const queued = readQueued(store, workspaceId, sessionId);
+  if (!queued.length) return "";
+  store.deleteSetting(workspaceId, interviewQueueKey(sessionId));
+  return queued.map((item) => item.text).filter(Boolean).join("\n\n");
+}
+/** A queue taken for a round that then stopped goes back in front, so nothing the person wrote is lost. */
+function putBack(store: CrosslineStore, workspaceId: string, sessionId: string, text: string): void {
+  const rest = readQueued(store, workspaceId, sessionId);
+  store.setSetting(workspaceId, interviewQueueKey(sessionId), JSON.stringify([{ text, at: new Date().toISOString() }, ...rest]));
 }
 
 /**
- * The cards a round of the profile-first flow carries: in a profile stage, what is left of the stages already passed and then this one's,
- * two at most; past the module (the Crossline part), whatever is still unanswered one card at a time, so the start item can close.
- * `set` is the card set (`INTERVIEW_PACE.cards`: the short one).
+ * The person's message put into the round that is running (D17, 2026-11-22: 「插入本轮」, Codex `turn/steer` with the running turn's id).
+ * Saved in the conversation as their message, so the extraction reads it and the page shows it where it was said. Only a round on a
+ * route with tools can be steered (one bound to an output schema cannot); otherwise, or when the round ended meanwhile, it is queued.
  */
-export function cardsForRound(stage: string | undefined, settled: ReadonlySet<string>, items?: number, set: CardSet = "all"): ProfileCard[] {
-  const module = INTERVIEW_FLOW_STAGES.v2.filter((name) => PROFILE_MODULE_STAGES.has(name)) as ProfileStage[];
-  const at = module.indexOf(stage as ProfileStage);
-  // A stage the model went back to (compass after energy) leaves the later stages' cards behind: with none left up to it, the rest come
-  // one card a round as past the module, or the start item never closes (2026-11-03 walk: 9 cards left and none offered).
-  const upTo = at >= 0 ? cardsFor(module.slice(0, at + 1), settled, undefined, items, set) : [];
-  return upTo.length ? upTo : cardsFor(module, settled, 1, items, set);
+export async function steerInterview(store: CrosslineStore, workspaceId: string, sessionId: string, text: string):
+  Promise<{ state: "steered"; sessionId: string } | { state: "queued"; sessionId: string; queued: number }> {
+  const said = text.trim().slice(0, 16_000);
+  const active = activeTurns.get(`${workspaceId}:${sessionId}`);
+  if (said && active && await steerTurn(active.client, active.threadId, active.turnId, said)) {
+    store.appendOnboardingMessage({ sessionId, workspaceId, role: "user", content: { text: said, steered: true }, createdAt: new Date().toISOString() });
+    return { state: "steered", sessionId };
+  }
+  return enqueueInterview(store, workspaceId, sessionId, said);
 }
-
-/** The parts of the main interview in order; the details part belongs to a line's own interview only. */
-export const stageOrderFor = (flow: InterviewFlow): OnboardingStage[] =>
-  INTERVIEW_FLOW_STAGES[flow].filter((stage) => stage !== "details");
 
 /**
  * The conversation as plain lines, for a thread that has to be rebuilt. Questions are kept; option lists are not. The whole conversation,
@@ -879,16 +938,19 @@ export function conversationSoFar(messages: StoredOnboardingMessage[]): NonNulla
 }
 
 /**
- * What the runtime's local compaction keeps of the interview's thread (`compact_prompt`). Every turn sends the ledger's state again, so the
- * summary keeps what only the thread holds: the person's own words and what was put in front of them.
+ * What the runtime's local compaction keeps of the interview's thread (`compact_prompt`, 2026-11-22). The ledger is the record of fact
+ * (a remote compaction ignores this prompt), so the summary keeps the person's words and the material's own words with where they are
+ * on record, never a paraphrase in their place.
  */
 export const COMPACT_PROMPT = "把这段访谈压缩成交接记录，给接着访谈的你自己看。必须保留："
-  + "（1）本人每条回复里的事实、原话里有分量的说法和情绪，带回复编号（reply-N），关键的话逐字照抄；"
-  + "（2）出过的每张观察卡：假设 id、一句话内容、本人的评价和更正；"
-  + "（3）问过、本人还没答的题和你答应过要回来问的事；"
-  + "（4）本人拒绝或说不需要的话题（整场不再问）；"
-  + "（5）你正在追的假设和下一步想问什么。"
-  + "不必保留：开始标准、问题记录、文件正文、调研结论——每轮的输入会重新给出，或可以用 read_ledger、read_file 读到。";
+  + "（1）本人每条回复里的事实、有分量的说法和情绪，带回复编号（reply-N），关键的话逐字照抄；"
+  + "（2）读过的材料里用到的原话，逐字照抄，并写明出处（文件名和文件编号，或账本里的位置），以后用 read_file、read_ledger 按出处找回全文；"
+  + "（3）出过的每张观察卡：假设 id、一句话内容、本人的评价和更正；"
+  + "（4）已经命名过的模式、点出过的漏洞、问过而本人还没答的题、你答应过要回来问的事；"
+  + "（5）本人拒绝或说不想谈的话题（整场不再问）；"
+  + "（6）交给后台调研的问题，和当场核实过的信念（本人的认知、判定、数据与链接）；"
+  + "（7）你正在追的假设、访谈走到哪一部分、下一步想问什么。"
+  + "开始标准、问题记录、调研线程的现状和账本里的事实可以只写指针：需要时用 read_interview_state、read_ledger 读。";
 /* i18n-ignore-end */
 
 /**
@@ -904,10 +966,6 @@ const TAP_LINE = /^(\s*【[^】\n]+】)点选：[1-5]\/5(?:（[^）\n]*）)?/gmu
 export const withoutTaps = (text: string): string => text.replace(TAP_LINE, "$1已点选（读数见 scaleReadings）"); // i18n-ignore: model-facing
 /** The scale talked about in its own numbers or the cards' words, which the dialogue reads off taps and gets wrong (replay 15). */
 export const SCORE_TALK = /(?<![\d/])[1-5]\s*\/\s*5(?![\d/])|\d{1,3}\s*\/\s*100|自评|最重那一档/u; // i18n-ignore: matched against the model's words
-export function withoutEndHint(reply: string): string {
-  const sentences = reply.match(/[^。！？!?\n]+[。！？!?]?|\n+/gu) ?? [];
-  return sentences.filter((sentence) => !END_HINT.test(sentence)).join("").trim() || reply;
-}
 
 /** A session id the browser can mint for itself before the first turn. */
 

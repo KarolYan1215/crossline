@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
-import { inventedDates, researchCopied, safetyReplyOnly } from "./onboarding-reply";
+import * as reply from "./onboarding-reply";
+import { inventedDates, safetyReplyOnly } from "./onboarding-reply";
 
 const HELP = "如果这个念头再出现，全国心理援助热线 12356；北京心理危机研究与干预中心 010-82951332；身处危险时打 120 或 110，或去最近的医院急诊。";
 
@@ -10,10 +11,9 @@ test("the safety round's reply ends at its help lines; only a question after the
   expect(safetyReplyOnly("你最投入的两次都有人等结果。")).toBe("你最投入的两次都有人等结果。");
 });
 
-test("the figures a reply repeats from the finished research are counted once each", () => {
-  const findings = ["事务所寒假实习网申多在 7 月底到 10 月，安永 10 月 16 日截止；银行分行多在 12 月底到 1 月初截止。"];
-  expect(researchCopied("事务所多在 7 月到 10 月，安永 10 月 16 日已截止，银行分行 12 月底截止。", findings)).toEqual(["7月", "10月", "16日", "12月"]);
-  expect(researchCopied("银行分行还在窗口内，先投它。周三 3 点投。", findings)).toEqual([]);
+test("a reply may use the research's figures: the check that counted them is gone (2026-11-22, the reply cites its data)", () => {
+  expect(Object.keys(reply)).not.toContain("researchCopied");
+  expect(Object.keys(reply)).not.toContain("RESEARCH_FIGURES_MAX");
 });
 
 test("a date the reply sets something for must come from the person, the research, the files or a weekday just said", () => {

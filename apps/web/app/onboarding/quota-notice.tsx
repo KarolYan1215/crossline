@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { InvitePanel } from "../connect/invite-panel";
 
-type Quota = { verdict: "ok" | "tight" | "insufficient" | "spent"; message: string; plan?: string; roundsLeft?: number; remainingRounds: number };
+type Quota = { verdict: "ok" | "tight" | "insufficient" | "spent"; message: string; plan?: string; roundsLeft?: number };
 
 /**
  * Whether the ChatGPT quota will carry the interview (lib/interview-quota.ts), asked again after every round and after a round that
