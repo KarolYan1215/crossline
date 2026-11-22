@@ -34,7 +34,6 @@ import {
 } from "../packages/core/src/index";
 import { CrosslineStore, interviewChecklistFor, rateInsight } from "../packages/db/src/index";
 import { composeAnswers, type Question } from "../apps/web/app/onboarding/onboarding-types";
-import { openingReply } from "../apps/web/app/onboarding/opening-card";
 import { shouldRemindFull, shouldRemindStart } from "../apps/web/app/onboarding/finish-button";
 import { interviewMetrics } from "../apps/worker/src/interview-metrics";
 import { identityLines } from "../apps/worker/src/lines";
@@ -48,7 +47,10 @@ import { createPortraitWriter } from "../apps/worker/src/portrait-writer";
 import { sponsorFromEnv, SPONSOR_PROVIDER_ID } from "../apps/worker/src/sponsor";
 
 // The web library guards itself with `import "server-only"`, which only Next resolves; here it is an empty module.
-register("data:text/javascript,export async function resolve(s,c,n){if(s==='server-only')return{url:'data:text/javascript,',shortCircuit:true};return n(s,c)}");
+// A component's stylesheet (`import "./x.css"`, opening-card → CalendarSetupStep since 2026-11-22) is Next's to bundle: empty here too.
+register("data:text/javascript,export async function resolve(s,c,n){if(s==='server-only'||s.endsWith('.css'))return{url:'data:text/javascript,',shortCircuit:true};return n(s,c)}");
+// Loaded after the hook: opening-card imports a stylesheet (CalendarSetupStep), and a static import would load before it.
+const { openingReply } = await import("../apps/web/app/onboarding/opening-card");
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const args = process.argv.slice(2);

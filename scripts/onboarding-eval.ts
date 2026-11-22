@@ -36,7 +36,6 @@ import { AVAILABILITY_PROPOSED_SETTING, EVAL_HOLD_FILE, INTERVIEW_SETTINGS, PROF
 import { CrosslineStore, interviewChecklistFor } from "../packages/db/src/index";
 import { domainGuides } from "../packages/identity-packs/src/index";
 import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY, composeAnswers, type Question } from "../apps/web/app/onboarding/onboarding-types";
-import { openingReply } from "../apps/web/app/onboarding/opening-card";
 import { extractText, sha256 } from "../apps/worker/src/extract";
 import { identityLines } from "../apps/worker/src/lines";
 import { createOnboardingExtractor, extractionSettled, requestExtraction } from "../apps/worker/src/onboarding-extract";
@@ -44,7 +43,10 @@ import { createOnboardingSessionRunner } from "../apps/worker/src/onboarding-ses
 import { readMatrixConfig, startProviderHarness } from "./provider-harness";
 
 // The web library guards itself with `import "server-only"`, which only Next resolves; here it is an empty module.
-register("data:text/javascript,export async function resolve(s,c,n){if(s==='server-only')return{url:'data:text/javascript,',shortCircuit:true};return n(s,c)}");
+// A component's stylesheet (`import "./x.css"`, opening-card → CalendarSetupStep since 2026-11-22) is Next's to bundle: empty here too.
+register("data:text/javascript,export async function resolve(s,c,n){if(s==='server-only'||s.endsWith('.css'))return{url:'data:text/javascript,',shortCircuit:true};return n(s,c)}");
+// Loaded after the hook: opening-card imports a stylesheet (CalendarSetupStep), and a static import would load before it.
+const { openingReply } = await import("../apps/web/app/onboarding/opening-card");
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const args = process.argv.slice(2);
