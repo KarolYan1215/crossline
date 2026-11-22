@@ -48,7 +48,7 @@ test("work that takes effect by itself is announced in the workspace's language"
   const store = new CrosslineStore(":memory:");
   writeLocale(store, "w", "en");
   store.saveWorkOrder({ id: "prep", ownerId: "o", workspaceId: "w", identityId: "research", projectId: "p", milestoneId: "", intent: "Organize review notes",
-    state: "awaiting_plan_approval", riskTier: "routine", estimate, payload: { family: "preparation", humanCore: [] } });
+    state: "awaiting_plan_approval", riskTier: "routine", estimate, payload: { family: "preparation", humanCore: [], needsPerson: { kind: "none", quote: "" } } });
   expect(autoApproveEligible(store, "w")).toEqual(["prep"]);
   const card = store.listRecentNudges("w", "2000-01-01T00:00:00.000Z")[0]!.payload.card as { clarify: { question: string; options: Array<{ label: string }> } };
   expect(card.clarify.question).toBe("1 task took effect by itself: \"Organize review notes\". Blocks that get scheduled show up on the calendar; a task that needs material first will ask for it. None of them needs your choice or permission, and any step that leaves this computer is yours to do; undo any within 24 hours under \"Recently took effect\" on the Decisions page.");

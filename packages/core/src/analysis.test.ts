@@ -18,7 +18,7 @@ const validProposal = {
 };
 
 test("accepts a strict proposal tied to supplied fragments and an approved milestone", () => {
-  expect(core.validateAnalysisProposal(validProposal, analysisContext)).toEqual(validProposal);
+  expect(core.validateAnalysisProposal(validProposal, analysisContext)).toEqual({ ...validProposal, needsPerson: { kind: "none", quote: "" } });
   for (const invalid of [
     { ...validProposal, surprise: true }, { ...validProposal, milestoneId: "invented" },
     { ...validProposal, estimate: { ...validProposal.estimate, p25Minutes: 100 } },
@@ -293,7 +293,9 @@ test("needsPerson, category and graded are the model's; a needsPerson quote must
   expect(() => core.validateAnalysisProposal({ ...structuredClone(validProposal), ...fields, category: "cooking", needsPerson: { kind: "none", quote: "" } }, analysisContext))
     .toThrow("ANALYSIS_SCHEMA_INVALID");
   const legacy = core.validateAnalysisProposal(structuredClone(validProposal), analysisContext);
-  for (const key of ["request", "needsPerson", "category", "graded"]) expect(legacy, key).not.toHaveProperty(key);
+  for (const key of ["request", "category", "graded"]) expect(legacy, key).not.toHaveProperty(key);
+  // needsPerson is kept as "nothing named": without it the proposal would wait for the person like work written before the field.
+  expect(legacy.needsPerson).toEqual({ kind: "none", quote: "" });
 });
 
 test("a drill form the capture never named is cut from the proposal; the person's own words keep it (2026-11-10)", () => {

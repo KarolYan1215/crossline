@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { autoApprovalEligible, needsPersonProblem, proposalReady, readNeedsPerson } from "./auto-approval";
 
 const base = { state: "awaiting_plan_approval", riskTier: "routine", intent: "整理 ECE 548 前几章的复习提纲",
-  payload: { family: "preparation", humanCore: [{ intent: "确认章节范围" }], materialContract: [{ kind: "file" }] } };
+  payload: { family: "preparation", humanCore: [{ intent: "确认章节范围" }], materialContract: [{ kind: "file" }], needsPerson: { kind: "none", quote: "" } } };
 
 test("internal work takes effect by default — preparation, deep work, milestone-tier and high-risk alike", () => {
   expect(autoApprovalEligible(base).eligible).toBe(true);
@@ -25,9 +25,13 @@ const needs = (kind: string, quote: string) => ({ ...base, payload: { ...base.pa
 test("the person's own choice or decision waits for them", () => {
   expect(autoApprovalEligible(needs("decision", "选出四个首轮选题")).eligible).toBe(false);
   expect(autoApprovalEligible(needs("decision", "Pick four topics")).eligible).toBe(false);
-  // Nothing named, or an answer written before the field: no reason to hold it.
+  // Nothing named: no reason to hold it, whatever the words.
   expect(autoApprovalEligible(needs("none", "")).eligible).toBe(true);
   expect(autoApprovalEligible({ ...base, intent: "从素材库选出四个首轮选题" }).eligible).toBe(true);
+  // Work written before the field was never judged by a model: it waits rather than taking effect unread (the old word lists that
+  // held such work are gone, and the worker's sweep would otherwise approve what they had held).
+  const { needsPerson: _dropped, ...legacy } = base.payload;
+  expect(autoApprovalEligible({ ...base, payload: legacy })).toMatchObject({ eligible: false });
 });
 
 test("access only the person can grant waits for them", () => {

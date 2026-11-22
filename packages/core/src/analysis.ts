@@ -265,7 +265,7 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext,
     ...(!("extendsTaskId" in withBreakdown) ? { extendsTaskId: "" } : {}),
     ...(!("usedRefs" in withBreakdown) ? { usedRefs: [] } : {}),
     // Answers recorded before the request, needsPerson, category and graded fields (2026-11-22): read as "no request", "eligible",
-    // "no category" and "the project decides" — the fields are removed again below, so the readers' own defaults apply.
+    // "no category" and "the project decides" — the fields are removed again below (needsPerson excepted), so the readers' own defaults apply.
     ...(!("request" in withBreakdown) ? { request: { kind: "none", who: "", fact: "" } } : {}),
     ...(!("needsPerson" in withBreakdown) ? { needsPerson: { kind: "none", quote: "" } } : {}),
     ...(!("category" in withBreakdown) ? { category: "" } : {}),
@@ -469,7 +469,9 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext,
   if (proposal.extendsTaskId && !existingTaskIds(context).has(proposal.extendsTaskId)) proposal.extendsTaskId = "";
   // What was never in the answer is not stored as if it had been; readers treat the absent fields as empty.
   if (injected) delete (proposal as Partial<AnalysisProposal>).estimateBreakdown;
-  for (const key of Object.keys(legacyExtras)) delete (proposal as Partial<AnalysisProposal> & Record<string, unknown>)[key];
+  // needsPerson stays: a proposal accepted now without it would wait for the person (`autoApprovalEligible` holds work written before
+  // the field), and a recorded answer was judged "nothing named" here on purpose.
+  for (const key of Object.keys(legacyExtras)) if (key !== "needsPerson") delete (proposal as Partial<AnalysisProposal> & Record<string, unknown>)[key];
   return proposal;
 }
 

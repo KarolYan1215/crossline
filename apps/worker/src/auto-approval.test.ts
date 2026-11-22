@@ -6,7 +6,7 @@ import { autoApproveEligible } from "./auto-approval";
 const estimate = { p25Minutes: 30, p50Minutes: 45, p85Minutes: 90, source: "llm_prior" as const, observationCount: 0, confidence: "low" as const };
 const order = (id: string, intent: string, family: string, riskTier: "routine" | "milestone" | "high_risk" = "routine") => ({
   id, ownerId: "o", workspaceId: "w", identityId: "research", projectId: "p", milestoneId: "", intent,
-  state: "awaiting_plan_approval" as const, riskTier, estimate, payload: { family, humanCore: [] } });
+  state: "awaiting_plan_approval" as const, riskTier, estimate, payload: { family, humanCore: [], needsPerson: { kind: "none", quote: "" } } });
 const nudges = (store: CrosslineStore) => store.listRecentNudges("w", "2000-01-01T00:00:00.000Z");
 
 test("eligible proposals take effect with the system as approver and are told in one message; the rest wait", () => {

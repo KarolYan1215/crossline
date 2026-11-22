@@ -1,5 +1,5 @@
 import { provideMaterial, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
-import { courseCodeOf } from "@crossline/core";
+import { courseCodeOf, NO_NEEDS_PERSON } from "@crossline/core";
 import { autoApproveEligible } from "./auto-approval";
 import { ownerOf } from "./owner";
 import { tOfWorkspace } from "./locale";
@@ -71,7 +71,8 @@ export function materializeDatePairs(store: CrosslineStore, workspaceId: string,
       payload: { title: t("完成 {{course}} 作业 {{number}}", { course: courseCodeOf(project.name) ?? project.name, number: due.number }), family: "deep_work", dueDate: due.day, ...(out && out.day > today ? { notBefore: out.day } : {}),
         datePair: { releaseDay: out?.day ?? "", dueDay: due.day, number: due.number, releaseTitle: out?.title ?? "", dueTitle: due.title },
         humanCore: [{ id: `${id}-core`, intent, quote: due.title, rationale: t("课程日期已确认"), energy: "high", interruptible: true }],
-        automationParts: [], materialContract: [],
+        // A dated piece of the person's own work: nothing in it is a choice or a login (written by code, so it says so itself).
+        needsPerson: NO_NEEDS_PERSON, automationParts: [], materialContract: [],
         evidenceContract: [{ kind: "file", description: t("提交的作业文件或提交确认截图"), why: t("作业以提交为准"), required: true }] } };
     // The person may already have this homework on the board (typed in, or planned from the milestone): it gets the dates, not a twin.
     const payload = order.payload as { title: string; dueDate: string; datePair: unknown };

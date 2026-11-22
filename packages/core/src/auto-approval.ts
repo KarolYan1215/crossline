@@ -89,9 +89,10 @@ export function autoApprovalEligible(order: Candidate & { id?: string }, options
     const verdict = workOwner(order, options.locale);
     return verdict.owner === "person" ? { eligible: false, reason: t("{{reason}}，需本人确认", { reason: verdict.reason }) } : { eligible: true, reason: t("助手的准备工作，不占本人时间，默认生效") };
   }
-  // The model that wrote the work said whether approving it is the person's call (`needsPerson`). Work written before the field has none
-  // and takes effect like any other: default effect, the exception asks.
+  // The model that wrote the work said whether approving it is the person's call (`needsPerson`). Work written before the field
+  // (2026-11-22) has none: it was not judged by the model, so it waits for the person rather than taking effect unread.
   const needs = readNeedsPerson((order.payload as { needsPerson?: unknown } | undefined)?.needsPerson);
+  if (!needs) return { eligible: false, reason: t("写于判断字段之前，未经判断，需本人确认") };
   if (needs?.kind === "decision") return { eligible: false, reason: t("这件事本身是本人的选择或决定，需本人确认") };
   if (needs?.kind === "access") return { eligible: false, reason: t("需要本人授权或登录才能进行，需本人确认") };
   // Sending, submitting, publishing, paying or contacting someone is no reason here: in the person's own work the person does it, and
