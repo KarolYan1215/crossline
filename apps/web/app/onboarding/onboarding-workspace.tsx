@@ -11,6 +11,7 @@ import { QuestionCard } from "./question-card";
 import { cardReplyLines, NO_CARD_ANSWERS, ProfileCards, type CardAnswers } from "./profile-cards";
 import { StageBar } from "./portrait-panel";
 import { LeftColumn } from "./left-column";
+import { chooseFromFolder, collectDropped, uploadInParallel, type PickedFolder } from "./upload-queue";
 import { StageView } from "./stage-view";
 import { FirstHint } from "../ui/first-hint";
 import { OpeningCard, openingReply, type OpeningAnswer } from "./opening-card";
@@ -27,7 +28,7 @@ import { FinishButton } from "./finish-button";
 import { ResearchPanel } from "./research-panel";
 import { composeAnswers, type Answer, type AssistantTurn, type DocumentRow, type Message, type OnboardingState } from "./onboarding-types";
 
-const ACCEPT = ".pdf,.docx,.txt,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.m4a,.mp3,.wav,.aac,.ogg,.flac";
+const ACCEPT = ".pdf,.docx,.txt,.md,.csv,.json,.jsonl,.zst,.png,.jpg,.jpeg,.gif,.webp,.m4a,.mp3,.wav,.aac,.ogg,.flac";
 
 /** Put in front of the tab's title when a round lands while the page is hidden (translated where it is used). */
 const NEW_ROUND_MARK = "● 新问题 · ";
@@ -52,7 +53,10 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const [sessionId, setSessionId] = useState("");
   // A turn still running in the background after a reload: its reply is on the way, so nothing else may be sent meanwhile.
   const [background, setBackground] = useState(false);
-  const [busy, setBusy] = useState<"" | "turn" | "upload" | "dates" | "milestones">("");
+  const [busy, setBusy] = useState<"" | "turn" | "dates" | "milestones">("");
+  // Uploads run beside everything else (2026-11-22): their own count and note, never `busy`, so one finishing cannot end a turn's wait.
+  const uploading = useRef(0);
+  const [uploadNote, setUploadNote] = useState("");
   const [researching, setResearching] = useState<string[]>([]);
   const [error, setError] = useState("");
   // The last round stopped because the ChatGPT quota was spent: the quota notice then says what to do next (Plus or an invite code).
@@ -91,6 +95,9 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   }, []);
   useEffect(() => { if (connected === false && !line) location.replace("/connect?next=/onboarding"); }, [connected, line]);
   const bottom = useRef<HTMLDivElement>(null);
+  // What is running now, read by an upload after its awaits (its own closure holds the values from when it started).
+  const live = useRef({ busy, background });
+  live.current = { busy, background };
   const asked = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -193,28 +200,54 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     if (response?.ok && body?.state !== "blocked") announceRound(locale);
   };
 
-  const upload = async (files: FileList | File[]) => {
-    const list = [...files];
-    if (!list.length) return;
-    setBusy("upload"); setError("");
-    // The route takes at most 12 files a request; a picked folder sends many, so they go up in batches and the first failure stops it.
-    let response: Response | undefined, body: { ok?: boolean; message?: string; code?: string; deferred?: boolean } | undefined;
-    for (let start = 0; start < list.length; start += 10) {
+  /**
+   * Files and folders the person adds (2026-11-22, §四): sent several at a time, one file a request, so one that fails or is refused fails
+   * alone; folders are screened first (credentials and private papers by code, the rest by the model). An upload never waits for a turn
+   * and a turn never waits for an upload: what arrives while a round runs is read by the next one, which the worker tells about the new
+   * files. With nothing running the app sends that next round itself, as before.
+   */
+  const upload = async (files: FileList | File[], folders: PickedFolder[] = []) => {
+    const loose = [...files];
+    if (!loose.length && !folders.length) return;
+    setError("");
+    const screen = (body: unknown) => fetch("/api/onboarding/sources/screen", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+      .then((response) => response.json() as Promise<{ ok?: boolean; keep?: string[]; why?: string }>).catch(() => undefined);
+    if (folders.length) setUploadNote(t("正在挑选文件夹里值得读的文件…"));
+    const chosen = await Promise.all(folders.map((folder) => chooseFromFolder(folder, screen)));
+    const all = [...loose, ...chosen.flatMap((choice) => choice.files)];
+    const left = chosen.reduce((sum, choice) => ({ credentials: sum.credentials + choice.left.credentials, sensitive: sum.sensitive + choice.left.sensitive,
+      skipped: sum.skipped + choice.left.skipped, screened: sum.screened + choice.left.screened }), { credentials: 0, sensitive: 0, skipped: 0, screened: 0 });
+    uploading.current += 1;
+    setUploadNote(t("上传中 {{done}}/{{total}}", { done: 0, total: all.length }));
+    const outcomes = await uploadInParallel(all, async (file) => {
       const form = new FormData();
-      list.slice(start, start + 10).forEach((file) => form.append("file", file));
-      response = await fetch("/api/onboarding/sources", { method: "POST", body: form }).catch(() => undefined);
-      body = await response?.json().catch(() => undefined) as typeof body;
-      if (!response?.ok) break;
-    }
-    if (!response?.ok) setError(body?.message ?? t("文件没有上传成功。"));
-    else if (body?.deferred) setError(t("文件已保存，但后台还没读取它（worker 没有运行）。"));
+      form.append("file", file);
+      form.append("modified", String(file.lastModified || 0));
+      const response = await fetch("/api/onboarding/sources", { method: "POST", body: form }).catch(() => undefined);
+      const body = await response?.json().catch(() => undefined) as { refused?: Array<{ message?: string }>; deferred?: boolean; message?: string } | undefined;
+      const refused = body?.refused?.[0]?.message ?? (!response?.ok ? body?.message : undefined);
+      return { ok: Boolean(response?.ok) && !body?.refused?.length, ...(refused ? { refused } : {}), ...(body?.deferred ? { deferred: true } : {}) };
+    }, (done) => setUploadNote(t("上传中 {{done}}/{{total}}", { done, total: all.length })));
+    uploading.current -= 1;
+    const failed = outcomes.filter((item) => !item.ok);
     const next = await load();
-    // The same model that interviews you reads what you added, in its next turn: it says what it found, asks about what
-    // it cannot tell, and returns the dates the files state. Nothing separate runs, and nothing waits for you to ask. On the
-    // materials step (no conversation yet) the person adds everything first and starts the interview themselves.
-    const readable = list.filter((file) => next?.documents.some((doc) => doc.fileName === file.name && doc.extractionStatus === "done"));
-    setBusy("");
-    if (response?.ok && !body?.deferred && readable.length && (next?.messages.length ?? 0) > 0) await runTurn(t("我添加了这些文件：{{files}}。请读一下，整理里面的日期和我的情况。", { files: readable.map((file) => file.name).join(t("、")) }), false, true);
+    setUploadNote([
+      t("已上传 {{count}} 个文件", { count: outcomes.length - failed.length }),
+      ...(left.credentials ? [t("{{count}} 个像密钥或密码的没有上传", { count: left.credentials })] : []),
+      ...(left.sensitive ? [t("{{count}} 个像私人证件或单据的已跳过（需要的话单独添加）", { count: left.sensitive })] : []),
+      ...(left.screened ? [t("模型筛掉 {{count}} 个", { count: left.screened })] : []),
+      ...(left.skipped ? [t("{{count}} 个读不了或在隐藏、依赖目录里", { count: left.skipped })] : []),
+      ...chosen.map((choice) => choice.why).filter(Boolean)
+    ].join(t("；")));
+    if (failed.length) setError([t("{{count}} 个文件没有上传：", { count: failed.length }), failed.slice(0, 3).map((item) => item.refused ?? item.file.name).join(t("；"))].join(""));
+    else if (outcomes.some((item) => item.deferred)) setError(t("文件已保存，但后台还没读取它（worker 没有运行）。"));
+    // The same model that interviews you reads what you added, in its next turn: it says what it found, asks about what it cannot tell,
+    // and returns the dates the files state. On the materials step (no conversation yet) the person adds everything first and starts the
+    // interview themselves; while a round runs, the next one reads the files.
+    const readable = outcomes.filter((item) => item.ok && next?.documents.some((doc) => doc.fileName === item.file.name && doc.extractionStatus === "done")).map((item) => item.file);
+    if (readable.length && (next?.messages.length ?? 0) > 0 && live.current.busy === "" && !live.current.background && uploading.current === 0) {
+      await runTurn(t("我添加了这些文件：{{files}}。请读一下，整理里面的日期和我的情况。", { files: readable.map((file) => file.name).join(t("、")) }), false, true);
+    }
   };
 
   // Dates may be confirmed while a turn runs (docs/onboarding-v3.md 「等待」): that must not end the turn's own wait.
@@ -265,7 +298,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     if (!response?.ok || !next) setError(t("没有开始下载，请重试。")); else setTranscription(next);
   };
 
-  const onDrop = (event: DragEvent) => { event.preventDefault(); setOver(false); void upload(event.dataTransfer.files); };
+  const onDrop = (event: DragEvent) => { event.preventDefault(); setOver(false); void collectDropped(event.dataTransfer).then((dropped) => upload(dropped.loose, dropped.folders)); };
   // The app's own questions arrive inside each round (the worker adds the ones about what the round is talking about); questions the person
   // already answered on 待决事项 are not shown again — those answers go in front of this reply.
   const answeredElsewhere = new Set(state?.answeredElsewhere ?? []);
@@ -344,7 +377,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   };
 
   return <div className="ob3" onDragOver={(event) => { event.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop} data-dragging={over}>
-    <LeftColumn state={state} busy={busy !== "" && busy !== "turn"} accept={ACCEPT} onUpload={(files) => void upload(files)} onChanged={() => void load()}
+    <LeftColumn state={state} busy={busy !== "" && busy !== "turn"} accept={ACCEPT} onUpload={(files) => void upload(files)} onFolders={(folders) => void upload([], folders)} uploadNote={uploadNote} onChanged={() => void load()}
       heldQuestions={held} answers={answers} onAnswer={(id, next) => setAnswers((previous) => ({ ...previous, [id]: next }))} />
 
     <section className="ob-centre" aria-label={t("访谈对话")}>
@@ -431,7 +464,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
         <div className="ob-composer-row">
           <label className="ob-file-button">
             <input type="file" multiple accept={ACCEPT} hidden onChange={(event) => { void upload(event.target.files ?? []); event.target.value = ""; }} />
-            {busy === "upload" ? t("上传中…") : t("添加文件")}
+            {uploading.current > 0 ? t("上传中…") : t("添加文件")}
           </label>
           <button type="submit" className="ob-btn ob-primary" disabled={!canSend}>{deep ? t("回答") : open ? t("发送这一轮") : t("发送")}</button>
         </div>

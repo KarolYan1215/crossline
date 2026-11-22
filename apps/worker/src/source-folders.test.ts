@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import { SOURCE_FOLDERS_SETTING, folderPathProblem, readSourceFolders } from "@crossline/core";
 import { CrosslineStore } from "@crossline/db";
 import { fileURLToPath } from "node:url";
-import { addFolder, folderDocuments, previewFolder, removeFolder, scanFolder, setFolderLines, setFolderRules, syncFolder } from "./source-folders";
+import { addFolder, configureFolderReading, folderDocuments, folderReaderFor, listFolderEntries, previewFolder, readFolderFile, removeFolder, scanFolder, setFolderLines, setFolderRules, syncFolder } from "./source-folders";
 import { createFolderClassifier } from "./folder-classifier";
 import { fakeRuntime } from "./testing/fake-runtime";
 
@@ -152,18 +152,67 @@ test("excluding what was read removes it from sources and its stored copy, keeps
   expect(names()).toEqual(["a.md", "course/syllabus.md"]);
 });
 
-test("copies of one content are read once and named in the preview", async () => {
-  put("开题报告.doc.md", "proposal");
-  put("开题报告 (1).doc.md", "proposal");
-  put("开题报告 (2).doc.md", "proposal");
-  const preview = await previewFolder(path.join(root, "course"), deps());
-  if (preview.state !== "preview") throw new Error("no preview");
-  expect(preview.duplicates).toBe(2);
-  expect(preview.groups.find((group) => group.name === "")!.list.find((file) => file.relative === "开题报告.doc.md")).toMatchObject({ duplicates: 2 });
+test("copies of one content are stored once, whichever name came first; no name is preferred (the shortest-name rule is gone)", async () => {
+  put("proposal.md", "proposal");
+  put("proposal (1).md", "proposal");
+  put("proposal (2).md", "proposal");
   const folder = await addCourse();
   await syncFolder(store, workspaceId, folder, deps());
-  expect(names().filter((name) => name.includes("开题报告"))).toEqual(["course/开题报告.doc.md"]);
+  expect(names().filter((name) => name.includes("proposal"))).toHaveLength(1);
+  // Every copy points at that one row, so excluding one copy leaves the others' reading intact.
+  const index = JSON.parse(store.getSetting(workspaceId, `sources.folder.index:${folder.id}`)!) as Record<string, { documentId: string }>;
+  const ids = Object.entries(index).filter(([relative]) => relative.includes("proposal")).map(([, entry]) => entry.documentId);
+  expect(new Set(ids).size).toBe(1);
+  expect(ids).toHaveLength(3);
   expect(readSourceFolders(store.getSetting(workspaceId, SOURCE_FOLDERS_SETTING))[0]).toMatchObject({ duplicates: 2 });
+});
+
+test("on this computer a folder is listed, not imported; what is written there after authorizing is read as it arrives", async () => {
+  const old = new Date(Date.UTC(2026, 0, 1));
+  for (const file of ["syllabus.md", "week1/notes.txt", "week1/slides.pptx"]) utimesSync(path.join(root, "course", file), old, old);
+  const folder = await addCourse();
+  const outcome = await syncFolder(store, workspaceId, folder, { ...deps(), onDemand: true });
+  expect(outcome.read).toBe(0);
+  expect(store.listSourceDocuments(workspaceId)).toEqual([]);
+  expect(extracted).toEqual([]);
+  const index = JSON.parse(store.getSetting(workspaceId, `sources.folder.index:${folder.id}`)!) as Record<string, { documentId: string; listed?: true }>;
+  expect(Object.values(index).every((entry) => entry.listed && entry.documentId === "")).toBe(true);
+  expect(readSourceFolders(store.getSetting(workspaceId, SOURCE_FOLDERS_SETTING))[0]).toMatchObject({ onDemand: true, imported: 0, files: 2 });
+  // New work: written after the folder was authorized, so it is read (the deliverable check needs it).
+  put("week2/report.md", "my week 2 report");
+  await syncFolder(store, workspaceId, folder, { ...deps(), onDemand: true });
+  expect(names()).toEqual(["course/week2/report.md"]);
+});
+
+test("the interview opens a folder's file on demand: inside the folder only, never a credential, an excluded path or a private paper", async () => {
+  configureFolderReading({ deps: deps(), allowed: (ws) => ws === workspaceId });
+  put("notes/plan.md", "my plan for spring");
+  put("notes/AccessKey.txt", "id,secret");
+  put("tax/W-2 2023.md", "wages");
+  put("drafts/key.md", "OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwx");
+  const folder = await addCourse({ exclude: ["week1"] });
+  await syncFolder(store, workspaceId, folder, { ...deps(), onDemand: true });
+  const reader = folderReaderFor(workspaceId)!;
+  expect(folderReaderFor("someone-else")).toBeUndefined();
+  const top = await listFolderEntries(store, workspaceId, folder.id);
+  expect(top.ok && top.text).toContain("notes/");
+  expect(top.ok && top.text).not.toContain("week1");
+  expect(top.ok && top.text).not.toContain("tax/W-2");
+  const notes = await listFolderEntries(store, workspaceId, folder.id, "notes");
+  expect(notes.ok && notes.text).toContain("notes/plan.md");
+  expect(notes.ok && notes.text).not.toContain("AccessKey");
+  const opened = await readFolderFile(store, workspaceId, reader, folder.id, "notes/plan.md");
+  expect(opened.ok && opened.doc.extractedText).toBe("my plan for spring");
+  // Read once: the second opening is the stored document, not another read.
+  const before = extracted.length;
+  expect(await readFolderFile(store, workspaceId, reader, folder.id, "notes\\plan.md")).toMatchObject({ ok: true });
+  expect(extracted.length).toBe(before);
+  for (const refused of ["../outside.md", "C:/Windows/win.ini", "notes/AccessKey.txt", "week1/notes.txt", "tax/W-2 2023.md"]) {
+    expect(await readFolderFile(store, workspaceId, reader, folder.id, refused)).toMatchObject({ ok: false });
+  }
+  expect(await readFolderFile(store, workspaceId, reader, folder.id, "drafts/key.md")).toMatchObject({ ok: false });
+  expect(names()).toEqual(["course/notes/plan.md"]);
+  configureFolderReading(undefined);
 });
 
 test("past the limit the most recently changed files are read, and the rest are counted", async () => {

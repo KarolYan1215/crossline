@@ -1,9 +1,39 @@
-import { FOLDER_LINES_SCHEMA, SOURCE_FOLDERS_SETTING, readSourceFolders, sourceFolderIndexSetting, validateFolderLines, type FolderIndexEntry, type FolderLinesAnswer } from "@crossline/core";
+import { FOLDER_LINES_SCHEMA, FOLDER_SCREEN_SCHEMA, SOURCE_FOLDERS_SETTING, readSourceFolders, sourceFolderIndexSetting, validateFolderLines, validateFolderScreen,
+  type FolderIndexEntry, type FolderLinesAnswer, type FolderScreenAnswer } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
 
 export const FOLDER_CLASSIFIER = "crossline:crossline-folder-classifier";
+
+/** Files offered to the screening at most (a picked folder's readable files, most recent first; the rest are not offered). */
+const SCREEN_OFFERED = 1000;
+export type ScreenFile = { path: string; size: number; modified: number };
+
+/**
+ * Screens a folder the person picked in the browser before anything goes up (§四.3.3; the hosted app cannot browse the person's disk, so
+ * it screens, then imports): the same Skill, asked which of the files code already let through are worth reading, by name, format, size
+ * and date, at most `limit`. Answers indexes into `files`; without a model the caller falls back to the most recently changed.
+ */
+export function createFolderScreener(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined) {
+  return async function screen(folder: string, files: ScreenFile[], limit: number): Promise<{ keep: string[]; why: string } | { blocked: string }> {
+    const offered = files.slice(0, SCREEN_OFFERED);
+    if (offered.length <= 1) return { keep: offered.map((file) => file.path), why: "" };
+    const client = getClient();
+    if (!client) return { blocked: "CODEX_SUPERVISOR_UNAVAILABLE" };
+    let profiles: Record<string, { description?: string }> = {};
+    try { profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") ?? {}; } catch { /* none yet */ }
+    const lines = identityLines(store, workspaceId).map((line) => ({ label: line.label, description: profiles[line.id]?.description ?? "" }));
+    const context = { version: "crossline.folder-screen.v1", folder, limit, lines,
+      files: offered.map((file, index) => ({ index, path: file.path, size: file.size, modifiedAt: new Date(file.modified).toISOString().slice(0, 10) })) };
+    const result = await runCodexSkill<FolderScreenAnswer>(client, context, { skillName: FOLDER_CLASSIFIER, cwd,
+      developerInstructions: "Screen the picked folder: keep the files worth reading to know the person and their work, by name, format, size and date, "
+        + "at most `limit`, most useful first. Return raw JSON only.", outputSchema: FOLDER_SCREEN_SCHEMA,
+      prepareInput: () => context, validateOutput: (output) => validateFolderScreen(output, offered.length, limit), onAudit: () => {}, timeoutMs: 3 * 60_000 });
+    if (!result.ok) return { blocked: result.blocker.code };
+    return { keep: result.output.keep.map((index) => offered[index]!.path), why: result.output.why };
+  };
+}
 
 /**
  * Proposes the lines each newly read folder serves (decided 2026-10-14: the model files folders, the person can change it). Asked once per

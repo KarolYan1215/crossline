@@ -173,7 +173,6 @@
   "个人档案": "Personal records",
   "身份证号": "Chinese ID number",
   "银行卡号": "Bank card number",
-  "需要完整路径，例如 D:\\课程资料": "Enter the full path, for example D:\\Course materials",
   "不能授权整个磁盘，请选一个具体的文件夹": "A whole drive cannot be authorized. Choose a specific folder.",
   "不能授权整个用户文件夹，请选其中一个具体的文件夹": "The whole user folder cannot be authorized. Choose a specific folder inside it.",
   "系统文件夹不能授权": "System folders cannot be authorized",

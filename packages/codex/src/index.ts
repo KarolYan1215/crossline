@@ -401,6 +401,15 @@ export async function handleSourceFolderRequest(request: IncomingMessage, respon
   const one = /^\/v1\/sources\/folders\/([A-Za-z0-9-]{1,40})(\/lines|\/exclusions|\/purge)?$/.exec(pathname);
   const strings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length <= 300).slice(0, 500) : [];
   try {
+    // A folder picked in the browser, screened by the model before it goes up (any account: it reads names only, nothing on this machine).
+    if (request.method === "POST" && pathname === "/v1/sources/folders/screen") {
+      const body = await readJsonBody(request).catch(() => undefined) as { folder?: unknown; files?: unknown; limit?: unknown } | undefined;
+      const files = Array.isArray(body?.files) ? body.files.filter((file): file is { path: string; size: number; modified: number } => Boolean(file) && typeof file.path === "string"
+        && file.path.length <= 500 && typeof file.size === "number" && typeof file.modified === "number").slice(0, 1000) : [];
+      if (!folders.screen || !files.length) { sendJson(response, 400, { blocker: { code: "FOLDER_SCREEN_INVALID", message: say("需要文件列表") } }); return true; }
+      sendJson(response, 200, await folders.screen(callerWorkspaceId, String(body?.folder ?? "").slice(0, 200), files, Math.min(1000, Math.max(1, Number(body?.limit) || 60))));
+      return true;
+    }
     if (request.method === "POST" && (pathname === "/v1/sources/folders/preview" || pathname === "/v1/sources/folders")) {
       const body = await readJsonBody(request).catch(() => undefined) as { path?: unknown; exclude?: unknown; include?: unknown; names?: unknown } | undefined;
       if (typeof body?.path !== "string" || !body.path.trim() || body.path.length > 1000) {
@@ -584,6 +593,8 @@ export async function startCodexSupervisor(options: {
     remove: (workspaceId: string, id: string, purge?: boolean) => Promise<unknown>;
     setLines: (workspaceId: string, id: string, lines: string[]) => Promise<unknown>;
     setRules: (workspaceId: string, id: string, rules: { exclude?: unknown; include?: unknown; names?: unknown }) => Promise<unknown>;
+    /** Screens a folder picked in the browser by the model (names, sizes and dates only), answering the paths worth uploading. */
+    screen?: (workspaceId: string, folder: string, files: Array<{ path: string; size: number; modified: number }>, limit: number) => Promise<unknown>;
   };
   /** Signing in the account that holds the Crossline calendar by device code: the code goes to the page and the person signs in there. */
   calendarWriteLogin?: { start: (workspaceId: string) => Promise<unknown>; status: (workspaceId: string) => unknown };

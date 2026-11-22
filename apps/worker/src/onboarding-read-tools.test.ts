@@ -19,10 +19,10 @@ test("read_file reads a file past the turn's budget page by page; read_ledger pa
   const first = await tools.call("read_file", { id: "doc-1" });
   expect(first).toContain(`接着读用 offset ${FILE_PAGE}`);
   expect(await tools.call("read_file", { id: "doc-1", offset: FILE_PAGE })).toContain("已读完");
-  expect(() => tools.call("read_file", { id: "nope" })).toThrow("没有 id 为「nope」");
+  await expect(tools.call("read_file", { id: "nope" })).rejects.toThrow("没有 id 为「nope」");
   expect(await tools.call("read_ledger", { section: "questions" })).toContain("第 1/2 页");
   expect(await tools.call("read_ledger", { section: "questions", page: 1 })).toContain(`第 ${LEDGER_PAGE + 1} 题？`);
   expect(await tools.call("read_ledger", { section: "facts" })).toContain("research · what = 博士研究（确认）");
   expect(await tools.call("read_ledger", { section: "research" })).toContain("没有记录");
-  expect(() => tools.call("read_ledger", { section: "secrets" })).toThrow("section 只能是");
+  await expect(tools.call("read_ledger", { section: "secrets" })).rejects.toThrow("section 只能是");
 });

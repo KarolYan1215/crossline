@@ -101,7 +101,7 @@ describe("core text in English", () => {
 
   test("folders, artifact timing and the weekly energy advice", () => {
     expect(folderPathProblem("C:\\", { locale: "en" })).toBe("A whole drive cannot be authorized. Choose a specific folder.");
-    expect(folderPathProblem("courses")).toBe("需要完整路径，例如 D:\\课程资料");
+    expect(folderPathProblem("courses")).toBe("需要完整路径，例如 D:\\资料");
     expect(timeOrderProblem("2026-11-10", "2026-11-05", 2, false, "en")).toBe("Upstream is due 2026-11-10, later than the downstream deadline 2026-11-05 less 2 days to hand it over (latest 2026-11-03)");
     const advice = energyAdviceRule({ now: "2026-10-16T12:00:00Z", zone: "UTC", episodes: [], reports: [], worked: [], locale: "en" });
     expect("insufficient" in advice ? advice.insufficient : "").toBe("Needs at least 3 nights of sleep on record or 2 energy self-reports");

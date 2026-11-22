@@ -7,7 +7,7 @@ import { CrosslineStore } from "@crossline/db";
 import { SOURCE_FOLDERS_SETTING, sourceFolderIndexSetting } from "@crossline/core";
 vi.mock("server-only", () => ({}));
 vi.mock("./codex-runtime", () => ({ requestCodexSupervisor: vi.fn(async () => ({})), CodexSupervisorRequestError: class extends Error {} }));
-import { removeUploadedSource, saveSourceFiles } from "./sources";
+import { removeUploadedSource, restoreUploadedSource, saveSourceFiles, UNDO_WINDOW_MS } from "./sources";
 import { unfiledFiles } from "./file-belonging";
 import { TEST_CTX } from "./test-support";
 
@@ -35,12 +35,45 @@ test("a mistaken upload is taken back: its row, its stored copy and the question
   const file = fileURLToPath(doc.uri);
   expect(existsSync(file)).toBe(true);
 
-  expect(removeUploadedSource(TEST_CTX, doc.id)).toEqual({ ok: true, fileName: "t.md" });
+  const at = Date.UTC(2026, 10, 22);
+  expect(removeUploadedSource(TEST_CTX, doc.id, at)).toEqual({ ok: true, fileName: "t.md" });
   expect(store.listSourceDocuments(ws)).toEqual([]);
-  expect(existsSync(file)).toBe(false);
   expect(unfiledFiles(TEST_CTX, "2026-10-17")).toEqual([]);
   expect(store.listEvents(ws, { type: "source.removed" })).toHaveLength(1);
-  expect(removeUploadedSource(TEST_CTX, doc.id)).toEqual({ ok: false, code: "SOURCE_NOT_FOUND" });
+  expect(removeUploadedSource(TEST_CTX, doc.id, at)).toEqual({ ok: false, code: "SOURCE_NOT_FOUND" });
+  // The copy waits out the undo window, then goes with the next removal.
+  expect(existsSync(file)).toBe(true);
+  const other = saveSourceFiles(TEST_CTX, [{ fileName: "u.md", mediaType: "text/markdown", buffer: Buffer.from("另一行") }]);
+  if (!other.ok) throw new Error(other.message);
+  removeUploadedSource(TEST_CTX, other.documents[0]!.id, at + UNDO_WINDOW_MS);
+  expect(existsSync(file)).toBe(false);
+});
+
+test("deleting asks nothing; the notice's undo brings the file back under its id and has it read again, within the window only", async () => {
+  const saved = saveSourceFiles(TEST_CTX, [{ fileName: "plan.md", mediaType: "text/markdown", buffer: Buffer.from("计划") }], "ece548");
+  if (!saved.ok) throw new Error(saved.message);
+  const doc = saved.documents[0]!;
+  const at = Date.UTC(2026, 10, 22);
+  removeUploadedSource(TEST_CTX, doc.id, at);
+  expect(await restoreUploadedSource(TEST_CTX, doc.id, at + 1000)).toEqual({ ok: true, fileName: "plan.md" });
+  expect(store.listSourceDocuments(ws)).toMatchObject([{ id: doc.id, projectId: "ece548", extractionStatus: "pending" }]);
+  expect(store.listEvents(ws, { type: "source.restored" })).toHaveLength(1);
+  expect(await restoreUploadedSource(TEST_CTX, doc.id, at + 2000)).toEqual({ ok: false, code: "SOURCE_NOT_IN_TRASH" });
+  removeUploadedSource(TEST_CTX, doc.id, at + 3000);
+  expect(await restoreUploadedSource(TEST_CTX, doc.id, at + 3000 + UNDO_WINDOW_MS)).toEqual({ ok: false, code: "SOURCE_NOT_IN_TRASH" });
+});
+
+test("one file the app cannot take is refused on its own; the rest of the batch is kept", () => {
+  const saved = saveSourceFiles(TEST_CTX, [
+    { fileName: "AccessKey.txt", mediaType: "text/plain", buffer: Buffer.from("id,secret") },
+    { fileName: "notes.md", mediaType: "text/markdown", buffer: Buffer.from("OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwx") },
+    { fileName: "movie.mkv", mediaType: "video/x-matroska", buffer: Buffer.from("x") },
+    { fileName: "plan.md", mediaType: "text/markdown", buffer: Buffer.from("下周写完第三章"), modifiedAt: Date.UTC(2026, 2, 1) }]);
+  if (!saved.ok) throw new Error(saved.message);
+  expect(saved.documents.map((doc) => doc.fileName)).toEqual(["plan.md"]);
+  expect(saved.refused.map((item) => [item.fileName, item.code])).toEqual([["AccessKey.txt", "SOURCE_CREDENTIAL"], ["notes.md", "SOURCE_CREDENTIAL"], ["movie.mkv", "SOURCE_TYPE_NOT_ALLOWED"]]);
+  expect(store.getSetting(ws, `sources.modified:${saved.documents[0]!.id}`)).toBe(String(Date.UTC(2026, 2, 1)));
+  expect(saveSourceFiles(TEST_CTX, [{ fileName: "server.pem", mediaType: "", buffer: Buffer.from("x") }])).toMatchObject({ ok: false, code: "SOURCE_TYPE_NOT_ALLOWED" });
 });
 
 test("the same content another workspace uploaded keeps its copy; a folder's file is excluded in its own card", () => {

@@ -11,6 +11,7 @@ import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore, StoredSourceDocument } from "@crossline/db";
 import { identityLines } from "./lines";
 import { ownerOf } from "./owner";
+import { supersededDocumentIds } from "./source-versions";
 import { sayToPerson } from "./workflow-smith";
 import { tOfWorkspace } from "./locale";
 
@@ -42,9 +43,13 @@ export function transcriptsAwaitingDigest(store: CrosslineStore, workspaceId: st
     .map((recording) => ({ doc: docs.get(recording.documentId)!, recording }));
 }
 
-/** The documents that are raw recording transcripts: the interview reads their digests instead. */
+/**
+ * The documents the interview reads through a note instead of in full: raw recording transcripts (their digests) and older versions of a
+ * document (their 「旧版摘要」, source-versions.ts). The originals stay stored and readable by id.
+ */
 export function transcriptDocumentIds(store: CrosslineStore, workspaceId: string): Set<string> {
-  return new Set(store.listEvents(workspaceId, { type: RECORDING_TRANSCRIBED_EVENT }).map((event) => String((event.payload as RecordingTranscribed).documentId ?? "")));
+  return new Set([...store.listEvents(workspaceId, { type: RECORDING_TRANSCRIBED_EVENT }).map((event) => String((event.payload as RecordingTranscribed).documentId ?? "")),
+    ...supersededDocumentIds(store, workspaceId)]);
 }
 
 const startedAtOf = (doc: StoredSourceDocument) => /约 (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) 开始/.exec(doc.extractedText)?.[1] ?? doc.createdAt.slice(0, 16).replace("T", " ");

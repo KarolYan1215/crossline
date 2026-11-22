@@ -88,15 +88,17 @@ import { createWeeklyInsight } from "./weekly-insight-runner";
 import { createOnboardingSessionRunner, finishInterview } from "./onboarding-session";
 import { researchRunnerFor } from "./onboarding-research";
 import { createOnboardingExtractor, EXTRACT_LANES, extractionRunning, requestExtraction } from "./onboarding-extract";
-import { extractText, reextractForLayout } from "./extract";
+import { reextractForLayout } from "./extract";
+import { maskForModel, readSourceText, screenUploadedText } from "./source-intake";
+import { createVersionJudge } from "./source-versions";
 import { WHISPER_MODEL, createTranscriber, createWhisperEngine, modelsDirectory } from "./transcribe";
 import { recordingPass, recordingsOn, transcribeConcurrency } from "./recordings";
 import { createRecordingDigester, transcriptsAwaitingDigest } from "./recording-digest";
 import { createBackgroundFactsExtractor } from "./background-facts-runner";
 import { createGraphSync, type SyncOutcome } from "./graph-sync";
 import { addSubscription, hasSubscriptions, removeSubscription, subscriptionSources } from "./calendar-subscriptions";
-import { addFolder, personNames, previewFolder, removeFolder, setFolderLines, setFolderRules, syncFolders } from "./source-folders";
-import { createFolderClassifier } from "./folder-classifier";
+import { addFolder, configureFolderReading, personNames, previewFolder, removeFolder, setFolderLines, setFolderRules, syncFolders, type FolderDeps } from "./source-folders";
+import { createFolderClassifier, createFolderScreener } from "./folder-classifier";
 import { homedir, tmpdir } from "node:os";
 import { defaultSafeGetDeps } from "./safe-fetch";
 import { REQUIRED_SKILLS } from "./required-skills";
@@ -279,7 +281,7 @@ async function titlePass(workspaceId: string, checkedAt: string): Promise<void> 
 
 /** Files new calendar events under the person's lines after a sync, a batch a tick; a small model, so it still runs when quota is tight. */
 /**
- * Reads a stored document's text: the worker's one extraction path (the web's upload and the supervisor route; authorized folders call `extractText` before keeping a file).
+ * Reads a stored document's text: the worker's one extraction path (the web's upload and the supervisor route; authorized folders call `readSourceText` before keeping a file).
  * Only files this app wrote itself, by the path it recorded: the model and the browser never supply one.
  */
 async function extractDocument(documentId: string, workspaceId: string) {
@@ -287,11 +289,25 @@ async function extractDocument(documentId: string, workspaceId: string) {
   const t = tOfWorkspace(analysisStore, workspaceId);
   if (!doc) return { state: "blocked" as const, code: "SOURCE_NOT_FOUND", message: t("找不到这个文件。") };
   if (doc.kind === "audio") return transcribeDocument(workspaceId, doc.id);
+  const locale = localeOf(analysisStore, workspaceId);
   let result;
-  try { result = await extractText(new Uint8Array(readFileSync(fileURLToPath(doc.uri))), doc.kind, localeOf(analysisStore, workspaceId)); }
+  try { result = await readSourceText(new Uint8Array(readFileSync(fileURLToPath(doc.uri))), doc.kind, doc.fileName, locale); }
   catch { result = { status: "failed" as const, text: "", note: t("读不到已保存的文件。") }; }
-  analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: result.status, text: result.text, ...(result.note ? { note: result.note } : {}) });
-  return { state: "extracted" as const, documentId: doc.id, status: result.status, characters: result.text.length };
+  // A direct upload passes the same code checks as a folder's file before anything keeps its text (§四.3: keys first, then personal numbers).
+  const verdict = screenUploadedText(doc.fileName, result.text, locale);
+  if (verdict.refused) {
+    const gone = analysisStore.deleteSourceDocument(workspaceId, doc.id);
+    if (gone && !gone.uriInUse) {
+      try { const file = path.resolve(fileURLToPath(gone.uri)); if (file.startsWith(path.resolve(dataDir, "sources") + path.sep)) rmSync(file, { force: true }); } catch { /* not a local copy */ }
+    }
+    analysisStore.appendEvent({ ownerId: ownerOf(analysisStore, workspaceId), workspaceId, idempotencyKey: `source.refused:${doc.id}`, type: "source.refused", entityId: doc.id,
+      payload: { fileName: doc.fileName, code: verdict.code } });
+    return { state: "refused" as const, documentId: doc.id, fileName: doc.fileName, code: verdict.code, message: verdict.message };
+  }
+  const note = [result.note, verdict.note].filter(Boolean).join(t("；"));
+  analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: result.status, text: verdict.text, ...(note ? { note } : {}) });
+  void versionPass(workspaceId).catch(() => undefined);
+  return { state: "extracted" as const, documentId: doc.id, status: result.status, characters: verdict.text.length };
 }
 
 /** Authorized folders (source-folders.ts): read what is new or changed, then have the model propose lines for newly read folders. */
@@ -324,9 +340,13 @@ const evalHeld = (): boolean => {
 const heldForEval = (workspaceId: string) => machineOwner(workspaceId) && evalHeld();
 const ownerOnlyFolder = (workspaceId: string) => ({ state: "blocked" as const, code: "FOLDER_OWNER_ONLY",
   message: tOfWorkspace(analysisStore, workspaceId)("文件夹在运行 Crossline 的那台电脑上，只有那台电脑的主人能授权。请改用「添加文件」上传。") });
-const folderDeps = { dataDir, home: homedir(), readText: extractText };
-/** With 录音自动转写 on, the folder pass also queues the recordings it finds (recordings.ts). */
-const folderDepsFor = (workspaceId: string) => ({ ...folderDeps, audio: recordingsOn(analysisStore, workspaceId) });
+const folderDeps: FolderDeps = { dataDir, home: homedir(), readText: (bytes, kind, locale, fileName) => readSourceText(bytes, kind, fileName ?? "", locale) };
+/**
+ * With 录音自动转写 on, the folder pass also queues the recordings it finds (recordings.ts). Folders are this computer's own (the pass runs
+ * for the machine owner only), so they are listed rather than imported and the interview opens what it needs (D3, 2026-11-22).
+ */
+const folderDepsFor = (workspaceId: string): FolderDeps => ({ ...folderDeps, audio: recordingsOn(analysisStore, workspaceId), onDemand: true });
+configureFolderReading({ deps: folderDeps, allowed: machineOwner });
 const readingFolders = new Set<string>();
 // A folder added while a pass runs would wait for the next tick (up to fifteen minutes) while its card says 「正在读取」 — four folders
 // authorized at once read only the first (2026-10-15) — so a call during a pass runs one more pass after it.
@@ -898,6 +918,8 @@ async function intakeTick(workspace: { id: string }, checkedAt: string): Promise
   await folderPass(workspace.id, checkedAt);
   // Transcripts from any source — this computer's folders or the server transcriber's inbox — are digested for every workspace.
   void digestPass(workspace.id).catch(() => undefined);
+  // Files read since the last tick are compared with the others for older versions of one document.
+  void versionPass(workspace.id).catch(() => undefined);
   // Uploaded files are filed under the project their own name or opening names; what stays unclear is asked about on 待确认.
   try {
     const filed = fileSourceDocuments(analysisStore, workspace.id);
@@ -1281,7 +1303,10 @@ async function transcribeDocument(workspaceId: string, documentId: string): Prom
       const bytes = new Uint8Array(readFileSync(fileURLToPath(doc.uri)));
       const result = await transcriber.transcribe(bytes, doc.fileName, process.env.CROSSLINE_TRANSCRIBE_LANGUAGE?.trim() || undefined, locale);
       if (result.state === "transcribed") {
-        analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: "done", text: result.text, note: t("本机转写，约 {{minutes}} 分钟的录音。", { minutes: Math.round(result.seconds / 60) }) });
+        // A recording uploaded on purpose is read like any other upload: numbers that identify the person are masked before it is kept.
+        const masked = maskForModel(result.text, locale);
+        analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: "done", text: masked.text,
+          note: [t("本机转写，约 {{minutes}} 分钟的录音。", { minutes: Math.round(result.seconds / 60) }), masked.note].filter(Boolean).join(" ") });
       } else {
         analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: "failed", text: "",
           note: result.state === "failed" ? result.message : t("语音识别模型还没有准备好。") });
@@ -1338,6 +1363,22 @@ async function digestPass(workspaceId: string): Promise<void> {
       { dataDir, timeZone: calendarZone(workspaceId) ?? "America/Chicago" })();
     console.info(JSON.stringify({ type: "recordings.digested", workspaceId, ...outcome }));
   } finally { digesting.delete(workspaceId); }
+}
+
+/**
+ * Older versions of one document (source-versions.ts): fingerprints circle close pairs after a file is read, the model confirms them and
+ * picks the latest. Intake work, so it runs while the quota allows intake; a pass already running takes the next file on its next call.
+ */
+const versioning = new Set<string>();
+async function versionPass(workspaceId: string): Promise<void> {
+  if (versioning.has(workspaceId) || paused(workspaceId, "intake") || !codexSupervisor) return;
+  if (!spendAllows(await spendFor(workspaceId), "intake")) return;
+  versioning.add(workspaceId);
+  try {
+    enterUsageWorkspace(workspaceId);
+    const outcome = await createVersionJudge(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId), { dataDir })().catch(() => undefined);
+    if (outcome && "superseded" in outcome && outcome.asked) console.info(JSON.stringify({ type: "sources.versions_judged", workspaceId, ...outcome }));
+  } finally { versioning.delete(workspaceId); }
 }
 
 /** After the model arrives, every recording that was waiting for it starts. */
@@ -2002,7 +2043,13 @@ if (!capabilitySecret) {
       remove: async (workspaceId: string, id: string, purge?: boolean) => removeFolder(analysisStore, workspaceId, id, { purge: Boolean(purge), dataDir }),
       setRules: async (workspaceId: string, id: string, rules: { exclude?: unknown; include?: unknown; names?: unknown }) =>
         machineOwner(workspaceId) ? setFolderRules(analysisStore, workspaceId, id, rules, folderDepsFor(workspaceId)) : ownerOnlyFolder(workspaceId),
-      setLines: async (workspaceId: string, id: string, lines: string[]) => ({ saved: setFolderLines(analysisStore, workspaceId, id, lines) })
+      setLines: async (workspaceId: string, id: string, lines: string[]) => ({ saved: setFolderLines(analysisStore, workspaceId, id, lines) }),
+      // Any account: a folder picked in its browser is screened by name before it goes up (the page falls back to the newest files without it).
+      screen: async (workspaceId: string, folder: string, files: Array<{ path: string; size: number; modified: number }>, limit: number) => {
+        if (!spendAllows(await spendFor(workspaceId), "intake")) return { blocked: "SPEND_LIMIT" };
+        enterUsageWorkspace(workspaceId);
+        return createFolderScreener(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))(folder, files, limit);
+      }
     },
     extractBackgroundFacts: (_client, captureTitle, captureContext, signal, workspaceId) =>
       createBackgroundFactsExtractor(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))(captureTitle, captureContext, signal),
