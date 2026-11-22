@@ -61,6 +61,48 @@ export const MCP_ANSWERABLE_KINDS: ReadonlySet<AskKind> = new Set<AskKind>([
 ]);
 export const mcpAnswerable = (kind: AskKind): boolean => MCP_ANSWERABLE_KINDS.has(kind);
 
+/**
+ * OAuth for the hosts that sign in only that way (claude.ai, ChatGPT; docs/mcp-server.md §4.3). An access token is an ordinary MCP token
+ * that expires; the refresh token renews it (and is replaced each time) until the person revokes the connection or it lies unused.
+ */
+export const MCP_OAUTH_ACCESS_SECONDS = 3600;
+export const MCP_OAUTH_REFRESH_DAYS = 30;
+export const MCP_OAUTH_CODE_SECONDS = 60;
+export const MCP_REFRESH_PREFIX = "cl_mcr_";
+export const MCP_REFRESH_PATTERN = /^cl_mcr_[A-Za-z0-9_-]{32,64}$/;
+
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+const urlOf = (value: string): URL | undefined => { try { return new URL(value); } catch { return undefined; } };
+const isLoopback = (url: URL) => url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname);
+
+/**
+ * A redirect URI a client may register: https anywhere (claude.ai, chatgpt.com), or http only on this machine's loopback (Claude Code,
+ * Codex, RFC 8252). Never a fragment, credentials, or another scheme a page could be made to run.
+ */
+export function mcpRedirectUriAllowed(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > 512) return false;
+  const url = urlOf(value);
+  if (!url || url.hash || url.username || url.password || value.includes("#")) return false;
+  return url.protocol === "https:" || isLoopback(url);
+}
+
+/** Whether `requested` is one of `registered`: exactly, or for loopback with any port (RFC 8252 §7.3; the port is picked at sign-in). */
+export function mcpRedirectUriMatches(requested: string, registered: readonly string[]): boolean {
+  if (registered.includes(requested)) return true;
+  const asked = urlOf(requested);
+  if (!asked || !isLoopback(asked)) return false;
+  return registered.some((entry) => {
+    const known = urlOf(entry);
+    return Boolean(known && isLoopback(known) && known.hostname === asked.hostname && known.pathname === asked.pathname && known.search === asked.search);
+  });
+}
+
+/** An OAuth `scope` string to Crossline's scopes: `write` includes reading; anything else asked for is not granted. */
+export function mcpScopesFrom(scope: string | null | undefined): McpScope[] {
+  const asked = (scope ?? "").split(/\s+/);
+  return asked.includes("write") ? ["read", "write"] : ["read"];
+}
+
 /** How an outside agent may record work: the whole task or a block done, a step done, or how far a task got. */
 export type McpCompletion = "done" | "partial";
 

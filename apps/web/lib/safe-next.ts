@@ -1,6 +1,10 @@
-/** Where to go after signing in or verifying: only a path on this site, never another origin (`//evil`, `/\evil`, `https:`). */
+/**
+ * Where to go after signing in or verifying: only a path on this site, never another origin (`//evil`, `/\evil`, `https:`). A query may
+ * carry what a form or `encodeURIComponent` leaves unescaped (`+` for a space, `!'()*`, `,:;@$`): an OAuth sign-in's consent page
+ * (`/mcp/authorize?…scope=read+write`) has to come back whole.
+ */
 export function safeNext(next: string | null | undefined, fallback = "/connect"): string {
-  return next && /^\/(?!\/)[\w\-/?=&.%~#]*$/.test(next) && !next.startsWith("/login") && !next.startsWith("/signup") ? next : fallback;
+  return next && /^\/(?!\/)[\w\-/?=&.%~#+!'()*,;:@$]*$/.test(next) && !next.startsWith("/login") && !next.startsWith("/signup") ? next : fallback;
 }
 
 /** The sign-in page for someone who was on `path`, so signing in (or up) brings them back there. */

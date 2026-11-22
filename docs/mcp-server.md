@@ -2,7 +2,7 @@
 
 2026-11-21。本人的决定：先做「往外开」——让 Claude Code、Codex 等外部 AI 通过 MCP 用 Crossline；「往里接外部 MCP」只做计划（§9），以后放在本地版。
 
-实现：`apps/web/app/api/mcp/route.ts`（端点）、`apps/web/lib/mcp/`（server、工具、令牌）、`packages/core/src/mcp.ts`（工具表、权限、可回答的待决类型）、`apps/web/app/settings/mcp-card.tsx`（设置卡）。
+实现：`apps/web/app/api/mcp/route.ts`（端点）、`apps/web/lib/mcp/`（server、工具、令牌、`oauth.ts` 授权服务器）、`apps/web/app/mcp/authorize/`（同意页）、`packages/core/src/mcp.ts`（工具表、权限、可回答的待决类型）、`apps/web/app/settings/mcp-card.tsx`（设置卡）。
 
 ## 1. 要做的四件事
 
@@ -24,8 +24,8 @@
 - **宿主**：
   - Claude Code：`claude mcp add --transport http <name> <url> --header "Authorization: Bearer …"`，支持静态请求头。
   - Codex：`~/.codex/config.toml` 的 `[mcp_servers.x] url = …`、`bearer_token_env_var = …`。
-  - claude.ai 自定义连接器：OAuth 或无认证（静态请求头在 beta，不能指望）。
-  - ChatGPT 连接器 / Apps：只有 OAuth 或无认证。
+  - claude.ai 自定义连接器：OAuth 或无认证（静态请求头在 beta，不能指望）。回调固定 `https://claude.ai/api/mcp/auth_callback`（以后可能是 claude.com）；AS 元数据同时声明 `client_id_metadata_document_supported: true` 与 `token_endpoint_auth_methods_supported` 含 `none` 才用 CIMD，否则用 DCR（需要 `registration_endpoint`）；每次都带 PKCE S256；401 的 `resource_metadata` 优先，没有再探 `/.well-known/oauth-protected-resource/<path>` 与根路径；Token 端点必须收 form 编码；401 时与过期前 5 分钟刷新，公共客户端应轮换 refresh token（<https://claude.com/docs/connectors/building/authentication>）。
+  - ChatGPT 连接器 / Apps：只有 OAuth 或无认证。元数据须有 `code_challenge_methods_supported` 含 `S256`，否则不支持；有 `client_id_metadata_document_supported` 时优先 CIMD，否则 DCR（每个连接注册一次并复用）；授权与换令牌都带 `resource`；声明 `authorization_response_iss_parameter_supported: true` 并且每个授权响应（含错误）都带与 `issuer` 完全相同的 `iss`（RFC 9207）时，用固定回调 `https://chatgpt.com/connector_platform_oauth_redirect`，否则用每次不同的 `https://chatgpt.com/connector/oauth/{callback_id}`（<https://developers.openai.com/apps-sdk/build/auth>）。
 - **安全文献**：规范的 Security Best Practices（confused deputy、令牌透传、会话劫持）；工具投毒 / rug pull（描述被事后改写）；间接提示注入（工具返回的数据里藏指令）。
 
 ## 3. 批判性分析与取舍
@@ -36,7 +36,7 @@
 
 - stdio server 是宿主拉起的子进程。要读写账本，它只能直接打开 SQLite：那是第二个写者，绕过 web 的 AccessContext、撤销、i18n、限流，而且托管版的账本根本不在用户电脑上。若改成转发到 web，它就只是一个带令牌的 HTTP 代理，多一个要打包、要更新的二进制，没有新能力。
 - 一个 HTTP 端点 `/api/mcp` 同时服务两种部署：本地版 `http://localhost:3210/api/mcp`，托管版 `https://app.crossline.lol/api/mcp`。代码一份。
-- Claude Code 与 Codex 都直接支持「URL + Bearer」，第一期就能用；claude.ai 与 ChatGPT 需要 OAuth（§4.3），是下一期。
+- Claude Code 与 Codex 都直接支持「URL + Bearer」；claude.ai 与 ChatGPT 只走 OAuth，由 Crossline 自己当授权服务器（§4.3）。
 
 ### 3.2 与 `docs/agent-host-plugins.md` 的关系
 
@@ -58,7 +58,7 @@
 - 浏览器会话**不能**调用 `/api/mcp`：只认 Bearer，别的网站的页面借不到本人的 cookie；跨站 `Origin` 在读令牌前就 403。
 - 限流：每个令牌每分钟 60 次调用、每小时 60 次写入（内存计数，防失控循环，不防重启）。
 
-为什么不直接复用 `packages/auth`（Better Auth）的会话：会话 cookie 绑定浏览器、跟随登录登出，外部 AI 需要的是长期、可单独撤销、带范围的凭据。OAuth 上线后（§4.3）令牌改由 Better Auth 的 OAuth provider 发，范围与撤销语义不变。
+为什么不直接复用 `packages/auth`（Better Auth）的会话：会话 cookie 绑定浏览器、跟随登录登出，外部 AI 需要的是长期、可单独撤销、带范围的凭据。OAuth 登录（§4.3）发出的也是同一种令牌、存在同一个列表里，范围与撤销语义不变。
 
 ### 3.4 写入边界
 
@@ -126,22 +126,51 @@ url = "https://app.crossline.lol/api/mcp"
 bearer_token_env_var = "CROSSLINE_MCP_TOKEN"
 ```
 
-### 4.3 下一期：OAuth（claude.ai、ChatGPT）
+### 4.3 OAuth：claude.ai 与 ChatGPT（2026-11-21）
 
-claude.ai 与 ChatGPT 的连接器只走 OAuth。计划：
+claude.ai 与 ChatGPT 的连接器只走 OAuth，所以 Crossline 自己当授权服务器（`apps/web/lib/mcp/oauth.ts`），`/api/mcp` 是资源服务器。
 
-- 用 `@better-auth/oauth-provider`（与现有 `packages/auth` 同一套 Better Auth）+ jwt 插件，Crossline 自己当授权服务器；
-- `/.well-known/oauth-protected-resource`（RFC 9728）指向它，401 的 `WWW-Authenticate` 带 `resource_metadata`；
-- 客户端用 Client ID Metadata Document，必要时兼容 DCR；令牌受众绑定 `/api/mcp`（RFC 8707）；
-- 同意页列出 `read` / `write` 两档，与个人令牌同语义，在同一张设置卡里列出与撤销；
-- 登录始终由本人在浏览器里完成。
+**端点**
+
+| 地址 | 作用 |
+|---|---|
+| `GET /.well-known/oauth-protected-resource`（及 `/.well-known/oauth-protected-resource/api/mcp`） | RFC 9728：`resource` = `<站点>/api/mcp`，`authorization_servers` = [`<站点>`]，`scopes_supported` = `read`、`write` |
+| `GET /.well-known/oauth-authorization-server` | RFC 8414：code + PKCE S256、`none`（公共客户端）、`authorization_code` + `refresh_token`、`authorization_response_iss_parameter_supported: true` |
+| `POST /api/mcp/oauth/register` | RFC 7591 动态注册 |
+| `GET /mcp/authorize` | 授权端点 = 同意页 |
+| `POST /api/mcp/oauth/consent` | 同意页提交（本人浏览器会话） |
+| `POST /api/mcp/oauth/token` | 换令牌、刷新（form 编码） |
+
+`/api/mcp` 没有令牌时回 401 `WWW-Authenticate: Bearer resource_metadata="<站点>/.well-known/oauth-protected-resource"`，令牌无效时再加 `error="invalid_token"`。站点地址取 `CROSSLINE_WEB_BASE_URL`（与 Better Auth 同一个），签名用 `BETTER_AUTH_SECRET`；没有密钥就没有 OAuth（元数据 404，手动令牌照常）。
+
+**为什么自己写，不用 `@better-auth/oauth-provider`**（原计划）：
+
+- 它发 JWT 访问令牌，撤销要等过期；这里令牌就是 `mcp.tokens` 里的一条，设置卡上点撤销，下一次调用就 401，和手动令牌一样。
+- 它把客户端、令牌、同意记录放进 `auth.db` 的新表，设置卡要读两处；这里一个列表。
+- 能对上本仓库 `better-auth@1.7.5` 的版本不保证 RFC 9207 的 `iss`（ChatGPT 的固定回调要它）；最新版要求先把 Better Auth 升到 1.7.27。
+- 需要的只是 code + PKCE + 刷新 + 动态注册，约 250 行，每一步都有测试（§5）。
+
+**取舍**
+
+- **不做 Client ID Metadata Document。** CIMD 要服务器去抓客户端给的任意 URL（SSRF 面），托管版不开新的出站路径；两个宿主都在没声明 CIMD 时退回 DCR。
+- **注册不落库。** `client_id` 就是注册内容（名字、回调地址）加站点密钥的 HMAC 签名：开放的注册端点不会被灌满，改动任何一处签名就失效。回调地址只收 https，或本机 loopback 的 http（Claude Code、Codex；端口任意，RFC 8252 §7.3）；不收片段、账号密码、别的 scheme；最多 5 个。
+- **同意页名字不算数，地址算数。** 客户端名字是自报的，同意页醒目写出授权后**返回到哪个地址**（`claude.ai`、`chatgpt.com`），提示「只在认得这个地址时允许」。本人可以改名字（每次写入都标这个名字）、把读写降成只读；不会多给客户端没要的范围。未知客户端或未登记的回调地址只在页面上说明，**绝不重定向**过去；其他错误按规范带 `state` 与 `iss` 回给客户端。
+- **登录始终由本人在浏览器里完成。** 未登录时同意页送去登录页，登录后回到同一个同意页（`safeNext` 放行查询串里的 `+`、`!'()*,;:@$`）。打开同意页不授予任何东西，只有按「允许」才会。同意页的提交只接受本站浏览器会话、拒绝跨站；它返回下一步地址由页面自己跳转（站点 CSP `form-action 'self'` 会拦下跳到别站的表单）。
+- **授权码**：32 字节随机，存哈希，60 秒，只能用一次（PKCE 不对也作废），必须同一个 `client_id` 与 `redirect_uri`；放在进程内存（`globalThis`），重启丢失只损失一分钟内的码。
+- **令牌**：访问令牌就是 `cl_mcp_…` 手动令牌的同一格式，1 小时过期；刷新令牌 `cl_mcr_…`，30 天，每次刷新都换新、旧的立即失效，只能由同一个客户端刷新，可以收窄范围、不能扩大。两者都只存 SHA-256。`resource` 若给出必须等于 `<站点>/api/mcp`（`invalid_target`）；只有一个资源，令牌也只在 `/api/mcp` 有效。
+- **在设置卡里与手动令牌一起列出**，标「登录连接 · <地址>」，同样一键撤销（访问与刷新令牌同时失效）。刷新令牌过期的连接在下一次登录时清掉，不会堆满 10 个的上限；满了时同意页直接说「先撤销一个」。
+- **托管版才能接 claude.ai / ChatGPT**：它们从网上连过来，本地版 `http://127.0.0.1` 连不上（设置卡会说明）。本地版上 Claude Code 也可以走 OAuth（loopback 回调），但手动令牌更简单。
+
+接入：claude.ai → 设置 → 连接器 → 添加自定义连接器，填 `https://app.crossline.lol/api/mcp`，按提示登录 Crossline 并允许；ChatGPT → 开发者模式新建连接器，同一地址，认证选 OAuth。
 
 ## 5. 测试
 
 - `apps/web/lib/mcp/tokens.test.ts`：只存哈希、范围、撤销一个不影响其他、两个账号互不可达、校验与上限、写入限流。
 - `apps/web/lib/mcp/tools.test.ts`：每个工具一条，经页面同一函数；含零宽字符被清掉、链接不外泄、待决按卡片规则校验、写入带 agent 名、状态机拒绝。
 - `apps/web/app/api/mcp/route.test.ts`：协议级。用 SDK 的 `Client` + `StreamableHTTPClientTransport` 连自己的 route，2026-07-28 客户端（`auto`）与 2025 客户端（`legacy`）各跑通四类操作；只读令牌只看到只读工具；无令牌 / 错令牌 401，跨站 403。
-- `packages/core/src/mcp.test.ts`：`mcpText`、`mcpToolAllowed`、白名单不含任何对外类型。
+- `packages/core/src/mcp.test.ts`：`mcpText`、`mcpToolAllowed`、白名单不含任何对外类型、回调地址规则与 loopback 端口、`scope` 解析。
+- `apps/web/lib/mcp/oauth.test.ts`：元数据（无 CIMD）、注册不落库且伪造 / 改动 / 换密钥的 `client_id` 无效、坏回调地址、未知客户端与回调不重定向、其余错误带 `state` 与 `iss`、拒绝与只读不超范围、PKCE / 同客户端 / 同回调 / 一次性 / 60 秒、令牌即账号的 MCP 令牌并列在设置卡、1 小时过期、刷新轮换、换客户端不能刷新、收窄范围、撤销同时废掉两种令牌、30 天、上限。
+- `apps/web/app/api/mcp/oauth/flow.test.ts`：协议级。SDK 自带的 OAuth 客户端从 `/api/mcp` 的 401 开始：发现 → 动态注册 → 同意页提交（未登录 401）→ 带 `iss` 的回调（SDK 按 RFC 9207 校验）→ 换令牌 → 调工具（写入标「Claude」）→ 访问令牌过期后 SDK 自己刷新再调；ChatGPT 路径：拒绝得到 `access_denied`、选只读只看到只读工具；跨站提交同意页 403。
 
 ## 6. 不变的硬约束
 
@@ -150,11 +179,22 @@ claude.ai 与 ChatGPT 的连接器只走 OAuth。计划：
 
 ## 7. 已知局限
 
+- 授权码在进程内存里：多实例部署要换成共享存储（现在托管版是单实例）。
+
 - 限流在内存里，多实例或重启后重计；够防失控循环，不是配额。
 - `lastUsedAt` 每分钟最多写一次。
 - 令牌查找遍历所有账号（同设备令牌）；账号数到上千再加索引。
 
 ## 8. 宿主验证（2026-11-21）
+
+OAuth：claude.ai 与 ChatGPT 要从网上连到托管版，部署前只能在本机验证。在 `localhost:3417` 的临时实例（`scripts/review-server.ts dev`）上：
+
+- `/.well-known/oauth-protected-resource`（及 `/api/mcp` 后缀）与 `/.well-known/oauth-authorization-server` 由 Next 正常提供；`/api/mcp` 无令牌回 401 带 `resource_metadata`。
+- 一个站在 `localhost:4567` 的假宿主注册后打开同意页：未登录 → 登录页（`next` 带着完整的同意页地址）→ 用测试邮箱的验证码登录 → 设密码页的「以后再说」→ 回到同意页，显示返回地址 `localhost:4567`、自称「Claude」、只读 / 读写；按「允许」后浏览器跳到回调，带 `code`、`state`、`iss`。
+- 假宿主用 code + verifier 换到令牌（`Bearer`、3600、`read write`、有 refresh token），`initialize` 与 `crossline_today` 都 200；刷新后旧访问令牌 401、新的 200；设置卡列出「Claude · 读写 · 登录连接 · localhost:4567」。
+- 顺带验证：上一轮发给另一个客户端的 code 被浏览器重放到假宿主，换令牌被拒。
+
+部署后由本人在 claude.ai / ChatGPT 里添加连接器、登录并允许，再问一次「我今天排了什么」。
 
 在 `localhost:3417` 的临时实例（独立数据目录，`scripts/review-server.ts dev`）上造一个账号和读写令牌：
 

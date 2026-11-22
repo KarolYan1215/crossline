@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { MCP_ANSWERABLE_KINDS, MCP_TOOLS, mcpAnswerable, mcpText, mcpToolAllowed } from "./mcp";
+import { MCP_ANSWERABLE_KINDS, MCP_TOOLS, mcpAnswerable, mcpRedirectUriAllowed, mcpRedirectUriMatches, mcpScopesFrom, mcpText, mcpToolAllowed } from "./mcp";
 
 test("tool access follows the token's scope, and only reading tools are read-only", () => {
   expect(mcpToolAllowed("crossline_today", ["read"])).toBe(true);
@@ -20,4 +20,17 @@ test("text handed to another AI keeps its words and loses what could hide them",
   expect(mcpText("x".repeat(250))).toHaveLength(200);
   expect(mcpText("x".repeat(250)).endsWith("…")).toBe(true);
   expect(mcpText(undefined)).toBe("");
+});
+
+test("OAuth redirect URIs: https anywhere, http only on loopback with any port, never a fragment or another scheme", () => {
+  for (const ok of ["https://claude.ai/api/mcp/auth_callback", "https://chatgpt.com/connector_platform_oauth_redirect", "http://localhost/callback", "http://127.0.0.1:8123/cb"])
+    expect(mcpRedirectUriAllowed(ok)).toBe(true);
+  for (const bad of ["http://evil.example/cb", "javascript:alert(1)", "https://a.example/cb#x", "https://user:pw@a.example/cb", "data:text/html,x", 42, ""])
+    expect(mcpRedirectUriAllowed(bad)).toBe(false);
+  expect(mcpRedirectUriMatches("http://localhost:51234/callback", ["http://localhost/callback"])).toBe(true);
+  expect(mcpRedirectUriMatches("http://localhost:51234/other", ["http://localhost/callback"])).toBe(false);
+  expect(mcpRedirectUriMatches("https://claude.ai:444/api/mcp/auth_callback", ["https://claude.ai/api/mcp/auth_callback"])).toBe(false);
+  expect(mcpScopesFrom("read write")).toEqual(["read", "write"]);
+  expect(mcpScopesFrom("offline_access openid")).toEqual(["read"]);
+  expect(mcpScopesFrom(undefined)).toEqual(["read"]);
 });
