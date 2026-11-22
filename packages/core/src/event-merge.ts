@@ -1,19 +1,24 @@
 import { calendarEventKey } from "./calendar-lines";
-import { normalizeTaskTitle, textSimilarity } from "./task-merge";
+import { CANDIDATE, normalizeTaskTitle, textSimilarity } from "./task-merge";
 
 /**
  * Overlapping timed items that are the same thing (the owner, 2026-11-03: 「对于所有时间冲突的事项，应该检查两者内容是否相似，相似的话
  * 则询问用户是否合并，周期性事务只要用户合并一次就应该持续合并」). A class can reach the plan three ways at once — the synced calendar, the
  * syllabus's dates and an event the person typed — and the day view drew it two or three times over.
  *
- * - Two items overlap on one day and their titles say the same thing (`similarTitles`) → the `event_merge` ask: 合并 / 两个都留 / 不是同一件事.
+ * - Two items overlap on one day and their titles are worth a look (`titlesWorthALook`, cheap character overlap) → a candidate. Code
+ *   asks the person about it only when the titles are the same (`sameTitle`) or the reviewer model called the two the same thing
+ *   (`EVENT_MERGE_REVIEW`, `apps/worker/src/event-merge-review.ts`) → the `event_merge` ask: 合并 / 两个都留 / 不是同一件事. Before
+ *   2026-11-22 a synonym-free Dice score, a course-code rule and a number rule decided it, which merged 「ECE 555 Lecture」 with
+ *   「ECE 555 Office Hours」 and knew nothing outside courses. A candidate not yet reviewed is not asked about (both stay, shown overlapping).
  * - The answer is kept per **series**, not per occurrence (`seriesKey`: where it came from, its title, its start), so a weekly class merged
  *   once stays merged every week, and a pair answered 「不是同一件事」 is not asked again.
  * - A merged pair is drawn as one item: the one kept is the stronger source (`KEEP_RANK`: the person's own calendar, then a file's item,
  *   then an event the person added, then a day heard in a recording); a work block the person locked over a calendar event of the same
  *   work keeps the work block.
  * - Where the person names a concrete time and a new event would be made (the input box, a file's dates, a recording), a matching item
- *   already there (`matchesItem`: same day, starts within 15 minutes, `similarTitles`) is merged into without asking.
+ *   already there (`matchesItem`: same day, starts within 15 minutes, `sameTitle`) is merged into without asking. Anything less than the
+ *   same title is written and left to the candidates above: nothing is merged by itself on a resemblance.
  *
  * Stored in `schedule.merges`, a `schedule.` setting, so undo and backups carry it.
  */
@@ -36,27 +41,32 @@ export const KEEP_RANK: Record<TimedKind, number> = { work: 0, calendar: 1, file
 /** How far apart two starts may be for an item to be the one the person just named. */
 export const SAME_START_MINUTES = 15;
 
-const COURSE = /[a-z]{2,5}\s?\d{3,4}/gi;
 const squash = (text: string) => text.replace(/[\s\p{P}\p{S}]+/gu, "").toLowerCase();
-const courseOf = (title: string) => (title.match(COURSE) ?? []).map((code) => code.replace(/\s/g, "").toLowerCase()).sort().join(",");
-const numbersOf = (title: string) => (title.replace(COURSE, "").match(/\d+/g) ?? []).sort().join(",");
 const toMinutes = (time: string) => { const [h, m] = time.split(":").map(Number); return (h ?? 0) * 60 + (m ?? 0); };
 
+/** The same title once spaces, punctuation, case and filler words are set aside: the only resemblance code acts on by itself. */
+export function sameTitle(a: string, b: string): boolean {
+  const x = normalizeTaskTitle(a), y = normalizeTaskTitle(b);
+  return Boolean(x) && x === y;
+}
+
 /**
- * Two titles name the same thing: one contains the other, they share a course code, four characters in a row, or their normalized
- * titles are 0.6 alike (the task merge's rule). Never when both name a course and the courses differ (ECE 555 / ECE 548), or when the
- * numbers in them differ (作业 2 / 作业 3, Midterm 1 / Midterm 2).
+ * Two titles share enough characters to be worth the reviewer's look: one contains the other, or their character bigrams are `CANDIDATE`
+ * alike. It only draws candidates; which ones are the same thing (a lecture and its office hours are not; 「组会」 and 「实验室组会（周三）」
+ * are) is the reviewer's, and the person's.
  */
-export function similarTitles(a: string, b: string): boolean {
+export function titlesWorthALook(a: string, b: string): boolean {
   const x = squash(a), y = squash(b);
   if (!x || !y) return false;
-  const ca = courseOf(a), cb = courseOf(b);
-  if (ca && cb && ca !== cb) return false;
-  if (numbersOf(a) !== numbersOf(b)) return false;
-  if (x.includes(y) || y.includes(x)) return true;
-  if (ca && ca === cb) return true;
-  for (let i = 0; i + 4 <= x.length; i += 1) if (y.includes(x.slice(i, i + 4))) return true;
-  return textSimilarity(normalizeTaskTitle(a), normalizeTaskTitle(b)) >= 0.6;
+  if (x.length >= 2 && y.length >= 2 && (x.includes(y) || y.includes(x))) return true;
+  return textSimilarity(normalizeTaskTitle(a), normalizeTaskTitle(b)) >= CANDIDATE;
+}
+
+/** The reviewer's reading of candidate pairs, by `pairKey` of their series: `same` asks the person, anything else does not. */
+export const EVENT_MERGE_REVIEW = "schedule.mergeReview";
+export type MergeReview = Record<string, { same: boolean; why: string; at: string }>;
+export function readMergeReview(raw: string | null | undefined): MergeReview {
+  try { const parsed = JSON.parse(raw ?? "null") as unknown; return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as MergeReview : {}; } catch { return {}; }
 }
 
 /** The series an item belongs to: every week's occurrence of one class has the same key. */
@@ -86,10 +96,11 @@ export function mergeDecision(a: TimedItem, b: TimedItem, how: MergeHow, by: "pe
 export type MergeCandidate = { key: string; a: TimedItem; b: TimedItem; firstDay: string; days: number };
 
 /**
- * Pairs to ask about: overlapping on a day, titles alike, from different series, and not decided yet. One per series pair (a weekly class
- * overlaps its calendar copy every week), with its first day and how many days it happens on. Work blocks are left to `locked_conflict`.
+ * Candidate pairs: overlapping on a day, titles worth a look, from different series, and not decided yet. One per series pair (a weekly
+ * class overlaps its calendar copy every week), with its first day and how many days it happens on. Work blocks are left to
+ * `locked_conflict`. With `review`, only the pairs to ask the person about: the same title, or called the same by the reviewer.
  */
-export function mergeCandidates(items: TimedItem[], book: MergeBook): MergeCandidate[] {
+export function mergeCandidates(items: TimedItem[], book: MergeBook, review?: MergeReview): MergeCandidate[] {
   const byDay = new Map<string, TimedItem[]>();
   for (const item of items) if (item.kind !== "work") byDay.set(item.day, [...(byDay.get(item.day) ?? []), item]);
   const found = new Map<string, MergeCandidate>();
@@ -98,9 +109,10 @@ export function mergeCandidates(items: TimedItem[], book: MergeBook): MergeCandi
     for (let i = 0; i < list.length; i += 1) for (let j = i + 1; j < list.length; j += 1) {
       const a = list[i]!, b = list[j]!;
       const sa = seriesKey(a), sb = seriesKey(b);
-      if (sa === sb || !overlaps(a, b) || !similarTitles(a.title, b.title)) continue;
+      if (sa === sb || !overlaps(a, b) || !titlesWorthALook(a.title, b.title)) continue;
       const key = pairKey(sa, sb);
       if (book[key]) continue;
+      if (review && !sameTitle(a.title, b.title) && review[key]?.same !== true) continue;
       const known = found.get(key);
       if (known) { if (known.firstDay !== day) known.days += 1; continue; }
       found.set(key, { key, a, b, firstDay: day, days: 1 });
@@ -136,7 +148,24 @@ export function applyMerges<T extends TimedItem>(items: T[], book: MergeBook): {
 /** Whether a series has been merged away into another (so it is never written to a calendar or offered again). */
 export const mergedAway = (book: MergeBook, key: string) => Object.values(book).some((decision) => decision.how === "merge" && decision.drop === key);
 
-/** Whether `existing` is the item the person just named: same day, starts within 15 minutes, titles alike. */
+/**
+ * Whether `existing` is the item the person just named: same day, starts within 15 minutes, the same title. Merged without asking, so
+ * only on the same title; a resemblance is written and becomes a candidate for the reviewer and the person.
+ */
 export function matchesItem(named: { title: string; day: string; start: string }, existing: { title: string; day: string; start: string }): boolean {
-  return named.day === existing.day && Math.abs(toMinutes(named.start) - toMinutes(existing.start)) <= SAME_START_MINUTES && similarTitles(named.title, existing.title);
+  return named.day === existing.day && Math.abs(toMinutes(named.start) - toMinutes(existing.start)) <= SAME_START_MINUTES && sameTitle(named.title, existing.title);
+}
+
+/**
+ * A stored plan block as a fixed timed item, by its id: a synced calendar's (`graph_calendar:`), a file's (`import:`), an event the person
+ * added (`event:`); anything else (work, activity, proposals) is not one. Shared by the web's asks and the worker's review.
+ */
+export function fixedTimedItemOf(block: { id: string; title: string; day?: string | undefined; start: string; end: string; sourceKey?: string | undefined }, sourceKey?: string): TimedItem | undefined {
+  if (!block.day) return undefined;
+  const base = { id: block.id, title: block.title, day: block.day, start: block.start, end: block.end };
+  const source = sourceKey ?? block.sourceKey;
+  if (block.id.startsWith("graph_calendar:")) return { ...base, kind: "calendar", ...(source ? { source } : {}) };
+  if (block.id.startsWith("import:")) return { ...base, kind: "file" };
+  if (block.id.startsWith("event:")) return { ...base, kind: "event" };
+  return undefined;
 }

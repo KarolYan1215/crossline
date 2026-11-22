@@ -1,13 +1,29 @@
 import { expect, test } from "vitest";
-import { homeworkNumber } from "./date-pairs";
 
-// 「RBT 610 作业 3 截止」 became the task 「完成 RBT 610 作业 610」 (2026-10-15 walkthrough): the course code is not the homework's number.
-test("the homework's number is the one after 作业/HW, never the course code's", () => {
-  expect(homeworkNumber("RBT 610 作业 3 截止")).toBe("3");
-  expect(homeworkNumber("ECE555 HW #4 due")).toBe("4");
-  expect(homeworkNumber("作业 2 发布")).toBe("2");
-  expect(homeworkNumber("ECE 555 第 5 次作业截止")).toBe("5");
-  expect(homeworkNumber("RBT 610 截止")).toBeUndefined();
+// Which release and which due are one piece of work is the reading model's `work` label (2026-11-22): the homework-number regex it
+// replaces knew only homework and once read 「RBT 610 作业 3 截止」 as homework 610. Any line's work pairs, and a date read before the
+// label existed is not paired at all.
+test("an adopted release and due with the same work label become one task, on any line; unlabelled dates make none", async () => {
+  const { CrosslineStore } = await import("@crossline/db");
+  const { materializeDatePairs } = await import("./date-pairs");
+  const store = new CrosslineStore(":memory:"), ws = "ws";
+  const at = "2026-10-01T00:00:00.000Z";
+  store.saveProject({ id: "acme", ownerId: "o", workspaceId: ws, identityId: "work", name: "Acme 提案", status: "active", summary: "", createdAt: at, updatedAt: at });
+  store.saveMilestone({ id: "m", ownerId: "o", workspaceId: ws, identityId: "work", projectId: "acme", title: "Acme 合同签下", status: "approved", version: 1 });
+  const adopt = (id: string, date: string, kind: string, title: string, extra: object) => {
+    store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: `dates:${id}`, type: "dates.extracted", entityId: id,
+      payload: { dates: [{ id, date, startTime: "", endTime: "", kind, title, project: "Acme 提案", sourceRef: "src-1", quote: title, confidence: "high", note: "", ...extra }] } });
+    store.upsertProfileFact({ workspaceId: ws, identityId: "work", projectId: "acme", slot: `date_${date.replaceAll("-", "")}_${kind}`, value: `${date} ${title}`,
+      status: "confirmed", sourceRef: "src-1", sourceQuote: title, updatedAt: at });
+  };
+  adopt("r", "2026-10-20", "release", "客户发来第二轮需求", { work: "第二轮方案" });
+  adopt("d", "2026-11-03", "due", "第二轮方案交付", { work: "第二轮方案" });
+  adopt("old", "2026-11-10", "homework_due", "作业 4 截止", {});
+  const created = materializeDatePairs(store, ws, new Date("2026-10-15T12:00:00Z"));
+  expect(created).toHaveLength(1);
+  expect(store.getWorkOrder(ws, created[0]!)!).toMatchObject({ intent: "完成 Acme 提案 第二轮方案",
+    payload: { dueDate: "2026-11-03", notBefore: "2026-10-20", datePair: { work: "第二轮方案", releaseDay: "2026-10-20" } } });
+  store.close();
 });
 
 test("a homework waits for its release instead of being scheduled from the planned day, and its own file is the answer", async () => {

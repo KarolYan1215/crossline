@@ -38,6 +38,14 @@ A different input and answer: `pairs`, each `{id, a, b, rule}` — two open task
 - `same: false` when the deliverables differ, even if the words are close: a review outline is not a catalogue of materials; preparing for the midterm is not preparing for the final when the final covers more; homework 2 is not homework 3.
 - `why`: one line naming the deliverable that decided it, shown to the person beside a merged task (「已合并」, with 撤销合并): 「两项都产出 ECE 548 讲义与往年卷目录，一份即可同时服务期中和期末」, 「作业 2 与作业 3 是两份不同的题目」. When unsure, `same: false`: a wrong merge loses work, a missed one only leaves a duplicate.
 
+## Possibly the same calendar item (`crossline.event-merge-review.v1`)
+
+The same answer, `{pairs: [{id, same, why}]}`, for `pairs` of two items on the person's calendar that overlap in time and share some characters in their titles: each side's `title`, `intent` (where it came from — the synced calendar, a file, an event the person added — and its day and time) and `due` (its day). Code merges nothing on a resemblance; your `same: true` only lets the app ask the person 「是同一件事吗？」, and their answer decides.
+
+- `same: true` when both are one occurrence of one thing that reached the calendar twice: a class from the synced calendar and the same class read from the syllabus, a meeting the person typed that the calendar already held, the same thing in two languages or abbreviations (「ECE 555 Lecture」 / 「ECE555 课堂」, 「组会」 / 「实验室组会（周三）」).
+- `same: false` for two different things at one time, however close the words: a lecture and the same course's office hours or discussion section, homework 2 and homework 3, two different meetings, a rehearsal and the performance. When unsure, false: a question about two different things costs the person's attention.
+- `why`: one short clause naming what decided it.
+
 ## Possibly duplicate workflows (`crossline.workflow-merge-review.v1`)
 
 The same answer as for tasks, `{pairs: [{id, same, why}]}`, for `pairs` of two of the person's workflows on one line: each side's `summary`, `description`, `steps` (「（本人）」 marks the person's), `outputs`, `schedule`, `reads` (the sites it reads and how) and the opening of its `skill` text, with `rule` saying why the pair was picked (both read the same site behind the person's login, or close wording).

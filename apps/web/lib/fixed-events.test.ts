@@ -62,7 +62,14 @@ test("a timed day heard in a recording is offered as a one-off event the person 
   expect(store.listProfileFacts(ws).find((item) => item.slot === "date_heard_ab12cd34")).toMatchObject({ status: "inferred", value: "2026-10-28 15:00 组会" });
 });
 
-test("an arrangement the person's own calendar already holds is not offered again", () => {
-  setup([{ title: "ECE555 Lecture", day: "2026-10-12", start: "14:30", end: "15:45" }]);
+test("an arrangement the person's own calendar already holds under its title is not offered again", () => {
+  setup([{ title: "ECE 555 上课", day: "2026-10-12", start: "14:30", end: "15:45" }]);
   expect(collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "event_propose").map((ask) => ask.title)).toEqual(["日历中没有「ECE 555 期中考试」，要创建吗？"]);
+});
+
+// 2026-11-22: a copy under another name is no longer dropped on a resemblance (the course-code rule did that); it is offered, and the two
+// then meet as a merge candidate for the reviewer and the person.
+test("a copy under another name is still offered", () => {
+  setup([{ title: "ECE555 Lecture", day: "2026-10-12", start: "14:30", end: "15:45" }]);
+  expect(collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "event_propose").map((ask) => ask.title)).toContain("日历中没有「ECE 555 上课」，要创建吗？");
 });

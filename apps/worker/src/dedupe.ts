@@ -9,6 +9,7 @@ import { ownerOf } from "./owner";
 import { sayToPerson } from "./workflow-smith";
 import { localeOf } from "./locale";
 import { meetingDuplicatePass } from "./meeting-dedupe";
+import { eventMergeReviewPass } from "./event-merge-review";
 
 /**
  * The daily self-check (the owner's decision of 2026-10-15): near-identical open tasks are merged, and a standalone request for a fact is
@@ -218,6 +219,9 @@ export async function dedupePass(deps: { store: CrosslineStore; workspaceId: str
   const calendarClient = !catchUp ? deps.client() : undefined;
   const onCalendar = calendarClient && spendAllows(await deps.spend(), deps.force ? "core" : "discretionary")
     ? await meetingDuplicatePass(store, workspaceId, calendarClient, deps.cwd, now).catch(() => []) : [];
+  // Overlapping calendar items that might be one thing (2026-11-22): the reviewer picks which pairs the person is asked about.
+  if (calendarClient && spendAllows(await deps.spend(), deps.force ? "core" : "discretionary"))
+    await eventMergeReviewPass(store, workspaceId, calendarClient, deps.cwd, now).catch(() => []);
   if (onCalendar.length && !deps.force) sayToPerson(store, workspaceId, [t("{{count}} 个任务和日历上已有的安排是同一件，已归档，日历上的保留：", { count: onCalendar.length }),
     ...onCalendar.map((item) => `- ${t("「{{task}}」＝日历上的「{{calendar}}」", { task: item.title, calendar: item.calendar })}`), t("可在任务页「已归档」里逐个恢复。")].join("\n"),
     "tasks_on_calendar", `on-calendar:${day}`, [], now);

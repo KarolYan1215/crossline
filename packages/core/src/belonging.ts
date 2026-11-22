@@ -1,27 +1,24 @@
-import { courseCodeOf } from "./task-title";
-
 /**
  * What a dated item, a file or an event belongs to, worked out from everything already on record before anyone is asked (decided
  * 2026-10-08): the item's own project when it names a known one plainly, the project its source file is already filed under, then the
  * file's name, then the opening of its text. Only a single, unambiguous match counts — two projects named in one file decide nothing.
- * When nothing decides it, the person is asked (`apps/web/lib/asks.ts`, `source_project`), never guessed for.
+ * What code cannot settle by a name written out goes to the folder classifier (`crossline.file-projects.v1`, `FILE_PROJECTS_SCHEMA`,
+ * 2026-11-22: a course-code parser and a 「course part」 word list used to settle it, and knew only courses); what the model cannot settle
+ * either is asked (`apps/web/lib/asks.ts`, `source_project`), never guessed for.
  */
 export type KnownProject = { id: string; name: string; identityId: string };
 
 const squash = (text: string) => text.replace(/[\s_\-·.:：]+/g, "").toLowerCase();
 const UNCERTAIN = /待确认|可能|未定|不确定|[?？]|\b(possibly|maybe|probably|likely|perhaps|unconfirmed|uncertain|unsure|tbd|tbc)\b/iu;
 
-/** Known projects a piece of text names: by course code, or by a name of three or more characters appearing in it. */
+/**
+ * Known projects a piece of text names written out: the project's name or its id, three characters or more, appearing in it once spaces
+ * and separators are set aside (「ECE555-Syllabus」 names 「ECE 555」). Anything looser is the model's to read.
+ */
 export function projectsNamedIn(text: string, projects: KnownProject[]): KnownProject[] {
   if (!text.trim()) return [];
   const haystack = squash(text);
-  const codes = new Set([...text.matchAll(/(?:^|[^A-Za-z])([A-Za-z]{2,5})[\s_\-]?(\d{3,4}[A-Za-z]?)(?![\dA-Za-z])/gu)].map((match) => `${match[1]!.toUpperCase()} ${match[2]!.toUpperCase()}`));
-  return projects.filter((project) => {
-    const code = courseCodeOf(project.name) ?? courseCodeOf(project.id);
-    if (code) return codes.has(code);
-    const name = squash(project.name);
-    return name.length >= 3 && haystack.includes(name);
-  });
+  return projects.filter((project) => [squash(project.name), squash(project.id)].some((key) => key.length >= 3 && haystack.includes(key)));
 }
 
 /** The one known project a plain project string means (「ECE 555」, 「ece555」, 「Crossline」), or undefined — never for one marked uncertain. */
@@ -35,23 +32,28 @@ export function plainProject(project: string | undefined, projects: KnownProject
 
 /** The project a file's own name, or else the opening of its text, names unambiguously; with which of the two decided it. */
 export function documentProject(doc: { fileName: string; extractedText: string }, projects: KnownProject[]): { project: KnownProject; basis: "文件名" | "正文开头" } | undefined {
-  const byName = oneCourse(projectsNamedIn(doc.fileName, projects));
+  const byName = projectsNamedIn(doc.fileName, projects);
   if (byName.length === 1) return { project: byName[0]!, basis: "文件名" };
   if (byName.length > 1) return undefined;
-  const byHead = oneCourse(projectsNamedIn(doc.extractedText.slice(0, 1500), projects));
+  const byHead = projectsNamedIn(doc.extractedText.slice(0, 1500), projects);
   return byHead.length === 1 ? { project: byHead[0]!, basis: "正文开头" } : undefined;
 }
 
-/** A part of a course (its final project, an exam) — named like the course but not the course itself. */
-const COURSE_PART = /项目|作业|考试|测验|报告|论文|展示|project|homework|assignment|exam|quiz|report|paper|presentation/i;
 /**
- * 「RBT610-Fall2026-Syllabus.pdf」 names both 「RBT 610 Robot Perception」 and 「RBT 610 期末项目」: the course's file belongs to the course.
- * Before, the tie left every file of that course unfiled and its tasks without material (2026-10-15 walkthrough).
+ * The folder classifier's reading of files code could not file (`crossline.file-projects.v1`): the one project each belongs to, or ""
+ * when the file's own words do not tie it to one. A tie such as 「RBT610-Fall2026-Syllabus.pdf」 against both 「RBT 610 Robot Perception」
+ * and 「RBT 610 期末项目」 (2026-10-15 walkthrough) is the model's to settle: the course's syllabus belongs to the course.
  */
-function oneCourse(named: KnownProject[]): KnownProject[] {
-  if (named.length < 2) return named;
-  const courses = named.filter((project) => !COURSE_PART.test(project.name));
-  return courses.length === 1 && named.every((project) => courseCodeOf(project.name) && courseCodeOf(project.name) === courseCodeOf(courses[0]!.name)) ? courses : named;
+export const FILE_PROJECTS_SCHEMA = { type: "object", additionalProperties: false, required: ["files"], properties: {
+  files: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "projectId", "why"],
+    properties: { id: { type: "string" }, projectId: { type: "string" }, why: { type: "string" } } } } } } as const;
+export type FileProjectsAnswer = { files: Array<{ id: string; projectId: string; why: string }> };
+/** Keeps only answers about files that were asked, naming a known project or none; unknown project ids count as none. */
+export function validateFileProjects(value: unknown, fileIds: readonly string[], projectIds: readonly string[]): FileProjectsAnswer {
+  const answer = value as FileProjectsAnswer | undefined;
+  if (!answer || !Array.isArray(answer.files)) throw new Error("FILE_PROJECTS_INVALID");
+  return { files: answer.files.filter((item) => item && fileIds.includes(item.id))
+    .map((item) => ({ id: item.id, projectId: projectIds.includes(item.projectId) ? item.projectId : "", why: String(item.why ?? "").trim().slice(0, 200) })) };
 }
 
 /** A project an uncertain string leans towards (「课程待确认（可能为 ECE 548）」 → ECE 548): the recommended answer when the person is asked. */

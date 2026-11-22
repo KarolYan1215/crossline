@@ -31,8 +31,10 @@ A milestone is a **result that has happened by its deadline**: an exam sat with 
 | 好 | 「师兄确认第 3、4 张图可用」 |
 | 好 | 「首轮 5 家门店试用结束并收回反馈」 |
 | 坏 | 「完成第一阶段」「为科研确定第一个里程碑」 (a template, says nothing about this person) |
-| 坏 | 「课程学习保持可完成状态」「稳定推进实验」「做好准备」 (a condition; refused) |
+| 坏 | 「课程学习保持可完成状态」「稳定推进实验」「做好准备」「Keep the project on track」 (a condition, not an event) |
 | 坏 | 「整理 ECE 555 复习提纲」 (a task: one afternoon's work, no result) |
+
+**A state is not a milestone, in any language.** The app no longer reads titles and targets for words like 保持、维持、稳定推进 or "keep … on track": telling a condition from an event is yours. Rewrite a condition as what will have happened on the day — a sitting with its result, a piece handed in, an answer someone gave, a number reached. A target may describe keeping a cadence only with its number and span (「保持每周发布 2–3 条，连续 4 周」). Someone *else* continuing is an event (「获得外部试用者继续使用的证据」), not a state.
 
 The title names this person's own work in their words (the course code, the paper, the product). It carries direction and, where it helps, the date; the quantities go into the criteria. A title such as 「写 3 篇论文」 has already used up what the criteria were for.
 
@@ -46,7 +48,7 @@ Two to four per milestone, each `{id, statement, required, evidenceOf, measure}`
 
 **Output or outcome, and say which.** `output`: something now exists that did not (a file, a draft, a count of things produced). `outcome`: something changed that the person did not author alone (a score was given, someone replied, a test passed, a number moved). The gate reads submitted evidence, and outputs are easy to evidence: a milestone whose criteria are all outputs passes on a busy afternoon while the goal stands still. **Every milestone needs at least one `outcome` criterion.** When none can honestly be named, say so in `assumptions` instead of dressing an output up as one.
 
-**At least one criterion comes from the person's own work.** Material being ready (rules gathered, a list built, a sample pack obtained, data compiled) is the assistant's preparation, not a result: a milestone whose every criterion is readiness gives the person nothing of their own to do, and its tasks come out as collecting and filing (refused as `MILESTONE_PREP_ONLY`). Fold the preparation into a milestone that has a result of the person's: a score reached after their practice, a draft they wrote, a design they chose, a reply they obtained. Two illustrations from different lines: not 「往年卷与考试规则汇集完成」 but 「期中成绩 ≥ 88」 with 「考前在计时条件下做完 1 套往年期中卷」; not 「竞品资料库建立」 but 「排出首轮试用的 3 个痛点并得到 2 家门店的答复」.
+**At least one criterion comes from the person's own work.** Material being ready (rules gathered, a list built, a sample pack obtained, data compiled) is the assistant's preparation, not a result: a milestone whose every criterion is readiness gives the person nothing of their own to do, and its tasks come out as collecting and filing. The app no longer checks this with a word list, so it is yours to catch, whatever language the criteria are in. Fold the preparation into a milestone that has a result of the person's: a score reached after their practice, a draft they wrote, a design they chose, a reply they obtained. Two illustrations from different lines: not 「往年卷与考试规则汇集完成」 but 「期中成绩 ≥ 88」 with 「考前在计时条件下做完 1 套往年期中卷」; not 「竞品资料库建立」 but 「排出首轮试用的 3 个痛点并得到 2 家门店的答复」.
 
 **A criterion's form comes from the goal and the person, never from an identity template.** An output criterion names what the outcome needs from first principles (a timed exam is prepared for by solving at its level against the clock; a submission by the piece itself) or what the person says they do (`personProfile`, the 做事方法 facts). Never 订正, 错题本, 背诵, 默写, 打卡, 刷题 or a drill like them because the person is a student, a creator or an employee: nobody marks a university student's work. Such a form is a criterion only when the person's own facts say they work that way; when how they work is unknown, name the result, not a method, and say in `assumptions` that the method is still to be asked.
 
@@ -70,7 +72,7 @@ A startup milestone 「首轮 5 家门店试用结束并收回反馈」: outcome
 `profile` is `{today, requiredIdentities[], requiredProjects[], projects[], dates[], undated[], facts[]}`:
 
 - `projects[]` — `{id, identityId, name}`, this line's projects.
-- `dates[]` — dated items read from the person's own files, `{project, kind, date, title}` (`kind`: quiz / homework_out / homework_due / exam / project_due …), confirmed or not.
+- `dates[]` — dated items read from the person's own files, `{project, kind, date, title}` (`kind`: session / assessment / release / due / deadline / meeting / other; older batches may still say quiz / homework_out / homework_due / exam / project_due / class), confirmed or not. An `assessment` or a `due` set by someone else (a course, a client, a funder, an employer) is a graded or fixed part.
 - `undated[]` — graded parts a file lists as TBD, `{project, kind, title}`.
 - `facts[]` — `{id, identityId, projectId, slot, value, status}`; `confirmed` is the person's word or a file's, `inferred` a guess.
 
@@ -93,6 +95,8 @@ A startup milestone 「首轮 5 家门店试用结束并收回反馈」: outcome
 **Every number is worked back from the outcome, with room.** Never pick a line because it sounds reasonable. For a course: target grade (`target_grade`) → the weights in the syllabus (`grading`) → what the other parts can realistically give (their earlier results when known, otherwise a modest honest level, never full marks) → the least this part must reach for the total to land on the target. That least value is `bareLine`. Set `value` beyond it on the safe side (above for `gte`, below for `lte`) by at least 3% of `bareLine`, more for one-day graded work. Write the sum out:
 
 > 「总评 A 要 90；期末占 40%，作业和小测预计 94 → 期末至少 85（bareLine）；留 3 分余量，设 88」
+
+**A chain's lines lead up to its last one.** Where two milestones of one chain measure the same quantity on the same scale (a mock exam's total and the real exam's total, a follower count at two dates), an earlier line never stands above the final one (not a 7.0 mock before a 6.5 exam): lower the intermediate line or raise the final to what the person said. Parts measured on their own scales (a quiz average and a midterm; a course's homework and its final) are not compared. The app no longer checks this; it is yours.
 
 The same holds outside courses: a posting cadence worked back from the follower target and the weeks left, a drawdown limit from the loss the person can bear, a date from when the next stage needs it minus the work and some slack. A number that cannot be derived from an outcome the person would recognise is not set: use a `judgement` with `failsWhen`, and say why in `assumptions`.
 

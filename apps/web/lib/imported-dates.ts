@@ -1,6 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { expandRecurring, matchesItem, mergeDecision, requiredApproval, type AccessContext, type DateCandidate, type RecurringMeeting } from "@crossline/core";
+import { adoptedDateItems } from "@crossline/db";
 import { ensureSeeded, getStore, type PersistedScheduleBlock } from "./crossline";
 import { localeFor } from "./locale";
 import { tFor, weekdayShort, type Locale } from "./i18n";
@@ -165,24 +166,21 @@ function writeItems(ctx: AccessContext, batchId: string, payload: ExtractedPaylo
   return { blocks: written, facts };
 }
 
-/** A final exam's title, in the file's or the reply's words: the course ends with it. */
-const FINAL_EXAM = /期末|final/iu; // i18n-ignore: matched in the source's own words
-
 /**
- * A course's weekly classes end with its final exam. A weekly pattern with no end in its source runs half a year (`OPEN_ENDED_DAYS`), so
- * 「这学期两门课」 stood on the calendar into May: 132 fixed items for a term whose final is on 12-15 (2026-11-06 walkthrough, W-243).
- * Run whenever dates are written, so it holds in either order — the classes adopted first and the final later, or the other way round.
+ * A project's weekly arrangements end with the date that closes them — a course's classes with its final exam, rehearsals with the
+ * closing night. A weekly pattern with no end in its source runs half a year (`OPEN_ENDED_DAYS`), so 「这学期两门课」 stood on the
+ * calendar into May: 132 fixed items for a term whose final is on 12-15 (2026-11-06 walkthrough, W-243). Which date closes them is the
+ * reading model's `endsSeries` (2026-11-22; a 「期末|final」 title match before, which knew only courses); a date read before the field
+ * existed cuts nothing short. Run whenever dates are written, so it holds in either order.
  */
 function endClassesAtFinal(ctx: AccessContext): void {
   const store = getStore();
   const projects = store.listProjects(ctx.workspaceId, { includeArchived: true });
   const finals = new Map<string, string>();
-  for (const fact of store.listProfileFacts(ctx.workspaceId)) {
-    const day = fact.slot.match(/^date_(\d{4})(\d{2})(\d{2})_exam$/u);
-    if (!day || !FINAL_EXAM.test(fact.value)) continue;
-    const id = projectNamed(projects, fact.projectId)?.id ?? fact.projectId;
-    const date = `${day[1]}-${day[2]}-${day[3]}`;
-    if ((finals.get(id) ?? "") < date) finals.set(id, date);
+  for (const item of adoptedDateItems(store, ctx.workspaceId)) {
+    if (item.endsSeries !== true) continue;
+    const id = projectNamed(projects, item.project)?.id ?? item.project;
+    if ((finals.get(id) ?? "") < item.date) finals.set(id, item.date);
   }
   if (!finals.size) return;
   const endOf = new Map<string, string>();

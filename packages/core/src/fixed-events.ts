@@ -1,4 +1,4 @@
-import { similarTitles } from "./event-merge";
+import { sameTitle } from "./event-merge";
 import { monthDay, tFor, weekdayShort, type Locale } from "./i18n";
 
 /**
@@ -84,11 +84,12 @@ const minutes = (time: string) => { const [h, m] = time.split(":").map(Number); 
 
 /**
  * Whether the person's own calendar already has this event: some occurrence in `days` meets a calendar block that starts within fifteen
- * minutes of it and names the same thing (`similarTitles`, `event-merge.ts`). A calendar that already holds a class is not offered a second copy of it.
+ * minutes of it and has the same title (`sameTitle`, `event-merge.ts`). A calendar that already holds a class is not offered a second copy
+ * of it; a copy under another name is written and then met by the merge candidates and their reviewer, never dropped on a resemblance.
  */
 export function inCalendar(event: FixedEvent, calendar: Array<{ title: string; day: string; start: string; end: string }>, days: string[]): boolean {
   return occurrences(event, days).some((day) => calendar.some((block) => block.day === day
-    && Math.abs(minutes(block.start) - minutes(event.start)) <= 15 && similarTitles(block.title, event.title)));
+    && Math.abs(minutes(block.start) - minutes(event.start)) <= 15 && sameTitle(block.title, event.title)));
 }
 
 const GRAPH_DAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] as const;

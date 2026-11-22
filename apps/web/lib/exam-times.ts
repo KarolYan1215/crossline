@@ -1,5 +1,5 @@
 import "server-only";
-import { dateItemAttributes, parseTimeRange, urgencyFor, type AccessContext, type Ask, type DateCandidate } from "@crossline/core";
+import { dateItemAttributes, dateKindOf, parseTimeRange, urgencyFor, type AccessContext, type Ask, type DateCandidate } from "@crossline/core";
 import { ensureSeeded, getStore, type PersistedScheduleBlock } from "./crossline";
 import type { Translate } from "./i18n";
 
@@ -35,7 +35,7 @@ function untimedSittings(ctx: AccessContext, today: string): Array<{ key: string
     const included = new Set(decision.included ?? []);
     for (const item of (event.payload as { dates?: DateCandidate[] }).dates ?? []) {
       const course = courseOf(item.project ?? "");
-      if (!included.has(item.id) || item.date < today || !dateItemAttributes(item, Boolean(course)).needsTime || item.kind === "class") continue;
+      if (!included.has(item.id) || item.date < today || !dateItemAttributes(item, Boolean(course)).needsTime || dateKindOf(item.kind) === "session") continue;
       const key = `${event.entityId}:${item.id}`;
       const same = `${course!.id}|${item.date}|${item.title}`;
       if (answered[key] || seen.has(same)) continue;

@@ -12,11 +12,38 @@ import { STARTS_WORDS, inRoughWindow, roughWindow, settleRoughDay } from "./roug
  *
  * Nothing is written to the calendar from here. The result is a batch the person confirms as a whole.
  */
-export const DATE_KINDS = ["class", "quiz", "homework_out", "homework_due", "exam", "project_due", "deadline", "meeting", "other"] as const;
+/**
+ * What a dated item is, in terms every line shares (2026-11-22): a course is one source of dates among many — a job's shifts, a client's
+ * deliverables, a funder's call, a band's rehearsals. `session`: a sitting the person attends (a class, a shift, a rehearsal);
+ * `assessment`: a sitting that is judged (an exam, a quiz, an interview, an audition, a defence); `release`: something handed out that
+ * work starts from (an assignment posted, a call opening, a brief arriving); `due`: a piece of work to hand in by the day; `deadline`:
+ * a cut-off that is not a piece of work (registration closes, a fee); `meeting`; `other`.
+ */
+export const DATE_KINDS = ["session", "assessment", "release", "due", "deadline", "meeting", "other"] as const;
+export type DateKind = (typeof DATE_KINDS)[number];
+/** The kinds batches read before 2026-11-22 carry (course-shaped), and the general kind each one is. */
+export const LEGACY_DATE_KINDS = { class: "session", quiz: "assessment", exam: "assessment", homework_out: "release", homework_due: "due", project_due: "due" } as const;
+export type StoredDateKind = DateKind | keyof typeof LEGACY_DATE_KINDS;
+/** The general kind of a stored item's kind, old or new; an unknown kind is `other`. */
+export function dateKindOf(kind: string | undefined): DateKind {
+  if ((DATE_KINDS as readonly string[]).includes(kind ?? "")) return kind as DateKind;
+  return (LEGACY_DATE_KINDS as Record<string, DateKind>)[kind ?? ""] ?? "other";
+}
 
 export type DateCandidate = {
-  id: string; date: string; startTime: string; endTime: string; kind: (typeof DATE_KINDS)[number];
+  id: string; date: string; startTime: string; endTime: string; kind: StoredDateKind;
   title: string; project: string; sourceRef: string; quote: string; confidence: "high" | "medium" | "low"; note: string;
+  /**
+   * The piece of work this date belongs to, in the same words on its release and its due (「作业 3」, 「Report 2」, 「第二轮申请材料」), so
+   * the two are paired by the model's reading instead of a homework-number regex (2026-11-22); "" when it is no piece of work. Absent in
+   * batches read before: such dates are not paired into a task.
+   */
+  work?: string;
+  /**
+   * The model's reading that this date ends the project's weekly arrangements (a course's final exam ends its classes, a closing night
+   * ends rehearsals). Absent in batches read before: nothing is cut short on their account.
+   */
+  endsSeries?: boolean;
 };
 /** A weekly meeting pattern. Expanded into dated blocks in code, never by the model, so the arithmetic is right. */
 export type RecurringMeeting = {
@@ -28,7 +55,7 @@ export type RecurringMeeting = {
  * Something a file lists as due or happening but gives no day for ('TBD', 'to be announced'). It is not a date and is never turned into one;
  * it is kept so the part it belongs to still exists (a course project with a due date TBD is still 25% of the grade) and the person is asked.
  */
-export type UndatedItem = { id: string; kind: (typeof DATE_KINDS)[number]; title: string; project: string; sourceRef: string; quote: string; note: string };
+export type UndatedItem = { id: string; kind: StoredDateKind; title: string; project: string; sourceRef: string; quote: string; note: string };
 export type DateExtraction = { dates: DateCandidate[]; recurring: RecurringMeeting[]; questions: string[]; undated?: UndatedItem[];
   /**
    * Verified dates that are already over (a note's 「记录于 7/28」, a quiz last month, a finished course). They are history: kept for
@@ -63,7 +90,7 @@ export const DATE_EXTRACTION_SCHEMA = object({
     items: object({
       id: text(60, 1), date: text(10, 10), startMinute: minuteOrNone, endMinute: minuteOrNone,
       kind: { type: "string", enum: [...DATE_KINDS] }, title: text(160, 1), project: text(80),
-      refs: REFS, confidence, note: text(300)
+      refs: REFS, confidence, note: text(300), work: text(80), endsSeries: { type: "boolean" }
     })
   },
   recurring: {

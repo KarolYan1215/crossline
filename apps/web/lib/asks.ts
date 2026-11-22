@@ -4,7 +4,7 @@ import {
   ACCOUNT_CLASS_LABEL, ATTENTION_SNAPSHOT, BACKGROUND_BLOCKER, CALENDAR_LINES, degradedService, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
   localStamp, prepStepRetried, readableFromMaterial, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
   validateAskChoice, withFrozen, type AccessContext, type Ask, type AskField, type AskItem, type AskOption, type AskPreview, type AskSnooze,
-  attendedText, isPreparationOnlyMilestone, onPersonsBoard, outcomeCriteriaVerdict, preparesOf, workOwner, decisionFor, similarTitles, type TimedItem,
+  attendedText, isPreparationOnlyMilestone, onPersonsBoard, outcomeCriteriaVerdict, preparesOf, workOwner, decisionFor, sameTitle, titlesWorthALook, type TimedItem,
   MILESTONE_RISK_KIND_LABEL, MILESTONE_RISK_LEVEL_LABEL, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskBufferDays, riskCriteriaKeys, riskLevelOf,
   parseRiskDigestSeen, RISK_DIGEST_SETTING, riskDigestShows, weekStartOf, type MilestoneRisk, type RiskDigestSeen,
   assumedAnswer, QUESTION_LEAD_DAYS, questionCannotWait, questionNeededDay, type StepQuestion
@@ -1156,7 +1156,9 @@ function lockedConflictAsks({ store, ctx, today, now, t, locale }: Source): Ask[
     const other = block ? timedItemOf(block) : undefined;
     const decided = other ? decisionFor(merges, work, other) : undefined;
     if (decided && decided.how === "merge") return [];
-    const alike = Boolean(other) && !decided && similarTitles(taskTitleOf(order), hit.title);
+    // A merge is offered when the titles are worth a look, and recommended only when they are the same: a resemblance is the person's call.
+    const alike = Boolean(other) && !decided && titlesWorthALook(taskTitleOf(order), hit.title);
+    const same = alike && sameTitle(taskTitleOf(order), hit.title);
     return [{ id: `locked:${item.blockId}`, kind: "locked_conflict" as const, entityId: order.id, line: order.identityId,
       preview: { kind: "plan" as const, href: "/", label: t("看当天日程") },
       urgency: urgencyFor(day, today), dueDay: day, raisedAt: now.toISOString(), fingerprint: `${item.start}|${hit.title}`,
@@ -1164,8 +1166,8 @@ function lockedConflictAsks({ store, ctx, today, now, t, locale }: Source): Ask[
       why: t("{{day}} {{start}}–{{end}} 这段是本人锁定的，「{{event}}」占了同一时间。锁定的块不会被自动挪走，请选一个处理方式。", {
         day: format(day, locale), start: clock(item.start), end: clock(item.end), event: hit.title }),
       options: [
-        ...(alike ? [{ id: "merge", label: t("是同一件事，合并"), detail: t("锁定块留在原时间，日程不再单独显示；以后同样重叠也合并"), recommended: true }] : []),
-        { id: "move", label: t("挪到下一个空档"), detail: t("解除锁定，由排程重新放"), ...(alike ? {} : { recommended: true }) },
+        ...(alike ? [{ id: "merge", label: t("是同一件事，合并"), detail: t("锁定块留在原时间，日程不再单独显示；以后同样重叠也合并"), ...(same ? { recommended: true } : {}) }] : []),
+        { id: "move", label: t("挪到下一个空档"), detail: t("解除锁定，由排程重新放"), ...(same ? {} : { recommended: true }) },
         { id: "tomorrow", label: t("换到明天"), detail: t("解除锁定，明天起再排") },
         { id: "keep", label: t("保留重叠"), detail: t("两件事都留在原时间") }
       ] }];
