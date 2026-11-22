@@ -14,6 +14,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
 /**
  * A grown workflow, changed by the person: `{status: "active" | "off"}` turns it on or off, `{pinned}` keeps it from idle removal,
+ * `{keepOnReset}` keeps it through 「清空数据重新开始」,
  * `{action: "consent"}` accepts the risks of one that reads an account, `{action: "login", service}` opens a window to log in with (on the
  * hosted beta the server's browser, answered `remote: true` and shown in a dialog; `width`/`height` are the dialog's size) and
  * `{action: "run"}` starts it now; `{action: "allow_scripts" | "disallow_scripts"}` allows the scripts the checks capped to text, or takes it back;
@@ -26,7 +27,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if ("response" in guard) return guard.response;
   const { id } = await context.params;
   if (!validId(id)) return NextResponse.json({ ok: false, code: "INVALID_SKILL" }, { status: 400 });
-  const { status, pinned, action, service, width, height, perDay, from, to, text } = guard.body;
+  const { status, pinned, keepOnReset, action, service, width, height, perDay, from, to, text } = guard.body;
   if (action === "improve") {
     if (typeof text !== "string" || !text.trim() || text.length > 2_000) return NextResponse.json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
     const result = await improveGrownSkill(guard.ctx, id, text);
@@ -62,10 +63,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const result = await grownSkillAction(guard.ctx, id, action, typeof service === "string" ? service : "", viewport);
     return NextResponse.json(result, { status: result.ok ? 200 : 409 });
   }
-  if ((status !== undefined && status !== "active" && status !== "off") || (pinned !== undefined && typeof pinned !== "boolean") || (status === undefined && pinned === undefined)) {
+  if ((status !== undefined && status !== "active" && status !== "off") || (pinned !== undefined && typeof pinned !== "boolean")
+    || (keepOnReset !== undefined && typeof keepOnReset !== "boolean") || (status === undefined && pinned === undefined && keepOnReset === undefined)) {
     return NextResponse.json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
   }
-  const result = changeGrownSkill(guard.ctx, id, { ...(status ? { status } : {}), ...(typeof pinned === "boolean" ? { pinned } : {}) });
+  const result = changeGrownSkill(guard.ctx, id, { ...(status ? { status } : {}), ...(typeof pinned === "boolean" ? { pinned } : {}),
+    ...(typeof keepOnReset === "boolean" ? { keepOnReset } : {}) });
   return NextResponse.json(result, { status: result.ok ? 200 : 404 });
 }
 

@@ -405,6 +405,10 @@ function GrownFlow({ flow, shell, open, autoLogin, onChanged }: { flow: GrownSki
         <button type="button" className="secondary-button" aria-pressed={flow.pinned} onClick={async () => {
           if (await send("POST", { pinned: !flow.pinned })) onChanged({ ...flow, pinned: !flow.pinned }); else setNote(t("未保存"));
         }}>{flow.pinned ? t("已保留") : t("保留")}</button>
+        {/* A built-in one is always kept through a reset: no switch to show. */}
+        {!flow.builtIn && <button type="button" className="secondary-button" aria-pressed={flow.keepOnReset} onClick={async () => {
+          if (await send("POST", { keepOnReset: !flow.keepOnReset })) onChanged({ ...flow, keepOnReset: !flow.keepOnReset }); else setNote(t("未保存"));
+        }}>{flow.keepOnReset ? t("重置时不再保留") : t("重置时保留")}</button>}
         <ConfirmDelete name={t("工作流「{{name}}」", { name: flow.summary })} onConfirm={async () => { if (await send("DELETE")) onChanged(undefined); else setNote(t("删除未完成")); }} />
       </span>
     </div>
@@ -426,6 +430,8 @@ function GrownFlow({ flow, shell, open, autoLogin, onChanged }: { flow: GrownSki
       <dt>{t("检查")}</dt><dd>{flow.risk === "high" ? flow.scriptsAllowedAt ? t("脚本扫描发现风险，本人于 {{day}} 允许运行", { day: day(flow.scriptsAllowedAt) }) : t("脚本扫描发现风险，只用文字")
         : t("脚本扫描未发现风险")} · {t("{{count}} 个文件已记录校验值", { count: flow.files })}</dd>
       <dt>{t("审查")}</dt><dd className="gen"><Clamp lines={1} text={flow.reasons.join(sep)} /></dd>
+      <dt>{t("重置")}</dt><dd>{flow.builtIn ? t("内置工作流：清空数据重新开始时保留，连同已读记录、话题进度和登录")
+        : flow.keepOnReset ? t("清空数据重新开始时保留，连同已读记录和登录") : t("清空数据重新开始时一并删除")}</dd>
       <dt>{t("上次使用")}</dt><dd>{flow.lastRunAt ? t("{{day}} 执行", { day: day(flow.lastRunAt) }) : day(flow.lastUsedAt)}{flow.pinned ? "" : t("；30 天未用会被移除，保留后不再移除")}</dd>
     </dl>
     {flow.mergedInto && <p className="st-note">{slots(t("已合并到「{{name}}」（{{day}}，{{why}}）。", { name: flow.mergedInto.summary, day: day(flow.mergedInto.at), why: SLOT("why") }),

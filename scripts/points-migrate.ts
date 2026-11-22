@@ -13,7 +13,7 @@
  *     use the person's own words after a reset. Reads only.
  *
  *   pnpm exec tsx scripts/points-migrate.ts --email someone@example.com --reset [--data /data] [--apply]
- *     「清空数据重新开始」 as the settings page does it (`resetWorkspace` with `RESET_KEEPS`, files inside the data directory removed): the
+ *     「清空数据重新开始」 as the settings page does it (`resetWorkspaceKeepingWorkflows` with `RESET_KEEPS`, files inside the data directory removed): the
  *     login and the model connection stay, the next page is the interview's opening card.
  *
  * Dry run by default: says which workspace it found and what it would do. Back the ledger up first (deploy/server/backup.sh). Never prints
@@ -23,7 +23,7 @@ import { rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEEP_SECTIONS, POINTS_RULES, PROFILE_SECTIONS, PROFILE_SECTIONS_SETTING, SECTION_FIELDS, ONBOARDING_INSIGHTS, readInsightRatings } from "../packages/core/src/index";
-import { CrosslineStore, RESET_KEEPS } from "../packages/db/src/index";
+import { CrosslineStore, RESET_KEEPS, resetWorkspaceKeepingWorkflows } from "../packages/db/src/index";
 import { POINTS_SPLIT_SETTING } from "../apps/worker/src/onboarding-extract";
 import { readProfileModel, readSectionRecords } from "../apps/worker/src/onboarding-persist";
 
@@ -95,7 +95,7 @@ try {
       const inside = (target: string) => { const resolved = path.resolve(target);
         if (resolved === root || !resolved.startsWith(root + path.sep)) return false; rmSync(resolved, { recursive: true, force: true }); return true; };
       const safe = (part: string) => part.replace(/[^a-zA-Z0-9_-]/g, "_");
-      const reset = store.resetWorkspace(ws, RESET_KEEPS);
+      const reset = resetWorkspaceKeepingWorkflows(store, ws, RESET_KEEPS);
       let files = 0;
       for (const uri of reset.fileUris) { try { if (inside(uri.startsWith("file:") ? fileURLToPath(uri) : uri)) files += 1; } catch { /* unreadable uri */ } }
       for (const id of reset.workOrderIds) if (inside(path.join(root, "materials", id))) files += 1;

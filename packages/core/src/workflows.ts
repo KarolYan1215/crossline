@@ -223,6 +223,8 @@ export type GrownSkillRecord = {
   loginBrowsers?: Record<string, string>;
   /** Kept by the person: never removed for being idle. */
   pinned: boolean;
+  /** Kept by the person through 「清空数据重新开始」 (`keptOnReset`; a built-in one always is). */
+  keepOnReset?: boolean;
   scriptsAllowed?: ScriptsAllowance;
   createdAt: string; updatedAt: string; lastUsedAt: string;
   lastRunAt?: string;
@@ -256,6 +258,21 @@ export const VERIFY_PENDING_SETTING = "remote.verify.pending";
 
 /** The versions of a grown workflow a revision replaced, newest last (at most `GROWN_VERSIONS_KEPT`). */
 export const grownVersionsKey = (id: string) => `skills.grown.versions.${id}`;
+
+/**
+ * Workflows Crossline ships rather than grows (2026-11-21, the owner's decision): 按话题整理小红书收藏, installed from Skill 库's offer.
+ * A built-in one survives 「清空数据重新开始」 whatever its switch says.
+ */
+export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set(["xiaohongshu-favourites-topics"]);
+export const isBuiltInWorkflow = (record: Pick<GrownSkillRecord, "name">) => BUILT_IN_WORKFLOWS.has(record.name);
+/** Whether 「清空数据重新开始」 leaves this workflow: a built-in one, or one the person marked 「重置时保留」. */
+export const keptOnReset = (record: Pick<GrownSkillRecord, "name" | "keepOnReset">) => isBuiltInWorkflow(record) || record.keepOnReset === true;
+/**
+ * The settings a kept workflow carries through a reset besides its record: its files and earlier versions, and what it has read so far —
+ * the favourites reader's ledger of notes (`collect.notes.<id>`, apps/worker/src/favourites-reader.ts) and the topic plan with its progress
+ * (`collect.topics.<id>`, favourite-topics.ts). Its logins live in its browser profile on disk, which a reset leaves.
+ */
+export const grownKeptSettingKeys = (id: string) => [grownSkillFilesKey(id), grownVersionsKey(id), `collect.notes.${id}`, `collect.topics.${id}`];
 export const GROWN_VERSIONS_KEPT = 10;
 /** What the person says a workflow should do differently (Skill 库 「让它改进」): the strongest reason to revise it. */
 export const WORKFLOW_FEEDBACK_EVENT = "skill.grown.feedback";

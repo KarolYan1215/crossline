@@ -1,5 +1,5 @@
 import {
-  AGENT_CATEGORIES, PUBLIC_SKILL_CATEGORY_LABEL, currentMineVersion, scriptCount, scriptsAllowable, scriptsRunnable, scheduleLabel, ensureMineFrontmatter, mineSkillSettingKey, publicSkillFilesKey, grownSkillFilesKey, readMineSkill, readableMineSourceLabel, readableMineText, parseTopicPlan, topicPlanKey, topicProgress, withTopicSettings,
+  AGENT_CATEGORIES, PUBLIC_SKILL_CATEGORY_LABEL, currentMineVersion, scriptCount, scriptsAllowable, scriptsRunnable, scheduleLabel, ensureMineFrontmatter, mineSkillSettingKey, publicSkillFilesKey, grownSkillFilesKey, readMineSkill, readableMineSourceLabel, readableMineText, parseTopicPlan, topicPlanKey, topicProgress, withTopicSettings, isBuiltInWorkflow, keptOnReset,
   type AccessContext, type AiTool, type PublicSkillRecord, type StoredMineRule
 } from "@crossline/core";
 import { type CrosslineStore, unmergeGrownSkill, addWorkflowFeedback, aiToolsFor, listAgentTasks, allowSkillScripts, assistantMode, consentToGrownSkill, grownHomeLine, readGrownSkills, readGrownVersions, readPublicSkills, removeGrownSkill, removePublicSkill, revertGrownSkill, saveMineVersion, updateGrownSkill } from "@crossline/db";
@@ -35,7 +35,9 @@ export type PublicSkillView = Pick<PublicSkillRecord, "id" | "name" | "descripti
 export type GrownSkillView = { id: string; summary: string; name: string; category: string; lines: string[]; lineLabel: string; schedule: string;
   /** Used when a task of its kind comes up (no time of its own), or at a time. */
   scheduleKind: "on_request" | "scheduled"; action: "run" | "remind";
-  origin: string; steps: Array<{ title: string; person: boolean }>; status: "active" | "off" | "needs_consent"; pinned: boolean; verdict: "usable" | "text_only" | "reject";
+  origin: string; steps: Array<{ title: string; person: boolean }>; status: "active" | "off" | "needs_consent"; pinned: boolean;
+  /** Left by 「清空数据重新开始」: always for a built-in one, else when the person marked it. */
+  keepOnReset: boolean; builtIn: boolean; verdict: "usable" | "text_only" | "reject";
   /** The sites it reads and the risks it was installed with; when the person accepted them and last logged in to each. */
   access: Array<{ service: string; site: string; login: boolean; how: string; loggedInAt?: string }>; risks: string[]; consentedAt?: string;
   risk: "low" | "high"; reasons: string[]; files: number; createdAt: string; lastUsedAt: string; lastRunAt?: string; skillText: string;
@@ -103,6 +105,7 @@ export function loadSkillLibrary(ctx: AccessContext): SkillLibraryView {
       origin: record.origin.kind === "asked" ? t("本人要求：「{{text}}」", { text: record.origin.text.slice(0, 60) })
         : t("由 {{count}} 次采纳的同类结果生成", { count: record.origin.taskIds.length }),
       steps: record.manifest.steps.map((step) => ({ title: step.title, person: step.by === "person" })), status: record.status, pinned: record.pinned,
+      keepOnReset: keptOnReset(record), builtIn: isBuiltInWorkflow(record),
       access: (record.manifest.access ?? []).map((item) => ({ ...item, ...(record.logins?.[item.service] ? { loggedInAt: record.logins[item.service] } : {}) })),
       risks: record.manifest.risks ?? [], ...(record.consentedAt ? { consentedAt: record.consentedAt } : {}),
       verdict: record.review.final, risk: record.scan.risk, reasons: record.review.reasons, files: record.files.length, createdAt: record.createdAt,
@@ -273,7 +276,7 @@ export function changeFavouriteTopics(ctx: AccessContext, id: string, change: { 
   return { ok: true };
 }
 
-export function changeGrownSkill(ctx: AccessContext, id: string, change: { status?: "active" | "off"; pinned?: boolean } | "remove" | "consent"): { ok: boolean; code?: string } {
+export function changeGrownSkill(ctx: AccessContext, id: string, change: { status?: "active" | "off"; pinned?: boolean; keepOnReset?: boolean } | "remove" | "consent"): { ok: boolean; code?: string } {
   const store = getStore();
   const done = change === "remove" ? removeGrownSkill(store, ctx.workspaceId, id, tOf(ctx)("本人删除"), "person")
     : change === "consent" ? consentToGrownSkill(store, ctx.workspaceId, id) : updateGrownSkill(store, ctx.workspaceId, id, change);

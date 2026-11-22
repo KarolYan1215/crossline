@@ -5,7 +5,8 @@ import Database from "better-sqlite3";
 import { AUTOMATIONS_SETTING, GROWN_LIBRARY_SETTING, grownSkillFilesKey, grownVersionsKey, readAutomations, type Automation, type GrownSkillRecord, type WorkflowManifest } from "@crossline/core";
 import { CrosslineStore } from "./index";
 import { restoreAutomationVersion } from "./automations";
-import { readGrownSkills, readGrownVersions, restoreGrownVersion, reviseGrownSkill } from "./skills";
+import { readGrownSkills, readGrownVersions, resetWorkspaceKeepingWorkflows, restoreGrownVersion, reviseGrownSkill, updateGrownSkill } from "./skills";
+import { RESET_KEEPS } from "./reset-keeps";
 
 let store: CrosslineStore;
 let ws: string;
@@ -134,4 +135,33 @@ test("a workflow's conversation keeps its turns in order and rewrites a streamin
   expect(store.listWorkflowTurns(ws, "areq-1").map((turn) => [turn.ord, turn.id, turn.text, turn.state])).toEqual([[1, "t1", "每天整理邮件", "done"], [2, "t2", "已建好", "done"]]);
   store.saveWorkflowThread({ ...store.getWorkflowThread(ws, "areq-1")!, workflowId: "auto-a" });
   expect(store.findWorkflowThread(ws, "auto-a")?.id).toBe("areq-1");
+});
+
+test("清空数据重新开始 keeps the built-in workflow and the ones marked 重置时保留, with what they read, on no line; the rest go", () => {
+  const xhs = { ...grown(), id: "flow-xhs", name: "xiaohongshu-favourites-topics", status: "needs_consent" as const, consentedAt: "2026-11-02T00:00:00Z" };
+  const kept = { ...grown("off"), id: "flow-kept", name: "kept", mergedInto: { id: "flow-notes", at: "2026-11-03T00:00:00Z", why: "同一件事", status: "active" as const } };
+  store.setSetting(ws, GROWN_LIBRARY_SETTING, JSON.stringify([grown(), xhs, kept]));
+  expect(updateGrownSkill(store, ws, "flow-kept", { keepOnReset: true })).toBe(true);
+  const own = [[grownSkillFilesKey("flow-xhs"), "{\"files\":[]}"], [grownVersionsKey("flow-xhs"), JSON.stringify([{ version: 1, at: "x" }])],
+    ["collect.notes.flow-xhs", "{\"read\":[\"n1\"]}"], ["collect.topics.flow-xhs", "{\"topics\":[]}"], [grownSkillFilesKey("flow-kept"), "{\"files\":[]}"]] as const;
+  for (const [key, value] of own) store.setSetting(ws, key, value);
+  for (const key of [grownSkillFilesKey("flow-notes"), "collect.notes.flow-notes", "onboarding.tone"]) store.setSetting(ws, key, "{}");
+  const result = resetWorkspaceKeepingWorkflows(store, ws, RESET_KEEPS);
+  expect(result.keptWorkflows).toBe(2);
+  const after = readGrownSkills(store, ws);
+  expect(after.map((record) => record.id)).toEqual(["flow-xhs", "flow-kept"]);
+  expect(after.every((record) => record.lines.length === 0 && record.manifest.lines.length === 0)).toBe(true);
+  // The built-in one keeps its consent; the one merged into a workflow that went is unmerged, with the status it had.
+  expect(after[0]).toMatchObject({ status: "needs_consent", consentedAt: "2026-11-02T00:00:00Z" });
+  expect(after[1]).toMatchObject({ status: "active", keepOnReset: true });
+  expect(after[1]!.mergedInto).toBeUndefined();
+  expect(own.map(([key]) => store.getSetting(ws, key) !== undefined)).toEqual(own.map(() => true));
+  expect(store.getSetting(ws, "collect.notes.flow-xhs")).toBe("{\"read\":[\"n1\"]}");
+  expect([grownSkillFilesKey("flow-notes"), "collect.notes.flow-notes", "onboarding.tone"].map((key) => store.getSetting(ws, key))).toEqual([undefined, undefined, undefined]);
+});
+
+test("a reset with no workflow kept leaves the library empty", () => {
+  store.setSetting(ws, GROWN_LIBRARY_SETTING, JSON.stringify([grown()]));
+  expect(resetWorkspaceKeepingWorkflows(store, ws, RESET_KEEPS).keptWorkflows).toBe(0);
+  expect(readGrownSkills(store, ws)).toEqual([]);
 });

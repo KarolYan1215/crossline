@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { AccessContext } from "@crossline/core";
 import { RUNTIME_OWNER_SETTING } from "@crossline/core";
 import { deleteAuthUser } from "@crossline/auth";
-import { RESET_KEEPS, type CrosslineStore } from "@crossline/db";
+import { RESET_KEEPS, resetWorkspaceKeepingWorkflows, type CrosslineStore } from "@crossline/db";
 import { getAuth } from "./auth";
 import { requestCodexSupervisor } from "./codex-runtime";
 import { dataDirectory, getStore } from "./crossline";
@@ -40,7 +40,8 @@ export { RESET_KEEPS };
  * 「清空数据重新开始」 (2026-10-18, the owner's request to rebuild their own account, which as the machine owner's cannot be deleted): the
  * person types the account's email and everything the account has built goes — the interview, portrait, lines, milestones, tasks, files,
  * conversation and calendar subscriptions — while the login, the model connection, the machine-owner mark and the calendar writers' setup
- * and records stay (`RESET_KEEPS`: the next publish withdraws what they wrote that is still to come). The next page is the
+ * and records stay (`RESET_KEEPS`: the next publish withdraws what they wrote that is still to come), and so do the built-in workflows and
+ * those the person marked 「重置时保留」 (`resetWorkspaceKeepingWorkflows`, 2026-11-21). The next page is the
  * interview's opening card. Offered to every hosted account; an installed copy is reset by reinstalling.
  */
 export function resetAccountData(ctx: AccessContext, session: { email: string }, typedEmail: string): AccountReset {
@@ -49,7 +50,7 @@ export function resetAccountData(ctx: AccessContext, session: { email: string },
   const store = getStore();
   const root = path.resolve(dataDirectory());
   const safe = (part: string) => part.replace(/[^a-zA-Z0-9_-]/g, "_");
-  const reset = store.resetWorkspace(ctx.workspaceId, RESET_KEEPS);
+  const reset = resetWorkspaceKeepingWorkflows(store, ctx.workspaceId, RESET_KEEPS);
   let files = 0;
   for (const uri of reset.fileUris) {
     try { if (removeInside(root, uri.startsWith("file:") ? fileURLToPath(uri) : uri)) files += 1; } catch { /* an unreadable uri: nothing to remove */ }

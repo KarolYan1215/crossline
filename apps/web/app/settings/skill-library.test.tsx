@@ -8,7 +8,7 @@ const publicSkill = (id: string, lastUsedAt: string, installedAt = "2026-10-01T0
   commit: "abcdef1234", license: "MIT", installedAt, updatedAt: installedAt, lastUsedAt, why: "", category: "写作", repo: "https://github.com/example/skills",
   path: `skills/${id}`, url: "https://github.com/example/skills", files: 2, skipped: 0, risk: "low", injection: false, verdict: "usable", reasons: ["可用"], ...scripts });
 const flow = (id: string, over: Partial<GrownSkillView> = {}): GrownSkillView => ({ id, summary: `每周剪辑 ${id}`, name: id, category: "剪辑", lines: ["media"], lineLabel: "自媒体",
-  schedule: "每周五 18:00", scheduleKind: "scheduled", action: "run", origin: "本人要求", steps: [{ title: "粗剪", person: false }, { title: "发布", person: true }], status: "active", pinned: false,
+  schedule: "每周五 18:00", scheduleKind: "scheduled", action: "run", origin: "本人要求", steps: [{ title: "粗剪", person: false }, { title: "发布", person: true }], status: "active", pinned: false, keepOnReset: false, builtIn: false,
   verdict: "usable", access: [], risks: [], risk: "low", reasons: ["可用"], files: 1, createdAt: "2026-10-01T00:00:00Z", lastUsedAt: "2026-10-02T00:00:00Z", skillText: "",
   improvement: { version: 1, canRevert: false, pending: [], improving: false },
   ...scripts, ...over });

@@ -1,6 +1,6 @@
 import {
   AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, AI_TOOLS_SETTING, NODE_COMPUTE_SETTING, NODE_STATUS_SETTING, RUNTIME_OWNER_SETTING, GROWN_LIBRARY_SETTING, SKILL_LIBRARY_SETTING, allAiTools, detectedAiTools, personAiTool, readPersonAiTools, categoryFromWording, grownSkillFilesKey, grownSkillId, isScriptFile, mineSkillSettingKey, publicSkillFilesKey, scriptsAllowable, scriptsDigest, scriptsRunnable,
-  readGrownLibrary, readMineSkill, readSkillLibrary, tFor, GROWN_VERSIONS_KEPT, WORKFLOW_FEEDBACK_EVENT, grownVersionsKey, agreedScopeOf, widensAgreed,
+  readGrownLibrary, readMineSkill, keptOnReset, grownKeptSettingKeys, readSkillLibrary, tFor, GROWN_VERSIONS_KEPT, WORKFLOW_FEEDBACK_EVENT, grownVersionsKey, agreedScopeOf, widensAgreed,
   type AgreedScope, type AiTool, type GrownSkillRecord, type WorkflowAccess, type GrownSkillVersion, type WorkflowManifest, type PublicSkillRecord, type StoredMineSkill, type Weekday, type WorkflowSchedule
 } from "@crossline/core";
 import { createHash, randomUUID } from "node:crypto";
@@ -42,6 +42,26 @@ export function installedPublicFiles(store: CrosslineStore, workspaceId: string,
 export const readGrownSkills = (store: CrosslineStore, workspaceId: string) => readGrownLibrary(store.getSetting(workspaceId, GROWN_LIBRARY_SETTING));
 export const writeGrownSkills = (store: CrosslineStore, workspaceId: string, records: GrownSkillRecord[]) =>
   store.setSetting(workspaceId, GROWN_LIBRARY_SETTING, JSON.stringify(records));
+
+/**
+ * 「清空数据重新开始」 with the workflows it keeps (2026-11-21): a built-in one and every one the person marked 「重置时保留」 come back with
+ * their files, versions and what they have read (`grownKeptSettingKeys`); everything else goes as `resetWorkspace` decides. One
+ * transaction, so a failure leaves the account whole. The lines they named are gone, so they come back on no line (`grownHomeLine` then
+ * names none); one merged into a workflow that went is unmerged, with the status it had.
+ */
+export function resetWorkspaceKeepingWorkflows(store: CrosslineStore, workspaceId: string, keep: { settingPrefixes: string[]; eventTypePrefixes: string[] }) {
+  return store.atomically(() => {
+    const kept = readGrownSkills(store, workspaceId).filter(keptOnReset);
+    const ids = new Set(kept.map((record) => record.id));
+    const settings = kept.flatMap((record) => grownKeptSettingKeys(record.id))
+      .flatMap((key) => { const value = store.getSetting(workspaceId, key); return value === undefined ? [] : [[key, value] as const]; });
+    const result = store.resetWorkspace(workspaceId, keep);
+    for (const [key, value] of settings) store.setSetting(workspaceId, key, value);
+    if (kept.length) writeGrownSkills(store, workspaceId, kept.map(({ mergedInto, ...record }) => ({ ...record, lines: [], manifest: { ...record.manifest, lines: [] },
+      ...(mergedInto && !ids.has(mergedInto.id) ? { status: mergedInto.status } : mergedInto ? { mergedInto } : {}) })));
+    return { ...result, keptWorkflows: kept.length };
+  });
+}
 
 /**
  * The one line a grown workflow belongs to: the line of the request it was grown from, or of the errands it repeats. A workflow is used
@@ -95,7 +115,7 @@ export function allowSkillScripts(store: CrosslineStore, workspaceId: string, ki
 }
 
 /** The person turns a grown workflow off or on, or keeps it (`pinned`: never removed for being idle). */
-export function updateGrownSkill(store: CrosslineStore, workspaceId: string, id: string, patch: { status?: "active" | "off"; pinned?: boolean },
+export function updateGrownSkill(store: CrosslineStore, workspaceId: string, id: string, patch: { status?: "active" | "off"; pinned?: boolean; keepOnReset?: boolean },
   now = new Date()): boolean {
   const records = readGrownSkills(store, workspaceId);
   const record = records.find((item) => item.id === id);

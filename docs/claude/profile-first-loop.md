@@ -103,7 +103,7 @@ Costs and open points:
 - `scripts/points-migrate.ts` moves a named account:
   - `--split` sets the rules and `profile.points.split`, so the sections lane splits the old paragraphs into cited points once and keeps the paragraphs. The split run is asked for no section (`profileTask` undefined), and `--split` closes every section that holds a paragraph. The first run on the owner's finished interview had finalized every open section and rewritten the paragraphs; they were put back from the backup.
   - `--export` writes the interview out.
-  - `--reset` is 「清空数据重新开始」 (`RESET_KEEPS` now lives in `@crossline/db`).
+  - `--reset` is 「清空数据重新开始」 (`RESET_KEEPS` now lives in `@crossline/db`; since 2026-11-21 through `resetWorkspaceKeepingWorkflows`, like the settings page).
 
 **After the sixth replay (2026-11-13).** Changes:
 - **Cards come from the log.** `cardCandidates` sends the dialogue up to four never-carded, unrefuted hypotheses as `cardFrom` (`supported` ones included since replay 13, 2026-11-14). Each rests on two replies or more and comes with its quotes; when fewer than four do, uncertain ones on one reply with a competing explanation fill in, marked 「待核实」, and their card may cite that one reply. The least-asked dimension comes first. A new inference may be carded only when `cardFrom` is empty.

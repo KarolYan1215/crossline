@@ -25,7 +25,7 @@ export function ResetAccountCard({ email }: { email: string }) {
   };
 
   return <section className="st-card" aria-label={t("清空数据重新开始")} id="reset-account">
-    <header><h3>{t("清空数据重新开始")}</h3><small>{t("删除访谈、画像、主线、里程碑、任务、上传的文件和对话，无法恢复；账号、登录方式和模型连接保留")}</small></header>
+    <header><h3>{t("清空数据重新开始")}</h3><small>{t("删除访谈、画像、主线、里程碑、任务、上传的文件和对话，无法恢复；账号、登录方式、模型连接，以及内置和设为「重置时保留」的工作流保留")}</small></header>
     <div className="auth-form"><form method="post" onSubmit={submit}>
       <label><span>{t("输入账号邮箱确认（{{email}}）", { email })}</span>
         <input name="email" type="email" autoComplete="off" value={typed} onChange={(event) => setTyped(event.target.value)} /></label>
