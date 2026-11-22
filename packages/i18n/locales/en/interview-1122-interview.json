@@ -24,7 +24,6 @@
   "简历放第一份": "Résumé first",
   "已经放入的材料在左侧，访谈会先读。": "The material you added is on the left; the interview reads it first.",
   "可跳过": "Optional",
-  "现在不连也可以，之后在设置里连接。": "You can leave this for now and connect one later in Settings.",
   "这次访谈已经到 {{limit}} 轮的上限；可以结束并出报告，或开始一次新的访谈。": "This interview has reached its limit of {{limit}} rounds. You can end it and get the report, or start a new interview.",
   "按前几轮的用量，这个免费账号剩下的额度大约还够 {{rounds}} 轮。": "At the rate of the first rounds, this free account has about {{rounds}} rounds of quota left.",
   "免费账号的额度较少，访谈可能做不完；做两轮后这里会按实际用量估算还够几轮。": "A free account has little quota and may not finish the interview; after two rounds this estimates how many rounds are left from actual use."

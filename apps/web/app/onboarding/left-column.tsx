@@ -24,8 +24,10 @@ async function post(path: string, body: Record<string, unknown>): Promise<Respon
   return fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => undefined);
 }
 
-export function LeftColumn({ state, busy, accept, onUpload, onFolders, uploadNote, onChanged, heldQuestions, answers, onAnswer }: {
+export function LeftColumn({ state, busy, accept, onUpload, onFolders, uploadNote, onChanged, heldQuestions, answers, onAnswer, calendarElsewhere = false }: {
   state: OnboardingState; busy: boolean; accept: string;
+  /** The opening card shows the calendar step itself (2026-11-22); the column leaves it out meanwhile so it is not on the page twice. */
+  calendarElsewhere?: boolean;
   /** Files and folders go up at any time, a turn running or not (2026-11-22): neither waits for the other. */
   onUpload: (files: FileList | File[]) => void; onFolders: (folders: PickedFolder[]) => void;
   /** What the last upload came to (going up, kept, left out and why), shown under the buttons. */
@@ -94,7 +96,7 @@ export function LeftColumn({ state, busy, accept, onUpload, onFolders, uploadNot
       <SourceFolders onChanged={onChanged} />
       {/* Only the subscription link brings calendar events in: the ChatGPT connectors' card shows a status and imports nothing, and
           on the interview it sent an invitee off to connect Google for nothing (2026-10-15 walkthrough). It stays under 设置. */}
-      <CalendarSubscriptions onChanged={onChanged} />
+      {!calendarElsewhere && <CalendarSubscriptions onChanged={onChanged} />}
       {/* Lists kept in Todoist, TickTick, Notion or anywhere else, brought in on the first day (docs/personal-agent.md §9). */}
       <ImportCard compact onChanged={onChanged} />
     </section>

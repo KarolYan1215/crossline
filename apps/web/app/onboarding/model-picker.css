@@ -1,0 +1,6 @@
+.model-picker{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
+.model-picker select{min-width:0;max-width:100%}
+.model-picker small{font-size:12px}
+.model-picker-compact select{font-size:12px;padding:2px 4px}
+.model-picker-rows{display:grid;gap:10px}
+.model-picker-rows .st-row{flex-wrap:wrap}

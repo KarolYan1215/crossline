@@ -21,6 +21,7 @@ import { withLink } from "./rich-text";
 import { tFor } from "../../lib/i18n";
 import { useLocale } from "../locale-context";
 import { VoiceField } from "../ui/voice/voice-input";
+import { ModelPicker } from "./model-picker";
 import { cardsOf, foldThread } from "./round-fold";
 import { Receipt } from "./receipt";
 import { FinishButton } from "./finish-button";
@@ -398,7 +399,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   };
 
   return <div className="ob3" onDragOver={(event) => { event.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop} data-dragging={over}>
-    <LeftColumn state={state} busy={busy !== "" && busy !== "turn"} accept={ACCEPT} onUpload={(files) => void upload(files)} onFolders={(folders) => void upload([], folders)} uploadNote={uploadNote} onChanged={() => void load()}
+    <LeftColumn state={state} busy={busy !== "" && busy !== "turn"} accept={ACCEPT} onUpload={(files) => void upload(files)} onFolders={(folders) => void upload([], folders)} uploadNote={uploadNote} calendarElsewhere={opening} onChanged={() => void load()}
       heldQuestions={[]} answers={answers} onAnswer={(id, next) => setAnswers((previous) => ({ ...previous, [id]: next }))} />
 
     <section className="ob-centre" aria-label={t("访谈对话")}>
@@ -490,6 +491,8 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
             <input type="file" multiple accept={ACCEPT} hidden onChange={(event) => { void upload(event.target.files ?? []); event.target.value = ""; }} />
             {uploading.current > 0 ? t("上传中…") : t("添加文件")}
           </label>
+          {/* The interview's model and reasoning effort (D19), from the next round. */}
+          <ModelPicker slot="crossline-onboarding" compact />
           {running
             ? <>
               {insertState === "queued" && <small className="ob-muted" role="status">{t("已排队 {{count}} 条，这一轮结束后接着发。", { count: queued })}</small>}

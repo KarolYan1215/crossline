@@ -37,17 +37,23 @@ export function readSubscriptions(raw: string | undefined): CalendarSubscription
 
 /**
  * Where each calendar app keeps the link, in the person's words, and the page that holds it (`url`, opened by one button on the card, so
- * the person lands where the link is instead of hunting for it). Each `url` is the provider's own https page (checked by a test).
+ * the person lands where the link is instead of hunting for it). Each `url` is the provider's own https page (checked by a test). `note`
+ * is what goes wrong with that provider in particular (2026-11-22, the interview's preparation page: Google's slow refresh of calendars
+ * added by URL, work and school accounts that switch the private address off, and what to do once a link has leaked).
  */
-export const SUBSCRIPTION_GUIDES: Array<{ app: string; url: string; steps: string[] }> = [
+export const SUBSCRIPTION_GUIDES: Array<{ app: string; url: string; steps: string[]; note?: string }> = [
   { app: "Google 日历", url: "https://calendar.google.com/calendar/r/settings",
-    steps: ["在打开的设置页左侧「我的日历的设置」里点要接入的日历", "找到「集成日历」，拷贝「iCal 格式的私密地址」", "回到这里点「粘贴并接入」"] },
+    steps: ["点「打开设置页」，在左侧「我的日历的设置」里点要接入的日历", "往下找到「集成日历」，拷贝「iCal 格式的私密地址」（不是「公开地址」）", "回到这里点「粘贴并接入」"],
+    note: "学校或公司的 Google 账号，管理员可能关闭了私密地址，这时「集成日历」里没有这一项：改用个人账号，或请管理员开启。在 Google 日历里「通过网址添加」的外部日历（如学校课表），Google 要 12–24 小时才刷新一次；这类日历把它原本的订阅链接直接接到这里，变化来得更快。私密地址泄露了，就在同一处点「重置」，旧链接立即失效。" },
   { app: "Outlook（个人）", url: "https://outlook.live.com/calendar/0/options/calendar/SharedCalendars",
-    steps: ["在打开的「共享日历」页，「发布日历」里选要接入的日历，权限选「可以查看所有详细信息」，点「发布」", "拷贝出现的 ICS 链接", "回到这里点「粘贴并接入」"] },
+    steps: ["点「打开设置页」，在「共享日历」页的「发布日历」里选要接入的日历，权限选「可以查看所有详细信息」，点「发布」", "拷贝出现的 ICS 链接", "回到这里点「粘贴并接入」"],
+    note: "拿到链接的人都能看这本日历。泄露了就在同一页点「取消发布」再重新发布，旧链接失效。" },
   { app: "Outlook（工作或学校）", url: "https://outlook.office.com/calendar/options/calendar/SharedCalendars",
-    steps: ["在打开的「共享日历」页，「发布日历」里选要接入的日历，权限选「可以查看所有详细信息」，点「发布」", "拷贝出现的 ICS 链接（有的学校或公司关闭了发布，这时这里不会出现）", "回到这里点「粘贴并接入」"] },
+    steps: ["点「打开设置页」，在「共享日历」页的「发布日历」里选要接入的日历，权限选「可以查看所有详细信息」，点「发布」", "拷贝出现的 ICS 链接", "回到这里点「粘贴并接入」"],
+    note: "有的学校或公司关闭了日历发布，这时页面上没有「发布日历」：改用个人日历，或请管理员开启。链接泄露了就取消发布再重新发布，旧链接失效。" },
   { app: "苹果 iCloud", url: "https://www.icloud.com/calendar/",
-    steps: ["在打开的 iCloud 日历里，点要接入的日历旁的共享图标（在 iPhone 上是日历列表里的 ⓘ）", "打开「公开日历」，拷贝出现的链接（以 webcal:// 开头）", "回到这里点「粘贴并接入」"] }
+    steps: ["点「打开设置页」，在 iCloud 日历里点要接入的日历旁的共享图标（在 iPhone 上是日历列表里的 ⓘ）", "打开「公开日历」，拷贝出现的链接（以 webcal:// 开头）", "回到这里点「粘贴并接入」"],
+    note: "公开日历的链接任何拿到的人都能看。泄露了就关掉「公开日历」再打开，会生成新链接，旧的失效。" }
 ];
 
 /** An event from a connected calendar (Graph or a subscription link) in the coming seven days, one per title, weekday and time. */

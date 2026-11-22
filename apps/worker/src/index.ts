@@ -4,7 +4,7 @@ import { get } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { accountConcurrency, breakdownOfResponsesUsage, codexProcessEnvironment, flushMeteredUsage, recordMeteredUsage, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, installUndiciAssertionGuard, modelGateStatus, setDesignNoteProvider, setInstructionsProvider, setLocalLookupProvider, setWebAvailableProvider, webResearchBlocker, setEffortPreferenceProvider, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
+import { accountConcurrency, breakdownOfResponsesUsage, codexProcessEnvironment, flushMeteredUsage, recordMeteredUsage, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, installUndiciAssertionGuard, modelGateStatus, setDesignNoteProvider, setInstructionsProvider, setLocalLookupProvider, setWebAvailableProvider, webResearchBlocker, setEffortPreferenceProvider, setModelChoiceProvider, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
 import { containerMemory, containerPeak, createCollectMemory, heldMemory } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
@@ -49,7 +49,7 @@ import { workflowsProbe } from "./self-check-workflows";
 import { automationsProbe, mailProbe } from "./self-check-mail";
 import { hourly, nodeProbe, remoteBrowserProbe, sandboxProbe } from "./self-check-host";
 import { createWriteLogin } from "./calendar-write-login";
-import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, DEVICE_TOKEN_SETTING, NODE_COMPUTE_SETTING, NODE_STATUS_SETTING, NODE_TOKEN_SETTING, EVAL_HOLD_FILE, evalHoldActive, backgroundSpend, hoursToOffPeakEnd, sponsorOffPeak, CALENDAR_SYNC_FAILURE, htmlLang, tFor, FIRST_DRAFTS_SETTING, grownSkillName, publicSkillName, pausedKinds, readyToStart, spendAllows, NON_CORE_PURPOSE, type BackgroundKind, type PlanRankingInput, MODEL_EFFORT_SETTING, effortPreferenceOf } from "@crossline/core";
+import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, DEVICE_TOKEN_SETTING, NODE_COMPUTE_SETTING, NODE_STATUS_SETTING, NODE_TOKEN_SETTING, EVAL_HOLD_FILE, evalHoldActive, backgroundSpend, hoursToOffPeakEnd, sponsorOffPeak, CALENDAR_SYNC_FAILURE, htmlLang, tFor, FIRST_DRAFTS_SETTING, grownSkillName, publicSkillName, pausedKinds, readyToStart, spendAllows, NON_CORE_PURPOSE, type BackgroundKind, type PlanRankingInput, MODEL_EFFORT_SETTING, effortPreferenceOf, MODEL_CHOICE_SETTING, modelChoiceFor, modelChoicesOf } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders, pendingTutorials, prepareMaterialsAhead } from "./manualbook";
 import { startingWithin } from "./schedule-window";
@@ -1264,6 +1264,8 @@ setWebAvailableProvider(() => !webResearchBlocker());
 setLocalLookupProvider((workspaceId) => workspaceId ? localLookupsFor(analysisStore, workspaceId) : undefined);
 // The person's 模型强度 (Settings → 模型连接), read per run; only runs on the account's own Codex take it (skill-runner).
 setEffortPreferenceProvider((workspaceId) => effortPreferenceOf(workspaceId ? analysisStore.getSetting(workspaceId, MODEL_EFFORT_SETTING) : null));
+// The person's own model and effort per Skill (D19: the interview's picker, Settings → 模型), read per run; it wins over the route table.
+setModelChoiceProvider((workspaceId, skillName) => workspaceId ? modelChoiceFor(modelChoicesOf(analysisStore.getSetting(workspaceId, MODEL_CHOICE_SETTING)), skillName) : undefined);
 // The one quota gate for every background pass (core: keeps the person's own work moving; discretionary: nobody is waiting on it).
 const readSpend = createBackgroundSpend(analysisStore, (workspaceId) => readCost(workspaceId));
 const spendFor = async (workspaceId: string) => {

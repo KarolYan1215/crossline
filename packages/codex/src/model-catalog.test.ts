@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { accountModels, fitRoute, forgetAccountModels, type CatalogModel } from "./model-catalog";
+import { accountModels, fitRoute, forgetAccountModels, routeForChoice, type CatalogModel } from "./model-catalog";
 import { DEFAULT_TIERS } from "./model-policy";
 
 const model = (name: string, extra: Partial<CatalogModel> = {}): CatalogModel =>
@@ -36,4 +36,25 @@ test("the catalogue is read once per workspace for ten minutes, and a runtime th
   expect(calls).toBe(2);
   const broken = { request: async () => { throw new Error("method not found"); } } as never;
   expect(await accountModels(broken, "other", 0)).toBeNull();
+});
+
+test("the catalogue's own model name is kept for the picker when it says more than the id", async () => {
+  forgetAccountModels();
+  const client = { request: async () => ({ data: [
+    { model: "gpt-5.6-sol", displayName: "GPT-5.6 Sol", hidden: false, isDefault: false, supportedReasoningEfforts: [], defaultReasoningEffort: "medium" },
+    { model: "gpt-5.6-terra", displayName: "gpt-5.6-terra", hidden: false, isDefault: true, supportedReasoningEfforts: [], defaultReasoningEffort: "medium" }], nextCursor: null }) } as never;
+  const models = await accountModels(client, "named", 0);
+  expect(models?.[0]?.displayName).toBe("GPT-5.6 Sol");
+  expect(models?.[1]).not.toHaveProperty("displayName");
+});
+
+test("the person's own choice is kept as chosen, its effort fitted to the model, and never swapped for another model", () => {
+  const plus = [model("gpt-5.6-sol", { efforts: ["low", "medium", "high", "xhigh"], defaultEffort: "medium" }), model("gpt-5.6-terra", { isDefault: true })];
+  expect(routeForChoice({ model: "gpt-5.6-sol", effort: "xhigh" }, plus)).toEqual({ route: { model: "gpt-5.6-sol", effort: "xhigh" } });
+  // An effort the model does not take falls to the model's own default, not to another model.
+  expect(routeForChoice({ model: "gpt-5.6-terra", effort: "xhigh" }, plus)).toEqual({ route: { model: "gpt-5.6-terra", effort: "medium" } });
+  // A model the account does not have is refused, where a table route would have fallen down the ladder.
+  expect(routeForChoice({ model: "gpt-5.6-luna", effort: "low" }, plus)).toEqual({ unavailable: true });
+  // No catalogue to ask: sent as chosen.
+  expect(routeForChoice({ model: "gpt-5.6-luna" }, null)).toEqual({ route: { model: "gpt-5.6-luna" } });
 });

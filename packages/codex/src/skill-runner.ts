@@ -5,11 +5,11 @@ import { looksLooping, repairJsonBrackets } from "./json-repair";
 import { cleanAnswerStrings, designNoteText, instructionsText, tFor, type Locale } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
 import { routeForSkill, shiftEffort, tierForSkill, tierRoutes, type ModelRoute, type RouteTier, type SpendMode } from "./model-policy";
-import { createUsageCollector, currentEffortPreference, currentSpendMode, currentUsageWorkspace, reportUsage, takeMeteredUsage, type UsageCollector } from "./usage";
-import { currentProviderRouting, decideRoute, noteChatgptUsageLimit, type ThreadProvider } from "./providers";
+import { createUsageCollector, currentEffortPreference, currentModelChoice, currentSpendMode, currentUsageWorkspace, reportUsage, takeMeteredUsage, type UsageCollector } from "./usage";
+import { currentProviderRouting, decideRoute, noteChatgptUsageLimit, type RouteDecision, type ThreadProvider } from "./providers";
 import { markClientBusy, priorityForSkill, withModelSlot, type ModelPriority } from "./model-gate";
 import { bindForRun } from "./runtime-pool";
-import { accountModels, fitRoute } from "./model-catalog";
+import { accountModels, fitRoute, routeForChoice } from "./model-catalog";
 
 import { registerAgentThread, SANDBOX_PROFILE, sandboxProfile, type AgentMode } from "./agent-mode";
 
@@ -321,6 +321,12 @@ function toolAnswerer(tools: SkillTools) {
  * workspace's (docs/i18n.md).
  */
 const said = (locale?: Locale) => tFor(runLocale(locale, currentUsageWorkspace()));
+/** The person chose this model and its quota is spent: said as it is, never swapped for another model (D19). */
+const chosenModelSpent = (model: string, until?: string) => {
+  const time = until?.slice(0, 16).replace("T", " ");
+  return time ? said()("ChatGPT 额度已用尽，{{time}}（UTC）恢复；选定的模型 {{model}} 等额度恢复后继续，不会换成别的模型。要先接着做，可在 设置 → 模型 恢复默认。", { time, model })
+    : said()("ChatGPT 额度已用尽；选定的模型 {{model}} 等额度恢复后继续，不会换成别的模型。要先接着做，可在 设置 → 模型 恢复默认。", { model });
+};
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 
@@ -582,8 +588,16 @@ async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: stri
   const spendMode = await currentSpendMode();
   // The workspace's own provider when it can serve this Skill, else its own Codex sign-in, else a blocker (never the owner's runtime).
   const routing = options.provider ? undefined : currentProviderRouting();
-  const decision = options.provider ? { via: "provider" as const, provider: options.provider }
+  // The person's own model for this Skill (D19): it wins over the table, is not stepped down in economy, and is never swapped.
+  const choice = options.provider ? undefined : currentModelChoice(options.skillName);
+  let decision: RouteDecision = options.provider ? { via: "provider" as const, provider: options.provider }
     : decideRoute(options.skillName, routing, options.mainModel ? { mainModel: true } : {});
+  if (choice && decision.via !== "codex" && routing) {
+    // A Codex model was chosen: it runs on the account's own Codex whenever that is signed in. A spent ChatGPT quota is said as such
+    // rather than handed to the developer's model behind the person's back.
+    if (routing.codexSignedIn && !routing.chatgptExhausted) decision = { via: "codex" };
+    else if (routing.chatgptExhausted) return { ok: false, blocker: { code: "SKILL_USAGE_LIMIT", message: chosenModelSpent(choice.model, routing.chatgptExhausted.until) }, audit: {} };
+  }
   if (decision.via === "blocked") return { ok: false, blocker: { code: decision.code, message: decision.message }, audit: {} };
   const provider = decision.via === "provider" ? thinkingCapped(decision.provider, options.thinkingBudget) : undefined;
   // A stronger look is a cost the person did not ask for: in economy mode the Skill keeps its own route.
@@ -592,9 +606,14 @@ async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: stri
     ? { ...tierRoutes()[options.tier] } : routeForSkill(options.skillName, process.env, spendMode);
   // Fitted to the models this account is offered (a ChatGPT Free account has no `gpt-5.6-sol`); a provider's model is its own.
   const models = provider ? null : await accountModels(client);
-  const fitted = provider ? wanted : fitRoute(wanted, options.tier ?? tierForSkill(options.skillName), models);
+  const chosen = choice && !provider ? routeForChoice(choice, models) : undefined;
+  if (chosen && "unavailable" in chosen) {
+    return { ok: false, blocker: { code: "MODEL_CHOICE_UNAVAILABLE", message: said()("选定的模型 {{model}} 这个账号用不了；在访谈输入框旁或 设置 → 模型 改选一个，或恢复默认。", { model: choice!.model }) }, audit: {} };
+  }
+  const fitted = chosen ? chosen.route : provider ? wanted : fitRoute(wanted, options.tier ?? tierForSkill(options.skillName), models);
   // The person's 模型强度 moves only their own Codex; 更强 is not taken while the quota is tight, so it cannot undo economy's step down.
-  const preference = provider ? "default" : currentEffortPreference();
+  // A model and effort the person chose themselves are not moved either.
+  const preference = provider || chosen ? "default" : currentEffortPreference();
   const route = preference === "default" || (preference === "higher" && spendMode !== "normal") ? fitted
     : shiftEffort(fitted, preference, models?.find((model) => model.model === fitted?.model)?.efforts);
   const webTools = provider ? options.webTools ?? routing?.webTools : undefined;
@@ -1318,7 +1337,8 @@ export async function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: s
   // thread the runtime lost is (the thread itself stays on the provider it was started on).
   if (!onChatgpt || result.ok || result.blocker.code !== "SKILL_USAGE_LIMIT") return result;
   noteChatgptUsageLimit();
-  if (decideRoute(options.skillName, currentProviderRouting()).via !== "provider") return result;
+  // A model the person chose is not moved to another one: the spent quota is what they are told (D19).
+  if (currentModelChoice(options.skillName) || decideRoute(options.skillName, currentProviderRouting()).via !== "provider") return result;
   return { ok: false, blocker: { code: "SKILL_THREAD_LOST", message: said(options.locale)("ChatGPT 额度已用尽，这段对话改由开发者提供的模型接着进行。") }, audit: result.audit };
 }
 
@@ -1368,7 +1388,7 @@ export async function runCodexSkill<T>(client: CodexRpcBoundary, input: unknown,
   // run goes there once (2026-10-21). Nothing else changes about the run.
   if (onChatgpt && !first.ok && first.blocker.code === "SKILL_USAGE_LIMIT" && !options.signal?.aborted) {
     noteChatgptUsageLimit();
-    if (decideRoute(options.skillName, currentProviderRouting()).via === "provider") {
+    if (!currentModelChoice(options.skillName) && decideRoute(options.skillName, currentProviderRouting()).via === "provider") {
       console.log(JSON.stringify({ type: "skill.rerun_on_sponsor", skill: options.skillName }));
       first = await executeSkill(client, options, (context) => runSkillTurn(context.client, input, options, context));
     }

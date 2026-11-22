@@ -7,6 +7,7 @@ import { useLocale } from "../locale-context";
 import { withLink } from "./rich-text";
 import { VoiceField } from "../ui/voice/voice-input";
 import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY } from "./onboarding-types";
+import { CalendarSetupStep } from "../connectors/calendar-setup-step";
 
 /**
  * The preparation page before the interview (2026-11-22, the owner): first the main lines, then the material (the résumé first), then the
@@ -202,7 +203,7 @@ export function OpeningCard({ linesKnown, knownLines, busy, hasMaterials, needsC
     </fieldset>
     <fieldset className="ob-question">
       <legend>{t("日历")}<small>{t("可跳过")}</small></legend>
-      {calendarSlot ?? <p className="ob-muted">{t("现在不连也可以，之后在设置里连接。")}</p>}
+      {calendarSlot ?? <CalendarSetupStep />}
     </fieldset>
 
     <div className="ob-opening-go">

@@ -847,7 +847,6 @@
   "提示代码已过期": "Says the code has expired",
   "代码约 15 分钟内有效，回到这里再点「获取登录代码」。": "A code lasts about 15 minutes; come back here and press \"Get a sign-in code\" again.",
   "接入教程：各日历的订阅链接": "Setup guide: subscription links for each calendar",
-  "订阅链接是日历的只读地址，不用登录。点上面所用的日历会打开它的设置页，同时在这里展开对应的步骤。": "A subscription link is a calendar's read-only address; no sign-in is needed. Pressing the calendar in use above opens its settings page and shows its steps here.",
   "接入成功但没有读到日程": "Connected, but no events were read",
   "全天日程（节假日、生日）和标为「空闲」的日程不读入；只读未来九周有具体时间的日程。": "All-day events (holidays, birthdays) and events marked Free are not read; only timed events in the next nine weeks are.",
   "提示链接打不开或不是日历": "Says the link does not open or is not a calendar",
