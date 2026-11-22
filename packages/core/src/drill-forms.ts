@@ -70,11 +70,6 @@ export function stripDrillSentences(text: string, backed: ReadonlySet<DrillForm>
   return (text.match(/[^。！？!?\n]+[。！？!?\n]?/g) ?? []).filter((sentence) => !unbacked(sentence, backed).length).join("").trim();
 }
 
-/** Whether a question already asks how the person usually works (so a second one is not added). */
-const ASKS_METHOD = /平时怎么|通常怎么|一般怎么|习惯|方法|怎么准备|how (?:do|does) .{0,20}usually|habit|method/i; // i18n-ignore
-const EXAM = /考|期中|期末|测验|小测|quiz|exam|midterm|final|test/i; // i18n-ignore
-const WRITING = /写|论文|报告|稿|综述|展示|汇报|演讲|presentation|paper|report|essay|draft|talk/i; // i18n-ignore
-
 /**
  * The slots a fact about how the person works is filed under (the interview's 「做事方法」: `method_exam_prep`, `method_learning`,
  * `method_writing`), read by meaning as the checklist reads every slot.
@@ -83,21 +78,21 @@ export const METHOD_SLOT = /^method|_method$|approach|technique|study_habit|work
 
 export type MethodQuestion = { id: string; text: string; why: string; options: string[] };
 export const METHOD_QUESTION_ID = "q-method";
-export const asksMethod = (text: string) => ASKS_METHOD.test(text);
 
 /**
- * The question asked instead of guessing a method: how the person usually does this kind of work. The first option is the neutral one,
- * because a minor task's questions are settled as their first option (the step planner's `assumeAnswers`): an assumed method is never a
- * technique the person did not name.
+ * The question asked instead of guessing a method: how the person usually does this kind of work, in the step planner's own words for
+ * this task (`StepPlan.methodQuestion`; 2026-11-22, replacing the exam and writing word lists that chose among three canned ones). The
+ * first option is always the neutral one, because an unanswered question is settled as its assumption: an assumed method is never a
+ * technique the person did not name. Without the planner's wording (a plan from before it), a general question.
  */
-export function methodQuestion(taskText: string, locale?: Locale): MethodQuestion {
+export function methodQuestion(planned: { text?: unknown; options?: unknown } | undefined, locale?: Locale): MethodQuestion {
   const t = tFor(locale);
   const neutral = t("没有固定方法，按这次需要定");
   const why = t("做法按本人的习惯来，不套用模板");
-  if (EXAM.test(taskText)) return { id: METHOD_QUESTION_ID, text: t("平时怎么准备这类考试？"), why,
-    options: [neutral, t("主要做题，再对照答案"), t("主要重读讲义和笔记"), t("写总结或讲给别人听")] };
-  if (WRITING.test(taskText)) return { id: METHOD_QUESTION_ID, text: t("平时怎么写这类东西？"), why,
-    options: [neutral, t("先列提纲再写"), t("先写草稿再反复改"), t("边查资料边写")] };
+  const text = typeof planned?.text === "string" ? planned.text.trim().slice(0, 160) : "";
+  const options = (Array.isArray(planned?.options) ? planned!.options : []).filter((option): option is string => typeof option === "string")
+    .map((option) => option.trim().slice(0, 60)).filter((option) => option && option !== neutral);
+  if (text && options.length >= 2) return { id: METHOD_QUESTION_ID, text, why, options: [neutral, ...new Set(options)].slice(0, 5) };
   return { id: METHOD_QUESTION_ID, text: t("平时怎么做这类事？"), why,
     options: [neutral, t("先读材料再动手"), t("先动手，遇到问题再查"), t("和别人讨论着做")] };
 }

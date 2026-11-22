@@ -36,16 +36,16 @@ test("a started course homework past its due day is asked: can it still be hande
 
 test("passed talks and rehearsals on the folded card are let go in one answer; homework still waits for its own", async () => {
   const store = setup();
-  // The rehearsal's description does not start with the verb; its title does (2026-11-17 live walk: 「于 11 月 5 日 11:00 参加…」 was missed).
+  // Both read by the titler as going to something (`attends`); the rehearsal's description does not start with the verb (2026-11-17 live walk).
   for (const [id, intent, title] of [["talk", "参加 ECE 研究系列讲座", undefined], ["rehearsal", "于 11 月 3 日 18:00 参加 BadgerShop 排练", "参加 BadgerShop 排练"]] as const) {
     store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research", projectId: "ece555", milestoneId: "", intent, state: "active", riskTier: "routine",
-      estimate, payload: { dueDate: "2026-11-03", ...(title ? { title } : {}) } });
+      estimate, payload: { dueDate: "2026-11-03", attends: true, ...(title ? { title } : {}) } });
   }
   const folded = collectAsks(TEST_CTX, NOW).find((ask) => ask.id.startsWith("fold:overdue:"))!;
   const option = folded.options.find((item) => item.id === "drop_events")!;
   expect(option.label).toBe("过去的 2 个活动不参加了");
-  // Named by the day and what it is, not cut off at the verb and the date (「参加 11 月 6 日在 Lev…」, 2026-11-11).
-  expect(option.detail).toBe("「11/3 BadgerShop 排练」、「11/3 ECE 研究系列讲座」 归档，可从已归档恢复；其余照旧等本人决定");
+  // Named by the day and the task's own name (the titler's), not cut out of the description by a pattern.
+  expect(option.detail).toBe("「11/3 参加 BadgerShop 排练」、「11/3 参加 ECE 研究系列讲座」 归档，可从已归档恢复；其余照旧等本人决定");
   expect(await answerAsk(TEST_CTX, folded.id, { optionIds: ["drop_events"] }, {}, NOW)).toMatchObject({ ok: true });
   expect([store.getWorkOrder(ws, "talk")!.state, store.getWorkOrder(ws, "rehearsal")!.state]).toEqual(["archived", "archived"]);
   expect(store.getWorkOrder(ws, "hw3")!.state).toBe("active");

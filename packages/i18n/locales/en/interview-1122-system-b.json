@@ -1,0 +1,23 @@
+{
+  "由规划步骤时按本人的背景和做过的同类任务判断": "Judged when the steps were planned, from their background and similar work they have done",
+  "{{title}}本周已留 45 分钟进度，其余部分仍待排入": "{{title}} has 45 min of progress this week; the rest is still to be scheduled",
+  "名称（可选，如「工作日程」）": "Name (optional, e.g. \"Work schedule\")",
+  "整个磁盘、用户主文件夹、系统和程序数据文件夹不能授权。选一个具体的子文件夹，如「D:\\资料」。": "A whole drive, the user's home folder, and system or program data folders cannot be authorized. Pick a specific subfolder, such as \"D:\\Materials\".",
+  "只显示连接状态，暂不把日程读入计划；要让日历里的日程进入计划，用「订阅日历」粘贴链接": "Shows the connection state only and does not read events into the plan yet; to bring a calendar's events into the plan, paste its link under Subscribed calendars",
+  "「{{title}}」{{day}} 已经过了，结果怎样？": "\"{{title}}\" was on {{day}}. How did it go?",
+  "日期已过，为它做的准备不再排进日程。有结果就写下来，按这个里程碑的标准记进度；结果还没出就说一声，以后不再问。": "Its date has passed, so preparation for it is no longer scheduled. If there is a result, write it down and it counts against this milestone's standard; if the result is not out yet, say so and this will not be asked again.",
+  "参加了": "Took part",
+  "有结果就填，没有可空着": "Fill in the result if there is one, or leave it blank",
+  "结果还没出": "Result not out yet",
+  "准备任务收起，不再问": "Preparation is put away; not asked again",
+  "改期了": "It was moved",
+  "新的日期": "New date",
+  "这是外部给定的日期（课程、机构或他人），系统不改动。可以照常补做（截止不变，剩下的工作继续排），改成新的日期，或放弃这个里程碑。": "This date was set from outside (a course, an organisation or someone else), so the system does not move it. The work can be made up as usual (the deadline stays and the rest keeps being scheduled), moved to a new date, or the milestone dropped.",
+  "这是外部给的日期（课程、机构或他人），系统不替本人决定。能补交就写下实际的最后期限，按它重新排；不能补交就归档，可从已归档恢复。": "This date was set from outside (a course, an organisation or someone else), and the system does not decide for the person. If it can still be handed in, give the real last day and the work is placed by it; if not, it is archived and can be restored from Archived.",
+  "这些日期是外部或本人定的，系统不替本人改，逐个列在下方；最早的是 {{day}}。每项可以补做、改成新的日期或放弃。": "These dates were set from outside or by the person, so the system does not change them; each is listed below, the earliest is {{day}}. Each can be made up, moved to a new date or dropped.",
+  "文件名和正文开头都没有写明所属项目，从中读出的 {{count}} 项日程（{{named}}{{more}}）因此无法标明归属；访谈时判断更可能是 {{lean}}。确认后，这些日程与截止都会带上项目名。_one": "Neither the file name nor the start of the text names a project, so the {{count}} event read from it ({{named}}{{more}}) cannot be assigned to one. The interview judged {{lean}} more likely. Once confirmed, those events and deadlines carry the project's name.",
+  "文件名和正文开头都没有写明所属项目，从中读出的 {{count}} 项日程（{{named}}{{more}}）因此无法标明归属；访谈时判断更可能是 {{lean}}。确认后，这些日程与截止都会带上项目名。_other": "Neither the file name nor the start of the text names a project, so the {{count}} events read from it ({{named}}{{more}}) cannot be assigned to one. The interview judged {{lean}} more likely. Once confirmed, those events and deadlines carry the project's name.",
+  "文件名和正文开头都没有写明所属项目，从中读出的 {{count}} 项日程（{{named}}{{more}}）因此无法标明归属。确认后，这些日程与截止都会带上项目名。_one": "Neither the file name nor the start of the text names a project, so the {{count}} event read from it ({{named}}{{more}}) cannot be assigned to one. Once confirmed, those events and deadlines carry the project's name.",
+  "文件名和正文开头都没有写明所属项目，从中读出的 {{count}} 项日程（{{named}}{{more}}）因此无法标明归属。确认后，这些日程与截止都会带上项目名。_other": "Neither the file name nor the start of the text names a project, so the {{count}} events read from it ({{named}}{{more}}) cannot be assigned to one. Once confirmed, those events and deadlines carry the project's name.",
+  "文件名和正文开头都没有写明所属项目。确认后，这份文件会作为该项目任务的材料与背景使用。": "Neither the file name nor the start of the text names a project. Once confirmed, this file is used as material and background for that project's tasks."
+}

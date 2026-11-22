@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import {
-  PUSH_RELEVANCE, bestRelevance, classifyFind, mergeLineTags, migratedTags, opportunityTypeOf, overlapOf, pushable, relevanceOf, socialSigns, type LineBrief
+  PUSH_RELEVANCE, bestRelevance, classifyFind, mergeLineTags, migratedTags, opportunityTypeOf, overlapOf, pushable, relevanceOf, type LineBrief
 } from "./opportunity-tags";
 import { applyLess, emptyTuning, holdBack, undoLess } from "./opportunity-watches";
 
@@ -34,19 +34,23 @@ test("a find serves several lines, ranked; unknown lines and weak claims are dro
   expect(classified.lowValue).toBeUndefined();
 });
 
-test("low-value social gatherings by their own words, Chinese and English; a competition with a mixer is still a competition", () => {
-  for (const title of ["ECE GSA Winter Ball 2026", "CS Coffee Hour with Faculty", "WiC Mentor Mixer", "Grad Happy Hour at the Terrace", "研究生会新年社交酒会",
-    "导师交流会：与校友导师面对面", "春季联谊舞会"]) expect(socialSigns(title), title).not.toEqual([]);
-  for (const title of ["ISCA 2027 Call for Papers", "Badger Hacks 2026", "NSF GRFP Info Session", "Google Research Internship 2027", "类脑计算暑期学校"]) expect(socialSigns(title), title).toEqual([]);
-  const ball = classifyFind({ type: "event", reason: "", lines: [{ lineId: "research", confidence: 0.7, reason: "同系", anchors: ["goal"] }] }, { lines, title: "ECE GSA Winter Ball 2026", organizer: "ECE GSA" });
+test("low value is the model's call: no word list turns a title into a social gathering", () => {
+  // The model's flag is kept, whatever the title says.
+  const ball = classifyFind({ type: "social", reason: "", lowValue: true, lines: [{ lineId: "research", confidence: 0.7, reason: "同系", anchors: ["goal"] }] },
+    { lines, title: "ECE GSA Winter Ball 2026", organizer: "ECE GSA" });
   expect(ball).toMatchObject({ type: "social", lowValue: "social" });
-  const hack = classifyFind({ type: "competition", reason: "", lines: [] }, { lines, title: "Hack Night + founders mixer", organizer: "Badger Hacks" });
+  // A title full of social words is not marked by code: before, 「mixer」 made this a social gathering.
+  const hack = classifyFind({ type: "competition", reason: "", lowValue: false, lines: [] }, { lines, title: "Hack Night + founders mixer", organizer: "Badger Hacks" });
   expect(hack.type).toBe("competition");
   expect(hack.lowValue).toBeUndefined();
+  // The model's type stands: 「Coffee Hour」 in a title no longer overrides it.
+  expect(classifyFind({ type: "talk", reason: "", lowValue: false, lines: [] }, { lines, title: "CS Coffee Hour with Faculty", organizer: "CS" }).type).toBe("talk");
+  // An answer written before the field: not low value.
+  expect(classifyFind({ type: "social", reason: "", lines: [] }, { lines, title: "Mixer", organizer: "" }).lowValue).toBeUndefined();
 });
 
-test("a social gathering is kept when a line's goal is meeting people in its field", () => {
-  const night = classifyFind({ type: "social", reason: "天使投资人到场", lines: [{ lineId: "startup", confidence: 0.85, reason: "种子轮", anchors: ["ms-seed"] }] },
+test("a social gathering the model did not mark low value is kept and pushed when it serves a line", () => {
+  const night = classifyFind({ type: "social", reason: "天使投资人到场", lowValue: false, lines: [{ lineId: "startup", confidence: 0.85, reason: "种子轮", anchors: ["ms-seed"] }] },
     { lines, title: "Madison Founders & Angels Networking Night", organizer: "Madison Startups", pageText: "angel investors and seed funds" });
   expect(night.type).toBe("social");
   expect(night.lowValue).toBeUndefined();
@@ -67,7 +71,7 @@ test("held back: a low-value gathering always; a quiet type unless very relevant
 test("少来这类 learns the type, and taking it back removes only that", () => {
   const t = (key: string, values?: Record<string, unknown>) => key.replace(/\{\{(\w+)\}\}/g, (_m, name: string) => String(values?.[name] ?? ""));
   const applied = applyLess({ feedback: { opportunityId: "o1", scope: "kind" }, tuning: emptyTuning(), failedRules: [], id: "less-1", at: "2026-11-10T00:00:00Z", t,
-    opportunity: { id: "o1", url: "https://cs.example.edu/coffee", title: "CS Coffee Hour", lineId: "research", kind: "event" } });
+    opportunity: { id: "o1", url: "https://cs.example.edu/coffee", title: "CS Coffee Hour", lineId: "research", kind: "event", type: "social" } });
   expect(applied.tuning.quietTypes).toEqual([{ id: "less-1", type: "social" }]);
   expect(applied.entry.changes).toContain("社交类聚会以后不推");
   expect(undoLess(applied.entry, undefined, applied.tuning, "2026-11-11T00:00:00Z").tuning.quietTypes).toEqual([]);

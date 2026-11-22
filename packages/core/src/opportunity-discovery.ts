@@ -144,7 +144,7 @@ export type ReadItem = {
   place?: ReadPlace | undefined;
   eligibility: EligibilityTerm[]; needsAccount: boolean; materials: string[]; consents: string[]; registrationUrl: string;
   /** The classifier's type, reason and lines (§18, reader input v3); optional for answers and fixtures written before. */
-  type?: string | undefined; reason?: string | undefined; lines?: RawClassification["lines"] | undefined;
+  type?: string | undefined; reason?: string | undefined; lines?: RawClassification["lines"] | undefined; lowValue?: boolean | undefined;
 };
 export type ReadingAnswer = { items: ReadItem[]; blocked: string };
 

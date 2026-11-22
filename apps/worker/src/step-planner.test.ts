@@ -182,11 +182,13 @@ test("the model decides which questions reach the person (ask); the rest are ass
   expect(prompts.some((prompt) => prompt.includes("没有代价的就按 assume 做"))).toBe(true);
   expect(fact(fresh, "字体用哪种？")).toMatchObject({ status: "inferred" });
 
-  // Graded coursework read from the course's files is still researched on the web first.
+  // Work for a milestone the reviewer weighed at 60 or more is still researched on the web first (no rule makes every date pair important).
   const graded = new CrosslineStore(":memory:");
   seed(graded);
   const order = graded.getWorkOrder(workspaceId, "wo")!;
-  graded.saveWorkOrder({ ...order, payload: { ...(order.payload as object), datePair: { release: "2026-10-06", due: "2026-10-14" }, humanCore: [{ id: "h", intent: "解题" }] } });
+  graded.saveWorkOrder({ ...order, payload: { ...(order.payload as object), humanCore: [{ id: "h", intent: "解题" }] } });
+  graded.setSetting(workspaceId, "milestones.risks", JSON.stringify({ m: { fingerprint: "f", at: "2026-10-01T00:00:00.000Z", source: "model", risks: [],
+    reading: { weight: 75, weightWhy: "计入课程成绩", sitting: false, startsAt: "" } } }));
   answer = plan([]);
   expect((await createStepPlanner(graded, workspaceId, "C:\repo", () => runtime.rpc)("wo")).state).toBe("planned");
   expect(prompts.at(-1)).toContain('"research":true');
@@ -298,8 +300,9 @@ test("a drill form taken from an identity template is cut on the way to the ledg
   expect(saved.steps.map((item) => item.title)).toEqual(["汇集 ECE 555 往年期中卷", "推导 L5–L6 P-N 结静电与 I-V", "做 2 套往年卷", "限时模拟一套期中卷"]);
   // The mock waited on the dropped step; it now waits on what that step waited on.
   expect(saved.steps[3]!.dependsOn).toEqual([saved.steps[2]!.id]);
-  // The method is asked, first, and the question about the 错题本 is gone; an assumed answer invents no method.
-  expect(saved.questions.map((question) => question.text)).toEqual(["平时怎么准备这类考试？", "期中考到第几讲？"]);
+  // The method is asked, first, and the question about the 错题本 is gone; an assumed answer invents no method. This recorded answer
+  // predates the planner's own `methodQuestion`, so the general wording is asked (no word list picks one from the title any more).
+  expect(saved.questions.map((question) => question.text)).toEqual(["平时怎么做这类事？", "期中考到第几讲？"]);
   expect(assumed.join(" ")).not.toMatch(/订正|错题/);
 
   const own = await run([{ slot: "method_exam_prep", value: "做完往年卷我习惯对着答案订正，错题记进错题本" }]);

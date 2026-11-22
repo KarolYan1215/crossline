@@ -341,3 +341,31 @@ unsure: true | false
 | `guessKind`（line-attributes.ts:190） | 属性类别 | 访谈抽取由模型给出 |
 | `date-pairs` 的 `ASKS_FOR_HOMEWORK`、`homeworkNumber` | 作业发布与截止配对 | 入账判断 `update` |
 | `FINAL_EXAM`、`EXERCISE`、`drill-forms` 等 | 各类标题分类 | 逐个评估，多数并入入账判断或规划 Skill |
+
+## 附录 B：2026-11-22 落地情况（全系统去硬代码，S5）
+
+已换成模型字段（旧词表、正则和打分连同测试一并删除；老数据见每行的兼容）：
+
+| 原规则 | 现在由谁判断 | 老数据 |
+|---|---|---|
+| `SOCIAL`、`NETWORKING`（opportunity-tags.ts） | opportunity-reader 的 `lowValue` | 旧读数无此字段，按不低价值 |
+| `isRestEvent` 标题词、`isCancelledEvent` 前缀、连接器的 「Canceled:」 | calendar-classifier 的 `rest` / `cancelled`（Graph 的 `isCancelled` 照用） | 分类过但没有这两个标记的条目再读一次，主线不变 |
+| 熟悉度打分（familiarity.ts） | step-planner 的 `familiarity {level, why}`，随计划保存 | 旧计划按 mid |
+| `EXERCISE`（confirm.ts） | step-planner 每步的 `workout` | 旧计划不记锻炼 |
+| `ASKS_METHOD`、`EXAM`、`WRITING`（drill-forms.ts） | step-planner 的 `methodQuestion` | 缺省时用通用问法 |
+| `ACCEPTS_OUTPUT`、`JUDGES`（steps.ts） | 步骤 `role: "check"` | — |
+| `isAttending`、`attendedName`（mail-events.ts） | task-titler 的 `attends`（每件任务读一次）；步骤级用 step-planner 的 `attends` | 未读的任务先按普通工作，titler 每轮读 40 件 |
+| `withCourse` 加在任务名前（taskTitleOf、capture、backplanner、titler、考试时间卡）、`importedTitle` | 各 Skill 自己在名字里写课程 | 2026-10-08 前导入、名字里没写课号的日程不再补课号 |
+| 重要度四项打分（importance.ts `presetImportance`）、`importantByRule` 的日期对规则 | milestone-risk-reviewer 的 `weight`、`weightWhy` | 审过但没有 `reading` 的里程碑再读一次，风险保留不重问；读到之前按 50 |
+| `SITTING`、`isSittingMilestone`、`sittingStartOn`（task-title.ts） | milestone-risk-reviewer 的 `sitting`、`startsAt`（读截止日当天的固定日程） | 同上 |
+| `CONSTRAINT_WORDS`（diligence.ts） | due-diligence 自己从 `facts` 读限制 | 槽位名为约束的事实照旧列出 |
+| `MEDIA_LINE`（skill-library.ts） | 只认 id 为 `media` 的主线，否则本人选 | — |
+
+页面文案去掉学生假设：考试结果卡（「已经过了，结果怎样？」「参加了 / 结果还没出 / 改期了」）、外部日期说明（「外部给定的日期（课程、机构或他人）」）、文件归属卡（「所属项目」）、排程提示（「其余部分仍待排入」）、日历订阅与连接器、文件夹授权示例。
+
+未做，原因：
+
+- `DATE_KINDS` 泛化、`homeworkNumber`、`FINAL_EXAM`、`date-schema` 的 `withCourse`：日期由 `crossline-onboarding-extract` 抽取，属访谈范围，本轮不动；`courseCodeOf` 仍被访谈清单、`profile-gaps`、`meeting-dedupe`、`belonging`、`date-pairs` 使用。
+- `belonging.ts` 的课号匹配：替代它的是抽取日期时模型给出的项目（访谈抽取），以及 S1 的 folder-classifier；单独删掉会让文件归属退化，留给下一轮。
+- `db/overdue.ts`、`milestone-plan` 文案：与日期种类和 S4 的文件相连，留给下一轮。
+- 「11 个原型」：原型已由模型挑选，规则只作提示，没有可替换的判断。

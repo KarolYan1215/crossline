@@ -251,7 +251,7 @@ function makeResult(input: PlanningInput, tasks: PlannerTask[], slots: Slot[], b
     code: blocks.some((block) => block.taskId === task.id && block.progressOnly) ? "PROGRESS_ONLY"
       : task.interruptible === false ? "NO_CONTINUOUS_SLOT" : task.deadline && Date.parse(task.deadline) <= horizon ? "DEADLINE_CAPACITY" : "NO_CAPACITY",
     message: blocks.some((block) => block.taskId === task.id && block.progressOnly)
-      ? t("{{title}}本周已留 45 分钟进度，完整作业仍待排入", { title: task.title })
+      ? t("{{title}}本周已留 45 分钟进度，其余部分仍待排入", { title: task.title })
       : task.interruptible === false
         ? longestSlotMinutes(slots, task) < durationOf(task)
           ? t("{{title}}需要连续 {{minutes}} 分钟，但最长的连续空档只有 {{longest}} 分钟；可以补充更长的可用时间，或确认它其实可以分几次做",

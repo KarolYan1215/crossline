@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import {
-  attendedName, dateItemAttributes, mailEventClash, mailEventFrom, mailEventRulesAfter, mailEventsOnSchedule, mailObligation, parseTimeRange, readMailEventRules, structureEvidence,
+  attendedText, dateItemAttributes, mailEventClash, mailEventFrom, mailEventRulesAfter, mailEventsOnSchedule, mailObligation, parseTimeRange, readMailEventRules, structureEvidence,
   decideMailEvent, withMailEvent, type MailEvent, type MailMeetReading, type MailStructure
 } from "./index";
 
@@ -101,13 +101,11 @@ test("「几点到几点」 is read from the person's words", () => {
   expect(parseTimeRange("下午")).toBeUndefined();
 });
 
-test("an event is named by what it is: no verb, no leading day, no 「在…举行的」", () => {
-  expect(attendedName("参加 11 月 6 日在 Levy Hall 举行的 CoE Alumni Award 座谈会")).toBe("CoE Alumni Award 座谈会");
-  expect(attendedName("参加 11 月 2 日晚间 BadgerShop 排练")).toBe("BadgerShop 排练");
-  expect(attendedName("参加 11 月 5 日 ECE 研究系列讲座")).toBe("ECE 研究系列讲座");
-  expect(attendedName("出席组会")).toBe("组会");
-  // What follows the first clause is about the task (seen on the owner's card the day it shipped).
-  expect(attendedName("参加 11 月 5 日 ECE 研究系列讲座，并保留参会记录。")).toBe("ECE 研究系列讲座");
-  expect(attendedName("参加 11 月 2 日晚间 BadgerShop 排练。")).toBe("BadgerShop 排练");
-  expect(attendedName("参加")).toBe("参加");
+test("going to something is the titler's reading, not a verb at the front (2026-11-22)", () => {
+  // The verb list missed these; the titler read them as events.
+  expect(attendedText({ intent: "于 11 月 5 日 11:00 通过 Zoom 参加 ECE 研究系列讲座", payload: { title: "参加 ECE 研究系列讲座", attends: true } })).toBe("参加 ECE 研究系列讲座");
+  expect(attendedText({ intent: "Levy Hall 校友座谈会", payload: { attends: true } })).toBe("Levy Hall 校友座谈会");
+  // Preparing for it is work, and a task the titler has not read yet is ordinary work.
+  expect(attendedText({ intent: "复习第 3 章，并参加小测", payload: { title: "复习第 3 章", attends: false } })).toBeUndefined();
+  expect(attendedText({ intent: "参加组会", payload: { title: "参加组会" } })).toBeUndefined();
 });

@@ -102,9 +102,9 @@ test("work past its own deadline says so, not that the hours before it ran out (
   const ranked = planRanking(TEST_CTX, await loadCurrentPlan(TEST_CTX)).find((task) => task.id === order.id)!;
   expect(ranked.firstDay).toBeNull();
   expect(ranked.blocker).toBe("已过截止日；改截止日或标为不做后才会重新排入");
-  // An event to attend whose day has passed is over, not waiting for a new date (2026-11-17 live walk), whichever words say it is one.
+  // An event to attend whose day has passed is over, not waiting for a new date (2026-11-17 live walk): the titler read it as one.
   store.saveWorkOrder({ ...store.getWorkOrder(TEST_CTX.workspaceId, order.id)!, intent: "于 9 月 15 日 11:00 参加系列讲座",
-    payload: { ...(order.payload as object), dueDate: "2026-09-15", title: "参加系列讲座" } });
+    payload: { ...(order.payload as object), dueDate: "2026-09-15", title: "参加系列讲座", attends: true } });
   const event = planRanking(TEST_CTX, await loadCurrentPlan(TEST_CTX)).find((task) => task.id === order.id)!;
   expect(event.blocker).toBe("活动已过 · 去了就点完成，没去就归档");
 });

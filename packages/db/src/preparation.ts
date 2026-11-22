@@ -1,4 +1,4 @@
-import { FAMILIARITY_SETTING, familiarityOf, familiarityOverride, orderInfoRequest, taskPreparation, taskTitleOf, type Familiarity, type Preparation } from "@crossline/core";
+import { FAMILIARITY_SETTING, familiarityOf, familiarityOverride, orderInfoRequest, readModelFamiliarity, taskPreparation, taskTitleOf, type Familiarity, type ModelFamiliarity, type Preparation } from "@crossline/core";
 import type { CrosslineStore, StoredProfileFact, StoredStepPlan } from "./index";
 
 /**
@@ -23,35 +23,20 @@ export function preparationOf(order: { id: string; identityId: string; intent: s
     ...(orderInfoRequest(order) ? { infoRequest: true } : {}) }, plan?.steps, { ...(doneBefore ? { doneBefore } : {}), ...(familiarity ? { familiarity: familiarity.level } : {}) });
 }
 
-/** The lines' own settings, read here because `@crossline/db` does not depend on the identity packs (`LINE_SETTING` there). */
-const LINES_SETTING = "lines.v1";
-
-/** What `familiarityFor` reads, gathered once for a page or a pass: accepted work per line and kind, the facts, the person's choices. */
-export type FamiliarityBook = { kinds: Map<string, number>; lines: Map<string, number>; titles: Map<string, string[]>;
-  facts: StoredProfileFact[]; overrides: string | undefined; domains: Map<string, string> };
+/** What `familiarityFor` reads, gathered once for a page or a pass: the planner's judgement per task, the person's choices. */
+export type FamiliarityBook = { planned: Map<string, ModelFamiliarity>; overrides: string | undefined };
 
 export function familiarityBook(store: CrosslineStore, workspaceId: string, plans: readonly StoredStepPlan[] = store.listStepPlans(workspaceId)): FamiliarityBook {
-  const archetype = new Map(plans.map((plan) => [plan.workOrderId, plan.archetypeId]));
-  const kinds = new Map<string, number>(), lines = new Map<string, number>(), titles = new Map<string, string[]>();
-  for (const order of store.listWorkOrders(workspaceId).filter((item) => item.state === "accepted")) {
-    lines.set(order.identityId, (lines.get(order.identityId) ?? 0) + 1);
-    titles.set(order.identityId, [...(titles.get(order.identityId) ?? []), taskTitleOf(order)]);
-    const kind = archetype.get(order.id);
-    if (kind) kinds.set(`${order.identityId}|${kind}`, (kinds.get(`${order.identityId}|${kind}`) ?? 0) + 1);
-  }
-  const domains = new Map<string, string>();
-  try {
-    for (const line of JSON.parse(store.getSetting(workspaceId, LINES_SETTING) ?? "[]") as Array<{ id?: unknown; domain?: unknown }>)
-      if (typeof line?.id === "string" && typeof line.domain === "string") domains.set(line.id, line.domain);
-  } catch { /* unreadable: no domains */ }
-  return { kinds, lines, titles, facts: store.listProfileFacts(workspaceId), overrides: store.getSetting(workspaceId, FAMILIARITY_SETTING), domains };
+  const planned = new Map<string, ModelFamiliarity>();
+  for (const plan of plans) { const judged = readModelFamiliarity(plan.familiarity); if (judged) planned.set(plan.workOrderId, judged); }
+  return { planned, overrides: store.getSetting(workspaceId, FAMILIARITY_SETTING) };
 }
 
-/** How close a task is to what the person knows (`familiarityOf`), for preparation, the step planner and the tutorial writer. */
-export function familiarityFor(book: FamiliarityBook, order: { id: string; identityId: string; intent: string; payload?: unknown; projectId?: string },
+/**
+ * How close a task is to what the person knows (`familiarityOf`), for preparation, the step planner and the tutorial writer: the person's
+ * choice for the line and kind of work, else the planner's judgement kept with the task's plan (2026-11-22), else `mid`.
+ */
+export function familiarityFor(book: FamiliarityBook, order: { id: string; identityId: string },
   archetypeId: string | undefined): Familiarity {
-  return familiarityOf({ task: { title: taskTitleOf(order), intent: order.intent }, lineId: order.identityId, lineDomain: book.domains.get(order.identityId),
-    facts: book.facts, sameKindDone: archetypeId ? book.kinds.get(`${order.identityId}|${archetypeId}`) ?? 0 : 0,
-    lineDone: book.lines.get(order.identityId) ?? 0, doneTitles: (book.titles.get(order.identityId) ?? []).filter((title) => title !== taskTitleOf(order)),
-    override: familiarityOverride(book.overrides, order.identityId, archetypeId) });
+  return familiarityOf({ override: familiarityOverride(book.overrides, order.identityId, archetypeId), planned: book.planned.get(order.id) });
 }

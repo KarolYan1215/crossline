@@ -146,7 +146,7 @@ test("the daily merge takes a part already on the board into its whole; the part
   store.saveStepPlan(ws, "part", { archetypeId: "problem_set", quantity: { basis: "", amount: 0, unit: "" }, rationale: "", steps: [step("p1", "解第 1、2 题")] }, "o", "t");
   const done = await dedupePass(deps());
   expect(done.map((item) => [item.keep, item.absorbed])).toEqual([["whole", ["part"]]]);
-  expect(store.getWorkOrder(ws, "whole")!.payload).toMatchObject({ dueDate: "2026-10-20", partDeadlines: [{ title: "ECE 555 作业 3 第 1、2 题", dueDate: "2026-10-17" }] });
+  expect(store.getWorkOrder(ws, "whole")!.payload).toMatchObject({ dueDate: "2026-10-20", partDeadlines: [{ title: "作业 3 第 1、2 题", dueDate: "2026-10-17" }] });
   expect(store.getStepPlan(ws, "whole")!.steps).toEqual([expect.objectContaining({ title: "解第 1、2 题", dueBy: "2026-10-17" })]);
   expect(store.getWorkOrder(ws, "hw4")!.state).toBe("approved");
 });

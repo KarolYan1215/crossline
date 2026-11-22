@@ -123,20 +123,20 @@ export function loadSkillLibrary(ctx: AccessContext): SkillLibraryView {
     ...(favouritesInstall ? { favouritesInstall } : {}) };
 }
 
-/* i18n-ignore-start: matched against workflows' own words and the lines' names */
-const MEDIA_LINE = /媒体|内容|创作|博主|小红书|media|creator|content/i;
+/* i18n-ignore-start: matched against workflows' own words */
 const FAVOURITES = /收藏|favou?rite/i;
 /* i18n-ignore-end */
 /**
  * Whether Skill 库 offers 「添加：按话题整理小红书收藏」: only while no workflow reads the person's Xiaohongshu favourites (the topic one, or
- * one grown for favourites on that site), for the media-like line when the account has one, else for a line the person picks ("").
+ * one grown for favourites on that site), for the line with the id `media` when the account has one, else for a line the person picks
+ * (""). No word list guesses a media-like line from its name any more (2026-11-22): the person picks it.
  */
 export function favouritesOffer(records: Array<{ name: string; manifest: { summary: string; access?: Array<{ site: string }> } }>,
   lines: Array<{ id: string; label: string }>): { lineId: string } | undefined {
   const reads = records.some((record) => record.name === "xiaohongshu-favourites-topics"
     || (FAVOURITES.test(record.manifest.summary) && (record.manifest.access ?? []).some((item) => /xiaohongshu\.com/.test(item.site))));
   if (reads || !lines.length) return undefined;
-  return { lineId: lines.find((line) => line.id === "media" || MEDIA_LINE.test(line.label))?.id ?? "" };
+  return { lineId: lines.find((line) => line.id === "media")?.id ?? "" };
 }
 
 const MAX_SKILL_CHARS = 20_000;

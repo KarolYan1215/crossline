@@ -19,6 +19,8 @@ export type TimelineItem = {
   tag?: string;
   /** The line this belongs to, when it belongs to one: a task's own line, or the line a calendar event was filed under (`calendar.lines`). */
   identityId?: string;
+  /** A calendar event that is rest, not a commitment (`isRestEvent`: the classifier's mark, or free time on the calendar). */
+  rest?: true;
   milestone?: string;
   /** The work order a scheduled block stands for, so a click can open it. */
   workOrderId?: string;

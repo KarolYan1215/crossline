@@ -17,8 +17,8 @@ function setup(calendar: Array<{ title: string; day: string; start: string; end:
   store.savePlanVersion({ id: "plan-1", ownerId: "o", workspaceId: ws, version: 1, status: "draft", payload: { blocks: calendar.map((block, index) => ({
     id: `graph_calendar:${index}`, lane: "human", ...block, source: "日历", readOnly: true })) } });
   store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "dates:1", type: "dates.extracted", entityId: "b1", payload: { documentIds: [],
-    recurring: [{ id: "class", title: "上课", project: "ECE 555", weekdays: [1, 5], startTime: "14:30", endTime: "15:45", from: "2026-09-04", to: "2026-12-07", exceptions: [], location: "Plant Sci 108", sourceRef: "src-2" }],
-    dates: [{ id: "exam", title: "期中考试", project: "ECE 555", date: "2026-10-27", startTime: "14:30", endTime: "15:45", kind: "exam", sourceRef: "src-1" },
+    recurring: [{ id: "class", title: "ECE 555 上课", project: "ECE 555", weekdays: [1, 5], startTime: "14:30", endTime: "15:45", from: "2026-09-04", to: "2026-12-07", exceptions: [], location: "Plant Sci 108", sourceRef: "src-2" }],
+    dates: [{ id: "exam", title: "ECE 555 期中考试", project: "ECE 555", date: "2026-10-27", startTime: "14:30", endTime: "15:45", kind: "exam", sourceRef: "src-1" },
       { id: "due", title: "作业截止", project: "ECE 555", date: "2026-10-20", startTime: "", endTime: "", kind: "homework_due", sourceRef: "src-1" }], undated: [] } });
   store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "dates:2", type: "dates.decided", entityId: "b1", payload: { included: ["class", "exam", "due"], excluded: [] } });
   store.setSetting(ws, "portrait.report", JSON.stringify({ version: 1 }));

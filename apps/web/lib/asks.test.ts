@@ -822,8 +822,9 @@ test("a step question the task's own files answer is not asked; the same questio
 
 test("an event whose day has passed asks no step question (2026-11-17 live walk: a talk eleven days gone asked for its start time)", () => {
   const store = setup();
+  // Each read by the titler as going to something (`attends`); no verb decides it.
   const event = (id: string, intent: string, dueDate: string, title?: string) => store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research",
-    projectId: id, milestoneId: "", intent, state: "approved", riskTier: "routine", estimate, payload: { dueDate, ...(title ? { title } : {}) } });
+    projectId: id, milestoneId: "", intent, state: "approved", riskTier: "routine", estimate, payload: { dueDate, attends: true, ...(title ? { title } : {}) } });
   event("gone", "参加 10 月 6 日在 Levy Hall 举行的 CoE 校友座谈会", "2026-10-06");
   event("gone-prefixed", "通过 Zoom 参加第 13 期 Biolog 线上活动", "2026-10-05", "参加第 13 期 Biolog");
   event("coming", "参加 ECE 研究系列讲座", "2026-10-09");
@@ -951,7 +952,7 @@ test("a course's or the person's own deadline that passed with work open is aske
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.id.startsWith("fold:overdue:"))).toBe(false);
   expect(overdue().map((ask) => [ask.id, ask.title])).toEqual([["overdue:exam:2026-10-05", "「ECE 555 期中」的截止 10/5 已过，还有 1 个任务没完成"],
     ["overdue:talk:2026-10-05", "「组会报告」的截止 10/5 已过，还有 1 个任务没完成"]]);
-  expect(overdue()[0]!.why).toContain("课程给定的日期");
+  expect(overdue()[0]!.why).toContain("外部给定的日期");
   expect(await answerAsk(TEST_CTX, "overdue:exam:2026-10-05", "makeup", {}, NOW)).toMatchObject({ ok: true });
   expect(overdue().map((ask) => ask.entityId)).toEqual(["talk"]);
   expect(await answerAsk(TEST_CTX, "overdue:talk:2026-10-05", "drop", {}, NOW)).toMatchObject({ ok: true });
@@ -977,7 +978,7 @@ test("an exam whose day passed asks how it went, even with its preparation put a
   store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "milestone-overdue:sitting:mid:2026-10-05", type: "milestone.overdue", entityId: "mid",
     payload: { deadline: "2026-10-05", why: "sitting" } });
   const asks = () => collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "milestone_overdue");
-  expect(asks().map((ask) => ask.title)).toEqual(["「ECE 548 期中考试 1 达到 A− 支撑线」10/5 已经考过了，结果怎样？"]);
+  expect(asks().map((ask) => ask.title)).toEqual(["「ECE 548 期中考试 1 达到 A− 支撑线」10/5 已经过了，结果怎样？"]);
   expect(asks()[0]!.options.map((option) => option.id)).toEqual(["taken", "pending", "extend", "drop"]);
   expect(await answerAsk(TEST_CTX, "overdue:mid:2026-10-05", "taken", { score: "88 分" }, NOW)).toMatchObject({ ok: true });
   expect(asks()).toEqual([]);

@@ -4,7 +4,7 @@ import {
   ACCOUNT_CLASS_LABEL, ATTENTION_SNAPSHOT, BACKGROUND_BLOCKER, CALENDAR_LINES, degradedService, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
   localStamp, prepStepRetried, readableFromMaterial, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
   validateAskChoice, withFrozen, type AccessContext, type Ask, type AskField, type AskItem, type AskOption, type AskPreview, type AskSnooze,
-  attendedName, attendedText, isPreparationOnlyMilestone, onPersonsBoard, outcomeCriteriaVerdict, preparesOf, workOwner, decisionFor, similarTitles, type TimedItem,
+  attendedText, isPreparationOnlyMilestone, onPersonsBoard, outcomeCriteriaVerdict, preparesOf, workOwner, decisionFor, similarTitles, type TimedItem,
   MILESTONE_RISK_KIND_LABEL, MILESTONE_RISK_LEVEL_LABEL, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskBufferDays, riskCriteriaKeys, riskLevelOf,
   parseRiskDigestSeen, RISK_DIGEST_SETTING, riskDigestShows, weekStartOf, type MilestoneRisk, type RiskDigestSeen,
   assumedAnswer, QUESTION_LEAD_DAYS, questionCannotWait, questionNeededDay, type StepQuestion
@@ -458,14 +458,14 @@ function overdueAsks({ store, ctx, today, t, locale }: Source): Ask[] {
     // An exam or a defence is over once its day passed (its preparation is put away by the worker): the question is how it went.
     if (why === "sitting") return [{ id: `overdue:${milestoneId}:${deadline}`, kind: "milestone_overdue", entityId: milestoneId, line: milestone.identityId,
       preview: milestonePreview(t, milestoneId), urgency: "soon", dueDay: deadline, raisedAt: event.createdAt, fingerprint: deadline, important: true,
-      title: t("「{{title}}」{{day}} 已经考过了，结果怎样？", { title: short(milestone.title), day: format(deadline, locale) }),
-      why: t("考试日期已过，备考的任务不再排进日程。有成绩就写下来，按这个里程碑的分数线记进度；成绩还没出就说一声，以后不再问。"),
+      title: t("「{{title}}」{{day}} 已经过了，结果怎样？", { title: short(milestone.title), day: format(deadline, locale) }),
+      why: t("日期已过，为它做的准备不再排进日程。有结果就写下来，按这个里程碑的标准记进度；结果还没出就说一声，以后不再问。"),
       freeText: { placeholder: t("例如：86 分") },
       options: [
-        { id: "taken", label: t("考过了"), detail: t("有成绩就填，没有可空着"), recommended: true,
-          fields: [{ id: "score", label: t("成绩"), kind: "text" as const, required: false, placeholder: t("例如：86 分") }] },
-        { id: "pending", label: t("成绩还没出"), detail: t("备考任务收起，不再问") },
-        { id: "extend", label: t("考试改期了"), fields: [{ id: "date", label: t("新的考试日期"), kind: "date" as const, required: true }] },
+        { id: "taken", label: t("参加了"), detail: t("有结果就填，没有可空着"), recommended: true,
+          fields: [{ id: "score", label: t("结果"), kind: "text" as const, required: false, placeholder: t("例如：86 分") }] },
+        { id: "pending", label: t("结果还没出"), detail: t("准备任务收起，不再问") },
+        { id: "extend", label: t("改期了"), fields: [{ id: "date", label: t("新的日期"), kind: "date" as const, required: true }] },
         { id: "drop", label: t("没有参加"), detail: t("里程碑归档，可从已归档恢复") }
       ] }];
     if (!left.length) return [];
@@ -474,7 +474,7 @@ function overdueAsks({ store, ctx, today, t, locale }: Source): Ask[] {
       title: t("「{{title}}」的截止 {{day}} 已过，还有 {{count}} 个任务没完成", { title: short(milestone.title), day: format(deadline, locale), count: left.length }),
       why: why === "stalled"
         ? t("系统已经自动顺延过 {{times}} 次，这个里程碑的工作仍未完成，这次不再自动改。可以照常补做（截止不变，剩下的工作继续排），改成新的日期，或放弃这个里程碑。", { times: shifts ?? 2 })
-        : t(why === "course" ? "这是课程给定的日期，系统不改动。可以照常补做（截止不变，剩下的工作继续排），改成新的日期，或放弃这个里程碑。"
+        : t(why === "course" ? "这是外部给定的日期（课程、机构或他人），系统不改动。可以照常补做（截止不变，剩下的工作继续排），改成新的日期，或放弃这个里程碑。"
           : "这个日期是本人定的，系统不改动。可以照常补做（截止不变，剩下的工作继续排），改成新的日期，或放弃这个里程碑。"),
       options: [
         { id: "makeup", label: t("补做"), detail: t("截止不变，剩下的工作照常排"), recommended: true },
@@ -502,7 +502,7 @@ function overdueTaskAsks({ store, ctx, today, t, locale }: Source): Ask[] {
       title: stalled ? t("「{{title}}」已自动顺延 {{times}} 次，截止 {{day}} 又过了", { title, times: item.shifts, day: format(item.due, locale) })
         : t("「{{title}}」{{day}} 截止已过，还能补交吗？", { title, day: format(item.due, locale) }),
       why: stalled ? t("系统已经自动顺延过 {{times}} 次，这次不再自动改。改成新的日期就按它排；不做了就归档，可从已归档恢复。", { times: item.shifts })
-        : t(item.why === "course" ? "这是课程给的日期，系统不替本人决定。能补交就写下实际的最后期限，按它重新排；不能补交就归档，可从已归档恢复。"
+        : t(item.why === "course" ? "这是外部给的日期（课程、机构或他人），系统不替本人决定。能补交就写下实际的最后期限，按它重新排；不能补交就归档，可从已归档恢复。"
           : "这个日期来自别人或平台给的信息，系统不替本人决定。能补交就写下实际的最后期限，按它重新排；不能补交就归档，可从已归档恢复。"),
       options: [
         { id: "extend", label: stalled ? t("改为新日期") : t("能补交"), recommended: true,
@@ -537,11 +537,11 @@ function overdueFoldAsks(source: Source): Ask[] {
       ...(due ? { dueDay: due } : {}), raisedAt: rest.map((ask) => ask.raisedAt).sort().at(-1) ?? "", fingerprint: foldFingerprint(rest), items,
       important: rest.some((ask) => ask.important),
       title: t("{{count}} 项截止已过，等本人决定", { count: rest.length }),
-      why: t("这些日期是课程、别人或本人定的，系统不替本人改，逐个列在下方；最早的是 {{day}}。每项可以补做、改成新的日期或放弃。", { day: due ? format(due, locale) : "—" }),
+      why: t("这些日期是外部或本人定的，系统不替本人改，逐个列在下方；最早的是 {{day}}。每项可以补做、改成新的日期或放弃。", { day: due ? format(due, locale) : "—" }),
       options: [{ id: "split", label: t("逐个处理"), recommended: true, detail: t("拆成每项一张卡") },
         ...(events.length ? [{ id: "drop_events", label: t("过去的 {{count}} 个活动不参加了", { count: events.length }),
           detail: t("{{titles}} 归档，可从已归档恢复；其余照旧等本人决定", { titles: events.map((item) =>
-            `「${item.ask.dueDay ? `${format(item.ask.dueDay, locale)} ` : ""}${short(attendedName(attendedText(item.order) ?? item.order.intent), 24)}」`).join("、") }) }] : [])] };
+            `「${item.ask.dueDay ? `${format(item.ask.dueDay, locale)} ` : ""}${short(taskTitleOf(item.order), 24)}」`).join("、") }) }] : [])] };
   });
 }
 
@@ -957,11 +957,11 @@ function sourceProjectAsks({ store, ctx, today, t, locale }: Source): Ask[] {
       raisedAt, fingerprint: `${id}:${titles.length}`, title: t("《{{name}}》属于哪个项目？", { name: short(fileName, 32) }),
       why: titles.length
         ? (lean
-          ? t("文件名和正文开头都没有写明所属课程或项目，从中读出的 {{count}} 项日程（{{named}}{{more}}）因此无法标明归属；访谈时判断更可能是 {{lean}}。确认后，这些日程与截止都会带上项目名。",
+          ? t("文件名和正文开头都没有写明所属项目，从中读出的 {{count}} 项日程（{{named}}{{more}}）因此无法标明归属；访谈时判断更可能是 {{lean}}。确认后，这些日程与截止都会带上项目名。",
             { count: titles.length, named, more: titles.length > 3 ? t(" 等") : "", lean: lean.name })
-          : t("文件名和正文开头都没有写明所属课程或项目，从中读出的 {{count}} 项日程（{{named}}{{more}}）因此无法标明归属。确认后，这些日程与截止都会带上项目名。",
+          : t("文件名和正文开头都没有写明所属项目，从中读出的 {{count}} 项日程（{{named}}{{more}}）因此无法标明归属。确认后，这些日程与截止都会带上项目名。",
             { count: titles.length, named, more: titles.length > 3 ? t(" 等") : "" }))
-        : t("文件名和正文开头都没有写明所属课程或项目。确认后，这份文件会作为该项目任务的材料与背景使用。"),
+        : t("文件名和正文开头都没有写明所属项目。确认后，这份文件会作为该项目任务的材料与背景使用。"),
       options: [...ordered.map((project) => ({ id: `p:${project.id}`, label: project.name, ...(project.id === lean?.id ? { recommended: true } : {}) })),
         { id: "none", label: t("不属于任何项目"), detail: titles.length ? t("这份文件的日程保持原名") : t("作为通用资料保留") }] };
   });

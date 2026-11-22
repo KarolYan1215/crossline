@@ -12,7 +12,7 @@ Accept `{version: "crossline.diligence.v1", today, timeZone, identity, topic, pr
 - `identity`: the line (`id`, `label`, and `noTradeCalls: true` for the investment line and any wealth line). `topic`: `kind` and `question`, what to research for this line.
 - `projects`: the line's projects (`id`, `name`, `summary`).
 - `facts`: what is on record about this line and about the person (`id`, `projectId`, `slot`, `value`, `status`). The person's own status, place and stage are here: read them before deciding what applies. A fact with `status: "inferred"` is the interviewer's guess, not the person's word.
-- `constraints`: limits the person stated. `alreadyDecided`: proposals the person already accepted or rejected.
+- `constraints`: facts recorded as constraints. They are not all the limits: read every fact in `facts` and treat any that rules something out as a constraint too (「不能花钱买课」「I can't work on weekends」「不做直播」), in whatever words or language. `alreadyDecided`: proposals the person already accepted or rejected.
 
 Return exactly `{question, sources[], findings[], proposals[], gaps[], blockers[]}` as raw JSON, with no code fence and no prose around it.
 
@@ -40,7 +40,7 @@ What you actually researched, in one plain line, fitted to this person: 「杭�
 - `kind` `watch`: something to check again later: 「2027 年春季批次开放时核对申请条件」.
 - `why`: in one or two sentences, which finding and which of the person's facts make it fit.
 
-Respect every line in `constraints[]`: an opportunity that ignores one is not useful however real it is. Do not repeat anything in `alreadyDecided[]`, accepted or rejected.
+Respect every line in `constraints[]` and every limit you read in `facts[]`: an opportunity that ignores one is not useful however real it is. Do not repeat anything in `alreadyDecided[]`, accepted or rejected.
 
 ## What to research, by `topic.kind`
 

@@ -8,7 +8,7 @@ import {
   QUIET_HOURS_SETTING, inQuiet, quietHoursOf, forgottenTimerStop
 } from "@crossline/core";
 import { commitSoon, effectiveSchedulePreferences, energyAnswerMatters, getStore, loadCurrentPlan, planToday, readAvailability, STEP_FOCUSED, stopWorkOrderExecutionAt,
-  toZonedInstant } from "./crossline";
+  toZonedInstant, calendarMarks } from "./crossline";
 import { blockWorkMinutes, dayCapacityOf, measuredCapacityOn, measuredView } from "./measured-capacity";
 import { listed, openAsks, thisWeek } from "./asks";
 import { calendarFiling, currentWorkState, missedItems } from "./timeline";
@@ -163,7 +163,7 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
   // Time left before each due day: the person's free hours (fixed arrangements out, today from now on) less what other work holds.
   const windows = readAvailability(ctx);
   const fixed = plan.blocks.filter((block) => block.day && !block.id.startsWith("scheduled:") && !block.id.startsWith("proposed:") && !block.id.startsWith("optional:")
-    && !(block.id.startsWith("graph_calendar:") && isCancelledEvent(block.title))).map((block) => ({ day: block.day!, start: block.start, end: block.end }));
+    && !(block.id.startsWith("graph_calendar:") && isCancelledEvent(calendarMarks(ctx), block.title))).map((block) => ({ day: block.day!, start: block.start, end: block.end }));
   // Each day's free minutes at most its measured cap (docs/plans/closed-loop-1030.md §1), and the day's worth of margin the measured one.
   const measured = measuredCapacityOn() ? measuredView(ctx, now) : undefined;
   const provenance = dueProvenance(store, ctx.workspaceId);
@@ -209,7 +209,7 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
     }
   }
   const finished = backgroundDone(ctx, now, locale);
-  const meeting = todays.some((block) => block.id.startsWith("graph_calendar:") && !isCancelledEvent(block.title)
+  const meeting = todays.some((block) => block.id.startsWith("graph_calendar:") && !isCancelledEvent(calendarMarks(ctx), block.title)
     && minutesOf(block.start) <= nowMinute && nowMinute < minutesOf(block.end));
   const answeredAt = store.getSetting(ctx.workspaceId, ANSWERED_SETTING);
   // The energy question: the next three hours hold work, the model is unsure about now, the last word on it is over three hours old,
@@ -402,7 +402,7 @@ export async function dayAtGlance(ctx: AccessContext, now = new Date()) {
   const plan = await loadCurrentPlan(ctx);
   const todays = plan.blocks.filter((block) => (block.day ?? today) === today).sort((a, b) => a.start.localeCompare(b.start));
   const fixed = todays.filter((block) => !block.id.startsWith("scheduled:") && !block.id.startsWith("proposed:") && !block.id.startsWith("optional:")
-    && !(block.id.startsWith("graph_calendar:") && isCancelledEvent(block.title)));
+    && !(block.id.startsWith("graph_calendar:") && isCancelledEvent(calendarMarks(ctx), block.title)));
   const work = todays.filter((block) => block.id.startsWith("scheduled:"));
   const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
   const soon = store.listWorkOrders(ctx.workspaceId).filter((order) => ["approved", "preparing", "ready_for_human", "active"].includes(order.state) && onPersonsBoard(order))

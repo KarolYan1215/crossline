@@ -96,9 +96,9 @@ test("the reorganisation: payloads rewritten once, merges run, backplans request
   expect(await workSplitRepair(store, ws, { now, mergeNow: merge })).toBeUndefined();
 });
 
-const steps = (orderId: string, list: Array<[string, "human" | "agent", ("done" | "planned")?]>) => {
+const steps = (orderId: string, list: Array<[string, "human" | "agent", ("done" | "planned")?, ("do" | "check")?]>) => {
   store.saveStepPlan(ws, orderId, { archetypeId: "problem_set", quantity: { basis: "", amount: 0, unit: "" }, rationale: "", units: [], questions: [],
-    steps: list.map(([title, executor], index) => ({ id: `s${index + 1}`, role: "do", title, deliverable: "", doneCriterion: "完成", share: 1 / list.length,
+    steps: list.map(([title, executor, , role], index) => ({ id: `s${index + 1}`, role: role ?? "do", title, deliverable: "", doneCriterion: "完成", share: 1 / list.length,
       estimate: { p25Minutes: 30, p50Minutes: 45, p85Minutes: 60 }, dependsOn: index ? [`s${index}`] : [], notBefore: "", dueBy: "", schedulable: executor === "human",
       executor, tickOutcome: "", firstAction: executor === "human" ? "打开讲义" : "" })) }, owner, "t");
   const plan = store.getStepPlan(ws, orderId)!;
@@ -111,7 +111,7 @@ test("progress the assistant made is no reason to leave a chore with the person;
   milestone("mid", "research", "ece548", "2026-11-05");
   // Only the assistant's step is done: still a chore, moved, and what was done goes with it.
   order("hw-list", "整理 ECE 548 作业清单", "mid");
-  steps("hw-list", [["汇总讲义里的作业要求", "agent", "done"], ["核对作业截止日", "human"]]);
+  steps("hw-list", [["汇总讲义里的作业要求", "agent", "done"], ["核对作业截止日", "human", "planned", "check"]]);
   // The person ticked a step themselves: theirs as a whole; its open step stays as the plan wrote it (no verb list, 2026-11-22).
   order("papers", "汇集当前论文材料", "mid");
   steps("papers", [["读第一篇论文的方法部分", "human", "done"], ["下载其余三篇论文", "human"]]);
@@ -125,7 +125,7 @@ test("the open steps of the person's task are judged again: the plan's owners st
   milestone("mid", "research", "ece548", "2026-11-05");
   order("plan", "根据已汇集的规则和往年卷规划期中复习", "mid");
   // The step planner gave the grade list to the assistant; the review after it only checks that output.
-  steps("plan", [["形成 ECE 548 各计分组成的当前成绩与待定状态清单", "agent"], ["核对助手整理的往年卷清单", "human"], ["按规则规划每天的复习题量", "human"]]);
+  steps("plan", [["形成 ECE 548 各计分组成的当前成绩与待定状态清单", "agent"], ["核对助手整理的往年卷清单", "human", "planned", "check"], ["按规则规划每天的复习题量", "human"]]);
   order("prep", "准备 ECE 548 期中复习", "mid");
   steps("prep", [["下载往年卷", "agent"], ["汇总往年卷题型", "agent"]]);
   const reading = planWorkSplit(store, ws, now);

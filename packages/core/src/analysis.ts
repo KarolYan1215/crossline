@@ -1,7 +1,7 @@
 import type { WorkOrder } from "./index";
 import { trimLeakedTail } from "./text-hygiene";
 import { quoteSupportsDate } from "./date-schema";
-import { cleanTaskTitle, withCourse } from "./task-title";
+import { cleanTaskTitle } from "./task-title";
 import type { ModelInfoRequest } from "./info-request";
 import { needsPersonProblem, type NeedsPerson } from "./auto-approval";
 import { AGENT_CATEGORIES, type AgentCategory } from "./agent-dispatch";
@@ -276,7 +276,8 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext,
   if (!matches(candidate, ANALYSIS_OUTPUT_SCHEMA)) throw new Error("ANALYSIS_SCHEMA_INVALID");
   const injected = withBreakdown !== value;
   const proposal = candidate as AnalysisProposal;
-  proposal.title = withCourse(cleanTaskTitle(proposal.title) || cleanTaskTitle(proposal.intent), proposal.projectId);
+  // The Skill names the course in the title itself (crossline-automation-stripper); no code is put in front here any more (2026-11-22).
+  proposal.title = cleanTaskTitle(proposal.title) || cleanTaskTitle(proposal.intent);
   // The identity is a free string in the schema (the set of lines is not known until the context is built), so the check that it
   // names a real one has to live here. Without it a task that fit no line came back with the identity `\`, was accepted, and sat
   // on the real board under a line called 「\」 that no page can open.

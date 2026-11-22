@@ -19,7 +19,7 @@
         "deadlines": [{ "day": "2026-11-28", "quote": "must be purchased by November 28, 2026" }], "startsAt": { "day": "2026-12-05", "quote": "Friday, December 5, 2026 at Union South, 7:00 PM" },
         "cost": { "known": true, "amount": 15, "currency": "USD", "quote": "Tickets are $15" }, "location": "Union South, Madison", "place": { "mode": "in_person", "city": "", "country": "", "quote": "at Union South" },
         "eligibility": [], "needsAccount": false, "materials": [], "consents": [], "registrationUrl": "",
-        "type": "event", "reason": "院系研究生的年度舞会，可以认识同系同学。",
+        "lowValue": true, "type": "social", "reason": "院系研究生的年度舞会，可以认识同系同学。",
         "lines": [{ "lineId": "research", "confidence": 0.6, "reason": "同系研究生聚会，可能遇到合作者。", "anchors": ["goal"] }] }
     },
     {
@@ -31,7 +31,7 @@
         "deadlines": [], "startsAt": { "day": "2026-11-12", "quote": "Wednesday, November 12, 2026, 3:00 PM in CS 1240" },
         "cost": { "known": true, "amount": 0, "currency": "USD", "quote": "Free coffee and snacks" }, "location": "CS 1240, Madison", "place": { "mode": "in_person", "city": "", "country": "", "quote": "in CS 1240" },
         "eligibility": [], "needsAccount": false, "materials": [], "consents": [], "registrationUrl": "",
-        "type": "social", "reason": "和系里教授喝咖啡聊天。",
+        "lowValue": true, "type": "social", "reason": "和系里教授喝咖啡聊天。",
         "lines": [{ "lineId": "research", "confidence": 0.55, "reason": "可以和教授聊研究方向。", "anchors": [] }] }
     },
     {
@@ -43,7 +43,7 @@
         "deadlines": [{ "day": "2026-11-17", "quote": "RSVP by November 17, 2026" }], "startsAt": { "day": "2026-11-20", "quote": "Thursday, November 20, 2026 at 6:00 PM, Discovery Building" },
         "cost": { "known": false, "amount": 0, "currency": "", "quote": "" }, "location": "Discovery Building, Madison", "place": { "mode": "in_person", "city": "", "country": "", "quote": "Discovery Building" },
         "eligibility": [], "needsAccount": false, "materials": [], "consents": [], "registrationUrl": "",
-        "type": "event", "reason": "和业界导师认识。",
+        "lowValue": true, "type": "social", "reason": "和业界导师认识。",
         "lines": [{ "lineId": "research", "confidence": 0.5, "reason": "导师可能提供实习机会。", "anchors": ["ms-paper"] }] }
     },
     {
@@ -55,7 +55,7 @@
         "deadlines": [{ "day": "2026-12-08", "quote": "报名截止2026年12月8日" }], "startsAt": { "day": "2026-12-12", "quote": "2026年12月12日晚7点在 Memorial Union 举办" },
         "cost": { "known": true, "amount": 10, "currency": "USD", "quote": "每人10美元" }, "location": "Memorial Union, Madison", "place": { "mode": "in_person", "city": "", "country": "", "quote": "在 Memorial Union 举办" },
         "eligibility": [], "needsAccount": false, "materials": [], "consents": [], "registrationUrl": "",
-        "type": "social", "reason": "新年聚会。",
+        "lowValue": true, "type": "social", "reason": "新年聚会。",
         "lines": [{ "lineId": "media", "confidence": 0.4, "reason": "可以写一篇活动记录。", "anchors": [] }] }
     },
     {
@@ -67,7 +67,7 @@
         "deadlines": [{ "day": "2026-11-19", "quote": "请于2026年11月19日前报名" }], "startsAt": { "day": "2026-11-21", "quote": "2026年11月21日下午4点，Grainger Hall 1100" },
         "cost": { "known": false, "amount": 0, "currency": "", "quote": "" }, "location": "Grainger Hall 1100, Madison", "place": { "mode": "in_person", "city": "", "country": "", "quote": "Grainger Hall 1100" },
         "eligibility": [], "needsAccount": false, "materials": [], "consents": [], "registrationUrl": "",
-        "type": "event", "reason": "认识校友导师。",
+        "lowValue": true, "type": "social", "reason": "认识校友导师。",
         "lines": [{ "lineId": "research", "confidence": 0.62, "reason": "校友导师可能帮忙找研究型实习。", "anchors": ["goal"] }] }
     },
     {
@@ -79,7 +79,7 @@
         "deadlines": [{ "day": "2026-12-01", "quote": "register by December 1, 2026" }], "startsAt": { "day": "2026-12-04", "quote": "Thursday, December 4, 2026, 5:30 PM at StartingBlock Madison" },
         "cost": { "known": true, "amount": 0, "currency": "USD", "quote": "Free for founders" }, "location": "StartingBlock Madison", "place": { "mode": "in_person", "city": "Madison", "country": "", "quote": "at StartingBlock Madison" },
         "eligibility": [], "needsAccount": false, "materials": [], "consents": [], "registrationUrl": "",
-        "type": "social", "reason": "本地天使投资人和种子基金到场，正对种子轮。",
+        "lowValue": false, "type": "social", "reason": "本地天使投资人和种子基金到场，正对种子轮。",
         "lines": [{ "lineId": "startup", "confidence": 0.85, "reason": "直接接触天使投资人，推进种子轮。", "anchors": ["ms-seed", "goal"] }] }
     },
     {
@@ -91,7 +91,7 @@
         "deadlines": [{ "day": "2026-11-15", "quote": "Applications close November 15, 2026" }], "startsAt": { "day": "2026-11-22", "quote": "November 22–23, 2026 at the Discovery Building" },
         "cost": { "known": true, "amount": 0, "currency": "USD", "quote": "Free" }, "location": "Discovery Building, Madison", "place": { "mode": "in_person", "city": "", "country": "", "quote": "at the Discovery Building" },
         "eligibility": [], "needsAccount": false, "materials": [], "consents": [], "registrationUrl": "",
-        "type": "competition", "reason": "有类脑硬件赛道，也有对投资人的路演。",
+        "lowValue": false, "type": "competition", "reason": "有类脑硬件赛道，也有对投资人的路演。",
         "lines": [
           { "lineId": "research", "confidence": 0.75, "reason": "类脑硬件赛道由实验室教授评审，贴近论文方向。", "anchors": ["ms-paper"] },
           { "lineId": "startup", "confidence": 0.65, "reason": "种子投资人路演环节。", "anchors": ["ms-seed"] }
@@ -106,7 +106,7 @@
         "deadlines": [], "startsAt": { "day": "2026-11-17", "quote": "starting November 17, 2026" },
         "cost": { "known": false, "amount": 0, "currency": "", "quote": "" }, "location": "", "place": { "mode": "unknown", "city": "", "country": "", "quote": "" },
         "eligibility": [], "needsAccount": false, "materials": [], "consents": [], "registrationUrl": "",
-        "type": "talk", "reason": "放松。",
+        "lowValue": false, "type": "talk", "reason": "放松。",
         "lines": [{ "lineId": "media", "confidence": 0.7, "reason": "可写成一篇。", "anchors": [] }] }
     }
   ]

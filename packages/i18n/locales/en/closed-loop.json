@@ -34,7 +34,6 @@
   "「{{title}}」已自动顺延 {{times}} 次，截止 {{day}} 又过了": "“{{title}}” was moved {{times}} times by itself, and its due day {{day}} has passed again",
   "「{{title}}」{{day}} 截止已过，还能补交吗？": "“{{title}}” was due {{day}}: can it still be handed in?",
   "系统已经自动顺延过 {{times}} 次，这次不再自动改。改成新的日期就按它排；不做了就归档，可从已归档恢复。": "The system has already moved it {{times}} times, so it will not move it again. A new date is planned for; dropping it archives the task, which can be restored from Archived.",
-  "这是课程给的日期，系统不替本人决定。能补交就写下实际的最后期限，按它重新排；不能补交就归档，可从已归档恢复。": "This is the course's date, and the system does not decide for the person. If it can still be handed in, give the real last day and the work is placed by it; if not, it is archived and can be restored from Archived.",
   "这个日期来自别人或平台给的信息，系统不替本人决定。能补交就写下实际的最后期限，按它重新排；不能补交就归档，可从已归档恢复。": "This date came from someone else or a platform, and the system does not decide for the person. If it can still be handed in, give the real last day and the work is placed by it; if not, it is archived and can be restored from Archived.",
   "能补交": "Can still hand it in",
   "实际最后期限": "Real last day",

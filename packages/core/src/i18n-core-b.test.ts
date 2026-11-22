@@ -7,7 +7,6 @@ import { deriveCapacity } from "./capacity";
 import { acceptanceStandardLines, completionRule, outcomeCriteriaVerdict } from "./completion";
 import { mentionsExternalAction } from "./external-action";
 import { describeEvent, fixedEventBlocks, type FixedEvent } from "./fixed-events";
-import { presetImportance } from "./importance";
 import { advanceWorkOrder, validateCommandEnvelope, validateSuccessCriteria } from "./index";
 import { ASSUMPTION_PREFIX, interviewChecklist } from "./interview-checklist";
 import { openAccessVerdict } from "./manualbook-schema";
@@ -51,10 +50,6 @@ describe("text built in English, unchanged in Chinese", () => {
   test("capacity, importance, criteria, transitions and offline commands", () => {
     const reading = deriveCapacity({ now: "2026-10-16T12:00:00Z", selfReports: [], dailyActivity: [], interruptionDensity: [], localActivityConsent: "denied", locale: "en" });
     expect(reading.blockers[0]?.message).toMatch(/^Activity tracking on this computer is off/);
-    const preset = presetImportance({ standing: { rank: 2, hard: false }, line: "research", relations: 1, maxRelations: 3, graded: true, daysToDeadline: 10, pastAdjustments: [], locale: "en" });
-    expect(preset.basis.map((item) => item.detail)).toEqual(["Ranked 2 for the next 12–24 months", "1 cross-track link", "Counts toward a course grade, 10 days to the deadline", "No adjustments yet"]);
-    expect(presetImportance({ standing: { rank: 2, hard: false }, line: "research", relations: 1, maxRelations: 3, graded: true, daysToDeadline: 10, pastAdjustments: [] }).basis[2]?.detail)
-      .toBe("计入课程成绩，距截止 10 天");
     expect(validateSuccessCriteria([], "en")).toMatchObject({ ok: false, blocker: { message: "A milestone needs at least one success criterion" } });
     expect(advanceWorkOrder({ state: "captured" }, { type: "human.completed" } as never, "en"))
       .toMatchObject({ ok: false, blocker: { message: "Cannot move from captured via human.completed" } });

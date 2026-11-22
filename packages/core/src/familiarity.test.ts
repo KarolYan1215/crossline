@@ -1,36 +1,23 @@
 import "@crossline/i18n/catalog/worker";
 import { describe, expect, test } from "vitest";
-import { familiarityKey, familiarityLabel, familiarityOf, familiarityOverride, type FamiliarityInput } from "./familiarity";
+import { familiarityKey, familiarityLabel, familiarityOf, familiarityOverride, readModelFamiliarity } from "./familiarity";
 import { taskPreparation, tutorialSteps } from "./tutorial-worth";
 
-const base = (extra: Partial<FamiliarityInput> = {}): FamiliarityInput => ({
-  task: { title: "界定评审机制决策项", intent: "为 sleep replay 器件评审界定三个决策项" }, lineId: "research",
-  facts: [], sameKindDone: 0, lineDone: 3, ...extra });
-const fact = (identityId: string, slot: string, value: string, status = "confirmed") => ({ identityId, slot, value, status });
-
 describe("how close a task is to what the person knows (W-154)", () => {
-  test("the person's own field and work of this kind done before read as near", () => {
-    const near = familiarityOf(base({ sameKindDone: 2, facts: [fact("person", "background", "电子工程博士，研究方向为忆阻器件与 sleep replay")] }));
-    expect(near).toMatchObject({ level: "near", by: "rules" });
-    expect(near.basis.join(" ")).toContain("sleep");
+  test("the planner's judgement is the level; no rule scores the person's background any more", () => {
+    expect(familiarityOf({ planned: { level: "near", why: "本人为器件方向博士生，做过同类评审" } }))
+      .toEqual({ level: "near", by: "model", basis: ["本人为器件方向博士生，做过同类评审"] });
+    expect(familiarityOf({ planned: { level: "far", why: "" } })).toMatchObject({ level: "far", by: "model", basis: [] });
   });
 
-  test("a line the person is new to, with nothing in their background about it, reads as far", () => {
-    const task = { title: "选定首轮选题", intent: "为小红书账号选定首轮内容选题" };
-    expect(familiarityOf(base({ task, lineId: "media", lineDone: 0, facts: [fact("person", "background", "电子工程博士")] })).level).toBe("far");
-    expect(familiarityOf(base({ task, lineId: "media", lineDone: 4, facts: [fact("media", "stage", "完全是新手，第一次做内容")] })).level).toBe("far");
-    // A domain line (money) with nothing in the background about it.
-    expect(familiarityOf(base({ task: { title: "确认核心持仓标的", intent: "看月末持仓里市值最高的一行" }, lineId: "line-wealth", lineDomain: "wealth",
-      lineDone: 0 })).level).toBe("far");
+  test("before any plan it stays mid", () => {
+    expect(familiarityOf({})).toMatchObject({ level: "mid", by: "none" });
   });
 
-  test("without anything on record either way it stays mid; guesses and other lines' facts do not count", () => {
-    expect(familiarityOf(base())).toMatchObject({ level: "mid", basis: ["nothing on record either way"] });
-    expect(familiarityOf(base({ facts: [fact("person", "background", "假设：器件评审经验多年"), fact("startup", "background", "器件 sleep replay 评审专家")] })).level).toBe("mid");
-  });
-
-  test("generic task verbs say nothing about the domain", () => {
-    expect(familiarityOf(base({ task: { title: "确认时间", intent: "确认评审时间" }, facts: [fact("person", "skill", "擅长确认时间安排")] })).level).toBe("mid");
+  test("only a known level is read from a plan; plans from before the field have none", () => {
+    expect(readModelFamiliarity({ level: "far", why: "第一次做内容" })).toEqual({ level: "far", why: "第一次做内容" });
+    expect(readModelFamiliarity({ level: "expert", why: "" })).toBeUndefined();
+    expect(readModelFamiliarity(undefined)).toBeUndefined();
   });
 
   test("the person's own choice wins, by line and kind first, then the whole line", () => {
@@ -39,7 +26,7 @@ describe("how close a task is to what the person knows (W-154)", () => {
     expect(familiarityOverride(raw, "media", "writing")).toBeUndefined();
     expect(familiarityOverride(raw, "research", "build")).toBe("far");
     expect(familiarityOverride("not json", "media", "content")).toBeUndefined();
-    expect(familiarityOf(base({ sameKindDone: 2, override: "far" }))).toMatchObject({ level: "far", by: "person" });
+    expect(familiarityOf({ override: "far", planned: { level: "near", why: "" } })).toMatchObject({ level: "far", by: "person" });
   });
 
   test("labels in both languages", () => {

@@ -2,7 +2,7 @@ import "server-only";
 import { inferBlockOutcome, sessionWorkEnd, isRestEvent, MAX_SNOOZES, withFrozen, wrapTimeOf, type AccessContext, type InferredOutcome, type NudgeEnding } from "@crossline/core";
 import { blockWorkMinutes } from "./measured-capacity";
 import { formatInTimeZone } from "date-fns-tz";
-import { appNow, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, readFrozen, toZonedInstant, writeFrozen } from "./crossline";
+import { appNow, calendarMarks, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, readFrozen, toZonedInstant, writeFrozen } from "./crossline";
 import { blockAnswer, confirmBlockAt, type ConfirmOutcome } from "./confirm";
 import { eventBlocks } from "./fixed-events";
 import { draftConsent, pendingDrafts } from "./time-drafts";
@@ -148,7 +148,7 @@ export function loadWrap(ctx: AccessContext, now = appNow(), requestedDay?: stri
   const weekday = Number(formatInTimeZone(now, zone, "i")) % 7;
   // The day's rest events (「休息」 from 21:00) end the working day where they begin (W-156).
   const rest = ((store.listPlanVersions(ctx.workspaceId)[0]?.payload as { blocks?: Array<{ day?: string; start: string; end: string; title: string }> } | undefined)?.blocks ?? [])
-    .concat(eventBlocks(ctx, [day])).filter((block) => block.day === day && isRestEvent(block));
+    .concat(eventBlocks(ctx, [day])).filter((block) => block.day === day && isRestEvent(block, calendarMarks(ctx)));
   const at = day === today ? wrapTimeOf(readAvailability(ctx), weekday, rest) : undefined;
   const open = rows.filter((row) => !row.answered && !row.underway).length;
   const doneBlocks = rows.filter((row) => row.answered && row.answered !== "not_done" && row.answered !== "partial").length;

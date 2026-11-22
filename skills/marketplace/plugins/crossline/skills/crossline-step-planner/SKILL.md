@@ -14,14 +14,14 @@ One task already exists (from a capture, a milestone's backplan or a course's da
 
 So a person's step is one focused session the person can begin from its `firstAction` without thinking about what to do, and its result is something they could show.
 
-Return raw JSON only: `{archetypeId, quantity, rationale, importance, completion, offline, units, questions, needs, steps, usedRefs}`.
+Return raw JSON only: `{archetypeId, quantity, rationale, importance, familiarity, methodQuestion, completion, offline, units, questions, needs, steps, usedRefs}`.
 
 ## Input `crossline.step-plan.v1`
 
 - `research` — true when the task is important by the app's rules (graded coursework, or a milestone weighed 60 or more) and the person does part of it. The web is open for this run.
 - `task` — `intent`, `line`, `project`, `riskTier`, `personsPart` (what the analysis left to the person), `systemMayPrepare`, `mustDeliver` (its evidence lines), `needs` (material it needs), `currentEstimate`, and `getFirst`: facts the task first has to get from someone, `{kind, what, who}`.
 - `milestone` — the result the task serves and its criteria (often a score line or an artefact), or null.
-- `familiarity` — `{level, basis[]}`: how close this work is to what the person already knows, worked out by the app from their background facts, accepted work of this kind on this line and what they set themselves (section 5a).
+- `familiarity` — `{setByPerson}`: the level the person chose for this line and kind of work (`near`/`mid`/`far`), or "" when they have not; then you judge it (section 5a).
 - `window` — `notBefore` (earliest start), `dueBy` (latest finish, may be ""), `availableMinutes` (working time inside it, shared with other work).
 - `materials` — the person's material chosen for this task (syllabi, lecture plans, problem sets, briefs, data descriptions), cut into passages of about 800 characters: `files[]` `{doc: "doc-N", name, project, passages, own}` (`own`: the task's own file), `passages[]` `{id: "c123", doc, at: "3/12", text}` in full, and, when the functions below are offered, `candidates[]` `{id, doc, at, line}` with only their opening line.
 - The functions `search_material(query, scope)` (`task` | `line` | `all`) and `read_chunk(id)`, when offered: read the candidates the plan rests on and search for what the passages do not show (the lecture list up to an exam, the problem set, the rubric, the submission rule) before counting units. Read what you need, not everything; a passage you did not read is not evidence. Without the functions, `passages` is all there is.
@@ -72,6 +72,8 @@ The app checks only the shape: `assume` is one of `options`, `neededBy` names a 
 
 When nothing in `person` says how the person does this kind of work (prepares for an exam or a deadline, learns and goes back over material, writes or presents), the method is a question, never a guess: ask it as above, with 「没有固定方法，按这次需要定」 first (`assume` it: an assumed method must be none; `ask` true, since only the person knows how they work), and plan the steps by what the goal needs until it is answered.
 
+Always also write `methodQuestion: {text, options}`: that same question in words fit for this task (「平时怎么准备这类限时考试？」「平时怎么写这类结课报告？」) with two to four concrete ways people do it, without the neutral answer (the app puts it first). The app asks it only when it cut a drill form from your plan and nothing on record says how the person works; never put it in `questions` as well.
+
 What the task's own material settles is read, never asked: the problems and how many, how and where it is handed in, format and length, collaboration and AI rules, the rubric, the due time. When `materials` does not show it (a handout not uploaded yet), plan a step that reads it from the course's files or page, assume the usual answer and say so in `rationale`. Never ask what `person.facts` or `person.answers` already say: an answered question is used. Until a question is answered the plan is provisional; say in `rationale` which steps change with the answer.
 
 ## 5. The person's steps: whole deliverables, only the intellectual core
@@ -103,7 +105,9 @@ The person's attention is for what moves the outcome: understanding, solving, de
 
 **A task whose deliverable is static** (「整理复习提纲」「列出文献清单」「做一张对照表」) is not planned as the person compiling it. The assistant produces the deliverable, and the person's steps serve what it is for, read from the milestone, the intent and the facts: an outline for an exam means the person's steps are the exam preparation (problems, derivations, timed self-tests on the units), working from the assistant's outline; their own part on the outline is at most a short check.
 
-## 5a. Detail follows familiarity: `familiarity.level`
+## 5a. Detail follows familiarity: `familiarity`
+
+You judge it and return it: `familiarity: {level, why}`. Read what `person` says about their degree, field, job, skills and experience, anything they said about being new to this (「零基础」「第一次」), `doneSteps`, `acceptedOutputs` and `lessons`: work of their own field or of a kind they have done before is `near`; a field new to them is `far`; the rest, or too little on record to say, `mid`. `why` is one plain sentence naming what it rests on (「本人为器件方向博士生，做过两次同类评审」). When `familiarity.setByPerson` is given, that is the level, and `why` says so. The app keeps your judgement with the plan; the task card and the tutorial writer read it. No word list or score in the app makes this call any more.
 
 The further the work is from what the person already knows, the more each step explains; the closer, the shorter. Guidance an expert does not need costs them effort to reconcile with what they know (the expertise reversal effect), so the same detail is wrong at both ends.
 
@@ -145,6 +149,8 @@ Only the steps that need the answer depend on the send step; everything else pro
 - `owner` — who does it, judged by what the step produces and never by the kind of goal: `person` (`human` or `mixed`: the person's practice, judgement, core output or own acts), `assistant` (`agent`: a static artefact from existing material), or `ask` (`agent`, but it needs one thing only the person holds, such as data behind their login, an export or a sentence of scope; put that question in `questions`). Two illustrations from different lines: for an exam, 「汇集考试规则与往年卷」 is `assistant` and 「按规则限时做完 1 套往年卷」 is `person`; for a startup, 「整理 5 份访谈记录」 is `assistant` and 「排出前 3 个痛点并决定下一轮试用的门店」 is `person`. The app keeps your `owner` as it stands, except that a step which leaves the machine (sending, submitting, contacting, attending, paying) is always the person's and a `decide` step is always the person's. So: records of money (statements, transactions, holdings) are `assistant`, never `ask`; no step whose only work is for the person to look over or approve what the assistant made (that look belongs in the person's step that uses it).
 - `tickOutcome` — for the two to five steps whose result is a real capability or artefact, the result as it would be ticked on the milestone axis (「能在 20 分钟内独立解出 BJT 小信号题」); "" otherwise.
 - `covers`, `why`, `aiAssist` (section 8).
+- `attends` — `true` when the step is going to something at its own set time (attending a talk, a rehearsal, an interview, sitting an exam or a quiz): it is never placed in free hours. Preparing for it is a separate step and `false`. No verb list in the app decides this any more.
+- `workout` — `true` when the step is physical exercise (a run, a gym session, swimming, yoga, a hike): confirming it done on the health line records a workout. Planning a training schedule or booking a class is `false`.
 - `firstAction` — for every `human` or `mixed` step, the first move that starts it, five minutes or less, naming the actual thing to open or write, at most 80 characters: 「打开 L5 讲义，读到第一个例题」, 「新建 hw3.md，抄下第 1 题题干」, 「把去年期中卷第一页打印出来」. Never a restatement of the title, 「开始复习」 or 「做好准备」. "" for `agent` steps and waits.
 
 ## 10. Plan-level fields

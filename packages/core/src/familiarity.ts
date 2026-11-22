@@ -1,4 +1,3 @@
-import { searchTerms, type SearchTerms } from "./context-selection";
 import { tFor, type Locale } from "./i18n";
 
 /**
@@ -10,45 +9,34 @@ import { tFor, type Locale } from "./i18n";
  *
  * Why it matters (the expertise reversal effect, Kalyuga 2007, Educational Psychology Review 19(4)): worked examples and full
  * explanations help a novice and *hurt* someone who already knows the domain — they must reconcile the guidance with what they know,
- * which is load without learning. So the same tutorial is wrong at both ends: a device researcher handed NASA's and MIT's design-review
- * guides for their own review, and an engineer new to content work given no word on how topics are chosen (the live walk of 10-29).
+ * which is load without learning. So the same tutorial is wrong at both ends.
  *
- * Rules only, no model call, from what is on record:
- * - the person's own choice for this line and kind of work (`override`), which wins;
- * - accepted tasks of the same kind on the same line (two or more: +2, one: +1), and an accepted task on the line sharing the task's terms (+1);
- * - the person's confirmed facts about their background (degree, field, job, skills, experience) sharing the task's terms (two or more: +2,
- *   one: +1);
- * - a confirmed fact on this line saying they are new to it (新手、零基础、第一次…): −3;
- * - a domain line (health or money, the lite edition) with nothing in the background facts about it: −1; a line with no accepted work at
- *   all when the background facts on record are about something else: −1 (no background facts at all says nothing either way).
- * Three or more is `near`, −1 or less `far`, the rest `mid` (the rules as they were).
+ * Who judges it (2026-11-22, replacing the rule score over background words, 「新手」 words and counts of accepted tasks): the step
+ * planner, which reads the person's profile, facts, earlier work and lessons, writes `familiarity: {level, why}` with every plan
+ * (`StepPlan.familiarity`). The person's own choice for the line and kind of work (`override`) wins; before any plan, `mid`.
  */
 export type FamiliarityLevel = "near" | "mid" | "far";
 export const FAMILIARITY_LEVELS: readonly FamiliarityLevel[] = ["near", "mid", "far"];
+/** The planner's judgement as it is kept with the plan. */
+export type ModelFamiliarity = { level: FamiliarityLevel; why: string };
 export type Familiarity = {
   level: FamiliarityLevel;
-  /** `person` when the person chose it for this line and kind of work, else `rules`. */
-  by: "person" | "rules";
+  /** `person` when the person chose it for this line and kind of work, `model` when the planner judged it, `none` before either. */
+  by: "person" | "model" | "none";
   /** What the level rests on, in plain English for the model (never shown as UI text). */
   basis: string[];
 };
 
-export type FamiliarityFact = { identityId: string; slot: string; value: string; status: string };
-export type FamiliarityInput = {
-  task: { title: string; intent: string };
-  lineId: string;
-  /** The line's life domain (`wellness`/`wealth`) when it has one. */
-  lineDomain?: string | undefined;
-  /** Confirmed facts of the person (`person`) and of this line. Others are ignored. */
-  facts: readonly FamiliarityFact[];
-  /** Accepted tasks of this line and archetype. */
-  sameKindDone: number;
-  /** Accepted tasks on this line, of any kind. */
-  lineDone: number;
-  /** Short names of accepted tasks on this line. */
-  doneTitles?: readonly string[];
-  override?: FamiliarityLevel | undefined;
-};
+/** The planner's field (`stepPlanSchema`). */
+export const FAMILIARITY_FIELD = { type: "object", additionalProperties: false, required: ["level", "why"], properties: {
+  level: { type: "string", enum: [...FAMILIARITY_LEVELS] }, why: { type: "string" } } } as const;
+
+/** The planner's judgement when it is one: a known level, the reason clipped. */
+export function readModelFamiliarity(value: unknown): ModelFamiliarity | undefined {
+  const item = value as Partial<ModelFamiliarity> | undefined;
+  if (!item || typeof item !== "object" || !(FAMILIARITY_LEVELS as readonly unknown[]).includes(item.level)) return undefined;
+  return { level: item.level as FamiliarityLevel, why: typeof item.why === "string" ? item.why.trim().slice(0, 300) : "" };
+}
 
 /** The setting holding the person's own choices, keyed `<line>|<archetype>` (archetype `*` when the task has none yet). */
 export const FAMILIARITY_SETTING = "tasks.familiarity";
@@ -66,42 +54,11 @@ export function familiarityOverride(raw: string | undefined, lineId: string, arc
   return undefined;
 }
 
-// i18n-ignore-start: patterns read from the person's own facts
-/** A fact about the person's background: the slot names it, or the value says a degree, field, job or skill. */
-const BACKGROUND_SLOT = /expert|skill|background|degree|major|educat|experience|strength|occupation|job|role|field|profession|research|专业|背景|技能|经历|学历|职业|方向|擅长/i;
-const BACKGROUND_VALUE = /博士|硕士|学位|本科|专业|多年|擅长|熟悉|精通|经验|从事|研究方向|工程师|研究员|PhD|Ph\.D|master|bachelor|engineer|years? of/i;
-const BEGINNER = /新手|零基础|刚开始|刚入门|初学|没有经验|没经验|不熟|不太懂|不懂|第一次|从没|从未|小白|beginner|new to|never (?:done|tried)/i;
-/** Verbs and generic nouns every task carries: matching them says nothing about the domain. */
-const GENERIC = new Set(["确认", "选定", "设计", "打开", "写下", "列出", "汇集", "安排", "时间", "本周", "今天", "明天", "查看", "核对", "决定",
-  "评估", "检查", "开始", "首轮", "第一", "版本", "清单", "计划", "目标", "问题", "结果", "方案", "草稿", "review", "plan", "draft", "list", "check"]);
-// i18n-ignore-end
-
-const hitsIn = (text: string, terms: SearchTerms) => {
-  const lower = text.toLowerCase();
-  return [...terms.long, ...terms.short].filter((term) => !GENERIC.has(term) && lower.includes(term));
-};
-
-export function familiarityOf(input: FamiliarityInput): Familiarity {
-  const terms = searchTerms(`${input.task.title} ${input.task.intent}`);
-  const own = input.facts.filter((fact) => fact.status === "confirmed" && !fact.value.startsWith("假设") // i18n-ignore: the stored 「假设」 marker
-    && (fact.identityId === "person" || fact.identityId === input.lineId));
-  const background = own.filter((fact) => BACKGROUND_SLOT.test(fact.slot) || BACKGROUND_VALUE.test(fact.value));
-  const expertise = [...new Set(background.flatMap((fact) => hitsIn(`${fact.slot} ${fact.value}`, terms)))];
-  const beginner = own.find((fact) => fact.identityId === input.lineId && BEGINNER.test(fact.value));
-  const similarDone = (input.doneTitles ?? []).find((title) => hitsIn(title, terms).length >= 2);
-  const basis: string[] = [];
-  let score = 0;
-  if (input.sameKindDone > 0) { score += Math.min(2, input.sameKindDone); basis.push(`${input.sameKindDone} accepted task(s) of this kind on this line`); }
-  if (similarDone) { score += 1; basis.push(`an accepted task on this line shares its terms: ${similarDone}`); }
-  if (expertise.length) { score += Math.min(2, expertise.length); basis.push(`the person's background facts mention: ${expertise.slice(0, 4).join(", ")}`); }
-  if (beginner) { score -= 3; basis.push(`the person said about this line: ${beginner.value.slice(0, 60)}`); }
-  if (input.lineDomain && !expertise.length) { score -= 1; basis.push(`a ${input.lineDomain} line with nothing in the person's background about it`); }
-  // Known to work in another field (background facts on record, none about this task) and nothing done on this line yet. With no
-  // background facts at all nothing is known either way: a new account's work stays `mid`, so it is not all given tutorials.
-  if (input.lineDone === 0 && !expertise.length && background.length) { score -= 1; basis.push("the person's background is in another field and nothing on this line is done yet"); }
-  const ruled: FamiliarityLevel = score >= 3 ? "near" : score <= -1 ? "far" : "mid";
-  if (input.override) return { level: input.override, by: "person", basis: [`the person set this line and kind of work as ${input.override}`, ...basis] };
-  return { level: ruled, by: "rules", basis: basis.length ? basis : ["nothing on record either way"] };
+/** The level in force: the person's choice, else the planner's judgement, else `mid`. */
+export function familiarityOf(input: { override?: FamiliarityLevel | undefined; planned?: ModelFamiliarity | undefined }): Familiarity {
+  if (input.override) return { level: input.override, by: "person", basis: [`the person set this line and kind of work as ${input.override}`] };
+  if (input.planned) return { level: input.planned.level, by: "model", basis: input.planned.why ? [input.planned.why] : [] };
+  return { level: "mid", by: "none", basis: ["not judged yet"] };
 }
 
 /** The tag on the task: what the level means for how much is explained. */
@@ -120,3 +77,9 @@ export const FAMILIARITY_INSTRUCTIONS = "`familiarity.level` says how close this
   + "far: explain each term the first time it is used, say why each step is done, give one concrete worked example and the common "
   + "mistakes, and list material from an introduction to just enough (a few sources, the most useful first; say where to get what the "
   + "person must supply, such as where to export a statement). mid: as usual.";
+
+/** The planner alone: it judges the level itself, unless the person set one. */
+export const FAMILIARITY_JUDGE = "Judge `familiarity` first and return it: level near, mid or far, from what `person` says about their "
+  + "degree, field, job, skills and experience, what they said about being new to this, `doneSteps`, `acceptedOutputs` and `lessons`; "
+  + "why is one plain sentence naming what it rests on. When `familiarity.setByPerson` is given, that is the level. Then write the steps "
+  + "to that level. ";

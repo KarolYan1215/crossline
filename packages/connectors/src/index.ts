@@ -610,7 +610,7 @@ export class GraphReadSource {
         provider,
         externalId: String(row.id),
         // Graph marks a deletion with an `@removed` annotation rather than omitting the row; a cancelled meeting is no commitment either.
-        ...(row["@removed"] || row.isCancelled === true || /^\s*(canceled|cancelled|已取消)\s*[:：]/i.test(String(row.subject ?? "")) ? { removed: true } : {})
+        ...(row["@removed"] || row.isCancelled === true ? { removed: true } : {})
       })),
       ...(cursor ? { cursor } : {})
     };

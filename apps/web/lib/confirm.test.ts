@@ -120,9 +120,9 @@ test("a block moved elsewhere before it began is never asked about", async () =>
 
 test("on the health line, a confirmed exercise block is a workout record with the confirmed minutes; other lines and other work write none", async () => {
   const { store, at } = setup();
-  // The task's line is the health line, and its steps name an exercise.
+  // The task's line is the health line, and the planner marked its steps as exercise (`workout`; no word list reads the titles).
   store.setSetting(ws, "lines.v1", JSON.stringify([{ id: "research", label: "健康管理者", color: "olive", goal: "", createdAt: "", domain: "wellness" }]));
-  store.saveStepPlan(ws, "ece555-hw3", plan([step("s1", "跑步 5 公里"), step("s2", "力量训练", ["s1"])]), TEST_CTX.principalId, "replan");
+  store.saveStepPlan(ws, "ece555-hw3", plan([{ ...step("s1", "5 公里"), workout: true }, { ...step("s2", "第二段", ["s1"]), workout: true }]), TEST_CTX.principalId, "replan");
   const { message } = await askAboutFirstBlock(at);
   const view = confirmView(TEST_CTX, message.id)!;
   confirmBlock(TEST_CTX, message.id, { kind: "under", minutes: 10 });

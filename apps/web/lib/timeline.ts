@@ -1,10 +1,10 @@
 import "server-only";
 import { formatInTimeZone } from "date-fns-tz";
 import type { AccessContext, AvailabilityWindow, FrozenBlock } from "@crossline/core";
-import { applyMerges, CALENDAR_LINES, activityCategoryLabel, calendarLineOf, currentFiling, onPersonsBoard, importedProjects, importedTitle, itemProjectResolver, inferWorkState, stepCategory, suggestAvailability, type ActivitySegment, type CalendarLines, type WorkState } from "@crossline/core";
+import { applyMerges, CALENDAR_LINES, activityCategoryLabel, calendarLineOf, currentFiling, isRestEvent, onPersonsBoard, itemProjectResolver, inferWorkState, stepCategory, suggestAvailability, type ActivitySegment, type CalendarLines, type WorkState } from "@crossline/core";
 import { isAutoHandoff, isPaused, listAgentTasks, readCategories } from "@crossline/db";
 import {
-  ACTIVITY_DETAIL_CONSENT, COMMIT_GRACE_MINUTES, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, readFrozen, toZonedInstant
+  ACTIVITY_DETAIL_CONSENT, calendarMarks, COMMIT_GRACE_MINUTES, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, readFrozen, toZonedInstant
 } from "./crossline";
 import { itemsFromPlan, toMinutes, uniqueDeadlines, withAgentMarks, type TimelineDeadline, type TimelineItem } from "../app/timeline/model";
 import { identityLines } from "./lines";
@@ -168,12 +168,11 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
     { identityId: order.identityId, ...(order.milestoneId && titleOf.has(order.milestoneId) ? { milestone: titleOf.get(order.milestoneId)! } : {}) }]));
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
   // Calendar events and file dates take the line the classifier filed them under (`calendar.lines`, by title; never filed by hand).
-  // A file date is shown with its course in front when its title left it out (dates imported before titles had to name it).
   const filing = calendarFiling(ctx);
+  const marks = calendarMarks(ctx);
   const eventLine = new Map(inputEvents(ctx).map((event) => [event.id, event.lineId]));
   const knownProjects = store.listProjects(ctx.workspaceId).map((project) => ({ id: project.id, name: project.name, identityId: project.identityId }));
   const projectOfItem = itemProjectResolver(knownProjects, store.listSourceDocuments(ctx.workspaceId));
-  const imported = importedProjects(store.listEvents(ctx.workspaceId, { type: "dates.extracted" }), projectOfItem);
   const held = new Map(readFrozen(ctx, instantNow()).map((entry) => [entry.blockId, entry]));
   const preparedFor = preparedForEvents(ctx);
   const { items: drawn, mergedInto } = mergedView(ctx, plan.blocks, withAgentMarks(itemsFromPlan(plan.blocks, today, meta), agentMarks(ctx)));
@@ -182,7 +181,9 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
     return merged ? { ...item, merged, ...(item.tag ? {} : { tag: "已合并" }) } : item;
   }).map((item) => {
     if (item.kind !== "calendar" && item.kind !== "import") return item;
-    const named = item.kind === "import" ? { ...item, title: importedTitle(item.id, item.title, imported) } : item;
+    const titled = item;
+    // Rest by the classifier's mark (or free time on the calendar): kept off work, not counted as fixed schedule.
+    const named = isRestEvent(titled, marks) ? { ...titled, rest: true as const } : titled;
     if (named.identityId) return named;
     // An event the person added names its line itself; only when it does not is it filed like any calendar title.
     const lineId = (item.id.startsWith("event:") ? eventLine.get(item.id.split(":")[1]!) : "") || calendarLineOf(filing, named.title);

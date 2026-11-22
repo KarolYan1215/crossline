@@ -38,7 +38,7 @@ export function CalendarAppsView({ apps, problem, busy, onRefresh, lead }: {
 }) {
   const t = useT();
   return <section className="st-card calendar-apps" aria-label={t("日历连接")}>
-    <header><h3>{t("ChatGPT 日历连接器")}</h3><small>{t("只显示连接状态，暂不把日程读入计划；要让日历里的课表进入计划，用「订阅日历」粘贴链接")}</small></header>
+    <header><h3>{t("ChatGPT 日历连接器")}</h3><small>{t("只显示连接状态，暂不把日程读入计划；要让日历里的日程进入计划，用「订阅日历」粘贴链接")}</small></header>
     {lead && <p className="muted">{lead}</p>}
     {!apps && <p className="muted">{t("读取中…")}</p>}
     {apps?.map((app) => <div className="st-row" key={app.app}>

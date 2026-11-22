@@ -13,7 +13,7 @@ export const FAMILIARITY_TAG: Record<FamiliarityLevel, string> = { near: "熟悉
 const SWITCH_TO: Record<FamiliarityLevel, FamiliarityLevel[]> = { near: ["far"], mid: ["near", "far"], far: ["near"] };
 const SWITCH_LABEL: Record<FamiliarityLevel, string> = { near: "改为熟悉", mid: "改为一般", far: "改为新领域" };
 
-export function FamiliarityTag({ workOrderId, level, by }: { workOrderId: string; level: FamiliarityLevel; by: "person" | "rules" }) {
+export function FamiliarityTag({ workOrderId, level, by }: { workOrderId: string; level: FamiliarityLevel; by: "person" | "model" | "none" }) {
   const t = useT();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -26,7 +26,7 @@ export function FamiliarityTag({ workOrderId, level, by }: { workOrderId: string
     } finally { setBusy(false); }
   };
   return <span className="task-familiarity" data-level={level}>
-    <span className="ui-tag" title={by === "person" ? t("本人设定，同一主线的同类任务都按此准备") : t("按本人的背景和做过的同类任务判断")}>{t(FAMILIARITY_TAG[level])}</span>
+    <span className="ui-tag" title={by === "person" ? t("本人设定，同一主线的同类任务都按此准备") : t("由规划步骤时按本人的背景和做过的同类任务判断")}>{t(FAMILIARITY_TAG[level])}</span>
     {SWITCH_TO[level].map((next) => <button key={next} type="button" className="link-button" disabled={busy} onClick={() => void choose(next)}>{t(SWITCH_LABEL[next])}</button>)}
   </span>;
 }

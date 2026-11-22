@@ -1,7 +1,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import {
-  CALENDAR_WRITE_ACCOUNT_SETTING, CALENDAR_WRITE_PATHS_SETTING, readWritePaths, EVENT_DECISIONS, FIXED_EVENTS, fixedEventBlocks, graphWeekdays, heardEventFromFact, importedTitle, inCalendar, itemProjectResolver, occurrences, seriesKey, validFixedEvent,
+  CALENDAR_WRITE_ACCOUNT_SETTING, CALENDAR_WRITE_PATHS_SETTING, readWritePaths, EVENT_DECISIONS, FIXED_EVENTS, fixedEventBlocks, graphWeekdays, heardEventFromFact, inCalendar, itemProjectResolver, occurrences, seriesKey, validFixedEvent,
   type AccessContext, type FixedEvent
 } from "@crossline/core";
 import { effectiveSchedulePreferences, getStore, planToday, toZonedInstant, type PersistedScheduleBlock } from "./crossline";
@@ -22,7 +22,7 @@ export const eventDecisions = (ctx: AccessContext): Record<string, Decision> => 
 
 /**
  * The timed fixed arrangements the person confirmed from files or said in the interview (a confirmed batch of dates): weekly meetings as
- * recurring events, timed dated items as one-offs, each named with its course (`importedTitle`).
+ * recurring events, timed dated items as one-offs, each under its own name (dates name their course since extraction, 2026-10-08).
  */
 export function confirmedEvents(ctx: AccessContext): FixedEvent[] {
   const store = getStore();
@@ -42,7 +42,7 @@ export function confirmedEvents(ctx: AccessContext): FixedEvent[] {
       const project = projectOf(row) ?? row.project;
       return { id: `batch:${event.entityId}:${row.id}`, lineId: lineOf(project), location: row.location ?? "",
         source: (row.sourceRef ?? "").startsWith("reply-") ? "interview" as const : "file" as const,
-        title: importedTitle(`import:${event.entityId}:${row.id}`, row.title, new Map(project ? [[`${event.entityId}:${row.id}`, project]] : [])) };
+        title: row.title };
     };
     for (const row of (payload.recurring ?? []).filter((item) => included.has(item.id))) {
       out.push({ ...base(row), repeat: { weekdays: row.weekdays ?? [], from: row.from ?? "", until: row.to ?? "", exceptions: row.exceptions ?? [] },

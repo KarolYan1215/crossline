@@ -21,8 +21,8 @@ function setup(paths: Record<string, boolean> = { ics: true }) {
   store.saveProject({ id: "ece555", ownerId: "o", workspaceId: ws, identityId: "research", name: "ECE 555", summary: "", status: "active", createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z" });
   store.savePlanVersion({ id: "plan-1", ownerId: "o", workspaceId: ws, version: 1, status: "draft", payload: { blocks: [] } });
   store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "dates:1", type: "dates.extracted", entityId: "b1", payload: { documentIds: [],
-    recurring: [{ id: "class", title: "上课", project: "ECE 555", weekdays: [1, 5], startTime: "14:30", endTime: "15:45", from: "2026-09-04", to: "2026-12-07", exceptions: ["2026-11-27"], location: "Plant Sci 108", sourceRef: "src-2" }],
-    dates: [{ id: "exam", title: "期中考试", project: "ECE 555", date: "2026-10-27", startTime: "14:30", endTime: "15:45", kind: "exam", sourceRef: "src-1" }], undated: [] } });
+    recurring: [{ id: "class", title: "ECE 555 上课", project: "ECE 555", weekdays: [1, 5], startTime: "14:30", endTime: "15:45", from: "2026-09-04", to: "2026-12-07", exceptions: ["2026-11-27"], location: "Plant Sci 108", sourceRef: "src-2" }],
+    dates: [{ id: "exam", title: "ECE 555 期中考试", project: "ECE 555", date: "2026-10-27", startTime: "14:30", endTime: "15:45", kind: "exam", sourceRef: "src-1" }], undated: [] } });
   store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "dates:2", type: "dates.decided", entityId: "b1", payload: { included: ["class", "exam"], excluded: [] } });
   store.setSetting(ws, "portrait.report", JSON.stringify({ version: 1 }));
   store.setSetting(ws, CALENDAR_WRITE_PATHS_SETTING, JSON.stringify(paths));

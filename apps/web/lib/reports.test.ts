@@ -80,9 +80,11 @@ test("two runs finished in the same millisecond: the later request is the latest
   } finally { vi.useRealTimers(); }
 });
 
-test("Skill 库 offers the favourites topic workflow only while nothing reads the favourites, for the media-like line when there is one", () => {
+test("Skill 库 offers the favourites topic workflow only while nothing reads the favourites, for the media line when there is one", () => {
   const lines = [{ id: "research", label: "研究者" }, { id: "line-x", label: "自媒体创作者" }];
-  expect(favouritesOffer([], lines)).toEqual({ lineId: "line-x" });
+  // A line's name is not read: the person picks the line unless one has the id media.
+  expect(favouritesOffer([], lines)).toEqual({ lineId: "" });
+  expect(favouritesOffer([], [...lines, { id: "media", label: "博主" }])).toEqual({ lineId: "media" });
   expect(favouritesOffer([], [{ id: "research", label: "研究者" }])).toEqual({ lineId: "" });
   expect(favouritesOffer([{ name: "xiaohongshu-favourites-topics", manifest: { summary: "" } }], lines)).toBeUndefined();
   expect(favouritesOffer([{ name: "flow-a", manifest: { summary: "定期整理小红书收藏", access: [{ site: "https://www.xiaohongshu.com" }] } }], lines)).toBeUndefined();
