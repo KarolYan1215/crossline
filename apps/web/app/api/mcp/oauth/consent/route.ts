@@ -20,7 +20,8 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({})) as { query?: unknown; allow?: unknown; scope?: unknown; label?: unknown };
   const check = checkAuthorize(config, new URLSearchParams(typeof body.query === "string" ? body.query : ""));
   if (check.kind === "fatal") return Response.json({ ok: false, code: check.code }, { status: 400 });
-  if (check.kind === "redirect") return Response.json({ ok: true, redirect: check.url });
+  // The page offers 允许 only for a valid request; a wrong one is not sent anywhere from here either.
+  if (check.kind === "error") return Response.json({ ok: false, code: "OAUTH_REQUEST_INVALID" }, { status: 400 });
   // Said here, where the person can act on it, rather than as a failed sign-in in the other AI.
   const connection = { client: check.request.host, label: connectionLabel(check.request, typeof body.label === "string" ? body.label : undefined) };
   if (body.allow === true && mcpTokensFull(access.ctx.workspaceId, new Date(), connection)) return Response.json({ ok: false, code: "MCP_TOKENS_FULL" }, { status: 409 });

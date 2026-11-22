@@ -98,7 +98,12 @@ export type AuthorizeRequest = {
   /** The host the code goes back to: what the consent page names, since a client's own name is only what it says it is. */
   host: string;
 };
-export type AuthorizeCheck = { kind: "ok"; request: AuthorizeRequest } | { kind: "redirect"; url: string }
+/**
+ * `error`: the request is wrong, and `url` is the OAuth error for the client. It is never followed by itself: registration is open, so any
+ * https address can be a registered redirect URI, and sending the browser there unasked would make this site an open redirect (RFC 9700
+ * §4.11.2). The page says what is wrong and names `host`; the person goes back only by pressing the link.
+ */
+export type AuthorizeCheck = { kind: "ok"; request: AuthorizeRequest } | { kind: "error"; url: string; host: string; error: string }
   | { kind: "fatal"; code: "OAUTH_CLIENT_UNKNOWN" | "OAUTH_REDIRECT_UNKNOWN" };
 
 /** The answer to a client: on its redirect URI, with its state and this server's `iss` (RFC 9207), errors included. */
@@ -113,8 +118,8 @@ function answer(config: OAuthConfig, redirectUri: string, state: string | undefi
 const BASE64URL_43_128 = /^[A-Za-z0-9_-]{43,128}$/;
 
 /**
- * An authorization request as the client sent it. A client or redirect URI this site does not know is never redirected to (the page says
- * so instead); every other mistake goes back to the client as an OAuth error.
+ * An authorization request as the client sent it. A client or redirect URI this site does not know is only named on the page; every other
+ * mistake becomes an OAuth error for the client, which the person may carry back with a press.
  */
 export function checkAuthorize(config: OAuthConfig, params: URLSearchParams): AuthorizeCheck {
   const clientId = params.get("client_id") ?? "";
@@ -123,7 +128,8 @@ export function checkAuthorize(config: OAuthConfig, params: URLSearchParams): Au
   const redirectUri = params.get("redirect_uri") ?? (client.redirectUris.length === 1 ? client.redirectUris[0]! : "");
   if (!mcpRedirectUriAllowed(redirectUri) || !mcpRedirectUriMatches(redirectUri, client.redirectUris)) return { kind: "fatal", code: "OAUTH_REDIRECT_UNKNOWN" };
   const state = params.get("state") ?? undefined;
-  const fail = (error: string, description: string): AuthorizeCheck => ({ kind: "redirect", url: answer(config, redirectUri, state, { error, error_description: description }) });
+  const fail = (error: string, description: string): AuthorizeCheck => ({ kind: "error", error, host: new URL(redirectUri).host,
+    url: answer(config, redirectUri, state, { error, error_description: description }) });
   if (params.get("response_type") !== "code") return fail("unsupported_response_type", "only response_type=code");
   const codeChallenge = params.get("code_challenge") ?? "";
   if (params.get("code_challenge_method") !== "S256" || !BASE64URL_43_128.test(codeChallenge)) return fail("invalid_request", "PKCE with S256 is required");
@@ -143,14 +149,14 @@ declare global {
 const codes = () => globalThis.crosslineMcpCodes ??= new Map<string, PendingCode>();
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 
-/**
- * The person's answer on the consent page: allowed, with the scope they chose (never more than asked) and the name the connection will
- * carry in 最近操作; or refused. Either way, where to send the browser next.
- */
 /** The name a connection will carry: the one typed on the consent page, else the client's own, else its host. */
 export const connectionLabel = (request: AuthorizeRequest, typed?: string) =>
   mcpText(typed, MCP_TOKEN_LABEL_MAX) || mcpText(request.client.name, MCP_TOKEN_LABEL_MAX) || request.host;
 
+/**
+ * The person's answer on the consent page: allowed, with the scope they chose (never more than asked) and the name the connection will
+ * carry in 最近操作; or refused. Either way, where to send the browser next.
+ */
 export function decideAuthorize(config: OAuthConfig, ctx: AccessContext, request: AuthorizeRequest,
   decision: { allow: boolean; scope?: McpScope; label?: string }, now = new Date()): string {
   if (!decision.allow) return answer(config, request.redirectUri, request.state, { error: "access_denied", error_description: "the person declined" });

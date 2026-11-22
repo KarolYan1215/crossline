@@ -69,7 +69,7 @@ test("registration stores nothing: the client id is the registration, signed; a 
     expect(registerClient(config, { redirect_uris: uris })).toMatchObject({ ok: false, error: { error: "invalid_redirect_uri" } });
 });
 
-test("authorize: an unknown client or redirect is never redirected to; other mistakes go back to the client with state and iss", () => {
+test("authorize: an unknown client or redirect is only named; other mistakes become an error for the client, with state and iss, never followed by itself", () => {
   setup();
   const clientId = client();
   expect(checkAuthorize(config, authorize("nope.nope"))).toEqual({ kind: "fatal", code: "OAUTH_CLIENT_UNKNOWN" });
@@ -79,7 +79,7 @@ test("authorize: an unknown client or redirect is never redirected to; other mis
   for (const [extra, error] of [[{ code_challenge_method: "plain" }, "invalid_request"], [{ code_challenge: "" }, "invalid_request"],
     [{ response_type: "token" }, "unsupported_response_type"], [{ resource: "https://other.example/mcp" }, "invalid_target"]] as const) {
     const check = checkAuthorize(config, authorize(clientId, extra));
-    expect(check.kind).toBe("redirect");
+    expect(check).toMatchObject({ kind: "error", error, host: "claude.ai" });
     const url = new URL((check as { url: string }).url);
     expect([url.origin + url.pathname, url.searchParams.get("error"), url.searchParams.get("state"), url.searchParams.get("iss")]).toEqual([CLAUDE, error, "st-1", config.issuer]);
   }

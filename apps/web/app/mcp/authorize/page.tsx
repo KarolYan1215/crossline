@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
 import { requireSessionContext } from "../../../lib/access-guard";
 import { checkAuthorize, oauthConfig } from "../../../lib/mcp/oauth";
 import { listMcpTokens } from "../../../lib/mcp/tokens";
@@ -16,15 +15,23 @@ export const dynamic = "force-dynamic";
 /**
  * Where an OAuth sign-in from claude.ai, ChatGPT or another MCP host lands (docs/mcp-server.md §4.3): the person, signed in to this site
  * (the sign-in page brings them back here), sees which address the connection goes back to and what it may do, and allows or refuses.
- * Opening the page grants nothing; only 允许 does. A client or address this site does not know is named here, never redirected to.
+ * Opening the page grants nothing and sends the browser nowhere; only 允许 or 拒绝 does. A wrong request is explained here, never redirected.
  */
 export default async function McpAuthorizePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(await searchParams)) if (typeof value === "string") params.set(key, value);
   const config = oauthConfig();
   const check = config ? checkAuthorize(config, params) : undefined;
-  if (check?.kind === "redirect") redirect(check.url);
   const say = tFor(await getLocale());
+  if (check?.kind === "error") {
+    // Never followed by itself (lib/mcp/oauth.ts): named, and only a press of the link goes there.
+    return <main className="privacy">
+      <h1>{say("连接 AI")}</h1>
+      <p className="privacy-lede">{say("这个连接请求不完整或有误（{{error}}），已停止。", { error: check.error })}</p>
+      <p><a href={check.url} rel="noreferrer">{say("回到 {{host}}", { host: check.host })}</a></p>
+      <p className="muted">{say("只在认得这个地址时点。")}</p>
+    </main>;
+  }
   if (!check || check.kind === "fatal") {
     return <main className="privacy">
       <h1>{say("连接 AI")}</h1>

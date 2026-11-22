@@ -46,5 +46,8 @@
   "会替换同一地址下已有的「{{label}}」连接；想两个都留，换一个名字。": "This replaces the existing “{{label}}” connection from the same address; to keep both, use another name.",
   "最近读取 {{count}} 次": "Last {{count}} reads",
   "今天的安排": "Today's schedule",
-  "任务列表": "Task list"
+  "任务列表": "Task list",
+  "这个连接请求不完整或有误（{{error}}），已停止。": "This connection request is incomplete or wrong ({{error}}), so it stopped here.",
+  "回到 {{host}}": "Back to {{host}}",
+  "只在认得这个地址时点。": "Only follow it if you know this address."
 }

@@ -135,6 +135,13 @@ test("ChatGPT's path with read only, and a refusal: the person's choice is what 
   const transport = transportFor(auth);
   await expect(new Client({ name: "chatgpt", version: "1.0.0" }).connect(transport)).rejects.toBeInstanceOf(UnauthorizedError);
 
+  // A wrong request is not sent back anywhere from here either: registration is open, so its address proves nothing.
+  const wrong = new URL(authorizationUrl!);
+  wrong.searchParams.set("response_type", "token");
+  const invalid = await consent.POST(new Request(`${BASE}/api/mcp/oauth/consent`, { method: "POST", headers: { "content-type": "application/json", origin: BASE, host: "localhost:3210" },
+    body: JSON.stringify({ query: wrong.searchParams.toString(), allow: true, scope: "read" }) }));
+  expect([invalid.status, await invalid.json()]).toEqual([400, { ok: false, code: "OAUTH_REQUEST_INVALID" }]);
+
   const refused = await personAnswers(authorizationUrl!, false);
   expect(refused.searchParams.get("error")).toBe("access_denied");
   expect(listMcpTokens(ctx.workspaceId)).toEqual([]);
