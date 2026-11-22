@@ -75,7 +75,9 @@ test("a homework from the course's dates the person already has is not written t
   store.saveProject({ id: "ece548", ownerId: "o", workspaceId: ws, identityId: "research", name: "ECE 548", status: "active", summary: "", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" });
   store.saveMilestone({ id: "m", ownerId: "o", workspaceId: ws, identityId: "research", projectId: "ece548", title: "ECE 548 期末", status: "approved", version: 1 });
   order("typed", "完成 ECE 548 作业 2", { intent: "做完 ECE 548 作业 2" });
-  store.upsertProfileFact({ workspaceId: ws, identityId: "research", projectId: "ece548", slot: "date_20261020_homework_due", value: "2026-10-20 作业 2 截止",
+  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "dates:hw2", type: "dates.extracted", entityId: "hw2", payload: { dates: [{ id: "hw2",
+    date: "2026-10-20", startTime: "", endTime: "", kind: "due", title: "作业 2 截止", project: "ece548", sourceRef: "", quote: "", confidence: "high", note: "", work: "作业 2" }] } });
+  store.upsertProfileFact({ workspaceId: ws, identityId: "research", projectId: "ece548", slot: "date_20261020_due", value: "2026-10-20 作业 2 截止",
     status: "confirmed", sourceRef: "", sourceQuote: "", updatedAt: "2026-10-15T00:00:00.000Z" });
   const now = new Date("2026-10-15T12:00:00.000Z");
   expect(materializeDatePairs(store, ws, now)).toEqual([]);

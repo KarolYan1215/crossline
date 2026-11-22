@@ -1,6 +1,6 @@
 import "server-only";
 import { SOURCE_FOLDERS_SETTING, readSourceFolders, sourceFolderIndexSetting, calendarWeek, capacityConflict, timelineDeadlines, lineWeights, skeletonDraft,
-  type AccessContext, type AvailabilityWindow, type BusySpan, type DateCandidate, type RecurringMeeting, type SkeletonBlock, type WeekCalendarEvent, type WeekCapacity } from "@crossline/core";
+  dateKindOf, type AccessContext, type AvailabilityWindow, type BusySpan, type DateCandidate, type RecurringMeeting, type SkeletonBlock, type WeekCalendarEvent, type WeekCapacity } from "@crossline/core";
 import { getStore, readLineShares, resolvedAvailability } from "./crossline";
 import { identityLines } from "./lines";
 import { localeFor } from "./locale";
@@ -47,7 +47,8 @@ export function weekSkeleton(ctx: AccessContext, today: string): WeekSkeleton {
 
 
 
-const DATED_KINDS = new Set(["exam", "project_due", "deadline", "homework_due", "quiz", "meeting", "other"]);
+/** One-off dates a project's timeline shows: not its recurring sessions, not the day a piece of work is handed out (`dateKindOf`). */
+const DATED_KINDS = new Set<string>(["assessment", "due", "deadline", "meeting", "other"]);
 
 export function projectTimeline(ctx: AccessContext, today: string): ProjectTimeline {
   const store = getStore();
@@ -56,7 +57,7 @@ export function projectTimeline(ctx: AccessContext, today: string): ProjectTimel
   const items = new Map<string, TimelineItem[]>();
   for (const batch of batches(ctx)) for (const item of batch.payload.dates ?? []) {
     const status = statusOf(item.id, batch.included, batch.excluded);
-    if (!status || item.date < today || !DATED_KINDS.has(item.kind)) continue;
+    if (!status || item.date < today || !DATED_KINDS.has(dateKindOf(item.kind))) continue;
     const project = projects.find((entry) => entry.id === item.project || entry.name === item.project);
     if (!project) continue;
     const list = items.get(project.id) ?? [];

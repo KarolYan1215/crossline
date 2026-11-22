@@ -1,3 +1,4 @@
+import { dateKindOf, type DateKind } from "./date-schema";
 /**
  * Must the person go, and is it at a set time? (docs/plans/2026-11-11-walkthrough-decisions.md §2, approved by the owner.) Every event-like
  * item from mail and from a syllabus carries two attributes, kept apart because they are different questions: an assignment is required
@@ -65,17 +66,18 @@ export function structureEvidence(structure: MailStructure, person: string): { l
     toPersonAlone: structure.recipients.length > 0 && structure.recipients.every((item) => item === address), invite };
 }
 
-/** What a syllabus or timetable sits for: an exam, a quiz, a class. A course the person has (its project exists) makes them required. */
-const SITTING = new Set(["exam", "quiz", "class"]);
-const DUE = new Set(["homework_due", "project_due", "deadline"]);
+/** What a schedule sits for (`dateKindOf`, old kinds included): a session or an assessment. A project the person has makes them required. */
+const SITTING = new Set<DateKind>(["session", "assessment"]);
+const DUE = new Set<DateKind>(["due", "deadline"]);
 /**
- * A date read from the person's own files: a sitting of a known course is `required` and `fixed` and, with only a day, `needsTime` (the
- * person is asked 「几点到几点」); a due date is `due`; the rest is `none` and optional. A course nobody confirmed is at most `likely`.
+ * A date read from the person's own files: a sitting of a known project is `required` and `fixed` and, with only a day, `needsTime` (the
+ * person is asked 「几点到几点」); a due date is `due`; the rest is `none` and optional. A project nobody confirmed is at most `likely`.
  */
 export function dateItemAttributes(item: { kind: string; startTime: string }, courseKnown: boolean): { timing: EventTiming; obligation: EventObligation; needsTime: boolean } {
-  if (SITTING.has(item.kind)) return { timing: "fixed", obligation: courseKnown ? "required" : "likely", needsTime: courseKnown && !item.startTime };
-  if (DUE.has(item.kind)) return { timing: "due", obligation: courseKnown ? "required" : "likely", needsTime: false };
-  if (item.kind === "meeting") return { timing: item.startTime ? "fixed" : "none", obligation: "likely", needsTime: false };
+  const kind = dateKindOf(item.kind);
+  if (SITTING.has(kind)) return { timing: "fixed", obligation: courseKnown ? "required" : "likely", needsTime: courseKnown && !item.startTime };
+  if (DUE.has(kind)) return { timing: "due", obligation: courseKnown ? "required" : "likely", needsTime: false };
+  if (kind === "meeting") return { timing: item.startTime ? "fixed" : "none", obligation: "likely", needsTime: false };
   return { timing: item.startTime ? "fixed" : "none", obligation: "optional", needsTime: false };
 }
 

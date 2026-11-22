@@ -1,6 +1,6 @@
 import "server-only";
 import {
-  EVENT_MERGES, FIXED_EVENTS, fixedEventBlocks, isCancelledEvent, mergeCandidates, mergeDecision, readMergeBook,
+  EVENT_MERGE_REVIEW, EVENT_MERGES, FIXED_EVENTS, fixedEventBlocks, fixedTimedItemOf, isCancelledEvent, mergeCandidates, mergeDecision, readMergeBook, readMergeReview,
   type AccessContext, type FixedEvent, type MergeBook, type MergeCandidate, type MergeDecision, type MergeHow, type TimedItem
 } from "@crossline/core";
 import { calendarMarks, getStore, planToday, plannerIdOfBlock, type PersistedScheduleBlock } from "./crossline";
@@ -25,14 +25,9 @@ type BlockLike = Pick<PersistedScheduleBlock, "id" | "title" | "start" | "end"> 
 
 /** A plan block as a timed item, or nothing when it is not one the merge rules look at (activity, proposals, pencilled-in work). */
 export function timedItemOf(block: BlockLike, sourceKey?: string): TimedItem | undefined {
-  if (!block.day) return undefined;
-  const base = { id: block.id, title: block.title, day: block.day, start: block.start, end: block.end };
-  const source = sourceKey ?? block.sourceKey;
-  if (block.id.startsWith("graph_calendar:")) return { ...base, kind: "calendar", ...(source ? { source } : {}) };
-  if (block.id.startsWith("import:")) return { ...base, kind: "file" };
-  if (block.id.startsWith("event:")) return { ...base, kind: "event" };
-  if (block.id.startsWith("scheduled:")) return { ...base, kind: "work", orderId: plannerIdOfBlock(block.id).split("#")[0]! };
-  return undefined;
+  if (block.day && block.id.startsWith("scheduled:"))
+    return { id: block.id, title: block.title, day: block.day, start: block.start, end: block.end, kind: "work", orderId: plannerIdOfBlock(block.id).split("#")[0]! };
+  return fixedTimedItemOf(block, sourceKey);
 }
 
 const DAY_MS = 86_400_000;
@@ -57,5 +52,9 @@ export function fixedTimedItems(ctx: AccessContext, now = new Date(), days = day
   return [...stored, ...fixedEventBlocks(events, days)].flatMap((block) => { const item = timedItemOf(block); return item && item.kind !== "work" ? [item] : []; });
 }
 
-/** Pairs that overlap and look alike, not yet answered: the `event_merge` asks. */
-export const mergePairs = (ctx: AccessContext, now = new Date()): MergeCandidate[] => mergeCandidates(fixedTimedItems(ctx, now), readMerges(ctx));
+/**
+ * Pairs that overlap, not yet answered, with the same title or called the same thing by the reviewer (`EVENT_MERGE_REVIEW`, written by
+ * the worker's daily pass): the `event_merge` asks. A pair the reviewer has not seen yet is not asked.
+ */
+export const mergePairs = (ctx: AccessContext, now = new Date()): MergeCandidate[] =>
+  mergeCandidates(fixedTimedItems(ctx, now), readMerges(ctx), readMergeReview(getStore().getSetting(ctx.workspaceId, EVENT_MERGE_REVIEW)));

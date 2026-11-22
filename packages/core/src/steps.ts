@@ -657,12 +657,13 @@ export function stepPlanWarnings(plan: StepPlan, window: { notBefore?: string; d
   for (const step of plan.steps) {
     // A request for a fact is a quarter of an hour by design (info-request.ts), not a step too short to schedule.
     if (step.schedulable && step.estimate.p50Minutes < 15 && !(step.estimate.p50Minutes <= INFO_REQUEST_PERSON_MINUTES && step.role === "contact")) warnings.push({ code: "STEP_TOO_SHORT", detail: `「${step.title}」只有 ${step.estimate.p50Minutes} 分钟，不足一个工作时段` }); // i18n-ignore
-    if (!archetype.roles.includes(step.role)) warnings.push({ code: "STEP_ROLE_OUTSIDE_ARCHETYPE", detail: `「${step.title}」的类型「${STEP_ROLES[step.role]}」不在「${archetype.label}」的常见步骤中` }); // i18n-ignore
     if (!step.doneCriterion) warnings.push({ code: "STEP_DONE_CRITERION_MISSING", detail: `「${step.title}」没有完成标准` }); // i18n-ignore
   }
   // The archetype's required roles, its order (「先解后查」) and its usual last step are no longer warnings (2026-11-20, near-term doc §3.3):
   // the person's work is one step per deliverable with 提交 folded into its done criterion, so 「完成作业 4」 alone is a whole plan. The
-  // archetypes still describe the usual parts to the model (`archetypeBrief`), as guidance.
+  // archetypes still describe the usual parts to the model (`archetypeBrief`), as guidance. A step whose role is outside the archetype's
+  // usual list is not a warning either (2026-11-22): the eighteen archetypes are non-binding hints, and a role the
+  // work needs is the planner's to choose. They still pick the sizing (`quantify`) and the tutorial's parts.
   const p50 = plan.steps.filter((step) => step.schedulable).reduce((sum, step) => sum + step.estimate.p50Minutes, 0);
   if (plan.quantity.amount > 0) {
     const [low, high] = archetype.quantify.minutesPerUnit;

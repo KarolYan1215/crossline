@@ -1,3 +1,4 @@
+import { dateKindOf, type DateKind } from "@crossline/core";
 import type { CrosslineStore, StoredWorkOrder } from "./index";
 
 /**
@@ -5,8 +6,9 @@ import type { CrosslineStore, StoredWorkOrder } from "./index";
  * found 「ECE 555 作业 3」 due 11/2 still 「进行中」 on 11/27, neither scheduled nor asked about: the daily pass only moved milestones, the
  * return tidy-up only archived what was never started, and the weekly commitment only cut what was never started. Two kinds:
  *
- * - **external** — a course's date, homework from a course's schedule, or a date read from someone else's text (an analysis quote, an
- *   import): not the system's to decide. The person is asked whether it can still be handed in and by when (`overdue_task` on 待确认).
+ * - **external** — a date someone else set (a course's, a client's, a funder's: `externalDateProjectIds`), work paired from such a
+ *   schedule, or a date read from someone else's text (an analysis quote, an import): not the system's to decide. `why: "course"` is
+ *   the stored name for the first two, whatever kind of project set the date. The person is asked whether it can still be handed in and by when (`overdue_task` on 待确认).
  * - **self-set** — a due day the person typed, or one the system moved (the weekly commitment's 推, an earlier move of this pass): moved
  *   by the daily pass to the cautious finish at the measured pace plus two days, at most twice, then asked like an external one.
  *
@@ -18,19 +20,26 @@ export const OVERDUE_TASK_RESOLVED = "task.overdue_resolved";
 /** How many times a self-set due day is moved by itself before it is asked about instead. */
 export const SILENT_TASK_SHIFTS_MAX = 2;
 const OPEN = new Set(["approved", "preparing", "ready_for_human", "active", "blocked"]);
-const GRADED = new Set(["quiz", "exam", "homework_due", "homework_out", "project_due"]);
+/** Dated items whose day someone else sets for the person's work: an assessment, a hand-in, a release (`dateKindOf`, old kinds included). */
+const SET_BY_OTHERS = new Set<DateKind>(["assessment", "due", "release"]);
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** Projects that are courses: a grade breakdown on record, homework dated from the course's files, or graded items read from them. */
-export function courseProjectIds(store: CrosslineStore, workspaceId: string): Set<string> {
+/**
+ * Projects whose dates someone else sets (2026-11-22: a course is one case; a client's deliverables, a funder's call or an employer's
+ * reviews are the same): a grading scheme on record, work paired from release and due dates read from their files, or assessments,
+ * hand-ins and releases read from them.
+ */
+export function externalDateProjectIds(store: CrosslineStore, workspaceId: string): Set<string> {
   const out = new Set<string>();
   for (const fact of store.listProfileFacts(workspaceId)) if (fact.slot === "grading" && fact.projectId) out.add(fact.projectId);
   for (const order of store.listWorkOrders(workspaceId)) if (order.id.startsWith("datepair-") && order.projectId) out.add(order.projectId);
   for (const event of store.listEvents(workspaceId, { type: "dates.extracted" }))
     for (const item of (event.payload as { dates?: Array<{ project?: string; kind?: string }> }).dates ?? [])
-      if (item.project && item.kind && GRADED.has(item.kind)) out.add(item.project);
+      if (item.project && item.kind && SET_BY_OTHERS.has(dateKindOf(item.kind))) out.add(item.project);
   return out;
 }
+/** The former name, kept for callers: the projects are any whose dates are set by others, not only courses. */
+export const courseProjectIds = externalDateProjectIds;
 
 export type OverdueTask = { order: StoredWorkOrder; due: string; external: boolean; why: "course" | "source" | "person" | "system"; shifts: number };
 
@@ -53,7 +62,7 @@ export function overdueStartedTasks(store: CrosslineStore, workspaceId: string, 
  * daily pass already moved it.
  */
 export function dueProvenance(store: CrosslineStore, workspaceId: string): (order: StoredWorkOrder) => { why: OverdueTask["why"]; external: boolean; shifts: number } {
-  const courses = courseProjectIds(store, workspaceId);
+  const courses = externalDateProjectIds(store, workspaceId);
   const setBy = new Map<string, Map<string, "person" | "system">>();
   const note = (id: string, day: unknown, by: "person" | "system") => {
     if (typeof day !== "string") return;

@@ -46,12 +46,14 @@ test("a milestone whose criteria are all outputs is refused", () => {
   refused([item("西湖图表交付师兄确认", plan(), { successCriteria: [{ evidenceOf: "output", measure: { kind: "artifact" } }] })], "MILESTONE_OUTCOME_REQUIRED");
 });
 
-// docs/work-split.md §3: a milestone that is only material being ready gives the person nothing of their own to do; readiness is the
-// assistant's preparation, folded into a milestone with a result of the person's.
-test("a milestone whose every criterion is material being ready is refused, whatever the line", () => {
-  refused([item("西湖实验资料汇集", plan(), { successCriteria: [
+// docs/work-split.md §3: a milestone that is only material being ready gives the person nothing of their own to do. Whether its
+// criteria are only readiness is the architect's judgement now (2026-11-22): the word list that decided it read only Chinese.
+test("whether every criterion is material being ready is left to the architect, not a word list", () => {
+  const prepOnly = chain();
+  prepOnly[0] = item("西湖实验资料汇集", plan({ key: "a", stage: 1, deadline: "2026-10-15" }), { successCriteria: [
     { statement: "三篇对照论文的实验参数已汇集", evidenceOf: "outcome", measure: { kind: "artifact" } },
-    { statement: "仿真输入清单建立", evidenceOf: "output", measure: { kind: "artifact" } }] })], "MILESTONE_PREP_ONLY");
+    { statement: "仿真输入清单建立", evidenceOf: "output", measure: { kind: "artifact" } }] });
+  expect(() => validateMilestonePlans(prepOnly, profile, new Set())).not.toThrow();
   const withResult = chain();
   withResult[0] = item("西湖图表交付师兄确认", plan({ key: "a", stage: 1, deadline: "2026-10-15" }), { successCriteria: [
     { statement: "三篇对照论文的实验参数已汇集", evidenceOf: "output", measure: { kind: "artifact" } },
@@ -145,21 +147,13 @@ describe("concrete, not a state", () => {
     plan: { key: "k", stage: 1, deadline: "2026-10-27", outcome: "拿到好成绩", derivation: "总评 A 要 90 分，其余部分预计 92，所以这一项至少 85，再留 3 分余量", baseline: "尚未开始", target, stakeholders: [], sourceFactIds: ["f"], dependsOn: [] }
   }];
 
-  test("a mood or a maintenance state is sent back, and the refusal says what an event looks like", () => {
-    for (const title of ["ECE 555 课程学习保持可完成状态", "稳定推进当前实验", "继续推进课程", "做好期中准备"]) {
-      expect(() => validatePlans(one(title), base, new Set()), title).toThrow("MILESTONE_NOT_CONCRETE");
+  // A state rather than an event is the architect's judgement (2026-11-22): the word list read only Chinese and refused correct
+  // answers (「获得外部试用者继续使用的证据」 three times running). Code still asks for a checkable criterion and a written target.
+  test("a state is no longer refused by a word list, in either language; structure still is", () => {
+    for (const title of ["ECE 555 课程学习保持可完成状态", "Keep the course on track", "首批试用者提交使用答复"]) {
+      expect(() => validatePlans(one(title), base, new Set()), title).not.toThrow();
     }
-    try { validatePlans(one("ECE 555 课程学习保持可完成状态"), base, new Set()); } catch (error) {
-      expect((error as Error & { detail?: string }).detail).toContain("期中");
-    }
-  });
-
-  test("an event passes, and a cadence with a number is allowed to say 保持", () => {
-    expect(() => validatePlans(one("ECE 555 期中考试（10/27）取得 80 分以上"), base, new Set())).not.toThrow();
-    expect(() => validatePlans(one("小红书连续四周按节奏发布", "保持每周发布 2–3 条，连续 4 周"), base, new Set())).not.toThrow();
-    expect(() => validatePlans(one("提交 CAD 项目", "保持良好的状态，不掉队"), base, new Set())).toThrow("MILESTONE_NOT_CONCRETE");
-    // Someone else continuing is an event, not the person keeping something going (a real answer refused three times for this).
-    expect(() => validatePlans(one("首批试用者提交使用答复", "获得外部试用者继续使用、推荐或付费意向的证据"), base, new Set())).not.toThrow();
+    expect(() => validatePlans(one("提交 CAD 项目", "保持"), base, new Set())).toThrow("MILESTONE_TARGET_REQUIRED");
   });
 });
 
@@ -243,12 +237,13 @@ test("a target proposed in the same answer may be cited before it is written", (
   expect(() => validatePlans(answer, on, new Set(), [{ projectId: "ece555", value: "总评 A−（≥ 90）", why: "他要继续读博" }])).not.toThrow();
   expect(() => validatePlans(answer, on, new Set())).toThrow("MILESTONE_SOURCE_UNKNOWN");
 });
-test("a score line earlier in a chain may not stand above the chain's final one (a 7.0 mock before a 6.5 exam)", () => {
+// A 7.0 mock before a 6.5 exam (2026-10-30) is the architect's to avoid (2026-11-22): whether two lines measure the same thing — a
+// quiz average and a midterm share a unit but not a scale — was a course exemption in code, which only knew courses.
+test("a score line earlier in a chain above the final one is left to the architect", () => {
   const score = (value: number) => ({ successCriteria: [{ statement: `总分达到 ${value}`, evidenceOf: "outcome",
     measure: { kind: "threshold", unit: "分", comparator: "gte", value, bareLine: value - 0.5 } }] });
   const scored = (mock: number, exam: number) => [chain()[0]!,
     item("雅思全科模拟总分达标", plan({ key: "b", stage: 2, deadline: "2026-10-31", dependsOn: ["a"] }), score(mock)),
     item("雅思考试总分达标", plan({ key: "c", stage: 3, deadline: "2026-12-20", dependsOn: ["b"] }), score(exam))];
-  refused(scored(7, 6.5), "MILESTONE_THRESHOLD_REGRESSES");
-  expect(() => validateMilestonePlans(scored(6.5, 7), profile, new Set())).not.toThrow();
+  expect(() => validateMilestonePlans(scored(7, 6.5), profile, new Set())).not.toThrow();
 });

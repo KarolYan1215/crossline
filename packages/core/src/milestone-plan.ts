@@ -5,8 +5,6 @@
  * A model writing "完成第一阶段" for every line is the failure this exists to refuse. Every rule below checks
  * something that can be checked in code, so a generic answer is sent back instead of reaching the person.
  */
-import { isCourse } from "./profile-gaps";
-import { isPreparationOnlyCriterion } from "./work-owner";
 export type MilestonePlan = {
   /** Local to one answer, so `dependsOn` can point at a sibling before either has a real id. */
   key: string;
@@ -69,17 +67,12 @@ export const MILESTONE_PLAN_SCHEMA = {
   required: ["key", "stage", "deadline", "baseline", "target", "stakeholders", "sourceFactIds", "dependsOn", "outcome", "derivation", "outputs", "inputs"]
 } as const;
 
-/**
- * A title that describes keeping something going, or a mood, is not an event that either happened by the deadline or did not.
- * 「ECE 555 课程学习保持可完成状态」 passed every other check and says nothing anyone could verify on the day.
+/*
+ * Judged by the architect, not here (2026-11-22): a title or target that is a state rather than an event (「保持可完成状态」), a milestone
+ * whose every criterion is material being ready, and a score line earlier in a chain standing above the chain's final one. They were
+ * Chinese word lists and a course exemption (`isCourse`), so an English answer or a line that is not a course was judged by another
+ * grammar; the rules are in the crossline-milestone-architect Skill. What stays here is structure: dates, chains, sources, measures, margins.
  */
-const VAGUE_TITLE = /保持.*状态|可完成状态|稳定推进|[继持]续推进|维持|做好|跟上进度|不掉队/;
-/**
- * The same in a target, where a number is the way out: 「保持每周 3 条发布」 is a cadence, 「保持良好」 is not. Only the person's own
- * keeping-up verbs: 「继续」 and 「持续」 were here too and refused 「获得外部试用者继续使用的证据」 — a concrete event in which
- * someone *else* continues — three times running. A guard that blocks correct work is worse than the vagueness it was written for.
- */
-const VAGUE_TARGET = /保持|维持/;
 const GENERIC_TITLE = /第一个可验收|当前最该推进|起步里程碑|-starter$/;
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const day = (value: string) => Date.parse(`${value}T00:00:00Z`);
@@ -150,22 +143,18 @@ export function validateMilestonePlans(milestones: Proposed[], profile: ProfileF
     if (day(plan.deadline) < day(profile.today) || day(plan.deadline) > horizon) refuse("MILESTONE_DEADLINE_OUT_OF_RANGE", `${label} 的截止日期 ${plan.deadline} 不在今天之后的 18 个月内。`);
     if (plan.target.trim().length < 8) refuse("MILESTONE_TARGET_REQUIRED", `${label} 需要写清楚「做到什么算完成」。`);
     if (plan.baseline.trim().length < 2) refuse("MILESTONE_BASELINE_REQUIRED", `${label} 需要写出现在的起点（没开始也要写「尚未开始」）。`);
-    if (VAGUE_TITLE.test(item.title) || (VAGUE_TARGET.test(plan.target) && !/\d/.test(plan.target))) {
-      refuse("MILESTONE_NOT_CONCRETE", `${label} 写的是一种状态，不是一件到期那天能核对的事。改成会发生的事件：一场考试拿到什么、一份东西交出去、一个人给出了什么答复。课程就用大纲里的具体日期（小测、作业、期中、项目提交、期末）。`);
-    }
     // 「完成」 is not a number. A milestone has to be checkable on its deadline, which means at least one criterion that is not a
-    // judgement call, and for anything that is graded — an exam, a quiz, homework, a project mark — an actual score line. A real run
-    // came back with 「ECE 555 期末考试完成并被课程方记录」: it was an event, and it had no target at all.
+    // judgement call. Which milestones are scored and need a score line is the architect's judgement.
     const kinds = item.successCriteria.map((criterion) => criterion.measure?.kind);
     if (!kinds.some((kind) => kind === "count" || kind === "threshold" || kind === "artifact")) {
       refuse("MILESTONE_NOT_MEASURABLE", `${label} 的达成标准全是「判断」型。至少要有一条能用数字或「某个产出物存在」直接核对的标准（count / threshold / artifact）。`);
     }
     // Every number is worked back from the result the person wants, and says how much room was left. 「≥ 85」 with nothing behind it is a
     // guess that looks like a standard; the derivation is what the person can check, and the margin is what absorbs a bad day.
-    if (plan.outcome.trim().length < 4) refuse("MILESTONE_OUTCOME_UNSTATED", `${label} 没有写 plan.outcome：这些数字是为了哪个最终结果（比如「ECE 555 总评 A」）。先有结果，再倒推数字。`);
+    if (plan.outcome.trim().length < 4) refuse("MILESTONE_OUTCOME_UNSTATED", `${label} 没有写 plan.outcome：这些数字是为了哪个最终结果。先有结果，再倒推数字。`);
     const thresholds = item.successCriteria.flatMap((criterion) => criterion.measure?.kind === "threshold" ? [criterion.measure] : []);
     if (thresholds.length && (plan.derivation.trim().length < 20 || !/\d/.test(plan.derivation))) {
-      refuse("MILESTONE_DERIVATION_MISSING", `${label} 有分数线却没有倒推过程。plan.derivation 要写出从「${plan.outcome.trim().slice(0, 40)}」到这条线的算式：占比、其他部分预计拿多少、这一项因此至少要多少（bareLine），再说明留了多少余量。`);
+      refuse("MILESTONE_DERIVATION_MISSING", `${label} 有数值线却没有倒推过程。plan.derivation 要写出从「${plan.outcome.trim().slice(0, 40)}」到这条线的算式：这一项因此至少要多少（bareLine），再说明留了多少余量。`);
     }
     for (const measure of thresholds) {
       const problem = thresholdProblem(measure);
@@ -183,11 +172,6 @@ export function validateMilestonePlans(milestones: Proposed[], profile: ProfileF
     // criteria are all outputs passes on a productive afternoon while the goal stands still.
     if (!item.successCriteria.some((criterion) => criterion.evidenceOf === "outcome")) {
       refuse("MILESTONE_OUTCOME_REQUIRED", `${label} 的验收标准里至少要有一条 evidenceOf=outcome（世界发生了变化，而不只是产出了东西）。`);
-    }
-    // Material being ready is the assistant's preparation, not a result (docs/work-split.md §3): a milestone made only of it gives the
-    // person nothing of their own to do towards it, and its tasks come out as collecting and filing.
-    if (item.successCriteria.length && item.successCriteria.every((criterion) => isPreparationOnlyCriterion(criterion))) {
-      refuse("MILESTONE_PREP_ONLY", `${label} 的标准全是「资料已就绪」类（汇集、整理、清单、样本包）。准备由助手做，不单独成为里程碑：把它并入一个有本人产出的里程碑（本人练习、写出、做出、交出或拿到结果），在那个里程碑的标准里写本人的结果。`);
     }
     keys.set(plan.key, { ...item, plan });
   }
@@ -225,19 +209,6 @@ export function validateMilestonePlans(milestones: Proposed[], profile: ProfileF
       // Backward planning: a later stage cannot be due before an earlier one it builds on.
       if (later.plan.deadline < earlier.plan.deadline) {
         refuse("MILESTONE_ORDER_INCONSISTENT", `主线「${identityId}」里「${later.title}」（阶段 ${later.plan.stage}）的截止日期早于它前面的「${earlier.title}」。`);
-      }
-    }
-    // The chain's last score line under an earlier one of the same kind (2026-10-30: a 7.0 mock exam before a 6.5 real one). A course's
-    // parts are scored on their own scales (a quiz average and a midterm), so only a chain outside a course is checked.
-    const last = ordered.at(-1);
-    const projectId = last?.projectId ?? "";
-    const facts = projectId ? profile.facts.filter((fact) => fact.projectId === projectId) : [];
-    if (last && !(projectId && isCourse(projectId, facts, profile.dates, profile.undated))) {
-      const lines = (item: Planned) => item.successCriteria.flatMap((criterion) => criterion.measure?.kind === "threshold" && criterion.measure.comparator === "gte"
-        ? [{ unit: criterion.measure.unit, value: criterion.measure.value ?? 0 }] : []);
-      for (const earlier of ordered.slice(0, -1)) for (const before of lines(earlier)) for (const final of lines(last)) {
-        if (before.unit === final.unit && before.value > final.value) refuse("MILESTONE_THRESHOLD_REGRESSES",
-          `「${earlier.title}」要求 ≥ ${before.value}${before.unit}，比这条链最后的「${last.title}」（≥ ${final.value}${final.unit}）还高：中间的线应不高于最终目标，或把最终目标提到本人说的数。`);
       }
     }
   }

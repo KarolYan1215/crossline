@@ -22,10 +22,11 @@ test("a committed task gets a step plan; warnings are recorded, not refused, and
   const store = new CrosslineStore(":memory:");
   seed(store);
   expect(tasksAwaitingStepPlan(store, workspaceId)).toEqual(["wo"]);
-  // A step the archetype does not usually have (the archetype's order and required parts are guidance since 2026-11-20, not warnings).
-  const first = { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "",
+  // A total far below what 40 problems take (the archetype's order, required parts and usual roles are guidance, not warnings: 2026-11-20,
+  // and for roles 2026-11-22).
+  const first = { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 40, unit: "题" }, rationale: "",
     steps: [step("c", "compare"), step("s", "solve", { dependsOn: ["c"] })] };
-  const second = { ...first, steps: [step("s", "solve"), step("c", "check", { dependsOn: ["s"] }), step("u", "submit", { dependsOn: ["c"] })] };
+  const second = { ...first, quantity: { basis: "题目数", amount: 2, unit: "题" }, steps: [step("s", "solve"), step("c", "check", { dependsOn: ["s"] }), step("u", "submit", { dependsOn: ["c"] })] };
   const answers = [JSON.stringify(first), JSON.stringify({ verdict: "redo", notes: "把检查放在解题之后，并加提交" }), JSON.stringify(second)];
   const runtime = scriptedRuntime(["crossline:crossline-step-planner", "crossline:crossline-validation-reviewer"], (prompt) => prompt.includes("validation-review") ? answers[1]! : prompt.includes("把检查放在") ? answers[2]! : answers[0]!);
   const planner = createStepPlanner(store, workspaceId, "C:\\repo", () => runtime.rpc);
@@ -34,7 +35,8 @@ test("a committed task gets a step plan; warnings are recorded, not refused, and
   expect(store.getStepPlan(workspaceId, "wo")?.steps).toHaveLength(2);
   expect(tasksAwaitingStepPlan(store, workspaceId)).toEqual([]);
   const pending = warningsAwaitingReview(store, workspaceId);
-  expect(pending[0]!.warnings.map((w) => w.code)).toEqual(expect.arrayContaining(["STEP_ROLE_OUTSIDE_ARCHETYPE"]));
+  expect(pending[0]!.warnings.map((w) => w.code)).toEqual(expect.arrayContaining(["STEP_TOTAL_OFF_QUANTITY"]));
+  expect(pending[0]!.warnings.map((w) => w.code)).not.toContain("STEP_ROLE_OUTSIDE_ARCHETYPE");
 
   const review = createWarningReviewer(store, workspaceId, "C:\\repo", () => runtime.rpc, (id, feedback) => planner(id, feedback));
   expect((await review(pending[0]!))?.verdict).toBe("redo");
@@ -60,8 +62,15 @@ test("confirmed homework dates become one default-effective task between release
   const store = new CrosslineStore(":memory:");
   store.saveProject({ id: "ece555", ownerId, workspaceId, identityId: "research", name: "ECE 555", status: "active", summary: "", createdAt: "2026-09-01T00:00:00Z", updatedAt: "2026-09-01T00:00:00Z" });
   store.saveMilestone({ id: "m", ownerId, workspaceId, identityId: "research", projectId: "ece555", title: "ECE 555 期中", status: "approved", version: 1 });
-  const fact = (slot: string, value: string) => store.upsertProfileFact({ workspaceId, identityId: "research", projectId: "ECE 555", slot, value,
-    status: "confirmed", sourceRef: "src-1", sourceQuote: value, updatedAt: "2026-09-01T00:00:00Z" });
+  // The date as read (its `work` label pairs release and due) and the fact adopting it.
+  const fact = (slot: string, value: string) => {
+    const [date, ...title] = value.split(" ");
+    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `dates:${slot}`, type: "dates.extracted", entityId: slot, payload: { dates: [{ id: slot, date,
+      startTime: "", endTime: "", kind: slot.split("_").slice(2).join("_"), title: title.join(" "), project: "ECE 555", sourceRef: "src-1", quote: value, confidence: "high", note: "",
+      work: `作业 ${title[1]}` }] } });
+    store.upsertProfileFact({ workspaceId, identityId: "research", projectId: "ECE 555", slot, value,
+      status: "confirmed", sourceRef: "src-1", sourceQuote: value, updatedAt: "2026-09-01T00:00:00Z" });
+  };
   fact("date_20261012_homework_out", "2026-10-12 作业 3 发布");
   fact("date_20261102_homework_due", "2026-11-02 作业 3 截止");
   fact("date_20260928_homework_due", "2026-09-28 作业 1 截止");

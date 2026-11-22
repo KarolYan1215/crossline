@@ -1,7 +1,7 @@
 import "server-only";
 import { formatInTimeZone } from "date-fns-tz";
 import type { AccessContext, AvailabilityWindow, FrozenBlock } from "@crossline/core";
-import { applyMerges, CALENDAR_LINES, activityCategoryLabel, calendarLineOf, currentFiling, isRestEvent, onPersonsBoard, itemProjectResolver, inferWorkState, stepCategory, suggestAvailability, type ActivitySegment, type CalendarLines, type WorkState } from "@crossline/core";
+import { applyMerges, CALENDAR_LINES, dateKindOf, activityCategoryLabel, calendarLineOf, currentFiling, isRestEvent, onPersonsBoard, itemProjectResolver, inferWorkState, stepCategory, suggestAvailability, type ActivitySegment, type CalendarLines, type WorkState } from "@crossline/core";
 import { isAutoHandoff, isPaused, listAgentTasks, readCategories } from "@crossline/db";
 import {
   ACTIVITY_DETAIL_CONSENT, calendarMarks, COMMIT_GRACE_MINUTES, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, readFrozen, toZonedInstant
@@ -94,8 +94,9 @@ export function currentWorkState(ctx: AccessContext, plan: Awaited<ReturnType<ty
   return { ...state, label };
 }
 
-const DATE_KIND_LABEL: Record<string, string> = { class: "上课", quiz: "小测", homework_out: "作业发布", homework_due: "作业截止", exam: "考试",
-  project_due: "项目截止", deadline: "截止", meeting: "会议", other: "其他" };
+/** A date fact's kind as a word (`dateKindOf`: old course-shaped kinds read as their general kind). */
+const DATE_KIND_LABEL: Record<string, string> = { session: "场次", assessment: "考核", release: "下发", due: "截止交付", deadline: "截止",
+  meeting: "会议", other: "其他" };
 
 /**
  * Why a work block keeps its time (`schedule.frozen`), whether the person accepted an overlap and whether the lock came from their
@@ -206,7 +207,8 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
         // The fact's own project, or — when the interview could not tell which course — the project its source file has since been filed under.
         const resolved = projectOfItem({ project: fact.projectId, sourceRef: fact.sourceRef });
         const project = projects.find((item) => item.id === fact.projectId || item.name === fact.projectId || item.name === resolved);
-        const kind = t(DATE_KIND_LABEL[/^date_\d{8}_(\w+)$/.exec(fact.slot)?.[1] ?? ""] ?? "日期");
+        const slotKind = /^date_\d{8}_(\w+)$/.exec(fact.slot)?.[1];
+        const kind = t(slotKind ? DATE_KIND_LABEL[dateKindOf(slotKind)] ?? "日期" : "日期");
         return { id: `fact:${fact.identityId}:${fact.projectId}:${fact.slot}`, day: fact.value.slice(0, 10),
           title: project && !fact.value.slice(11).includes(project.name) ? `${project.name} · ${fact.value.slice(11)}` : fact.value.slice(11), identityId: fact.identityId,
           detail: fact.sourceQuote ? t("{{kind}} · 原文「{{quote}}」", { kind, quote: fact.sourceQuote.slice(0, 80) }) : kind };

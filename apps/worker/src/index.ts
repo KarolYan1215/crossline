@@ -74,7 +74,7 @@ import { createRemoteBrowsers } from "./remote-browser";
 import { localeOf, tOfWorkspace } from "./locale";
 import { createGoalSplitter, linesAwaitingCandidateSplit, linesAwaitingSplit } from "./goal-splitter";
 import { createMilestoneRiskReviewer, milestonesAwaitingRiskReview } from "./milestone-risk-review";
-import { fileSourceDocuments } from "./source-filing";
+import { createFileProjectReader, fileSourceDocuments } from "./source-filing";
 import { createPortraitWriter, PORTRAIT_GAP_AT, PORTRAIT_REWRITE_MARKER, portraitRewriteDue } from "./portrait-writer";
 import { createPortraitIllustrator } from "./portrait-illustrator";
 import { materializeDatePairs, releaseWaits, settleHomeworkNeeds } from "./date-pairs";
@@ -929,6 +929,8 @@ async function intakeTick(workspace: { id: string }, checkedAt: string): Promise
     const filed = fileSourceDocuments(analysisStore, workspace.id);
     if (filed.length) console.info(JSON.stringify({ type: "source.project_inferred", checkedAt, workspaceId: workspace.id, filed }));
   } catch { /* housekeeping */ }
+  // What no name written out settles goes to the folder classifier once per file before anyone is asked (2026-11-22).
+  void fileProjectPass(workspace.id).catch(() => undefined);
   // Calendar reality is pulled every tick. It never rewrites an approved plan — a change there becomes
   // a new draft whose diffs are conflicts for the person to look at.
   {
@@ -1372,6 +1374,18 @@ async function digestPass(workspaceId: string): Promise<void> {
  * picks the latest. Intake work, so it runs while the quota allows intake; a pass already running takes the next file on its next call.
  */
 const versioning = new Set<string>();
+const filingProjects = new Set<string>();
+async function fileProjectPass(workspaceId: string): Promise<void> {
+  if (filingProjects.has(workspaceId) || paused(workspaceId, "intake") || !codexSupervisor) return;
+  if (!spendAllows(await spendFor(workspaceId), "intake")) return;
+  filingProjects.add(workspaceId);
+  try {
+    enterUsageWorkspace(workspaceId);
+    const outcome = await createFileProjectReader(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))().catch(() => undefined);
+    if (outcome && "filed" in outcome && outcome.filed) console.info(JSON.stringify({ type: "source.project_inferred", workspaceId, by: "model", filed: outcome.filed }));
+  } finally { filingProjects.delete(workspaceId); }
+}
+
 async function versionPass(workspaceId: string): Promise<void> {
   if (versioning.has(workspaceId) || paused(workspaceId, "intake") || !codexSupervisor) return;
   if (!spendAllows(await spendFor(workspaceId), "intake")) return;

@@ -4998,6 +4998,7 @@ export * from "./artifacts";
 export * from "./portrait";
 export * from "./skills";
 export * from "./overdue";
+export * from "./adopted-dates";
 export * from "./due-date";
 export * from "./locale";
 export * from "./invites";

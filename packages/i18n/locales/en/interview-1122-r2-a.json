@@ -1,0 +1,11 @@
+{
+  "场次": "Session",
+  "考核": "Assessment",
+  "下发": "Handed out",
+  "截止交付": "Due",
+  "完成 {{course}} {{work}}": "Finish {{course}} {{work}}",
+  "{{course}} {{work}} 发布": "{{course}} {{work}} released",
+  "日期已确认": "Dates confirmed",
+  "提交的文件或提交确认截图": "The submitted file or a screenshot of the submission confirmation",
+  "以提交为准": "Counts once it is submitted"
+}

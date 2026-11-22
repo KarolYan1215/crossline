@@ -1,11 +1,11 @@
 ---
 name: crossline-folder-classifier
-description: Decide which of the person's Crossline lines each folder they authorized serves — one, several or none — from the folder's name, its file names and the openings of a few files; and screen a folder the person picked for upload, keeping the files worth reading by name, format, size and date.
+description: Decide which of the person's Crossline lines each folder they authorized serves — one, several or none — from the folder's name, its file names and the openings of a few files; and screen a folder the person picked for upload, keeping the files worth reading by name, format, size and date; and file a read file under the one known project it belongs to, or none.
 ---
 
 # Crossline Folder Classifier
 
-Two jobs on the person's folders, told apart by `version`.
+Three jobs on the person's folders and files, told apart by `version`.
 
 ## Filing folders under lines (`crossline.folder-lines.v1`)
 
@@ -44,6 +44,24 @@ Return raw JSON only: `{keep: [index, …], why}`, most useful first, at most `l
 - Leave out what says little about them: installers' readmes, licence texts, auto-generated logs and exports of tools, templates never filled in, many near-identical copies (keep the newest-looking one), bulk downloads of other people's documents with no sign the person worked on them.
 - When more qualify than `limit`, prefer recent files and the person's own documents over downloaded ones.
 - `why`: one short clause on what was kept and what was left out.
+
+## Filing files under projects (`crossline.file-projects.v1`)
+
+Files whose own name or opening did not name exactly one known project written out. Code files a file by itself only when its name or the opening of its text contains one project's name or id; everything looser is yours: a code written another way, an abbreviation, a file that names a project and a part of it, a file of the project that never names it. A file you file lends its dates and its text to that project's tasks; a file you leave unfiled is asked about on 待确认 if dates were read from it.
+
+Accept `{version: "crossline.file-projects.v1", projects, files}`: `projects` (`{id, name, lineId, summary}`) and `files` (`{id, name, opening}`: the file name and its first few hundred characters).
+
+Return raw JSON only: `{files: [{id, projectId, why}]}`, one entry per file, `id` copied exactly.
+
+- `projectId`: the one project the file plainly belongs to, by what its own words say. When it names a project and a part of that project (a course and its final project, a product and one launch), the general file — a syllabus, a schedule, an overview — belongs to the whole, the part's own brief to the part.
+- `projectId: ""` when the file ties to none, or to several equally (notes comparing two courses, a weekly plan across projects). Never guess to avoid an empty answer: a wrong project hands that project's tasks dates and material that are not theirs.
+- `why`: one short clause naming what in the file decided it.
+
+| File | `projectId` | `why` |
+|---|---|---|
+| 「RBT610-Fall2026-Syllabus.pdf」 against 「RBT 610 Robot Perception」 and 「RBT 610 期末项目」 | the course | 「课程大纲属于课程本身」 |
+| 「Q3 pitch v2.pptx」, opening 「Acme seed round」 | Acme | 「开头写明 Acme 融资」 |
+| 「weekly plan.md」 naming three projects | "" | 「同时涉及三个项目」 |
 
 ## Language
 

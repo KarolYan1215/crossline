@@ -142,7 +142,7 @@ test("a date that names its project by name is filed under that project and its 
   expect(fact()).toBeUndefined();
 });
 
-test("a course's weekly classes end with its final exam, whichever was adopted first (W-243)", () => {
+test("a project's weekly sessions end with the date the reading marked as closing them, whichever was adopted first (W-243)", () => {
   const at = "2026-10-01T00:00:00Z";
   store.saveProject({ id: "ece548", ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId, identityId: "research", name: "ECE 548",
     status: "active", summary: "", createdAt: at, updatedAt: at });
@@ -153,8 +153,13 @@ test("a course's weekly classes end with its final exam, whichever was adopted f
   decideDateBatch(TEST_CTX, "classes", ["c"]);
   const last = () => planBlocks().filter((block) => block.id.startsWith("import:classes:c:")).map((block) => block.day!).sort().at(-1);
   expect(last()! > "2027-01-01").toBe(true);
-  batch("final", { dates: [{ id: "f", date: "2026-12-15", startTime: "", endTime: "", kind: "exam", title: "ECE 548 期末考试", project: "ECE 548",
-    sourceRef: "reply-9", quote: "期末 12 月 15 日", confidence: "high", note: "" }] });
+  // A date read before `endsSeries` existed cuts nothing short, whatever its title says (2026-11-22: the 「期末|final」 match is gone).
+  batch("old", { dates: [{ id: "o", date: "2026-12-01", startTime: "", endTime: "", kind: "exam", title: "ECE 548 期末考试", project: "ECE 548",
+    sourceRef: "reply-8", quote: "期末 12 月 1 日", confidence: "high", note: "" }] });
+  decideDateBatch(TEST_CTX, "old", ["o"]);
+  expect(last()! > "2027-01-01").toBe(true);
+  batch("final", { dates: [{ id: "f", date: "2026-12-15", startTime: "", endTime: "", kind: "assessment", title: "ECE 548 期末考试", project: "ECE 548",
+    sourceRef: "reply-9", quote: "期末 12 月 15 日", confidence: "high", note: "", work: "", endsSeries: true }] });
   decideDateBatch(TEST_CTX, "final", ["f"]);
   expect(last()).toBe("2026-12-15");
   // Classes adopted after the final, named by the project's id, end with it too.
