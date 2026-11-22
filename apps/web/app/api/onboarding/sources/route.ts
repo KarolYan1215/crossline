@@ -26,7 +26,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, code: "PROJECT_NOT_FOUND" }, { status: 404 });
   }
 
+  // Each file stands on its own: what could not be taken is listed in `refused` beside what was (2026-11-22).
   const uploaded = await uploadSources(ctx, await formFiles(form), projectId || undefined);
-  if (!uploaded.ok) return NextResponse.json({ ok: false, code: uploaded.code, message: uploaded.message }, { status: 400 });
-  return NextResponse.json({ ok: true, documents: uploaded.documents, ...(uploaded.deferred ? { deferred: true } : {}) });
+  if (!uploaded.ok) return NextResponse.json({ ok: false, code: uploaded.code, message: uploaded.message, refused: uploaded.refused }, { status: 400 });
+  return NextResponse.json({ ok: true, documents: uploaded.documents, refused: uploaded.refused, ...(uploaded.deferred ? { deferred: true } : {}) });
 }

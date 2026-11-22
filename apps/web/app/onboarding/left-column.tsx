@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { lineAttributes } from "@crossline/core";
 import { AttributePicker, type AttributeOption } from "../ui/attribute-picker";
 import { CalendarSubscriptions } from "../connectors/calendar-subscriptions";
 import { ImportCard } from "../connectors/import-card";
 import { SourceFolders } from "../connectors/source-folders";
 import { FolderPicker } from "./folder-picker";
+import type { PickedFolder } from "./upload-queue";
 import { FactList } from "./profile-panel";
 import { QuestionCard } from "./question-card";
 import { useT } from "../locale-context";
@@ -23,9 +24,12 @@ async function post(path: string, body: Record<string, unknown>): Promise<Respon
   return fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => undefined);
 }
 
-export function LeftColumn({ state, busy, accept, onUpload, onChanged, heldQuestions, answers, onAnswer }: {
+export function LeftColumn({ state, busy, accept, onUpload, onFolders, uploadNote, onChanged, heldQuestions, answers, onAnswer }: {
   state: OnboardingState; busy: boolean; accept: string;
-  onUpload: (files: FileList | File[]) => void; onChanged: () => void;
+  /** Files and folders go up at any time, a turn running or not (2026-11-22): neither waits for the other. */
+  onUpload: (files: FileList | File[]) => void; onFolders: (folders: PickedFolder[]) => void;
+  /** What the last upload came to (going up, kept, left out and why), shown under the buttons. */
+  uploadNote: string; onChanged: () => void;
   /** Fact questions waiting while the round is a deep one; answered here, sent with the next reply. */
   heldQuestions: Question[]; answers: Record<string, Answer>; onAnswer: (id: string, answer: Answer) => void;
 }) {
@@ -42,11 +46,22 @@ export function LeftColumn({ state, busy, accept, onUpload, onChanged, heldQuest
   // Files from an authorized folder are summed up in its own card.
   const uploads = state.documents.filter((doc) => !doc.fromFolder);
   const confirmed = facts.filter((fact) => fact.status === "confirmed").length;
+  // Deleting asks nothing (2026-11-22): the file goes at once and the notice offers 「撤销」 for a while (the server keeps the copy ten minutes).
+  const [removed, setRemoved] = useState<{ id: string; name: string } | { failed: string } | undefined>();
+  useEffect(() => {
+    if (!removed) return;
+    const timer = setTimeout(() => setRemoved(undefined), 60_000);
+    return () => clearTimeout(timer);
+  }, [removed]);
   const remove = async (doc: DocumentRow) => {
-    if (!window.confirm(t("删除「{{name}}」？访谈和计划不再读取这份文件。", { name: doc.fileName }))) return;
     const response = await fetch(`/api/source-documents/${encodeURIComponent(doc.id)}`, { method: "DELETE" }).catch(() => undefined);
+    setRemoved(response?.ok ? { id: doc.id, name: doc.fileName } : { failed: t("没有删除，请重试。") });
     if (response?.ok) onChanged();
-    else window.alert(t("没有删除，请重试。"));
+  };
+  const undo = async (id: string) => {
+    const response = await fetch("/api/onboarding/sources/restore", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id }) }).catch(() => undefined);
+    setRemoved(response?.ok ? undefined : { failed: t("撤销没有成功：文件已经清理。") });
+    onChanged();
   };
   // The long-term goals are a start item adopted here, not answered in the conversation; while any line has none they lead the column,
   // since below the calendar card nobody scrolled to them while the right column listed them as missing (W-8).
@@ -63,11 +78,15 @@ export function LeftColumn({ state, busy, accept, onUpload, onChanged, heldQuest
     <section className="ob-card" aria-label={t("材料与日历")}>
       <h3>{t("材料与日历")}</h3>
       <label className="ob-drop">
-        <input type="file" multiple accept={accept} hidden disabled={busy} onChange={(event) => { if (event.target.files) onUpload(event.target.files); event.target.value = ""; }} />
-        <b>{busy ? t("处理中…") : t("添加文件或录音")}</b>
-        <small>{t("简历、课表、课程大纲、项目说明；也可以直接拖进页面")}</small>
+        <input type="file" multiple accept={accept} hidden onChange={(event) => { if (event.target.files) onUpload([...event.target.files]); event.target.value = ""; }} />
+        <b>{t("添加文件或录音")}</b>
+        <small>{t("简历、计划、笔记、与 AI 的对话导出；可多选，也可以把文件或文件夹拖进页面")}</small>
       </label>
-      <FolderPicker busy={busy} onUpload={onUpload} />
+      <FolderPicker onFolders={onFolders} />
+      {uploadNote && <p className="ob-muted" role="status">{uploadNote}</p>}
+      {removed && <p className="ob-muted" role="status">{"failed" in removed ? removed.failed : <>
+        {t("已删除「{{name}}」。", { name: removed.name })}
+        <button type="button" className="ob-btn ob-quiet" onClick={() => void undo(removed.id)}>{t("撤销")}</button></>}</p>}
       {uploads.length > 0 && <ul className="ob-doclist">{uploads.map((doc) => <li key={doc.id} data-status={doc.extractionStatus}>
         <span>{doc.fileName}</span><small>{t(DOC_STATUS[doc.extractionStatus])}{doc.projectId ? ` · ${state.projects.find((project) => project.id === doc.projectId)?.name ?? ""}` : ""}</small>
         <button type="button" className="ob-doc-remove" disabled={busy} onClick={() => void remove(doc)} aria-label={t("删除 {{name}}", { name: doc.fileName })}>{t("删除")}</button>

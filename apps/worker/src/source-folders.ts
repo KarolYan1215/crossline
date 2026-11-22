@@ -1,11 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { open, readdir, readFile, stat } from "node:fs/promises";
+import { lstat, open, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   FOLDER_MAX_ENTRIES, FOLDER_MAX_FILES, RECORDING_SETTLE_MS, SOURCE_FOLDERS_SETTING, cleanFolderNames, cleanFolderRules, credentialName, credentialText, excludedByRules, folderFileAction, folderGroup, folderLabel,
-  folderPathProblem, readSourceFolders, sensitiveName, sensitiveText, skipFolderDirectory, sourceFolderIndexSetting, sourceKindFor,
+  folderPathProblem, readSourceFolders, redactSecrets, sensitiveName, sensitiveText, skipFolderDirectory, sourceFolderIndexSetting, sourceKindFor,
   type FolderIndexEntry, type SourceFolder, type SourceKind, tFor, type Locale
 } from "@crossline/core";
 import type { CrosslineStore, StoredSourceDocument } from "@crossline/db";
@@ -30,8 +30,6 @@ export type ScannedFile = {
   relative: string; size: number; mtimeMs: number; action: ReturnType<typeof folderFileAction>;
   /** Why it looks like a private paper; not read unless the person includes it. */
   sensitive?: string;
-  /** Same content as this other file, which is the one read. */
-  duplicateOf?: string;
   /** Past the cap: one of the least recently changed files. */
   capped?: true;
 };
@@ -39,7 +37,6 @@ export type FolderScan = {
   files: ScannedFile[]; read: number; nameOnly: number; bytes: number; skippedDirectories: number;
   /** Readable files past the cap, not read. */
   over: number;
-  duplicates: number;
   /** The walk stopped at `FOLDER_MAX_ENTRIES`. */
   truncated: boolean;
   /** Credentials found, never read and never offered back. */
@@ -53,13 +50,14 @@ const READ_PER_PASS = 40;
 const slash = (relative: string) => relative.replace(/\\/g, "/");
 const included = (relative: string, rules: Rules) => (rules.include ?? []).some((item) => item.toLowerCase() === slash(relative).toLowerCase());
 /** Read in full (`read`) or recorded by name (`name_only`), as opposed to left out. */
-const kept = (file: ScannedFile) => !file.sensitive && !file.duplicateOf && !file.capped;
+const kept = (file: ScannedFile) => !file.sensitive && !file.capped;
 
 /**
  * Walks a folder without following links (a junction can loop or lead anywhere), skipping what `skipFolderDirectory` names and what the
- * person excluded, then marks suspected private papers, second copies and what lies past the cap. Only files of the same size are hashed.
+ * person excluded, then marks suspected private papers and what lies past the cap. Copies of one content are not judged here: identical
+ * bytes become one stored row when read, and versions of one document are the model's call after reading (source-versions.ts) — the old
+ * rule that kept the copy with the shortest name is gone (2026-11-22).
  */
-// ponytail: same-size files are hashed on every scan; keep their hash in the index if a folder of many equal-size files gets slow.
 export async function scanFolder(root: string, rules: Rules = {}, options: { peekText?: boolean; audio?: boolean; locale?: Locale } = {}): Promise<FolderScan> {
   const audio = { audio: Boolean(options.audio), locale: options.locale };
   const files: ScannedFile[] = [];
@@ -101,26 +99,12 @@ export async function scanFolder(root: string, rules: Rules = {}, options: { pee
     const hit = sensitiveText(head);
     if (hit) file.sensitive = contains(hit, options.locale);
   }
-  const readable = files.filter((file) => file.action.action === "read" && !file.sensitive);
-  const bySize = new Map<number, ScannedFile[]>();
-  for (const file of readable) if (file.size > 0) bySize.set(file.size, [...(bySize.get(file.size) ?? []), file]);
-  for (const same of bySize.values()) {
-    if (same.length < 2) continue;
-    const byHash = new Map<string, ScannedFile>();
-    // The shortest name is the one read: 「开题报告.doc」 rather than 「开题报告 (2).doc」.
-    for (const file of same.sort((a, b) => a.relative.length - b.relative.length || a.relative.localeCompare(b.relative))) {
-      const hash = await readFile(path.join(root, file.relative)).then((bytes) => createHash("sha256").update(bytes).digest("hex")).catch(() => undefined);
-      if (!hash) continue;
-      const first = byHash.get(hash);
-      if (first) file.duplicateOf = first.relative; else byHash.set(hash, file);
-    }
-  }
-  const unique = readable.filter((file) => !file.duplicateOf).sort((a, b) => b.mtimeMs - a.mtimeMs);
-  for (const file of unique.slice(FOLDER_MAX_FILES)) file.capped = true;
-  const toRead = unique.slice(0, FOLDER_MAX_FILES);
+  const readable = files.filter((file) => file.action.action === "read" && !file.sensitive).sort((a, b) => b.mtimeMs - a.mtimeMs);
+  for (const file of readable.slice(FOLDER_MAX_FILES)) file.capped = true;
+  const toRead = readable.slice(0, FOLDER_MAX_FILES);
   return { files, read: toRead.length, nameOnly: files.filter((file) => file.action.action === "name_only" && !file.sensitive).length,
-    bytes: toRead.reduce((sum, file) => sum + file.size, 0), skippedDirectories, over: Math.max(0, unique.length - FOLDER_MAX_FILES),
-    duplicates: readable.length - unique.length, truncated, credentials };
+    bytes: toRead.reduce((sum, file) => sum + file.size, 0), skippedDirectories, over: Math.max(0, readable.length - FOLDER_MAX_FILES),
+    truncated, credentials };
 }
 
 /** The opening of a text file, for the ID check (PDF and Word are checked when they are read). */
@@ -141,8 +125,13 @@ const readIndex = (store: CrosslineStore, workspaceId: string, id: string): Reco
 export type FolderDeps = {
   dataDir: string;
   home: string;
-  /** Reads a file's text (the worker's own `extractText`), before anything is kept, so a file whose text holds an ID is never stored. */
-  readText: (bytes: Uint8Array, kind: StoredSourceDocument["kind"], locale?: Locale) => Promise<{ status: StoredSourceDocument["extractionStatus"]; text: string; note?: string }>;
+  /**
+   * Reads a file's text (the worker's own `readSourceText`: an AI conversation export keeps only what the person said), before anything is
+   * kept, so a file whose text holds an ID is never stored.
+   */
+  readText: (bytes: Uint8Array, kind: StoredSourceDocument["kind"], locale?: Locale, fileName?: string) => Promise<{ status: StoredSourceDocument["extractionStatus"]; text: string; note?: string }>;
+  /** This computer's own folders (the machine owner, not the hosted server or a linked device): listed, and read when the interview asks. */
+  onDemand?: boolean;
   /** 录音自动转写 is on: recordings are queued for transcription (`recordings.ts`) instead of being left alone. */
   audio?: boolean;
   now?: () => number;
@@ -170,7 +159,7 @@ export function personNames(store: CrosslineStore, workspaceId: string, given: u
 /** Files listed per group in the preview; the rest are counted. */
 const LISTED_PER_GROUP = 300;
 export type PreviewGroup = { name: string; files: number; nameOnly: number; bytes: number;
-  list: Array<{ relative: string; size: number; nameOnly?: true; duplicates?: number }>; more: number };
+  list: Array<{ relative: string; size: number; nameOnly?: true }>; more: number };
 
 /**
  * What authorizing a folder would read, before anything is read: grouped by top-level subfolder so the person can leave out a group or a
@@ -180,11 +169,9 @@ export async function previewFolder(raw: string, deps: FolderDeps, names: string
   const checked = await checkedPath(raw, deps, locale);
   if (!checked.ok) return { state: "blocked" as const, code: "FOLDER_REFUSED", message: checked.message };
   const scan = await scanFolder(checked.path, { names }, { peekText: true, ...(locale ? { locale } : {}) });
-  const copies = new Map<string, number>();
-  for (const file of scan.files) if (file.duplicateOf) copies.set(file.duplicateOf, (copies.get(file.duplicateOf) ?? 0) + 1);
   const groups = new Map<string, PreviewGroup & { all: ScannedFile[] }>();
   for (const file of scan.files) {
-    if (file.sensitive || file.duplicateOf) continue;
+    if (file.sensitive) continue;
     const name = folderGroup(file.relative);
     const group = groups.get(name) ?? { name, files: 0, nameOnly: 0, bytes: 0, list: [], more: 0, all: [] };
     if (file.action.action === "read") { group.files += 1; group.bytes += file.size; } else group.nameOnly += 1;
@@ -194,11 +181,11 @@ export async function previewFolder(raw: string, deps: FolderDeps, names: string
   const sensitive = scan.files.filter((file) => file.sensitive).map((file) => ({ relative: slash(file.relative), reason: file.sensitive!, size: file.size,
     ...(file.action.action === "name_only" ? { nameOnly: true as const } : {}) }));
   return { state: "preview" as const, path: checked.path, label: folderLabel(checked.path), files: scan.read, nameOnly: scan.nameOnly, bytes: scan.bytes,
-    skippedDirectories: scan.skippedDirectories, over: scan.over, duplicates: scan.duplicates, truncated: scan.truncated, limit: FOLDER_MAX_FILES,
+    skippedDirectories: scan.skippedDirectories, over: scan.over, truncated: scan.truncated, limit: FOLDER_MAX_FILES,
     groups: [...groups.values()].sort((a, b) => b.files - a.files || a.name.localeCompare(b.name)).map(({ all, ...group }) => {
       const recent = all.sort((a, b) => b.mtimeMs - a.mtimeMs);
       return { ...group, more: Math.max(0, recent.length - LISTED_PER_GROUP), list: recent.slice(0, LISTED_PER_GROUP).map((file) => ({ relative: slash(file.relative), size: file.size,
-        ...(file.action.action === "name_only" ? { nameOnly: true as const } : {}), ...(copies.get(file.relative) ? { duplicates: copies.get(file.relative)! } : {}) })) };
+        ...(file.action.action === "name_only" ? { nameOnly: true as const } : {}) })) };
     }),
     sensitive: sensitive.slice(0, LISTED_PER_GROUP), sensitiveCount: sensitive.length,
     credentials: scan.credentials.slice(0, LISTED_PER_GROUP), credentialCount: scan.credentials.length };
@@ -325,57 +312,20 @@ export async function syncFolder(store: CrosslineStore, workspaceId: string, fol
     const known = index[file.relative];
     return !known || known.size !== file.size || known.mtimeMs !== file.mtimeMs || Boolean(known.sensitive && !known.hard && included(file.relative, rules));
   });
-  const owner = ownerOf(store, workspaceId);
-  const root = path.resolve(deps.dataDir, "sources");
-  const bySha = new Map(store.listSourceDocuments(workspaceId).map((doc) => [doc.sha256, doc]));
-  const createdHere = new Set(Object.values(index).filter((entry) => entry.created).map((entry) => entry.documentId));
+  // On the person's own computer an authorized folder is not imported (D3, 2026-11-22): what was there when it was authorized is only
+  // listed, and the interview opens a file when it needs it (`readFolderFile`). What the person writes there afterwards is read as before —
+  // it is new work, which the deliverable check compares with their tasks — and so is anything already read that changed.
+  const authorizedAt = Date.parse(saved.addedAt);
+  const listOnly = (file: ScannedFile) => Boolean(deps.onDemand) && !index[file.relative]?.documentId && !(Number.isFinite(authorizedAt) && file.mtimeMs >= authorizedAt);
+  for (const file of changed.filter(listOnly)) index[file.relative] = { size: file.size, mtimeMs: file.mtimeMs, documentId: "", listed: true };
+  const toRead = changed.filter((file) => !listOnly(file));
+  const reading = readingContext(store, workspaceId, index);
   let done = 0;
-  for (const file of changed.slice(0, READ_PER_PASS)) {
-    const full = path.join(folder.path, file.relative);
-    const fileName = `${folder.label}/${slash(file.relative)}`.slice(-200);
-    let doc: StoredSourceDocument | undefined;
-    let created = false;
-    let flagged: string | undefined;
-    if (file.action.action === "read") {
-      let bytes: Buffer;
-      try { bytes = readFileSync(full); } catch { continue; }
-      const sha256 = createHash("sha256").update(bytes).digest("hex");
-      doc = bySha.get(sha256);
-      if (doc) created = createdHere.has(doc.id);
-      else {
-        const result = await deps.readText(new Uint8Array(bytes), file.action.kind, locale).catch(() => ({ status: "failed" as const, text: "", note: t("解析失败。") }));
-        // A key in its text: never kept, and no tick in the page brings it back.
-        const key = credentialText(result.text);
-        if (key) { index[file.relative] = { size: file.size, mtimeMs: file.mtimeMs, documentId: "", sensitive: contains(key, locale), hard: true }; done += 1; continue; }
-        const hit = sensitiveText(result.text);
-        // Its text holds an ID or an account number: nothing is kept, and the card lists it as left out — unless the person ticked it back.
-        if (hit && !included(file.relative, rules)) { index[file.relative] = { size: file.size, mtimeMs: file.mtimeMs, documentId: "", sensitive: contains(hit, locale) }; done += 1; continue; }
-        if (hit) flagged = contains(hit, locale);
-        const target = path.resolve(root, `${sha256}.${EXTENSION[file.action.kind]}`);
-        mkdirSync(root, { recursive: true });
-        writeFileSync(target, bytes);
-        const id = randomUUID();
-        doc = store.saveSourceDocument({ id, ownerId: owner, workspaceId, kind: file.action.kind, fileName,
-          mediaType: file.action.kind === "pdf" ? "application/pdf" : file.action.kind === "docx" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "text/plain",
-          sha256, uri: pathToFileURL(target).href, extractedText: result.text, extractionStatus: result.status,
-          ...(result.note ? { extractionNote: result.note } : {}), createdAt: new Date().toISOString() });
-        created = doc.id === id;
-        bySha.set(sha256, doc);
-      }
-    } else if (file.action.action === "name_only") {
-      // Nothing is copied: the name, size and time are all that is kept, keyed so the same file seen again is the same row.
-      const sha256 = createHash("sha256").update(`name-only:${full}:${file.size}:${file.mtimeMs}`).digest("hex");
-      const id = randomUUID();
-      doc = store.saveSourceDocument({ id, ownerId: owner, workspaceId, kind: sourceKindFor(file.relative, "") ?? "text", fileName,
-        mediaType: "application/octet-stream", sha256, uri: pathToFileURL(full).href, extractedText: "", extractionStatus: "unsupported",
-        extractionNote: file.action.reason, createdAt: new Date().toISOString() });
-      created = doc.id === id;
-    }
-    if (doc) {
-      index[file.relative] = { size: file.size, mtimeMs: file.mtimeMs, documentId: doc.id, ...(created ? { created: true } : {}), ...(flagged ? { flagged } : {}) };
-      if (created) createdHere.add(doc.id);
-      done += 1;
-    }
+  for (const file of toRead.slice(0, READ_PER_PASS)) {
+    const entry = await importFolderFile(store, workspaceId, folder, file, rules, deps, reading);
+    if (!entry) continue;
+    index[file.relative] = entry;
+    done += 1;
   }
   store.setSetting(workspaceId, sourceFolderIndexSetting(folder.id), JSON.stringify(index));
   const autoExcluded = [
@@ -384,11 +334,75 @@ export async function syncFolder(store: CrosslineStore, workspaceId: string, fol
     ...scan.files.filter((file) => file.sensitive).map((file) => ({ relative: slash(file.relative), reason: file.sensitive! })),
     ...Object.entries(index).filter(([, entry]) => entry.sensitive && !entry.hard).map(([relative, entry]) => ({ relative: slash(relative), reason: entry.sensitive! }))
   ].slice(0, 300);
-  const { lastError: _cleared, ...rest } = list(store, workspaceId).find((item) => item.id === folder.id) ?? folder;
+  const { lastError: _cleared, onDemand: _mode, imported: _count, ...rest } = list(store, workspaceId).find((item) => item.id === folder.id) ?? folder;
+  // Copies of one content are one stored row: the entries beyond the first that point at a document already pointed at.
+  const documents = Object.values(index).map((entry) => entry.documentId).filter(Boolean);
+  const imported = new Set(documents).size;
   save(store, workspaceId, list(store, workspaceId).map((item) => item.id === folder.id
     ? { ...rest, lastScanAt: new Date().toISOString(), files: scan.read, nameOnly: scan.nameOnly, bytes: scan.bytes, capped: scan.over > 0 || scan.truncated,
-      over: scan.over, duplicates: scan.duplicates, autoExcluded } : item));
-  return { read: done, waiting: Math.max(0, changed.length - done), removed };
+      over: scan.over, duplicates: documents.length - imported, autoExcluded, ...(deps.onDemand ? { onDemand: true as const, imported } : {}) } : item));
+  return { read: done, waiting: Math.max(0, toRead.length - done), removed };
+}
+
+type ReadingContext = { owner: string; bySha: Map<string, StoredSourceDocument>; createdHere: Set<string> };
+const readingContext = (store: CrosslineStore, workspaceId: string, index: Record<string, FolderIndexEntry>): ReadingContext => ({
+  owner: ownerOf(store, workspaceId), bySha: new Map(store.listSourceDocuments(workspaceId).map((doc) => [doc.sha256, doc])),
+  createdHere: new Set(Object.values(index).filter((entry) => entry.created).map((entry) => entry.documentId)) });
+
+/**
+ * Reads one file of a folder into `sources` and answers its new index entry (undefined when it could not be read from disk). The checks run
+ * before anything is kept: a key in the text is never kept and no tick brings it back; a text holding an ID or an account number is left
+ * out unless the person ticked it back; keys anywhere else in a kept text are cut out. A file whose bytes are already stored becomes that row.
+ */
+async function importFolderFile(store: CrosslineStore, workspaceId: string, folder: SourceFolder, file: Pick<ScannedFile, "relative" | "size" | "mtimeMs" | "action">,
+  rules: Rules, deps: FolderDeps, reading: ReadingContext): Promise<FolderIndexEntry | undefined> {
+  const locale = localeOf(store, workspaceId);
+  const t = tFor(locale);
+  const full = path.join(folder.path, file.relative);
+  const fileName = `${folder.label}/${slash(file.relative)}`.slice(-200);
+  const base = { size: file.size, mtimeMs: file.mtimeMs };
+  let doc: StoredSourceDocument | undefined;
+  let created = false;
+  let flagged: string | undefined;
+  if (file.action.action === "read") {
+    let bytes: Buffer;
+    try { bytes = readFileSync(full); } catch { return undefined; }
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    doc = reading.bySha.get(sha256);
+    if (doc) created = reading.createdHere.has(doc.id);
+    else {
+      const result = await deps.readText(new Uint8Array(bytes), file.action.kind, locale, file.relative).catch(() => ({ status: "failed" as const, text: "", note: t("解析失败。") }));
+      // A key in its text: never kept, and no tick in the page brings it back.
+      const key = credentialText(result.text);
+      if (key) return { ...base, documentId: "", sensitive: contains(key, locale), hard: true };
+      const hit = sensitiveText(result.text);
+      // Its text holds an ID or an account number: nothing is kept, and the card lists it as left out — unless the person ticked it back.
+      if (hit && !included(file.relative, rules)) return { ...base, documentId: "", sensitive: contains(hit, locale) };
+      if (hit) flagged = contains(hit, locale);
+      const root = path.resolve(deps.dataDir, "sources");
+      const target = path.resolve(root, `${sha256}.${EXTENSION[file.action.kind]}`);
+      mkdirSync(root, { recursive: true });
+      writeFileSync(target, bytes);
+      const id = randomUUID();
+      doc = store.saveSourceDocument({ id, ownerId: reading.owner, workspaceId, kind: file.action.kind, fileName,
+        mediaType: file.action.kind === "pdf" ? "application/pdf" : file.action.kind === "docx" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "text/plain",
+        sha256, uri: pathToFileURL(target).href, extractedText: redactSecrets(result.text).text, extractionStatus: result.status,
+        ...(result.note ? { extractionNote: result.note } : {}), createdAt: new Date().toISOString() });
+      created = doc.id === id;
+      reading.bySha.set(sha256, doc);
+    }
+  } else if (file.action.action === "name_only") {
+    // Nothing is copied: the name, size and time are all that is kept, keyed so the same file seen again is the same row.
+    const sha256 = createHash("sha256").update(`name-only:${full}:${file.size}:${file.mtimeMs}`).digest("hex");
+    const id = randomUUID();
+    doc = store.saveSourceDocument({ id, ownerId: reading.owner, workspaceId, kind: sourceKindFor(file.relative, "") ?? "text", fileName,
+      mediaType: "application/octet-stream", sha256, uri: pathToFileURL(full).href, extractedText: "", extractionStatus: "unsupported",
+      extractionNote: file.action.reason, createdAt: new Date().toISOString() });
+    created = doc.id === id;
+  }
+  if (!doc) return undefined;
+  if (created) reading.createdHere.add(doc.id);
+  return { ...base, documentId: doc.id, ...(created ? { created: true } : {}), ...(flagged ? { flagged } : {}) };
 }
 
 /** Every folder of a workspace, once (the tick's pass). */
@@ -403,4 +417,127 @@ export function folderDocuments(store: CrosslineStore, workspaceId: string): Map
   const byDocument = new Map<string, SourceFolder>();
   for (const folder of list(store, workspaceId)) for (const entry of Object.values(readIndex(store, workspaceId, folder.id))) if (entry.documentId) byDocument.set(entry.documentId, folder);
   return byDocument;
+}
+
+/**
+ * Who may open folder files on demand: set once by the worker (the machine owner's workspace, never on the hosted server). The interview's
+ * read tools (onboarding-read-tools.ts) ask here, so a guest's interview and a hosted one never get the tools.
+ */
+let folderReading: { deps: FolderDeps; allowed: (workspaceId: string) => boolean } | undefined;
+export function configureFolderReading(value: typeof folderReading): void { folderReading = value; }
+export function folderReaderFor(workspaceId: string): FolderDeps | undefined {
+  return folderReading?.allowed(workspaceId) ? { ...folderReading.deps, onDemand: true } : undefined;
+}
+
+/** A relative path the model gave, made safe: forward slashes, no drive, no leading slash, no `..`; undefined when it is none of these. */
+function cleanRelative(raw: string): string | undefined {
+  const relative = raw.replace(/\\/g, "/").replace(/^\.\/+/, "").replace(/\/+$/, "");
+  if (/^[A-Za-z]:/.test(relative) || relative.startsWith("/") || relative.split("/").some((part) => part === "..")) return undefined;
+  return relative;
+}
+
+/** The real path of `relative` inside the folder, or undefined when it leads outside it (`..`, a link, a junction). */
+async function inside(folder: SourceFolder, relative: string): Promise<string | undefined> {
+  const root = await realpath(folder.path).catch(() => undefined);
+  if (!root) return undefined;
+  const full = path.resolve(root, relative);
+  const real = await realpath(full).catch(() => undefined);
+  if (!real) return undefined;
+  const within = path.relative(root, real);
+  if (within.startsWith("..") || path.isAbsolute(within)) return undefined;
+  if ((await lstat(full).catch(() => undefined))?.isSymbolicLink()) return undefined;
+  return real;
+}
+
+/** Why a file of a folder is not shown to a model, or undefined: the same rules the walk obeys (D15: a folder's private papers are skipped). */
+function leftOutOf(folder: SourceFolder, relative: string, names: string[], locale: Locale | undefined): string | undefined {
+  const t = tFor(locale);
+  if (relative.split("/").slice(0, -1).some(skipFolderDirectory) || excludedByRules(relative, folder.exclude)) return t("这个位置已被排除。");
+  if (credentialName(relative)) return t("这是密钥或密码类文件，不读。");
+  if (!included(relative, folder) && sensitiveName(relative, names)) return t("像是私人证件或单据，授权文件夹里的这类文件不读。");
+  return undefined;
+}
+
+export type FolderListing = { ok: true; text: string } | { ok: false; message: string };
+
+/**
+ * One directory of an authorized folder, for the interview to browse (read-only): subfolders, then readable files with size, date and,
+ * when one was already read, its document id. Credentials, private papers and what the person excluded are not listed.
+ */
+export async function listFolderEntries(store: CrosslineStore, workspaceId: string, folderId: string | undefined, rawDir = "", page = 0): Promise<FolderListing> {
+  const locale = localeOf(store, workspaceId);
+  const t = tFor(locale);
+  const folders = list(store, workspaceId);
+  if (!folderId) {
+    return { ok: true, text: folders.length ? folders.map((folder) => t("{{id}} · {{label}} · {{files}} 个可读文件，已读入 {{imported}} 个",
+      { id: folder.id, label: folder.label, files: folder.files ?? 0, imported: folder.imported ?? 0 })).join("\n") : t("还没有授权的文件夹。") };
+  }
+  const folder = folders.find((item) => item.id === folderId);
+  if (!folder) return { ok: false, message: t("没有 id 为「{{id}}」的授权文件夹。", { id: folderId }) };
+  const dir = cleanRelative(rawDir);
+  if (dir === undefined) return { ok: false, message: t("只能浏览授权文件夹以内的位置。") };
+  const real = dir ? await inside(folder, dir) : await realpath(folder.path).catch(() => undefined);
+  if (!real) return { ok: false, message: t("只能浏览授权文件夹以内的位置。") };
+  let listing;
+  try { listing = await readdir(real, { withFileTypes: true }); } catch { return { ok: false, message: t("读不到这个位置。") }; }
+  const names = personNames(store, workspaceId, folder.names);
+  const index = readIndex(store, workspaceId, folder.id);
+  const documentOf = new Map(Object.entries(index).map(([relative, entry]) => [slash(relative), entry.documentId]));
+  const lines: string[] = [];
+  for (const entry of listing.sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))) {
+    const relative = dir ? `${dir}/${entry.name}` : entry.name;
+    if (entry.isSymbolicLink() || leftOutOf(folder, entry.isDirectory() ? `${relative}/x` : relative, names, locale)) continue;
+    if (entry.isDirectory()) { if (!skipFolderDirectory(entry.name)) lines.push(`${relative}/`); continue; }
+    if (!entry.isFile() || folderFileAction(relative, 0).action === "skip") continue;
+    const info = await stat(path.join(real, entry.name)).catch(() => undefined);
+    if (!info) continue;
+    const read = documentOf.get(relative);
+    lines.push(`${relative} · ${Math.max(1, Math.round(info.size / 1024))} KB · ${new Date(info.mtimeMs).toISOString().slice(0, 10)}${read ? ` · ${t("已读入")}` : ""}`);
+  }
+  const pages = Math.max(1, Math.ceil(lines.length / LISTED_PER_PAGE));
+  const at = Math.min(Math.max(0, page), pages - 1);
+  const shown = lines.slice(at * LISTED_PER_PAGE, (at + 1) * LISTED_PER_PAGE);
+  return { ok: true, text: shown.length ? `${t("《{{folder}}》/{{dir}}，第 {{page}}/{{pages}} 页：", { folder: folder.label, dir, page: at + 1, pages })}\n${shown.join("\n")}`
+    : t("《{{folder}}》/{{dir}} 里没有可读的文件。", { folder: folder.label, dir }) };
+}
+/** Entries one listing call answers. */
+const LISTED_PER_PAGE = 200;
+
+/**
+ * Opens one file of an authorized folder for the interview (D3): the same checks as the walk — inside the folder only, nothing excluded,
+ * no credential, no private paper — then it is read into `sources` like any folder file (keys refused, IDs leave it out), so later turns,
+ * quotes and planning can cite it. A file already read and unchanged is not read again.
+ */
+export async function readFolderFile(store: CrosslineStore, workspaceId: string, deps: FolderDeps, folderId: string, rawRelative: string):
+  Promise<{ ok: true; doc: StoredSourceDocument } | { ok: false; message: string }> {
+  const locale = localeOf(store, workspaceId);
+  const t = tFor(locale);
+  const folder = list(store, workspaceId).find((item) => item.id === folderId);
+  if (!folder) return { ok: false, message: t("没有 id 为「{{id}}」的授权文件夹。", { id: folderId }) };
+  const relative = cleanRelative(rawRelative);
+  const real = relative ? await inside(folder, relative) : undefined;
+  if (!relative || !real) return { ok: false, message: t("只能读授权文件夹以内的文件。") };
+  const names = personNames(store, workspaceId, folder.names);
+  const refused = leftOutOf(folder, relative, names, locale);
+  if (refused) return { ok: false, message: refused };
+  const info = await stat(real).catch(() => undefined);
+  if (!info?.isFile()) return { ok: false, message: t("找不到这个文件。") };
+  const action = folderFileAction(relative, info.size, { locale });
+  if (action.action !== "read") return { ok: false, message: action.action === "name_only" ? action.reason : t("这种文件读不了正文。") };
+  const index = readIndex(store, workspaceId, folder.id);
+  const key = Object.keys(index).find((item) => slash(item) === relative) ?? relative.split("/").join(path.sep);
+  const known = index[key];
+  const mtimeMs = Math.round(info.mtimeMs);
+  const stored = known?.documentId && known.size === info.size && known.mtimeMs === mtimeMs ? store.listSourceDocuments(workspaceId).find((doc) => doc.id === known.documentId) : undefined;
+  if (stored) return { ok: true, doc: stored };
+  if (known?.hard || (known?.sensitive && known.size === info.size && known.mtimeMs === mtimeMs)) return { ok: false, message: t("这个文件的内容含{{what}}，不读。", { what: known.sensitive ?? "" }) };
+  const entry = await importFolderFile(store, workspaceId, folder, { relative: key, size: info.size, mtimeMs, action }, folder, deps, readingContext(store, workspaceId, index));
+  if (!entry) return { ok: false, message: t("读不到这个文件。") };
+  // Read the index again: a pass may have written it while the file was being read.
+  const now = readIndex(store, workspaceId, folder.id);
+  now[key] = entry;
+  store.setSetting(workspaceId, sourceFolderIndexSetting(folder.id), JSON.stringify(now));
+  if (!entry.documentId) return { ok: false, message: t("这个文件的内容含{{what}}，不读。", { what: entry.sensitive ?? "" }) };
+  const doc = store.listSourceDocuments(workspaceId).find((item) => item.id === entry.documentId);
+  return doc ? { ok: true, doc } : { ok: false, message: t("读不到这个文件。") };
 }

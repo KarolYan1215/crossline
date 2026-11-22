@@ -8,10 +8,10 @@ import { SOURCE_FOLDER_GUIDE } from "../../lib/setup-guides";
 /** Windows' 「复制为路径」 wraps the path in quotes; the worker takes the path as typed, so they are taken off here. */
 export const withoutQuotes = (value: string) => value.replace(/^\s*["'“”]|["'“”]\s*$/g, "");
 
-type PreviewFile = { relative: string; size: number; nameOnly?: true; duplicates?: number };
+type PreviewFile = { relative: string; size: number; nameOnly?: true };
 type PreviewGroup = { name: string; files: number; nameOnly: number; bytes: number; list: PreviewFile[]; more: number };
 type Preview = { state: "preview"; path: string; label: string; files: number; nameOnly: number; bytes: number; skippedDirectories: number;
-  over: number; duplicates: number; truncated: boolean; limit: number; groups: PreviewGroup[];
+  over: number; truncated: boolean; limit: number; groups: PreviewGroup[];
   sensitive: Array<PreviewFile & { reason: string }>; sensitiveCount: number; credentials: Array<{ relative: string; reason: string }>; credentialCount: number };
 const megabytes = (bytes: number) => bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
 const toggled = (set: Set<string>, item: string) => { const next = new Set(set); if (next.has(item)) next.delete(item); else next.add(item); return next; };
@@ -145,7 +145,7 @@ export function SourceFolders({ onChanged }: { onChanged?: () => void }) {
         <span className="st-row-label">{folder.label}
           <small>{folder.lastError ? folder.lastError
             : !folder.lastScanAt ? t("正在读取…")
-            : [t("已读 {{count}} 个文件", { count: folder.files ?? 0 }), ...(folder.nameOnly ? [t("{{count}} 个只记文件名", { count: folder.nameOnly })] : []),
+            : [folder.onDemand ? t("{{count}} 个可读文件，访谈时按需读取，已读入 {{imported}} 个", { count: folder.files ?? 0, imported: folder.imported ?? 0 }) : t("已读 {{count}} 个文件", { count: folder.files ?? 0 }), ...(folder.nameOnly ? [t("{{count}} 个只记文件名", { count: folder.nameOnly })] : []),
               ...(folder.duplicates ? [t("{{count}} 个相同副本只读一份", { count: folder.duplicates })] : [])].join(en ? ", " : "，")
               + (folder.over ? (en ? "; " : "；") + t("超出上限，最早改动的 {{count}} 个未读", { count: folder.over }) : "")}</small>
         </span>
@@ -177,7 +177,7 @@ export function SourceFolders({ onChanged }: { onChanged?: () => void }) {
       <FolderRules folder={folder} busy={busy} onSave={(exclude, include) => void saveRules(folder, exclude, include)} />
     </div>)}
     <form className="source-folders-form" onSubmit={(event) => { event.preventDefault(); if (draft.trim()) void look(); }}>
-      <input value={draft} onChange={(event) => { setDraft(withoutQuotes(event.target.value)); setPreview(undefined); }} placeholder={t("文件夹完整路径，如 D:\\课程资料")}
+      <input value={draft} onChange={(event) => { setDraft(withoutQuotes(event.target.value)); setPreview(undefined); }} placeholder={t("文件夹完整路径，如 D:\\资料")}
         aria-label={t("文件夹路径")} disabled={busy} spellCheck={false} />
       <button type="submit" className="ob-btn secondary-button" disabled={busy || !draft.trim()}>{busy && !preview ? t("查看中…") : t("查看")}</button>
     </form>
@@ -185,7 +185,6 @@ export function SourceFolders({ onChanged }: { onChanged?: () => void }) {
     {preview && chosen && <div className="source-folders-preview" role="status">
       <p><Bold text={[[t("将读取 <b>{{count}}</b> 个文件（共 {{size}}）", { count: Math.min(chosen.files, preview.limit), size: megabytes(chosen.bytes) }),
         ...(preview.nameOnly ? [t("另有 {{count}} 个只记文件名", { count: preview.nameOnly })] : [])].join(en ? ", " : "，"),
-        ...(preview.duplicates ? [t("{{count}} 个相同副本只读一份", { count: preview.duplicates })] : []),
         ...(preview.skippedDirectories ? [t("跳过 {{count}} 个依赖、缓存或隐藏文件夹", { count: preview.skippedDirectories })] : []),
         ...(preview.truncated ? [t("文件夹太大，只看了前 20 万项")] : [])].join(en ? "; " : "；") + (en ? "." : "。")} /></p>
       {chosen.over > 0 && <div className="sf-over">
@@ -201,7 +200,7 @@ export function SourceFolders({ onChanged }: { onChanged?: () => void }) {
             {group.list.map((file) => <li key={file.relative}><label className="sf-check">
               <input type="checkbox" checked={!offFiles.has(file.relative)} onChange={() => setOffFiles((set) => toggled(set, file.relative))} />
               <span className="sf-name">{group.name ? file.relative.slice(group.name.length + 1) : file.relative}</span>
-              <small>{file.nameOnly ? t("只记文件名") : megabytes(file.size)}{file.duplicates ? ` · ${t("另有 {{count}} 个相同副本", { count: file.duplicates })}` : ""}</small></label></li>)}
+              <small>{file.nameOnly ? t("只记文件名") : megabytes(file.size)}</small></label></li>)}
             {group.more > 0 && <li><small>{t("另有 {{count}} 个较早的文件未列出", { count: group.more })}</small></li>}
           </ul></details>}
         </li>)}

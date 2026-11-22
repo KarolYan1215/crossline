@@ -469,6 +469,8 @@
   - `lines`、`schedule`、`research`、`profile_sections`。
 - `search_evidence`、`read_sentences`：和整理子代理用的是同一套。
 - `read_file{id, offset}`。
+- `list_folder{folder?, dir?, page?}`、`read_folder_file{folder, path}`（2026-11-22）：本机授权文件夹不再整体导入，只在授权根目录内列目录、读文件；越界和指向外面的链接拒绝，密钥和私人证件单据仍不读；读过的文件此时才入账本。托管版没有这两个工具，文件夹仍先筛后导入。
+- 旧版文件（近似重复里较早的那份）不进访谈，换成「…（旧版摘要）.md」；需要逐字核对时 `read_file` 读原件。
 
 **压缩保底**
 

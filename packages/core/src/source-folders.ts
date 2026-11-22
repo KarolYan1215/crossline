@@ -1,12 +1,14 @@
 import { isSecretPath } from "./agent-guard";
-import { sourceKindFor, type SourceKind } from "./source-kinds";
+import { JSON_SOURCE, sourceKindFor, type SourceKind } from "./source-kinds";
+import { chatHistoryName } from "./chat-history";
 import { tFor, type Locale } from "./i18n";
 
 /**
- * Folders the person authorized (docs/onboarding-v3.md 「文件夹授权」, decided 2026-10-14): every readable file under them is read —
- * recursively, skipping version control, dependencies, caches and anything that looks like a secret — and kept up to date in the
- * background, so later planning and material preparation start from what the person already has. A file over 50 MB is recorded by
- * name only. A folder belongs to one or more lines, proposed by a model from its name and contents and changeable by the person.
+ * Folders the person authorized (docs/onboarding-v3.md 「文件夹授权」, decided 2026-10-14): walked recursively, skipping version control,
+ * dependencies, caches and anything that looks like a secret, and kept up to date in the background. On the person's own computer an
+ * authorized folder is not imported (D3, 2026-11-22): its readable files are listed and the interview opens the ones it needs; what is
+ * written there afterwards is read as it arrives. A linked device still reads every file, since its server cannot open them later. A
+ * file over 50 MB is recorded by name only. A folder belongs to one or more lines, proposed by a model and changeable by the person.
  */
 export const SOURCE_FOLDERS_SETTING = "sources.folders";
 /** Per folder, what was read: relative path → size, modification time and the document it became. */
@@ -41,8 +43,14 @@ export type SourceFolder = {
   capped?: boolean;
   /** Readable files beyond `FOLDER_MAX_FILES` (the least recently changed), not read. */
   over?: number;
-  /** Copies whose content equals a file already read here, read once. */
+  /** Copies whose content equals a file already read here, kept as one stored file. */
   duplicates?: number;
+  /**
+   * On the person's own computer the folder is listed, not imported (D3, 2026-11-22): `files` can be read when needed, `imported` of them
+   * have been (opened by the interview, or written there after authorizing).
+   */
+  onDemand?: true;
+  imported?: number;
   lastError?: string;
   /**
    * The person's exclusions, kept with the authorization and obeyed on every scan: relative paths with `/`, a pattern with `*`/`**`, or a
@@ -64,6 +72,8 @@ export type SourceFolder = {
  * included it, so it was kept — and goes again if they take that back.
  */
 export type FolderIndexEntry = { size: number; mtimeMs: number; documentId: string; created?: boolean; sensitive?: string; flagged?: string; hard?: true;
+  /** Seen and readable, not read: an on-demand folder's file nobody has opened yet (`documentId` is empty). */
+  listed?: true;
   /**
    * A recording (docs/phone-recording.md), seen while 录音自动转写 was on: `queued` waits for the one transcription at a time, `done`
    * became the transcript `documentId` names, `silent` held no speech, `failed` says why in `note`. The audio itself is never copied.
@@ -108,6 +118,8 @@ export function folderFileAction(relativePath: string, size: number, options: { 
   if (!name || name.startsWith(".") || name.startsWith("~$") || isSecretPath(relativePath.replace(/\\/g, "/"))) return { action: "skip" };
   if (options.audio && RECORDING_FILE.test(name)) return size > RECORDING_FILE_LIMIT ? { action: "name_only", reason: t("录音超过 500 MB，没有转写") } : { action: "audio" };
   const kind = sourceKindFor(name, "");
+  // JSON is read from a folder only when it is an AI conversation export (chat-history.ts): package.json and settings files are not material.
+  if (JSON_SOURCE.test(name) && !chatHistoryName(relativePath)) return { action: "skip" };
   if (kind === "pdf" || kind === "docx" || kind === "text") {
     return size > FOLDER_FILE_LIMIT ? { action: "name_only", reason: t("超过 50 MB，只记文件名") } : { action: "read", kind };
   }
@@ -248,6 +260,40 @@ export function sensitiveText(text: string): string | undefined {
   return undefined;
 }
 
+/** The mark left where a number was hidden: its kind and last four characters, so the person can still tell which card or account it was. */
+const maskMark = (t: ReturnType<typeof tFor>, kind: string, value: string) => t("［{{kind}}·尾号 {{tail}}］", { kind: t(kind), tail: value.replace(/[\s-]/g, "").slice(-4) });
+/** IBAN mod-97 check (ISO 13616). */
+const ibanValid = (raw: string) => {
+  const iban = raw.replace(/\s/g, "").toUpperCase();
+  const moved = (iban.slice(4) + iban.slice(0, 4)).replace(/[A-Z]/g, (letter) => String(letter.charCodeAt(0) - 55));
+  let rest = 0;
+  for (const digit of moved) rest = (rest * 10 + Number(digit)) % 97;
+  return rest === 1;
+};
+
+/**
+ * A file the person uploaded on purpose is read even when it holds their papers (the owner's decision D15 of 2026-11-22), but the numbers
+ * that identify them are hidden before any model sees the text: a US Social Security number, a valid 18-digit resident ID, a card number
+ * that passes Luhn, a valid IBAN, and the digits written after a label naming an account, a card or a passport. Each kind found is
+ * returned once, in the order found, for the file's note.
+ */
+export function maskPersonalNumbers(text: string, locale?: Locale): { text: string; masked: string[] } {
+  const t = tFor(locale);
+  const masked: string[] = [];
+  const found = (kind: string) => { if (!masked.includes(kind)) masked.push(kind); };
+  const out = text
+    .replace(/(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)/g, (match) => { found("社安号"); return maskMark(t, "社安号", match); })
+    .replace(/(?<![\dA-Za-z])\d{17}[\dXx](?![\dA-Za-z])/g, (match) => chineseIdValid(match) ? (found("身份证号"), maskMark(t, "身份证号", match)) : match)
+    .replace(/(?<![\dA-Za-z])[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,4})?(?![\dA-Za-z])/g, (match) => ibanValid(match) ? (found("账号"), maskMark(t, "账号", match)) : match)
+    .replace(/(?<![\d-])(?:\d{4}[ -]?){3}\d{1,7}(?![\d-])/g, (match) => {
+      const digits = match.replace(/[ -]/g, "");
+      return digits.length >= 13 && digits.length <= 19 && !/^(\d)\1+$/.test(digits) && luhn(digits) ? (found("银行卡号"), maskMark(t, "银行卡号", match)) : match;
+    })
+    .replace(/((?:账号|账户|帐号|帐户|卡号|护照号(?:码)?|证件号(?:码)?|account(?: no\.?| number| #)?|acct\.?(?: no\.?)?|routing(?: no\.?| number)?|passport(?: no\.?| number)?)\s*[:：#]?\s*)([A-Z]{0,2}\d[\d -]{4,22}\d)(?![\d])/gi,
+      (_whole, lead: string, value: string) => { const kind = /护照|passport/i.test(lead) ? "护照号" : "账号"; found(kind); return `${lead}${maskMark(t, kind, value)}`; });
+  return { text: out, masked };
+}
+
 const globSource = (pattern: string) => pattern.split("/").map((part) => part === "**" ? "\u0000"
   : part.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*").replace(/\?/g, "[^/]")).join("/")
   .replace(/\u0000\//g, "(?:.*/)?").replace(/\/?\u0000/g, "(?:/.*)?");
@@ -289,7 +335,7 @@ export const cleanFolderNames = (value: unknown) => [...new Set((Array.isArray(v
 export function folderPathProblem(path: string, options: { home?: string; appData?: string; locale?: Locale } = {}): string | undefined {
   const t = tFor(options.locale);
   const trimmed = path.trim().replace(/[\\/]+$/, "");
-  if (!/^[A-Za-z]:[\\/]|^\//.test(path.trim())) return t("需要完整路径，例如 D:\\课程资料");
+  if (!/^[A-Za-z]:[\\/]|^\//.test(path.trim())) return t("需要完整路径，例如 D:\\资料");
   if (/^[A-Za-z]:$/.test(trimmed) || trimmed === "") return t("不能授权整个磁盘，请选一个具体的文件夹");
   const lower = trimmed.toLowerCase().replace(/\//g, "\\");
   if (options.home && lower === options.home.toLowerCase().replace(/\//g, "\\").replace(/\\+$/, "")) return t("不能授权整个用户文件夹，请选其中一个具体的文件夹");
@@ -309,6 +355,22 @@ export const FOLDER_LINES_SCHEMA = { type: "object", additionalProperties: false
   folders: { type: "array", maxItems: 20, items: { type: "object", additionalProperties: false, required: ["id", "lineIds", "why"], properties: {
     id: { type: "string", minLength: 1, maxLength: 40 }, lineIds: { type: "array", maxItems: 8, items: { type: "string", minLength: 1, maxLength: 80 } },
     why: { type: "string", maxLength: 200 } } } } } } as const;
+
+/**
+ * The model's screening of a folder the person picked in the browser (§四.3.3, folders only: a file given on purpose is always taken). Code
+ * has already left out credentials, private papers, hidden and dependency folders and kinds the app cannot read; the model picks, by name,
+ * format, size and date, the files worth reading for knowing the person and their work, at most `limit`.
+ */
+export type FolderScreenAnswer = { keep: number[]; why: string };
+export const FOLDER_SCREEN_SCHEMA = { type: "object", additionalProperties: false, required: ["keep", "why"], properties: {
+  keep: { type: "array", maxItems: 1000, items: { type: "integer", minimum: 0 } }, why: { type: "string", maxLength: 300 } } } as const;
+/** Only indexes of files that were offered, each once, in the model's order, up to `limit`. */
+export function validateFolderScreen(value: unknown, offered: number, limit: number): FolderScreenAnswer {
+  const answer = value as FolderScreenAnswer | undefined;
+  if (!answer || !Array.isArray(answer.keep)) throw new Error("FOLDER_SCREEN_INVALID");
+  const keep = [...new Set(answer.keep.filter((index) => Number.isInteger(index) && index >= 0 && index < offered))].slice(0, limit);
+  return { keep, why: String(answer.why ?? "").trim().slice(0, 300) };
+}
 
 /** Keeps an answer for each folder asked about, with only lines that exist; an unknown folder or line is dropped, not refused. */
 export function validateFolderLines(value: unknown, folderIds: string[], lineIds: string[]): FolderLinesAnswer {

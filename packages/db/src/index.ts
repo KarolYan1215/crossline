@@ -2373,6 +2373,11 @@ export class CrosslineStore {
     })();
   }
 
+  /** Whether any row in any workspace reads this stored file, so a copy is deleted only once nothing does. */
+  sourceDocumentUriInUse(uri: string): boolean {
+    return Boolean(this.#prepare("SELECT 1 FROM source_documents WHERE uri = ? LIMIT 1").get(uri));
+  }
+
   /**
    * Removes one document row (an authorized folder's file the person excluded or took back). Returns its stored file and whether any
    * row in any workspace still points at it, so the caller deletes the copy only when nothing else reads it.
