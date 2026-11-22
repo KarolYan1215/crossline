@@ -1,7 +1,7 @@
 import "server-only";
 import {
   PRIVACY_LEVELS, PROFILE_CLAIMS_SETTING, PROFILE_CLAIM_STATUS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, REPORT_PRIVACY_SETTING, REPORT_SECTIONS,
-  instrumentClaims, readClaimStatus, readInstrumentAnswers, readPrivacyChoices, reportSections,
+  instrumentClaims, validScore, readClaimStatus, readInstrumentAnswers, readPrivacyChoices, reportSections,
   type AccessContext, type ClaimStatus, type InstrumentId, type PrivacyLevel, type ProfileClaim, type ReportSection, type ReportSectionView
 } from "@crossline/core";
 import { getStore } from "./crossline";
@@ -60,7 +60,7 @@ export function readProfileReportChange(body: unknown): ProfileReportChange | nu
     return { action: "claim_privacy", claimId: value.claimId, level: value.level === null ? null : level(value.level)! };
   if (value.action === "judge" && typeof value.claimId === "string" && (value.status === null || value.status === "confirmed" || value.status === "rejected"))
     return { action: "judge", claimId: value.claimId, status: value.status as ClaimStatus | null };
-  if (value.action === "item" && typeof value.itemId === "string" && (value.score === null || (Number.isInteger(value.score) && Number(value.score) >= 1 && Number(value.score) <= 5)))
+  if (value.action === "item" && typeof value.itemId === "string" && (value.score === null || (Number.isInteger(value.score) && Number(value.score) >= 1 && Number(value.score) <= 6)))
     return { action: "item", itemId: value.itemId, score: value.score as number | null };
   return null;
 }
@@ -89,7 +89,10 @@ export function changeProfileReport(ctx: AccessContext, change: ProfileReportCha
     event(ctx, "profile.claim_judged", { claimId: claim.id, section: claim.section, status: change.status });
     return { ok: true };
   }
-  if (!PROFILE_ITEMS.some((item) => item.id === change.itemId)) return { ok: false, code: "PROFILE_ITEM_UNKNOWN" };
+  const item = PROFILE_ITEMS.find((entry) => entry.id === change.itemId);
+  if (!item) return { ok: false, code: "PROFILE_ITEM_UNKNOWN" };
+  // A TwIVI item takes six points, an IPIP item five (2026-11-22).
+  if (change.score !== null && !validScore(item, change.score)) return { ok: false, code: "PROFILE_ITEM_SCORE" };
   const answers = readInstrumentAnswers(store.getSetting(ws, PROFILE_INSTRUMENTS_SETTING));
   // The person's own correction replaces whatever was recorded, a mapping included: it is set, not merged.
   answers[change.itemId] = change.score === null ? { itemId: change.itemId, by: "skipped", at: new Date().toISOString() }

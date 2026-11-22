@@ -8,13 +8,13 @@ import { VoiceField } from "../ui/voice/voice-input";
 const SLOT_LABEL: Record<string, string> = {
   what: "在做什么", for_whom: "为谁", stage: "阶段", goal: "目标", deadline: "截止", blockers: "卡点",
   collaborators: "合作者", evidence: "进展证据", local_assets: "已有资料", weekly_hours: "每周时间", tools: "工具",
-  no_deadline: "截止", grading: "评分", target_grade: "目标成绩", meetings: "上课时间", meeting_time: "上课时间", meeting_times: "上课时间", priority: "优先级", constraint: "约束",
+  no_deadline: "截止", grading: "评定方式", target_grade: "目标结果", meetings: "固定时间", meeting_time: "固定时间", meeting_times: "固定时间", priority: "优先级", constraint: "约束",
   work_view: "工作观", life_view: "人生观", true_north: "方向", values: "价值观", flow: "心流", energy: "精力", schedule: "作息"
 };
 // About the person (`identityId: "person"`): the keys the interview writes most.
 const PERSON_LABEL: Record<string, string> = {
   name: "称呼", nickname: "称呼", city: "所在城市", location: "所在地", timezone: "时区", age: "年龄", gender: "性别", hairstyle: "发型",
-  clothing_preference: "穿着", appearance: "外形", appearance_skipped: "外形", school: "学校", major: "专业", degree: "学历", education: "教育",
+  clothing_preference: "穿着", appearance: "外形", appearance_skipped: "外形", school: "所在机构", major: "方向", degree: "学历", education: "教育",
   occupation: "职业", job: "工作", role: "角色", company: "公司", advisor: "导师", language: "语言", mbti: "自评类型", strengths: "长处",
   weaknesses: "短板", hobbies: "爱好", family: "家庭", health: "健康", sleep: "睡眠", sleep_window: "睡眠", character: "形象"
 };
@@ -24,7 +24,7 @@ const SLOT_PREFIX: Array<[string, string]> = [["flywheel_", "线间关系"], ["d
 const SLOT_WORDS: Array<[RegExp, string]> = [
   [/(^|_)(experience|history|background|career)(_|$)/, "经历"], [/(^|_)(goal|target|aim|ambition)s?(_|$)/, "目标"],
   [/(^|_)(deadline|due)(_|$)/, "截止"], [/(^|_)(meeting|class|lecture|schedule|routine)s?(_|$)/, "固定日程"],
-  [/(^|_)(grade|grading|score|exam|midterm|final)s?(_|$)/, "成绩与考试"], [/(^|_)(evidence|progress|users?|traction)(_|$)/, "进展"],
+  [/(^|_)(grade|grading|score|exam|midterm|final)s?(_|$)/, "评定与考核"], [/(^|_)(evidence|progress|users?|traction)(_|$)/, "进展"],
   [/(^|_)(skill|strength|ability|abilities)s?(_|$)/, "能力"], [/(^|_)(value|belief|view)s?(_|$)/, "观念"],
   [/(^|_)(energy|flow|sleep|rest)(_|$)/, "精力"], [/(^|_)(hours|time|availability)(_|$)/, "时间"],
   [/(^|_)(constraint|limit|risk|blocker)s?(_|$)/, "约束"], [/(^|_)(tool|software|stack)s?(_|$)/, "工具"],

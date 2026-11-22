@@ -224,7 +224,9 @@ test("before the start standard stands, the model is told what is still owed, an
   expect(dialogue(prompts)[0]).toContain('"startStandard":{"met":false,"missing":[');
 });
 
-test("the start standard is the ledger's items alone: parts not walked yet are not owed, their order is the Skill's (2026-11-22, W-269 retired)", async () => {
+// W-269's minimum per deep part held the start from 2026-11-14; D10 (2026-11-22) lets the person decide when to start, and only a line and
+// a milestone are hard gates (`partsUncovered` returns none).
+test("no deep part of the interview is listed as owed before the start (D10, 2026-11-22)", async () => {
   const { rpc, prompts } = fakeRuntime([turn({ stage: "narrative" })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
   await run({ sessionId: "s", text: "我在读大三" });
@@ -1114,16 +1116,11 @@ test("every weekly arrangement reaches the dialogue each round as its own weekda
   }
 });
 
-test("the cards' start item counts the short set whatever tier an account once chose: the start standard is unchanged by the tiers' removal (W-186)", async () => {
+test("the scale holds no start item (D10, 2026-11-22): a v2 interview with no answers is not held for cards", async () => {
   const { interviewChecklistFor } = await import("@crossline/db");
-  const { cardBank } = await import("@crossline/core");
   const at = "2026-11-03T00:00:00.000Z";
   store.saveOnboardingSession({ id: "s", ownerId: "o", workspaceId, state: "active", coverage: { flow: "v2" }, createdAt: at, updatedAt: at });
-  store.setSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING, JSON.stringify(Object.fromEntries(cardBank("short").map((item) => [item.id, { itemId: item.id, score: 3, by: "tapped", at }]))));
-  const cardsItem = () => interviewChecklistFor(store, workspaceId, [], { unfiledFiles: 0 }).find((item) => item.id === "profile_cards");
-  expect(cardsItem()).toMatchObject({ done: true });
-  store.setSetting(workspaceId, "onboarding.depth", "standard");
-  expect(cardsItem()).toMatchObject({ done: true });
+  expect(interviewChecklistFor(store, workspaceId, [], { unfiledFiles: 0 }).some((item) => item.id === "profile_cards")).toBe(false);
 });
 
 

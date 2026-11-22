@@ -31,6 +31,7 @@ export * from "./wealth";
 export * from "./profile-gaps";
 export * from "./profile-framework";
 export * from "./profile-instruments";
+export * from "./profile-scale";
 export * from "./profile-report";
 export * from "./profile-claims";
 export * from "./agent-guard";

@@ -25,6 +25,7 @@ import { Receipt } from "./receipt";
 import { FinishButton } from "./finish-button";
 import { ResearchPanel } from "./research-panel";
 import { composeAnswers, type Answer, type AssistantTurn, type DocumentRow, type Message, type OnboardingState } from "./onboarding-types";
+import { ScaleStep, scaleNeeded } from "./scale-step";
 
 const ACCEPT = ".pdf,.docx,.txt,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.m4a,.mp3,.wav,.aac,.ogg,.flac";
 
@@ -63,6 +64,8 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   // What was just sent, shown at once: the saved copy only arrives with the next read, after the turn ends.
   const [pendingText, setPendingText] = useState("");
   const [answers, setAnswers] = useState<Record<string, Answer>>({});
+  // The opening answer held while the scale page is up (2026-11-22): sent as the first reply once the scale is done or put off.
+  const [scaleFor, setScaleFor] = useState<OpeningAnswer | null>(null);
   const [cardAnswers, setCardAnswers] = useState<CardAnswers>(NO_CARD_ANSWERS);
   const [over, setOver] = useState(false);
   // What a one-shot card left when it was done (the dates card): shown for about 1.5 s where the card was.
@@ -356,6 +359,8 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
       if (!response?.ok) { setError(t("主线没有保存成功，请重试。")); setBusy(""); return; }
     }
     setBusy("");
+    // The scale comes after the opening's lines and before the first round (2026-11-22, D1): the opening reply waits for it.
+    if (await scaleNeeded()) { setScaleFor(answer); return; }
     await runTurn(openingReply(answer, filesRead, locale));
   };
 
@@ -379,7 +384,8 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
         {t("访谈以开始时的语言继续（{{language}}）。界面切换不影响访谈。", { language: state.interviewLocale === "en" ? "English" : t("中文") })}</p>}
       <div className="ob-thread ob-voice" aria-live="polite">
         {!state.focusLine && <AssessCard />}
-        {opening && <OpeningCard linesKnown={!state.setupLines} knownLines={state.lines.map((line) => line.label)}
+        {opening && scaleFor && <ScaleStep onDone={() => { const answer = scaleFor; setScaleFor(null); void runTurn(openingReply(answer, filesRead, locale)); }} />}
+        {opening && !scaleFor && <OpeningCard linesKnown={!state.setupLines} knownLines={state.lines.map((line) => line.label)}
           busy={busy !== ""} hasMaterials={filesRead} needsConnection={!state.focusLine && connected === false} onStart={(answer) => void start(answer)}
           onAddFiles={(files) => void upload(files)} />}
         {messages.length === 0 && state.focusLine && <div className="ob-turn ob-assistant"><p>{t("「{{line}}」的访谈：现状、长期目标、项目、截止日与已有文件。", { line: state.focusLine.label })}</p></div>}

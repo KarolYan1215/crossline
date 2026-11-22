@@ -702,6 +702,16 @@ Skill 同步改了 `questionLedger`、`lastRound`、`openItems`、`followUp` 和
 
 **观察卡求准（2026-11-17，本人：「优化观察卡生成的 prompt，力求更准」）。** 读了第十七、十八次回放 80 张评过的卡（准 7、部分对 59、不准 14）和「部分对」的附言：本人几乎都认了卡上的事实，改的是卡多走的那一步——本人给过的原因被换成更深的规则、没碰上的情境被说成态度、有例外的事被说成「一直」，还有一张卡塞两三个论断、错一处就只能认一半。按本人的原则给信息和目标，不加闸门：对话 Skill 的观察卡一节加「「准」从哪来」（一张卡一个论断、出卡前拿整场记录核对反例和本人给过的原因、说行为的条件不评人、结论范围和证据一样大，IR-163）；整理 Skill 的推断规则加「`statement` 只说 `basis` 盖得住的范围」（IR-164）。同一天本人又定：访谈阶段不对模型设 token、上下文或别的限制，至少和 Codex 本身一样自由（每月 ¥30 上限不变），所以整理各通道的思考封顶全部撤掉（不止推断通道），画像通道不再等批，访谈的四个 Skill 走 `top` 且不降档，访谈线程留一小时、过 0.75 窗口才压缩（docs/token-economy.md §4）。效果要下一次回放看「准」的占比和花费。
 
+**整理层、量表与开始门槛（2026-11-22，访谈与导入重做 §二.2、§三.2、§三.4，D1/D9/D10/D12/D13）。**
+
+- 整理层是独立线程，不 fork 访谈线程。访谈前没有会话时，材料按 `prep` 会话整理（`PREP_SESSION`），课表、截止这类日程读到就写，不等访谈问到。
+- 要点按二十四个维度（`PERSONAL_DIMENSIONS`，M1–M24，`packages/core/src/profile-points.ts`）归档，字段 `dimension`、`selfReported`（【自报】）、`literature`、`contradicts`。依据是原话、材料句子或文献，点选从不是依据。同一维度有新证据就改写原条，不追加。矛盾两边都留，各有时间。修了 `pointChanges` 的 TAP_LINE（点选行不能当引用）。
+- 写完后用 `thread/inject_items` 把最新要点作为开发者消息送回访谈线程。结果记在 `onboarding.extract.inject`，送不到时访谈用 `read_ledger` 的 `notes` 读。量表分析在 `scale` 一节。
+- 画像各节不再按阶段定稿，只在访谈结束时写一次（`portraitTask` 只在 `complete` 时 finalize）。
+- 量表在访谈前单独一页，接在开场准备之后、第一轮之前（`onboarding-workspace.tsx` 的 `scaleFor`，`ScaleStep`）。做完后 worker 的整理轮次触发量表分析（`runScaleAnalysis`）。访谈里不再出卡。
+- 开始标准只剩「至少一条主线」「至少一个里程碑」（`start_line`、`start_milestone`）。「开始使用」随时可按，核对页列出模型标为还没有依据的维度（`StartSummary.thin`），本人可以回访谈，也可以直接开始。
+- 右栏去掉 `minutesLeft` 和 `START_GROUPS`，画像要点按维度实时显示，不显示条数、置信度、时长。「整理中」用后台的真实状态。
+
 ---
 
 ## 6. 要本人拍板的取舍

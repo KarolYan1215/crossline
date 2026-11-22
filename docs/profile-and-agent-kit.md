@@ -75,6 +75,8 @@
 
 ## 三、卡片与文字折算
 
+> **2026-11-22 起被替代（访谈与导入重做 §二.2，D1）。** 43 题题库和短题组换成 IPIP-NEO-120（Johnson 2014，公有领域）和 TwIVI（Sandy 等 2017），中文是自译，标「译本待校」（`packages/core/src/profile-instruments.ts`）。量表是访谈前单独的一页（`apps/web/app/onboarding/scale-step.tsx`，开头「首先，让我们完成一份量表」，分页，可暂停、可先跳过、回来接着做；答案经 `/api/onboarding/scale` 记进账本 `profile.instruments` 和 `profile.scale`，事件 `profile.scale_changed`）。计分全是代码：反向题、5 个领域、30 个侧面（侧面 4–20 分，领域取侧面均值），百分位按 Kajonius 与 Johnson 2019 的常模用正态近似（1–99），页面写明常模是谁、局限是什么；TwIVI 十种价值按本人自己的均值居中后排序。最后的框是**补充**，不代替点选：没点的题记为跳过，不从文字折算（下面的折算规则只适用于此前的旧答案）。别处做过的测试（16 型等）只作为本人自报记下，系统不贴类型标签。做完后整理 Skill 以「量表分析模式」写一段给本人的分析和待访谈验证的假设（`apps/worker/src/scale-analysis.ts`，`profile.scale.analysis`），不写置信度；访谈用 `read_ledger` 的 `scale` 读它。下面是 2026-10-31 的设计记录。
+
 卡片是对话里的一张小卡：一道题、五个圆点（两端和中间有字）、一个输入框。本人可以点圆点，也可以写一句话，或者什么都不做跳过。
 
 - 写下的话同时是访谈的证据句，抽取层照常引用。

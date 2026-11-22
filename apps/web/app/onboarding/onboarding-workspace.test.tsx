@@ -1,11 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 import { OpeningCard, openingReply } from "./opening-card";
-import { minutesLeft, viewForStage, WeekView } from "./stage-view";
+import { viewForStage, WeekView } from "./stage-view";
 import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY } from "./onboarding-types";
 import { cardReplyLines, ProfileCards } from "./profile-cards";
 import { DiligencePanel } from "./diligence-panel";
-import { cardsFor, readCardAnswers } from "@crossline/core";
+import { PROFILE_ITEMS, readCardAnswers, type ProfileCard } from "@crossline/core";
 
 /** The interview v3 (docs/onboarding-v3.md): the opening card, the stage pictures and the time left. */
 test("the opening is a preparation page: lines, then material (résumé first), then a calendar — no tone, tier or time estimate (2026-11-22)", () => {
@@ -65,42 +65,27 @@ test("the lite edition is asked first, and its domain lines are named with their
   expect(nurse).not.toContain("【有固定日程的事】");
 });
 
-test("each stage brings its own picture, and the time left is said before and after the start standard", () => {
+test("each stage brings its own picture; no time estimate is given (D10, 2026-11-22)", () => {
   // The compass and energy pictures are details of the map's dimensions now (decision 25): those stages bring the map forward.
   expect(["orientation", "lines", "situation", "compass", "energy", "details"].map((stage) => viewForStage(stage, false)))
     .toEqual(["lines", "lines", "week", "map", "map", "projects"]);
   expect(viewForStage("details", true)).toBe("structure");
-  expect(minutesLeft({ readyToStart: false, startMissing: [{ id: "a", label: "", detail: "", owner: "interview" }, { id: "b", label: "", detail: "", owner: "person" }] }, "lines"))
-    .toEqual({ label: "开始使用前约", minutes: 5 });
-  expect(minutesLeft({ readyToStart: true, startMissing: [] }, "compass")).toEqual({ label: "画像访谈还剩约", minutes: 10 });
-  // The profile-first flow: the module's parts come before the start, about ten minutes each, on top of the fact items.
   expect(viewForStage("narrative", false)).toBe("map");
-  expect(minutesLeft({ readyToStart: false, startMissing: [{ id: "profile_cards", label: "", detail: "", owner: "interview" }] }, "narrative", "v2"))
-    .toEqual({ label: "开始使用前约", minutes: 40 });
-  expect(minutesLeft({ readyToStart: false, startMissing: [{ id: "a", label: "", detail: "", owner: "interview" }] }, "lines", "v2"))
-    .toEqual({ label: "开始使用前约", minutes: 3 });
 });
 
-test("going back to an earlier part for one question does not add that part's time again (W-235)", () => {
-  // v2 order: narrative, compass, energy, situation, orientation, lines. The interview had reached 「主线」 (6 of 6), then asked a compass question.
-  const ready = { readyToStart: true, startMissing: [] };
-  expect(minutesLeft(ready, "compass", "v2")).toEqual({ label: "画像访谈还剩约", minutes: 25 });
-  expect(minutesLeft(ready, "compass", "v2", 6)).toEqual({ label: "画像访谈还剩约", minutes: 5 });
-});
-
-test("a card is five dots labelled at both ends and the middle, and what is tapped or written is the line the worker reads back", () => {
-  const [card] = cardsFor("compass", new Set());
-  const html = renderToStaticMarkup(<ProfileCards cards={[card!]} answers={{ taps: {}, words: {} }} disabled={false} onChange={() => {}} />);
-  expect(html.match(/role="radio"/g)).toHaveLength(card!.items.length * 5);
-  expect(html).toContain(card!.items[0]!.anchors[0]);
-  expect(html).toContain(card!.items[0]!.anchors[2]);
-  const [a, b] = card!.items;
-  const lines = cardReplyLines([card!], { taps: { [a!.id]: 5, [b!.id]: 0 }, words: { [card!.id]: "  看场合\n大多不主动 " } });
-  const answers = readCardAnswers(lines.join("\n"), [card!], "2026-10-31T00:00:00.000Z");
+test("a card item has one dot per point, and its box supplements the taps: an untapped item is skipped, never scored from the words", () => {
+  const items = PROFILE_ITEMS.filter((item) => item.instrument === "twivi").slice(0, 2);
+  const card: ProfileCard = { id: "c1", instrument: "twivi", title: "这个人像不像你", stage: "compass", items };
+  const html = renderToStaticMarkup(<ProfileCards cards={[card]} answers={{ taps: {}, words: {} }} disabled={false} onChange={() => {}} />);
+  expect(html.match(/role="radio"/g)).toHaveLength(items.length * 6);
+  expect(html).toContain("不代替点选");
+  const [a, b] = items;
+  const lines = cardReplyLines([card], { taps: { [a!.id]: 5, [b!.id]: 0 }, words: { [card.id]: "  看场合\n大多不主动 " } });
+  const answers = readCardAnswers(lines.join("\n"), [card], "2026-10-31T00:00:00.000Z");
   expect(answers.find((answer) => answer.itemId === a!.id)).toMatchObject({ by: "tapped", score: 5 });
-  expect(answers.find((answer) => answer.itemId === b!.id)).toMatchObject({ by: "pending" });
+  expect(answers.find((answer) => answer.itemId === b!.id)).toMatchObject({ by: "skipped" });
   expect(lines.at(-1)).toMatch(/补充：看场合 大多不主动$/);
-  expect(cardReplyLines([card!], { taps: {}, words: {} })).toEqual([]);
+  expect(cardReplyLines([card], { taps: {}, words: {} })).toEqual([]);
 });
 
 test("the week draws working hours and fixed arrangements, waiting ones dashed, and says where the hours came from", () => {

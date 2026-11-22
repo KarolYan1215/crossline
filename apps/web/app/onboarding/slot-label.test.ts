@@ -6,7 +6,7 @@ test("a fact is labelled by its kind: a known key, a person's key, a prefix, the
   expect(slotLabel("what")).toBe("在做什么");
   expect(slotLabel("city")).toBe("所在城市");
   expect(slotLabel("name")).toBe("称呼");
-  expect(slotLabel("meeting_times")).toBe("上课时间");
+  expect(slotLabel("meeting_times")).toBe("固定时间");
   expect(slotLabel("date_ece548_midterm")).toBe("日期");
   expect(slotLabel("work_experience")).toBe("经历");
   expect(slotLabel("course_goal")).toBe("目标");

@@ -1,7 +1,7 @@
 import "server-only";
 import {
-  AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, INTERVIEW_SETTINGS, START_CONFIRMED_SETTING, readInterviewSettings, resolveAvailability,
-  type AccessContext, type AvailabilityWindow, type DateExtraction, type StoredLineProfile
+  AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, INTERVIEW_SETTINGS, PORTRAIT_DIMENSION_LABEL, START_CONFIRMED_SETTING, readInterviewSettings, resolveAvailability,
+  type AccessContext, type AvailabilityWindow, type DateExtraction, type DimensionId, type StoredLineProfile
 } from "@crossline/core";
 import { extractBacklog, latestFileDates, startConfirmedFor } from "@crossline/db";
 import { getStore } from "./crossline";
@@ -22,6 +22,12 @@ export type StartSummary = {
   fixed: { count: number; items: string[] };
   /** Settings the person stated in the interview, still to apply (`id` is `key|target`). */
   settings: Array<{ id: string; label: string; to: string; quote: string }>;
+  /**
+   * What the portrait is still thin on (D10, 2026-11-22), in the model's own words: the dimensions the interview's inference lane marked
+   * as not yet resting on anything the person said, with its summary of each. Shown when 「开始使用」 is pressed; the person may go on or
+   * start. Nothing is held for it.
+   */
+  thin: Array<{ label: string; summary: string }>;
 };
 
 const ENERGY: Record<AvailabilityWindow["energy"], string> = { high: "精力高", medium: "精力中", low: "精力低" };
@@ -73,7 +79,13 @@ export function startSummary(ctx: AccessContext): StartSummary {
       windows: availability.windows.map((window) => t("{{days}} {{start}}–{{end}}（{{energy}}）", { days: daysText(window.days, locale), start: window.start, end: window.end, energy: t(ENERGY[window.energy]) })) },
     fixed: { count: recurring.length, items: recurring.slice(0, 8).map((item) => t("{{title}}：{{when}}", { title: item.title,
       when: `${daysText(item.weekdays, locale)}${item.startTime ? ` ${item.startTime}${item.endTime ? `–${item.endTime}` : ""}` : ""}` })) },
-    settings: pendingInterviewSettings(ctx).map((item) => ({ id: `${item.key}|${item.target}`, ...settingWords(ctx, item), quote: item.quote }))
+    settings: pendingInterviewSettings(ctx).map((item) => ({ id: `${item.key}|${item.target}`, ...settingWords(ctx, item), quote: item.quote })),
+    thin: (() => {
+      type Model = { dimensions?: Array<{ id: DimensionId; summary?: string; evidenced?: boolean }> } | null;
+      const model = ((): Model => { try { return JSON.parse(store.getSetting(workspaceId, "profile.model") ?? "null") as Model; } catch { return null; } })();
+      return (model?.dimensions ?? []).filter((item) => item.evidenced === false && PORTRAIT_DIMENSION_LABEL[item.id])
+        .map((item) => ({ label: t(PORTRAIT_DIMENSION_LABEL[item.id]), summary: String(item.summary ?? "") }));
+    })()
   };
 }
 

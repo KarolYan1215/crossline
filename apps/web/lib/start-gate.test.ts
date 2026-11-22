@@ -19,7 +19,7 @@ test("未达可开始标准的账号被带回访谈，已有工作也不豁免",
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
   seedOneWorkOrder(store, TEST_CTX.workspaceId);
   expect(() => gateUntilReady(TEST_CTX)).toThrow(expect.objectContaining({ digest: expect.stringContaining("/onboarding") }));
-  expect(startReadiness(TEST_CTX).missing.map((item) => item.id)).toContain("availability");
+  expect(startReadiness(TEST_CTX).missing.map((item) => item.id)).toEqual(["start_milestone"]);
   seedReadyToStart(store, TEST_CTX.workspaceId);
   expect(() => gateUntilReady(TEST_CTX)).not.toThrow();
   expect(startReadiness(TEST_CTX)).toMatchObject({ ready: true, missing: [] });

@@ -24,7 +24,7 @@ const full: ChecklistInput = {
 test("a complete record ticks every item, the portrait included", () => {
   const items = interviewChecklist(full);
   expect(items.filter((item) => !item.done)).toEqual([]);
-  expect(items.map((item) => item.id)).toEqual(["portrait_fields", "portrait_synthesis", "portrait_grounded", "portrait_confirmed", "line_desc:research", "line_goal:research",
+  expect(items.map((item) => item.id)).toEqual(["portrait_fields", "portrait_synthesis", "portrait_grounded", "portrait_confirmed", "start_line", "start_milestone", "line_desc:research", "line_goal:research",
     "hard_schedule:research", "availability", "line_project:research", "near_term:research", "project:ece555", "project_course:ece555", "files_filed"]);
 });
 
@@ -43,9 +43,9 @@ test("what only the person can settle is theirs, and does not count as the inter
   expect(interviewOwnedOpen(items)).toEqual([]);
 });
 
-test("a course needs its grading and its class times, a hard line its fixed schedule; a confirmation lasts only while the portrait is the same", () => {
+test("a graded project needs how it is judged and its fixed times, a hard line its fixed schedule; a confirmation lasts only while the portrait is the same", () => {
   const items = interviewChecklist({ ...full, facts: full.facts.filter((fact) => fact.slot !== "grading"), dates: full.dates.filter((entry) => !entry.recurring) });
-  expect(items.find((item) => item.id === "project_course:ece555")?.detail).toBe("缺：评分占比、上课时间");
+  expect(items.find((item) => item.id === "project_course:ece555")?.detail).toBe("缺：怎么评定、固定时间");
   expect(items.find((item) => item.id === "hard_schedule:research")?.done).toBe(false);
   expect(portraitFingerprint({ portrait: "a b", coreConflict: "c" })).toBe(portraitFingerprint({ portrait: "ab", coreConflict: "c" }));
   expect(portraitFingerprint({ portrait: "a" })).not.toBe(portraitFingerprint({ portrait: "b" }));
@@ -60,27 +60,35 @@ test("what the person could not say is assumed (「假设：」) and settles the
   expect(interviewChecklist(assumed).find((item) => item.id === "portrait_grounded")).toMatchObject({ done: true, detail: "以假设代替：能量与心流" });
 });
 
-test("可开始标准：五条打标，全满足才算；画像不要求", () => {
-  const items = interviewChecklist({ ...full, portraitConfirmed: false, profile: {} });
-  expect(items.filter((item) => item.start).map((item) => item.id))
-    .toEqual(["line_desc:research", "line_goal:research", "hard_schedule:research", "availability", "line_project:research", "near_term:research"]);
+test("可开始标准（D10，2026-11-22）：只剩「至少一条主线」与「至少一个里程碑」；画像、日程、截止都不再挡开始", () => {
+  const items = interviewChecklist({ ...full, portraitConfirmed: false, profile: {}, availability: false, dates: [],
+    facts: full.facts.filter((fact) => fact.slot !== "near_term"), lines: [{ ...full.lines[0]!, goals: [] }] });
+  expect(items.filter((item) => item.start).map((item) => item.id)).toEqual(["start_line", "start_milestone"]);
   expect(readyToStart(items)).toBe(true);
   expect(items.find((item) => item.id === "portrait_fields")?.done).toBe(false);
+  expect(items.find((item) => item.id === "availability")).toMatchObject({ done: false, owner: "interview" });
+  expect(items.find((item) => item.id === "availability")?.start).toBeUndefined();
+  // No line: nothing to schedule on.
+  expect(readyToStart(interviewChecklist({ ...full, lines: [] }))).toBe(false);
 });
 
-test("画像优先的访谈（v2）：卡片题答完（跳过也算）才可开始；早先的访谈没有这一项", () => {
-  const open = interviewChecklist({ ...full, profileCards: { settled: 40, total: 43 } });
-  expect(open.find((item) => item.id === "profile_cards")).toMatchObject({ start: true, done: false, owner: "interview", detail: "还有 3 题未答" });
-  expect(readyToStart(open)).toBe(false);
-  expect(readyToStart(interviewChecklist({ ...full, profileCards: { settled: 43, total: 43 } }))).toBe(true);
-  expect(interviewChecklist(full).some((item) => item.id === "profile_cards")).toBe(false);
+test("a milestone is one on the board, a current project of a line, or a `milestone` fact the person confirmed; a guess is not", () => {
+  const bare = { ...full, projects: [{ id: "research-default", identityId: "research", name: "研究者" }], facts: full.facts.filter((fact) => fact.projectId !== "ece555") };
+  const milestone = (input: ChecklistInput) => interviewChecklist(input).find((item) => item.id === "start_milestone")!;
+  expect(milestone(bare)).toMatchObject({ done: false, start: true });
+  expect(milestone(bare).ask).toBeTruthy();
+  expect(readyToStart(interviewChecklist(bare))).toBe(false);
+  expect(milestone({ ...bare, milestones: 1 }).done).toBe(true);
+  expect(milestone(full).done).toBe(true);
+  const fact = (status: string, sourceRef: string) => ({ identityId: "research", projectId: "", slot: "milestone", status, sourceRef, value: "明年三月投稿" });
+  expect(milestone({ ...bare, facts: [...bare.facts, fact("confirmed", "reply-4")] }).done).toBe(true);
+  expect(milestone({ ...bare, facts: [...bare.facts, fact("inferred", "")] }).done).toBe(false);
 });
 
-test("可开始标准不认「假设：」：硬约束日程与截止只认本人确认或文件", () => {
+test("「假设：」 settles no fixed schedule: only the person's word or a file", () => {
   const assumed = { ...full, dates: full.dates.filter((entry) => !entry.recurring),
     facts: [...full.facts, { identityId: "research", projectId: "", slot: "fixed_schedule", status: "inferred", sourceRef: "", value: "假设：周二四上课" }] };
   expect(interviewChecklist(assumed).find((item) => item.id === "hard_schedule:research")?.done).toBe(false);
-  expect(readyToStart(interviewChecklist(assumed))).toBe(false);
 });
 
 test("本人用汉字说的钟点也算固定日程（「早八点到晚九点」）", () => {
@@ -161,7 +169,7 @@ test("project items read slots by meaning, and a course's part needs no grading 
   const items = interviewChecklist({ ...full, facts, projects: [...full.projects, { id: "ece555-final", identityId: "research", name: "ECE 555 期末项目" }],
     dates: [{ project: "ECE 555", kind: "exam", recurring: false, pending: false, sourceRef: "src-1" }] });
   const course = items.find((item) => item.id === "project_course:ece555")!;
-  expect(course.detail).toBe("缺：上课时间");
+  expect(course.detail).toBe("缺：固定时间");
   expect(items.some((item) => item.id === "project_course:ece555-final")).toBe(false);
   const withSchedule = interviewChecklist({ ...full, facts: [...facts, { identityId: "research", projectId: "ece555", slot: "class_schedule", status: "confirmed", sourceRef: "src-1" }],
     projects: [...full.projects, { id: "ece555-final", identityId: "research", name: "ECE 555 期末项目" }],
@@ -208,27 +216,20 @@ test("做事方法 is its own part: the energy part is not finished until the pe
   }
 });
 
-test("a deep part is owed until a round was in it and its portrait section rests on the person's words (W-269)", () => {
+test("no deep part holds the start any more (D10): the person decides when to start", () => {
   const order = ["narrative", "compass", "energy", "situation", "orientation", "lines"];
-  const items = interviewChecklist(full);
-  // Compass one round, energy two, situation none: situation is owed; orientation and lines never are.
-  expect(partsUncovered({ stageOrder: order, stagesSeen: ["narrative", "compass", "energy", "energy", "orientation", "lines"], items })).toEqual(["situation"]);
-  // A part walked whose section has nothing of the person's is still owed; energy is grounded by its method fact too.
-  const bare = { ...full, facts: full.facts.filter((fact) => fact.slot !== "work_view" && fact.slot !== "flow"), groundedSections: [] };
-  expect(partsUncovered({ stageOrder: order, stagesSeen: order, items: interviewChecklist(bare) })).toEqual(["compass"]);
-  expect(partsUncovered({ stageOrder: order, stagesSeen: order, items })).toEqual([]);
+  expect(partsUncovered({ stageOrder: order, stagesSeen: [], items: interviewChecklist({ ...full, groundedSections: [], facts: [] }) })).toEqual([]);
 });
 
-test("near-term work is a start item (2026-11-20): a thing named, a 「没有」, or a skipped line settles it; an account already started is not held", () => {
+test("near-term work is still asked (2026-11-20): a thing named, a 「没有」, or a skipped line settles it; an account already started is not asked", () => {
   const without = { ...full, facts: full.facts.filter((fact) => fact.slot !== "near_term") };
-  const open = interviewChecklist(without).find((item) => item.id === "near_term:research");
-  expect(open).toMatchObject({ done: false, start: true, owner: "interview" });
-  expect(open?.ask).toContain("这周到下周");
-  expect(readyToStart(interviewChecklist(without))).toBe(false);
+  const near = (input: ChecklistInput) => interviewChecklist(input).find((item) => item.id === "near_term:research")!;
+  expect(near(without)).toMatchObject({ done: false, owner: "interview" });
+  expect(near(without).ask).toContain("这周到下周");
   const none = { ...without, facts: [...without.facts, { identityId: "research", projectId: "", slot: "near_term", status: "confirmed", sourceRef: "reply-8", value: "没有" }] };
-  expect(readyToStart(interviewChecklist(none))).toBe(true);
+  expect(near(none).done).toBe(true);
   // A guess is not the person's word.
   const guessed = { ...without, facts: [...without.facts, { identityId: "research", projectId: "", slot: "near_term", status: "inferred", sourceRef: "", value: "写论文" }] };
-  expect(readyToStart(interviewChecklist(guessed))).toBe(false);
-  expect(readyToStart(interviewChecklist({ ...without, nearTermSettled: { research: true } }))).toBe(true);
+  expect(near(guessed).done).toBe(false);
+  expect(near({ ...without, nearTermSettled: { research: true } }).done).toBe(true);
 });

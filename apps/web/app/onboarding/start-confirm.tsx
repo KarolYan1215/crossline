@@ -40,6 +40,11 @@ export function StartConfirm({ summary }: { summary: StartSummary }) {
       </>}>
       <div className="ob-start-confirm">
         <p className="ob-muted">{t("第一份日程按下面这些内容排。哪里不对，回到访谈在对话框里直接说，访谈会改。")}</p>
+        {summary.thin.length > 0 && <section aria-label={t("画像还薄的地方")} className="ob-start-thin">
+          <h3>{t("画像还薄的地方")}</h3>
+          <p className="ob-muted">{t("下面这些还没有你亲口说过的依据。可以回到访谈再聊几句，也可以现在就开始，之后用的过程中会补上。")}</p>
+          <ul>{summary.thin.map((item) => <li key={item.label}><b>{item.label}</b>{item.summary && <span className="gen">{t("：{{value}}", { value: item.summary })}</span>}</li>)}</ul>
+        </section>}
         <section aria-label={t("主线")}>
           <h3>{t("主线")}</h3>
           {summary.lines.map((line) => <div key={line.id} className="ob-start-line" data-line={line.id}>
@@ -67,7 +72,7 @@ export function StartConfirm({ summary }: { summary: StartSummary }) {
           <h3>{t("固定日程：{{count}} 项", { count: summary.fixed.count })}</h3>
           {summary.fixed.count > 0 ? <ul>{summary.fixed.items.map((item) => <li key={item}>{item}</li>)}
             {summary.fixed.count > summary.fixed.items.length && <li>{t("等 {{count}} 项", { count: summary.fixed.count - summary.fixed.items.length })}</li>}</ul>
-            : <p className="ob-muted">{t("没有读到每周固定的课或会。")}</p>}
+            : <p className="ob-muted">{t("没有读到每周固定的安排。")}</p>}
         </section>
       </div>
     </Sheet>

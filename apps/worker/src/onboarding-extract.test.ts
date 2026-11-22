@@ -133,25 +133,27 @@ test("a line's own interview extracts its replies only (its files go with the ma
   expect(JSON.parse(store.getSetting(workspaceId, "profile.model")!)).toMatchObject({ portrait: "原画像" });
 });
 
-test("the portrait is kept by section: a deep section while its stage runs, finalized once the stage is over, the synthesis only after all three", async () => {
+test("the portrait is kept by section: no section is closed while the interview runs (2026-11-22), all are at its end, the synthesis after them", async () => {
   const { portraitTask } = await import("./onboarding-extract");
+  // Moving past a stage no longer finalizes its section: the notes stay live and are rewritten as evidence comes.
   expect(portraitTask("situation", false, {})).toEqual({ finalize: [], synthesize: false });
-  expect(portraitTask("compass", false, {})).toEqual({ finalize: ["situation"], synthesize: false });
+  expect(portraitTask("compass", false, {})).toEqual({ finalize: [], synthesize: false });
+  expect(portraitTask("details", false, {})).toEqual({ finalize: [], synthesize: false });
+  expect(portraitTask("compass", false, {}, "v2")).toEqual({ finalize: [], synthesize: false });
   const done = { final: true, sentences: [1], at: "x" };
-  expect(portraitTask("details", false, { situation: done })).toEqual({ finalize: ["compass", "energy"], synthesize: true });
   expect(portraitTask("details", false, { situation: done, compass: done, energy: done, synthesis: done }))
     .toEqual({ finalize: [], synthesize: false });
-  // A section closed with nothing in it (the old rule) is asked again; one that came back empty twice stays closed.
-  expect(portraitTask("details", false, { situation: { final: true, sentences: [], at: "x" }, compass: done, energy: done, synthesis: done }))
+  // Sections already closed (an interview from before) still get their synthesis.
+  expect(portraitTask("details", false, { situation: done, compass: done, energy: done })).toEqual({ finalize: [], synthesize: true });
+  // A section closed with nothing in it (the old rule) is asked again at the end; one that came back empty twice stays closed.
+  expect(portraitTask("details", true, { situation: { final: true, sentences: [], at: "x" }, compass: done, energy: done, synthesis: done }))
     .toEqual({ finalize: ["situation"], synthesize: true });
-  expect(portraitTask("details", false, { situation: { final: true, sentences: [], at: "x", emptyRuns: 2 }, compass: done, energy: done, synthesis: done }))
+  expect(portraitTask("details", true, { situation: { final: true, sentences: [], at: "x", emptyRuns: 2 }, compass: done, energy: done, synthesis: done }))
     .toEqual({ finalize: [], synthesize: false });
   // A finished interview finalizes whatever is left, even a stage it skipped.
   expect(portraitTask("energy", true, {})).toEqual({ finalize: ["situation", "compass", "energy"], synthesize: true });
-  // The profile-first flow: the life story comes first and is a section of its own; the synthesis waits for it too.
-  expect(portraitTask("compass", false, {}, "v2")).toEqual({ finalize: ["narrative"], synthesize: false });
-  expect(portraitTask("orientation", false, { narrative: done, compass: done }, "v2")).toEqual({ finalize: ["situation", "energy"], synthesize: true });
-  expect(portraitTask("details", false, { situation: done, compass: done, energy: done })).toEqual({ finalize: [], synthesize: true });
+  // The profile-first flow: the life story is a section of its own; the synthesis waits for it too.
+  expect(portraitTask("orientation", true, { narrative: done, compass: done }, "v2")).toEqual({ finalize: ["situation", "energy"], synthesize: true });
 
   const now = "2026-10-19T00:00:00.000Z";
   const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
@@ -168,14 +170,14 @@ test("the portrait is kept by section: a deep section while its stage runs, fina
   // The situation section is written with its sentences; the synthesis waits; the compass is untouched.
   expect(first).toMatchObject({ problem: "论文和产品抢同一段时间", portrait: "旧的一句话", workView: "旧工作观" });
   expect(JSON.parse(store.getSetting(workspaceId, "profile.sections")!)).toMatchObject({ situation: { sentences: [1], final: false } });
-  // The conversation moved on to the compass: the next run rewrites the situation whole and marks it final.
+  // The conversation moved on to the compass: the situation stays live (2026-11-22) — rewritten with the new evidence, not closed.
   const session = store.getOnboardingSession(workspaceId, "s")!;
   store.saveOnboardingSession({ ...session, coverage: { ...session.coverage, stage: "compass" } });
   await run({ sessionId: "s", text: "投稿前产品只做维护。" });
   const second = prompts().filter((prompt) => prompt.includes(EXTRACT))[1]!;
   const task = JSON.parse(second.slice(second.indexOf("{"), second.lastIndexOf("}") + 1)) as { profileTask: unknown };
-  expect(task.profileTask).toEqual({ finalize: ["situation"], synthesize: false });
-  expect(JSON.parse(store.getSetting(workspaceId, "profile.sections")!)).toMatchObject({ situation: { final: true } });
+  expect(task.profileTask).toEqual({ finalize: [], synthesize: false });
+  expect(JSON.parse(store.getSetting(workspaceId, "profile.sections")!)).toMatchObject({ situation: { final: false } });
 });
 
 test("conversations from before the extraction start at their last reply; one the extraction has worked in is never backfilled", async () => {
