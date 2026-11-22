@@ -9,7 +9,7 @@ import { useT } from "../../locale-context";
  * 允许 / 拒绝 on the consent page, with the scope (never more than the AI asked for) and the name its writes will carry. The answer comes
  * back as an address and the page goes there itself: the site's `form-action 'self'` would stop a form redirected to another site.
  */
-export function ConsentForm({ query, writeAsked, defaultLabel }: { query: string; writeAsked: boolean; defaultLabel: string }) {
+export function ConsentForm({ query, writeAsked, defaultLabel, connectedHere }: { query: string; writeAsked: boolean; defaultLabel: string; connectedHere: string[] }) {
   const t = useT();
   const [label, setLabel] = useState(defaultLabel);
   const [scope, setScope] = useState<McpScope>(writeAsked ? "write" : "read");
@@ -26,6 +26,7 @@ export function ConsentForm({ query, writeAsked, defaultLabel }: { query: string
     <p><label>{t("名称", { context: "field" })}{" "}
       <input value={label} onChange={(event) => setLabel(event.target.value)} maxLength={40} autoComplete="off" style={{ width: "12em" }} /></label></p>
     <p className="muted">{t("用它的 AI 叫什么；它的每次写入都会标上这个名字")}</p>
+    {connectedHere.includes(label.replace(/\s+/g, " ").trim()) && <p className="muted">{t("会替换同一地址下已有的「{{label}}」连接；想两个都留，换一个名字。", { label: label.trim() })}</p>}
     {writeAsked
       ? <SegmentedControl label={t("权限")} value={scope} options={[{ value: "read", label: t("只读") }, { value: "write", label: t("读写") }]} onChange={(next) => setScope(next as McpScope)} />
       : null}

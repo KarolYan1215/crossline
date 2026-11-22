@@ -147,11 +147,15 @@ const sha256 = (text: string) => createHash("sha256").update(text).digest("hex")
  * The person's answer on the consent page: allowed, with the scope they chose (never more than asked) and the name the connection will
  * carry in 最近操作; or refused. Either way, where to send the browser next.
  */
+/** The name a connection will carry: the one typed on the consent page, else the client's own, else its host. */
+export const connectionLabel = (request: AuthorizeRequest, typed?: string) =>
+  mcpText(typed, MCP_TOKEN_LABEL_MAX) || mcpText(request.client.name, MCP_TOKEN_LABEL_MAX) || request.host;
+
 export function decideAuthorize(config: OAuthConfig, ctx: AccessContext, request: AuthorizeRequest,
   decision: { allow: boolean; scope?: McpScope; label?: string }, now = new Date()): string {
   if (!decision.allow) return answer(config, request.redirectUri, request.state, { error: "access_denied", error_description: "the person declined" });
   const scopes: McpScope[] = decision.scope === "write" && request.scopes.includes("write") ? ["read", "write"] : ["read"];
-  const label = mcpText(decision.label, MCP_TOKEN_LABEL_MAX) || mcpText(request.client.name, MCP_TOKEN_LABEL_MAX) || request.host;
+  const label = connectionLabel(request, decision.label);
   const code = randomBytes(32).toString("base64url");
   const pending = codes();
   for (const [key, value] of pending) if (value.expiresAt <= now.getTime()) pending.delete(key);

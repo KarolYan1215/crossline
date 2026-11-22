@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { requireSessionContext } from "../../../lib/access-guard";
 import { checkAuthorize, oauthConfig } from "../../../lib/mcp/oauth";
+import { listMcpTokens } from "../../../lib/mcp/tokens";
 import { getLocale, localeFor } from "../../../lib/locale";
 import { tFor } from "../../../lib/i18n";
 import { ConsentForm } from "./consent-form";
@@ -44,6 +45,8 @@ export default async function McpAuthorizePage({ searchParams }: { searchParams:
       <li>{t("不能发信、报名、付款或改外部日历；每次写入都出现在最近操作里，注明是哪个 AI，24 小时内可撤销。")}</li>
       <li>{t("随时可以在 设置 → 在其他 AI 里用 Crossline 里撤销。")}</li>
     </ul>
-    <ConsentForm query={params.toString()} writeAsked={request.scopes.includes("write")} defaultLabel={request.client.name || request.host} />
+    {/* The names already connected from this host: allowing under one of them replaces that connection (lib/mcp/tokens.ts). */}
+    <ConsentForm query={params.toString()} writeAsked={request.scopes.includes("write")} defaultLabel={request.client.name || request.host}
+      connectedHere={listMcpTokens(ctx.workspaceId).filter((token) => token.client === request.host).map((token) => token.label)} />
   </main>;
 }

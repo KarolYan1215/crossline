@@ -42,5 +42,9 @@
   "登录连接 · {{host}}": "Signed-in connection · {{host}}",
   "claude.ai：设置 → 连接器 → 添加自定义连接器，填上面的服务地址，再按提示登录 Crossline 并允许。ChatGPT：在开发者模式里新建连接器，填同一个地址，认证选 OAuth。不需要令牌。": "claude.ai: Settings → Connectors → Add custom connector, enter the server address above, then sign in to Crossline and allow it when asked. ChatGPT: create a connector in developer mode with the same address and choose OAuth. No token needed.",
   "它们要从网上连到这里：用网页版 Crossline 的地址，本机地址连不上。": "They connect from the internet: use the web Crossline's address; this computer's address cannot be reached.",
-  "这个 Crossline 没有开放登录连接：claude.ai 与 ChatGPT 连不上，请用上面的令牌。": "This Crossline does not offer sign-in connections, so claude.ai and ChatGPT cannot connect; use a token above."
+  "这个 Crossline 没有开放登录连接：claude.ai 与 ChatGPT 连不上，请用上面的令牌。": "This Crossline does not offer sign-in connections, so claude.ai and ChatGPT cannot connect; use a token above.",
+  "会替换同一地址下已有的「{{label}}」连接；想两个都留，换一个名字。": "This replaces the existing “{{label}}” connection from the same address; to keep both, use another name.",
+  "最近读取 {{count}} 次": "Last {{count}} reads",
+  "今天的安排": "Today's schedule",
+  "任务列表": "Task list"
 }

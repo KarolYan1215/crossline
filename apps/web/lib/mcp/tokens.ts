@@ -16,10 +16,17 @@ export const MCP_TOKENS_SETTING = "mcp.tokens";
  * A connection made by OAuth (docs/mcp-server.md §4.3) is the same entry with an expiring access token and a refresh token: `client` is
  * the host the sign-in went back to (what the person saw on the consent page), `clientKey` the hash of the client id that may renew it.
  */
-type OAuthPart = { client: string; clientKey: string; expiresAt: string; refreshHash: string; refreshExpiresAt: string };
-type StoredToken = { id: string; label: string; hash: string; scopes: McpScope[]; createdAt: string; lastUsedAt?: string; oauth?: OAuthPart };
+type OAuthPart = { client: string; clientKey: string; expiresAt: string; refreshHash: string; refreshExpiresAt: string;
+  /** Access tokens issued before the last refresh, each kept until its own expiry: a request already on its way still gets through. */
+  earlier?: Array<{ hash: string; expiresAt: string }> };
+/** One read by the agent (writes are in 最近操作 already): which reading tool, when. The last `MCP_READS_KEPT` are kept. */
+export type McpRead = { tool: string; at: string };
+type StoredToken = { id: string; label: string; hash: string; scopes: McpScope[]; createdAt: string; lastUsedAt?: string; oauth?: OAuthPart; reads?: McpRead[] };
 /** What the settings card shows: never a hash. `client` is set for a connection made by signing in from the other AI. */
-export type McpTokenView = { id: string; label: string; scopes: McpScope[]; createdAt: string; lastUsedAt?: string; client?: string };
+export type McpTokenView = { id: string; label: string; scopes: McpScope[]; createdAt: string; lastUsedAt?: string; client?: string; reads?: McpRead[] };
+export const MCP_READS_KEPT = 20;
+/** How long a refresh token just replaced still answers with the same new pair (a lost answer, or two refreshes at once). */
+export const MCP_REFRESH_GRACE_MS = 60_000;
 
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 
@@ -33,8 +40,8 @@ function read(workspaceId: string): StoredToken[] {
 const write = (workspaceId: string, tokens: StoredToken[]) => getStore().setSetting(workspaceId, MCP_TOKENS_SETTING, JSON.stringify(tokens));
 
 export const listMcpTokens = (workspaceId: string): McpTokenView[] =>
-  read(workspaceId).map(({ id, label, scopes, createdAt, lastUsedAt, oauth }) =>
-    ({ id, label, scopes, createdAt, ...(lastUsedAt ? { lastUsedAt } : {}), ...(oauth ? { client: oauth.client } : {}) }));
+  read(workspaceId).map(({ id, label, scopes, createdAt, lastUsedAt, oauth, reads }) =>
+    ({ id, label, scopes, createdAt, ...(lastUsedAt ? { lastUsedAt } : {}), ...(oauth ? { client: oauth.client } : {}), ...(reads?.length ? { reads } : {}) }));
 
 export type IssueResult = { ok: true; token: string; view: McpTokenView } | { ok: false; code: "MCP_TOKEN_LABEL_INVALID" | "MCP_TOKEN_SCOPE_INVALID" | "MCP_TOKENS_FULL" };
 
@@ -61,17 +68,32 @@ const oauthTimes = (now: Date) => ({ expiresAt: new Date(now.getTime() + MCP_OAU
   refreshExpiresAt: new Date(now.getTime() + MCP_OAUTH_REFRESH_DAYS * 86_400_000).toISOString() });
 const refreshDead = (token: StoredToken, now: Date) => Boolean(token.oauth && Date.parse(token.oauth.refreshExpiresAt) <= now.getTime());
 
-/** Whether a new OAuth connection would be refused: the list is full even after dropping connections whose refresh token ran out. */
-export const mcpTokensFull = (workspaceId: string, now = new Date()) => read(workspaceId).filter((token) => !refreshDead(token, now)).length >= MCP_TOKENS_MAX;
+/**
+ * A sign-in from the same host under the same name is that AI connecting again (claude.ai registers a new client for every fresh
+ * connection), so it replaces the earlier connection instead of taking another place; the consent page says so before 允许. Two
+ * connections from one host are kept apart by naming them differently there.
+ */
+type Connection = { client: string; label: string };
+const replacedBy = (token: StoredToken, connection: Connection) => Boolean(token.oauth && token.oauth.client === connection.client && token.label === connection.label);
+/** The connection a sign-in from `client` named `label` would replace, if any. */
+export const mcpConnectionReplaced = (workspaceId: string, connection: Connection): McpTokenView | undefined => {
+  const id = read(workspaceId).find((token) => replacedBy(token, connection))?.id;
+  return id ? listMcpTokens(workspaceId).find((view) => view.id === id) : undefined;
+};
+const kept = (tokens: StoredToken[], now: Date, connection?: Connection) =>
+  tokens.filter((token) => !refreshDead(token, now) && !(connection && replacedBy(token, connection)));
+
+/** Whether a new OAuth connection would be refused: the list is full even after dropping dead connections and the one it replaces. */
+export const mcpTokensFull = (workspaceId: string, now = new Date(), connection?: Connection) => kept(read(workspaceId), now, connection).length >= MCP_TOKENS_MAX;
 
 /**
  * The connection an OAuth sign-in makes, after the person allowed it on the consent page: an entry in the same list as the tokens made by
- * hand, revoked the same way. Connections whose refresh token has run out are dropped here, so a host that signs in afresh each time does
- * not fill the list.
+ * hand, revoked the same way. Connections whose refresh token has run out, and the earlier connection of the same host and name, are
+ * dropped here, so a host that signs in afresh each time does not fill the list.
  */
 export function issueMcpGrant(ctx: AccessContext, input: { label: string; scopes: McpScope[]; client: string; clientId: string }, now = new Date()):
   { ok: true; tokens: GrantTokens } | { ok: false; code: "MCP_TOKENS_FULL" } {
-  const tokens = read(ctx.workspaceId).filter((token) => !refreshDead(token, now));
+  const tokens = kept(read(ctx.workspaceId), now, { client: input.client, label: input.label });
   if (tokens.length >= MCP_TOKENS_MAX) return { ok: false, code: "MCP_TOKENS_FULL" };
   const accessToken = newAccess(), refreshToken = newRefresh();
   const stored: StoredToken = { id: randomBytes(6).toString("hex"), label: input.label, hash: sha256(accessToken), scopes: input.scopes, createdAt: now.toISOString(),
@@ -80,13 +102,32 @@ export function issueMcpGrant(ctx: AccessContext, input: { label: string; scopes
   return { ok: true, tokens: { accessToken, refreshToken, expiresIn: MCP_OAUTH_ACCESS_SECONDS, scopes: input.scopes } };
 }
 
+type Replayable = { workspaceId: string; grantId: string; clientKey: string; tokens: GrantTokens; until: number };
+declare global {
+  // eslint-disable-next-line no-var
+  var crosslineMcpRefreshGrace: Map<string, Replayable> | undefined;
+}
+// In memory, on globalThis like the codes: the plain new pair must never reach the ledger, and a restart only ends a minute's grace.
+const grace = () => globalThis.crosslineMcpRefreshGrace ??= new Map<string, Replayable>();
+
 /**
- * A new access token and a new refresh token for a refresh token still on the list, presented by the client it was issued to; the old
- * pair stops working in the same write (refresh rotation, OAuth 2.1 §4.3.1 for public clients). `narrowTo` may narrow, never widen.
+ * A new access token and a new refresh token for a refresh token still on the list, presented by the client it was issued to
+ * (refresh rotation, OAuth 2.1 §4.3.1 for public clients). The replaced refresh token still answers, for a minute, with the same new
+ * pair: a host that refreshes twice at once, or whose answer was lost on the way, is not cut off. The replaced access token works until
+ * its own expiry. `narrowTo` may narrow, never widen.
  */
 export function refreshMcpGrant(refreshToken: string, clientId: string, narrowTo: McpScope[] | undefined, now = new Date()): GrantTokens | undefined {
   if (!MCP_REFRESH_PATTERN.test(refreshToken)) return undefined;
-  const hash = Buffer.from(sha256(refreshToken), "hex");
+  const key = sha256(refreshToken);
+  const hash = Buffer.from(key, "hex");
+  const replays = grace();
+  for (const [stale, entry] of replays) if (entry.until <= now.getTime()) replays.delete(stale);
+  const replay = replays.get(key);
+  if (replay) {
+    // Only while the connection is still there: revoking it on the settings card ends the grace too.
+    const alive = read(replay.workspaceId).some((token) => token.id === replay.grantId);
+    return alive && replay.clientKey === sha256(clientId) ? replay.tokens : undefined;
+  }
   for (const workspace of getStore().listWorkspaces()) {
     const tokens = read(workspace.id);
     const found = tokens.find((item) => item.oauth && timingSafeEqual(Buffer.from(item.oauth.refreshHash, "hex"), hash));
@@ -96,9 +137,13 @@ export function refreshMcpGrant(refreshToken: string, clientId: string, narrowTo
     const scopes = narrowTo ? found.scopes.filter((scope) => narrowTo.includes(scope)) : found.scopes;
     if (!scopes.length) return undefined;
     const accessToken = newAccess(), next = newRefresh();
+    const earlier = [...(oauth.earlier ?? []), { hash: found.hash, expiresAt: oauth.expiresAt }]
+      .filter((entry) => Date.parse(entry.expiresAt) > now.getTime()).slice(-5);
     write(workspace.id, tokens.map((item) => item.id === found.id
-      ? { ...item, hash: sha256(accessToken), scopes, oauth: { ...oauth, refreshHash: sha256(next), ...oauthTimes(now) } } : item));
-    return { accessToken, refreshToken: next, expiresIn: MCP_OAUTH_ACCESS_SECONDS, scopes };
+      ? { ...item, hash: sha256(accessToken), scopes, oauth: { ...oauth, refreshHash: sha256(next), earlier, ...oauthTimes(now) } } : item));
+    const issued = { accessToken, refreshToken: next, expiresIn: MCP_OAUTH_ACCESS_SECONDS, scopes };
+    replays.set(key, { workspaceId: workspace.id, grantId: found.id, clientKey: oauth.clientKey, tokens: issued, until: now.getTime() + MCP_REFRESH_GRACE_MS });
+    return issued;
   }
   return undefined;
 }
@@ -123,10 +168,12 @@ export function mcpCallerFor(token: string, now = new Date()): McpCaller | undef
   const store = getStore();
   for (const workspace of store.listWorkspaces()) {
     const tokens = read(workspace.id);
-    const found = tokens.find((item) => timingSafeEqual(Buffer.from(item.hash, "hex"), hash));
+    const same = (stored: string) => timingSafeEqual(Buffer.from(stored, "hex"), hash);
+    const found = tokens.find((item) => same(item.hash) || item.oauth?.earlier?.some((entry) => same(entry.hash)));
     if (!found) continue;
-    // An OAuth access token lasts an hour; the host renews it with its refresh token.
-    if (found.oauth && Date.parse(found.oauth.expiresAt) <= now.getTime()) return undefined;
+    // An OAuth access token lasts an hour, an earlier one until its own hour is up; the host renews them with its refresh token.
+    const expiresAt = same(found.hash) ? found.oauth?.expiresAt : found.oauth?.earlier?.find((entry) => same(entry.hash))?.expiresAt;
+    if (found.oauth && (!expiresAt || Date.parse(expiresAt) <= now.getTime())) return undefined;
     const ownerId = store.getWorkspaceOwnerId(workspace.id);
     if (!ownerId) return undefined;
     if (!found.lastUsedAt || now.getTime() - Date.parse(found.lastUsedAt) > 60_000)
@@ -137,6 +184,14 @@ export function mcpCallerFor(token: string, now = new Date()): McpCaller | undef
     return { ctx, tokenId: found.id, scopes: found.scopes };
   }
   return undefined;
+}
+
+/** A read by the agent, kept on its token for the settings card: which tool and when, never what it returned. */
+export function recordMcpRead(workspaceId: string, tokenId: string, tool: string, now = new Date()): void {
+  const tokens = read(workspaceId);
+  if (!tokens.some((token) => token.id === tokenId)) return;
+  write(workspaceId, tokens.map((token) => token.id === tokenId
+    ? { ...token, reads: [...(token.reads ?? []), { tool, at: now.toISOString() }].slice(-MCP_READS_KEPT) } : token));
 }
 
 /** Calls and writes per token, in memory: the limits guard against a looping agent, not against a restart. */

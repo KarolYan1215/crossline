@@ -6,7 +6,9 @@ import { SegmentedControl } from "../ui/controls";
 import { useLocale, useT } from "../locale-context";
 import { intlLocale, type Locale } from "../../lib/i18n";
 
-type TokenView = { id: string; label: string; scopes: McpScope[]; createdAt: string; lastUsedAt?: string; client?: string };
+type TokenView = { id: string; label: string; scopes: McpScope[]; createdAt: string; lastUsedAt?: string; client?: string; reads?: Array<{ tool: string; at: string }> };
+/** What each reading tool shows the agent; writes are in 最近操作 instead. */
+const READ_TOOLS: Record<string, string> = { crossline_today: "今天的安排", crossline_list_asks: "待决事项", crossline_list_tasks: "任务列表" };
 const time = (iso: string, locale: Locale) => new Date(iso).toLocaleString(intlLocale(locale), { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
 
 /**
@@ -61,7 +63,11 @@ export function McpCard() {
     {(tokens ?? []).map((token) => <div className="st-row" key={token.id}>
       <span className="st-row-label">{token.label}<small>{[token.scopes.includes("write") ? t("读写") : t("只读"),
         ...(token.client ? [t("登录连接 · {{host}}", { host: token.client })] : []), t("生成于 {{when}}", { when: time(token.createdAt, locale) }),
-        token.lastUsedAt ? t("最近使用 {{when}}", { when: time(token.lastUsedAt, locale) }) : t("还没用过")].join(" · ")}</small></span>
+        token.lastUsedAt ? t("最近使用 {{when}}", { when: time(token.lastUsedAt, locale) }) : t("还没用过")].join(" · ")}</small>
+        {/* What it read, newest first: only here, when opened (a read is nothing to act on). */}
+        {token.reads?.length ? <details><summary>{t("最近读取 {{count}} 次", { count: token.reads.length })}</summary>
+          <ul>{[...token.reads].reverse().map((entry, index) => <li key={index}>
+            {READ_TOOLS[entry.tool] ? t(READ_TOOLS[entry.tool]!) : entry.tool} · {time(entry.at, locale)}</li>)}</ul></details> : null}</span>
       <button type="button" className="secondary-button" onClick={() => void revoke(token.id)}>{t("撤销")}</button></div>)}
     <label className="st-row"><span className="st-row-label">{t("名称", { context: "field" })}<small>{t("用它的 AI 叫什么；它的每次写入都会标上这个名字")}</small></span>
       <input value={label} onChange={(event) => setLabel(event.target.value)} maxLength={40} autoComplete="off" style={{ width: "12em" }} /></label>

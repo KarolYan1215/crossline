@@ -1,7 +1,7 @@
 import type { McpScope } from "@crossline/core";
 import { resolveAccessContext } from "../../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../../lib/same-origin";
-import { checkAuthorize, decideAuthorize, oauthConfig } from "../../../../../lib/mcp/oauth";
+import { checkAuthorize, connectionLabel, decideAuthorize, oauthConfig } from "../../../../../lib/mcp/oauth";
 import { mcpTokensFull } from "../../../../../lib/mcp/tokens";
 
 /**
@@ -22,7 +22,8 @@ export async function POST(request: Request) {
   if (check.kind === "fatal") return Response.json({ ok: false, code: check.code }, { status: 400 });
   if (check.kind === "redirect") return Response.json({ ok: true, redirect: check.url });
   // Said here, where the person can act on it, rather than as a failed sign-in in the other AI.
-  if (body.allow === true && mcpTokensFull(access.ctx.workspaceId)) return Response.json({ ok: false, code: "MCP_TOKENS_FULL" }, { status: 409 });
+  const connection = { client: check.request.host, label: connectionLabel(check.request, typeof body.label === "string" ? body.label : undefined) };
+  if (body.allow === true && mcpTokensFull(access.ctx.workspaceId, new Date(), connection)) return Response.json({ ok: false, code: "MCP_TOKENS_FULL" }, { status: 409 });
   const redirect = decideAuthorize(config, access.ctx, check.request, { allow: body.allow === true,
     ...(body.scope === "read" || body.scope === "write" ? { scope: body.scope as McpScope } : {}), ...(typeof body.label === "string" ? { label: body.label } : {}) });
   return Response.json({ ok: true, redirect });

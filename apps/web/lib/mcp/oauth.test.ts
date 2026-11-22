@@ -9,7 +9,8 @@ import { issueMcpToken, listMcpTokens, mcpCallerFor, mcpTokensFull, revokeMcpTok
 import { TEST_CTX } from "../test-support";
 
 /** Crossline's own OAuth authorization server for `/api/mcp` (docs/mcp-server.md §4.3), piece by piece. */
-afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; globalThis.crosslineMcpCodes = undefined; });
+afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; globalThis.crosslineMcpCodes = undefined;
+  globalThis.crosslineMcpRefreshGrace = undefined; });
 
 const ENV = { BETTER_AUTH_SECRET: "test-secret-not-real", CROSSLINE_WEB_BASE_URL: "https://crossline.example/" };
 const config = oauthConfig(ENV)!;
@@ -138,15 +139,23 @@ test("refresh: an hour's access, renewed with a refresh token that is replaced e
   const second = refresh(first.refresh_token).body;
   expect(second).toMatchObject({ token_type: "Bearer", scope: "read write" });
   expect(mcpCallerFor(second.access_token as string, later)).toBeDefined();
-  // The old refresh token was replaced.
-  expect(refresh(first.refresh_token)).toMatchObject({ body: { error: "invalid_grant" } });
+  // The old refresh token was replaced, with a minute's grace: a concurrent refresh, or a retry after a lost answer, gets the same new pair
+  // (only from its own client); after that it is dead.
+  expect(refresh(first.refresh_token).body).toEqual(second);
+  expect(refresh(first.refresh_token, client([CLAUDE], "Other"))).toMatchObject({ body: { error: "invalid_grant" } });
+  expect(refresh(first.refresh_token, clientId, new Date(later.getTime() + 61_000))).toMatchObject({ body: { error: "invalid_grant" } });
   // Narrowing on refresh is allowed, widening is not possible.
   const narrowed = exchangeToken(config, form({ grant_type: "refresh_token", refresh_token: String(second.refresh_token), client_id: clientId, scope: "read" }), later).body;
   expect(narrowed).toMatchObject({ scope: "read" });
-  // Revoked on the settings card: neither token works any more.
+  // The access token it replaced keeps working until its own hour is up, so requests already on their way do not fail.
+  expect(mcpCallerFor(second.access_token as string, new Date(later.getTime() + 3599_000))).toBeDefined();
+  expect(mcpCallerFor(second.access_token as string, new Date(later.getTime() + 3601_000))).toBeUndefined();
+  // Revoked on the settings card: no token works any more, the grace included.
   revokeMcpToken(ctx.workspaceId, listMcpTokens(ctx.workspaceId)[0]!.id);
   expect(mcpCallerFor(narrowed.access_token as string, later)).toBeUndefined();
+  expect(mcpCallerFor(second.access_token as string, later)).toBeUndefined();
   expect(refresh(narrowed.refresh_token)).toMatchObject({ body: { error: "invalid_grant" } });
+  expect(refresh(second.refresh_token)).toMatchObject({ body: { error: "invalid_grant" } });
   // Thirty days unused: the refresh token is dead.
   const code2 = approved(ctx, clientId).searchParams.get("code")!;
   const again = exchangeToken(config, form({ grant_type: "authorization_code", code: code2, client_id: clientId, redirect_uri: CLAUDE, code_verifier: verifier }), NOW).body;
@@ -163,4 +172,34 @@ test("a full list refuses a new connection: the person revokes one first", () =>
   const code = approved(ctx, clientId).searchParams.get("code")!;
   expect(exchangeToken(config, form({ grant_type: "authorization_code", code, client_id: clientId, redirect_uri: CLAUDE, code_verifier: verifier }), NOW))
     .toMatchObject({ body: { error: "invalid_grant" } });
+});
+
+function connect(ctx: typeof TEST_CTX, clientId: string, label?: string) {
+  const check = checkAuthorize(config, authorize(clientId));
+  if (check.kind !== "ok") throw new Error(check.kind);
+  const code = new URL(decideAuthorize(config, ctx, check.request, { allow: true, scope: "write", ...(label ? { label } : {}) }, NOW)).searchParams.get("code")!;
+  return exchangeToken(config, form({ grant_type: "authorization_code", code, client_id: clientId, redirect_uri: CLAUDE, code_verifier: verifier }), NOW).body;
+}
+
+test("reconnecting replaces the connection of the same name from the same address; another name keeps both", () => {
+  const ctx = setup();
+  // claude.ai registers a new client for every fresh connection.
+  const old = connect(ctx, client());
+  const again = connect(ctx, client());
+  expect(listMcpTokens(ctx.workspaceId)).toMatchObject([{ label: "Claude", client: "claude.ai" }]);
+  expect(mcpCallerFor(old.access_token as string, NOW)).toBeUndefined();
+  expect(mcpCallerFor(again.access_token as string, NOW)).toBeDefined();
+  connect(ctx, client(), "Claude 工作");
+  expect(listMcpTokens(ctx.workspaceId).map((token) => token.label).sort()).toEqual(["Claude", "Claude 工作"]);
+});
+
+test("a full list still lets a connection be replaced", () => {
+  const ctx = setup();
+  for (let index = 0; index < MCP_TOKENS_MAX - 1; index += 1) issueMcpToken(ctx, { label: `t${index}`, scope: "read" }, NOW);
+  connect(ctx, client());
+  expect(mcpTokensFull(ctx.workspaceId, NOW)).toBe(true);
+  expect(mcpTokensFull(ctx.workspaceId, NOW, { client: "claude.ai", label: "Claude" })).toBe(false);
+  expect(mcpTokensFull(ctx.workspaceId, NOW, { client: "claude.ai", label: "其他" })).toBe(true);
+  expect(connect(ctx, client())).toHaveProperty("access_token");
+  expect(listMcpTokens(ctx.workspaceId)).toHaveLength(MCP_TOKENS_MAX);
 });

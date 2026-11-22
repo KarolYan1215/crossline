@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { MCP_TOOLS, mcpToolAllowed, type McpToolName } from "@crossline/core";
 import { McpToolError, answerAskTool, captureTool, completeTool, listAsksTool, listTasksTool, todayTool } from "./tools";
-import { mcpRateLimited, type McpCaller } from "./tokens";
+import { mcpRateLimited, recordMcpRead, type McpCaller } from "./tokens";
 
 /**
  * The MCP server one request is served by (docs/mcp-server.md §3). Built per request for the token's caller: the tools a read-only
@@ -72,7 +72,10 @@ export function buildMcpServer(caller: McpCaller): McpServer {
       if (mcpRateLimited(caller.tokenId, "call") || (!policy.readOnly && mcpRateLimited(caller.tokenId, "write")))
         return fail("MCP_RATE_LIMITED", "Too many calls from this token; wait a minute (writes: an hour).");
       try {
-        return ok(await run(input as z.infer<(typeof SCHEMAS)[N]>));
+        const result = ok(await run(input as z.infer<(typeof SCHEMAS)[N]>));
+        // Writes are in 最近操作 with the agent's name; a read is noted on its token, for the settings card.
+        if (policy.readOnly) recordMcpRead(caller.ctx.workspaceId, caller.tokenId, name);
+        return result;
       } catch (error) {
         if (error instanceof McpToolError) return fail(error.code, error.message);
         console.error(JSON.stringify({ event: "mcp.tool_failed", tool: name, message: error instanceof Error ? error.message : String(error) }));

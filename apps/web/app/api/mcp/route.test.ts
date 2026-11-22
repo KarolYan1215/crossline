@@ -4,7 +4,7 @@ import { CrosslineStore } from "@crossline/db";
 vi.mock("server-only", () => ({}));
 vi.mock("../../../lib/codex-runtime", () => ({ requestCodexSupervisor: vi.fn(async () => ({})), CodexSupervisorRequestError: class extends Error {} }));
 import { DELETE, GET, POST } from "./route";
-import { issueMcpToken, resetMcpRateLimits } from "../../../lib/mcp/tokens";
+import { issueMcpToken, listMcpTokens, resetMcpRateLimits } from "../../../lib/mcp/tokens";
 import { TEST_CTX } from "../../../lib/test-support";
 
 /**
@@ -86,6 +86,8 @@ test.each(["auto", "legacy"] as const)("a %s client runs all four kinds of opera
   const refused = await client.callTool({ name: "crossline_complete", arguments: { workOrderId: "hw4", outcome: "partial" } });
   expect(refused.isError).toBe(true);
   expect(JSON.stringify(refused.content)).toContain("NOTE_REQUIRED");
+  // What it read is kept on the token for the settings card (tool and time only); writes are in 最近操作 instead.
+  expect(listMcpTokens(CTX.workspaceId)[0]!.reads!.map((read) => read.tool)).toEqual(["crossline_today", "crossline_list_asks"]);
   await client.close();
 });
 
