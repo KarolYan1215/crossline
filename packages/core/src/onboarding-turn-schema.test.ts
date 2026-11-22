@@ -49,7 +49,7 @@ test("the schema is strict: every object lists all its properties and forbids ex
 });
 
 test("each layer has its own fields, and a turn's lines and projects are enums the model picks from", () => {
-  expect(Object.keys(ONBOARDING_DIALOGUE_SCHEMA.properties)).toEqual(["reply", "questions", "coverage", "nextAction", "stage", "insights", "progress", "research", "safety", "openItems", "next", "askLesson"]);
+  expect(Object.keys(ONBOARDING_DIALOGUE_SCHEMA.properties)).toEqual(["reply", "questions", "coverage", "nextAction", "stage", "insights", "progress", "research", "safety", "openItems", "askLesson"]);
   expect(Object.keys(ONBOARDING_EXTRACT_SCHEMA.properties)).toEqual(["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles",
     "goalEdits", "availability", "settings", "profileSections", "itemScores", "hypotheses", "careers", "dimensions", "dropCareers", "pointChanges"]);
   const question = (onboardingDialogueSchema({ lines: ["research", "media"], projects: ["ece555"] }).properties.questions as { items: { properties: Record<string, { enum?: string[] }> } }).items.properties;
@@ -98,8 +98,8 @@ test("a multiple-choice question with fewer than two options is refused, so hard
   expectRejected(bad, "ONBOARDING_OPTIONS_REQUIRED");
 });
 
-test("an unfinished interview must ask something, and a finished one may not", () => {
-  expectRejected(turn({ questions: [] }), "ONBOARDING_QUESTION_REQUIRED");
+test("a round may ask in its reply alone: no question card is required (2026-11-22, IR-052 retired)", () => {
+  expect(validateOnboardingTurn(turn({ questions: [] }), known).questions).toEqual([]);
   expect(validateOnboardingTurn(turn({ questions: [], nextAction: "ready_for_milestones" }), known).nextAction).toBe("ready_for_milestones");
 });
 
@@ -122,8 +122,8 @@ test("when repairs run out, a turn keeps everything but the facts and questions 
     lineProfiles: [{ lineId: "research", description: "研究描述", attributeCandidates: [] }, { lineId: "ghost", description: "", attributeCandidates: [] }] }), known);
   expect(kept?.slotUpdates.map((fact) => fact.slot)).toEqual(["deadline"]);
   expect(kept?.lineProfiles?.map((line) => line.lineId)).toEqual(["research"]);
-  // A turn that is wrong as a whole — an unfinished interview with no usable question — stays refused.
-  expect(keepOnboardingTurn(turn({ questions: [{ ...turn().questions[0]!, identityId: "ghost" }] }), known)).toBeUndefined();
+  // A malformed question card is dropped and the rest kept: the round's question is in its reply (2026-11-22, IR-052 retired).
+  expect(keepOnboardingTurn(turn({ questions: [{ ...turn().questions[0]!, identityId: "ghost" }] }), known)?.questions).toEqual([]);
 });
 
 const attribute = (text: string, kind: "domain" | "ability" | "state" = "domain", sourceRef = "reply-1") => ({ text, kind, sourceRef });

@@ -8,7 +8,7 @@ vi.mock("../../../../lib/access-guard", () => ({ resolveAccessContext: async () 
 
 afterEach(() => { vi.unstubAllEnvs(); globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; });
 
-test("an account whose interview ended but one line's project has no deadline is told so, and can answer 「没有截止」 here", async () => {
+test("an account whose interview ended but one line's project has no deadline is told so; the gap question is not put beside the round (2026-11-22)", async () => {
   vi.stubEnv("CROSSLINE_SEED_EXAMPLES", "");
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
   const { seedReadyToStart } = await import("../../../../lib/test-support");
@@ -21,8 +21,9 @@ test("an account whose interview ended but one line's project has no deadline is
     content: { reply: "…", questions: [], nextAction: "ready_for_milestones", stage: "details" } });
   const { GET } = await import("./route");
   const body = await (await GET(new Request("http://127.0.0.1/api/onboarding/state"))).json() as {
-    readyToStart: boolean; startMissing: Array<{ id: string; label: string; detail: string; owner: string }>; extraQuestions: Array<{ id: string }> };
+    readyToStart: boolean; startMissing: Array<{ id: string; label: string; detail: string; owner: string }>; extraQuestions?: unknown };
   expect(body.readyToStart).toBe(false);
   expect(body.startMissing).toEqual([expect.objectContaining({ id: "line_project:media", owner: "interview" })]);
-  expect(body.extraQuestions.map((question) => question.id)).toContain("gap-deadline-media-example");
+  // The gap question is not put beside the round any more (2026-11-22): the model reads the gap and asks it when it chooses.
+  expect(body.extraQuestions).toBeUndefined();
 }, 30_000); // the route imports the whole board (week, timeline, checklist): a cold import alone can pass five seconds on a busy machine

@@ -222,8 +222,7 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
         text: t("「{{project}}」的「{{item}}」还没有具体日期，大致什么时候？", { project: project.name, item: item.title }),
         options: [
           { id: "known", label: t("知道具体日期，我来写"), detail: t("在“其他”里写日期，里程碑会按它排") },
-          { id: "last-week", label: t("学期最后一周前后"), detail: t("里程碑按学期最后一周之前暂定，通知下来再改") },
-          { id: "exam-week", label: t("和期末考试差不多的时候"), detail: t("里程碑按期末前暂定，通知下来再改") },
+          // The two term-shaped options (「学期最后一周前后」「和期末考试差不多的时候」) assumed a student; removed 2026-11-22.
           { id: "unknown", label: t("还不知道"), detail: t("里程碑先放一个暂定日期并标明待确认") }
         ]
       }

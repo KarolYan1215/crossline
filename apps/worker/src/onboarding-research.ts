@@ -5,24 +5,27 @@ import { interviewLocale, type CrosslineStore } from "@crossline/db";
 import { readProfileModel } from "./onboarding-persist";
 
 /**
- * The interview's research threads (the owner's decision of 2026-11-12, scheme B): a question the dialogue wants looked into on the web — a
- * role's requirements, a base rate, the literature behind a pattern — gets its own long Codex thread, kept and shown by the worker. It may
- * ask the person something, which the page shows as a card beside the conversation; the person's answer or follow-up goes straight back to
- * that thread, never through the main dialogue. A conclusion joins the dialogue's next round; until then the dialogue leaves the topic alone.
+ * The interview's background research (the owner's decisions of 2026-11-12, scheme B, and 2026-11-22, D8/D16): a question the dialogue
+ * does not settle on the spot with its own web search — a side topic the person raised, a base rate, the literature behind a pattern —
+ * gets its own long Codex thread, kept and shown by the worker. It may ask the person something, which the page shows as a card beside the
+ * conversation; the person's answer or follow-up goes straight back to that thread, never through the main dialogue. The dialogue reads
+ * the threads when it wants (`read_interview_state`) and reports what they found when the interview ends.
  */
 export const RESEARCH_SKILL = "crossline:crossline-onboarding-research";
 export const RESEARCH_SETTING = "onboarding.research";
 export const researchKey = (sessionId: string) => `${RESEARCH_SETTING}:${sessionId}`;
-/** Open threads one interview keeps at once; a question past this waits until one finishes (the dialogue is told so through the list). */
-export const RESEARCH_OPEN_MAX = 4;
 
 // i18n-ignore-start: instructions to the research Skill (model-facing)
 const INSTRUCTIONS = "你是 Crossline 访谈的调研子任务。Skill crossline-onboarding-research 写了全部规则，照它做。"
   + "输入给你一个问题、为什么要查、它属于画像的哪个维度、画像摘要和线程到目前为止的消息。联网查证，只写有来源的结论。"
-  + "只在确实需要本人补充时写 ask；结论写在 conclusion，没查完就留空字符串，下一轮接着查；输入带 lastRun 时没有下一轮，写出阶段性结论。";
+  + "只在确实需要本人补充时写 ask；结论写在 conclusion，没查完就留空字符串，下一轮接着查；输入带 lastRun 时没有下一轮，写出阶段性结论。"
+  + "查询只放主题，不放本人的姓名、学校、邮箱或其他能认出本人的信息。";
 // i18n-ignore-end
-/** Runs one step may take while the thread neither concludes nor asks; the last is told so (`lastRun`). */
-export const RESEARCH_RUNS_PER_STEP = 4;
+/**
+ * No fixed number of runs (2026-11-22, the owner: research is not rationed; the model gate and the spend cap bound the cost). A thread
+ * runs again while each run brings a source it did not have; a run that neither concludes, asks nor finds anything new is told it is
+ * the last (`lastRun`) and closes the thread with what it found.
+ */
 
 export function readResearch(store: CrosslineStore, workspaceId: string, sessionId: string): ResearchThread[] {
   try {
@@ -58,15 +61,14 @@ export function researchFindings(threads: ResearchThread[]) {
     status === "done" && conclusion && sources?.length ? [{ question, conclusion, sources }] : []);
 }
 
-/** The questions of `asked` that are new: not the same as a thread already kept (by their words), within the open threads allowed. */
+/** The questions of `asked` that are new: not the same as a thread already kept (by their words). Every new one gets a thread. */
 export function newResearchQuestions(threads: ResearchThread[], asked: Array<{ question: string; why: string; dimension: DimensionId }>) {
   const seen = new Set(threads.map((thread) => normalized(thread.question)));
-  let open = threads.filter((thread) => thread.status === "running" || thread.status === "asking").length;
   const fresh: typeof asked = [];
   for (const item of asked) {
     const key = normalized(item.question);
-    if (!key || seen.has(key) || open >= RESEARCH_OPEN_MAX) continue;
-    seen.add(key); open += 1; fresh.push(item);
+    if (!key || seen.has(key)) continue;
+    seen.add(key); fresh.push(item);
   }
   return fresh;
 }
@@ -106,9 +108,11 @@ export function createResearchRunner(store: CrosslineStore, workspaceId: string,
       const common = { skillName: RESEARCH_SKILL, cwd, outputSchema: ONBOARDING_RESEARCH_SCHEMA, validateOutput: validateResearchTurn,
         allowWebSearch: true, ...(locale ? { locale } : {}), timeoutMs: 60 * 60_000 };
       let codexThread = thread.threadId;
-      for (let run = 0; run < RESEARCH_RUNS_PER_STEP; run += 1) {
+      // The run after one that found nothing new is the last.
+      let lastRun = false;
+      for (;;) {
         const current: ResearchThread = readResearch(store, workspaceId, sessionId).find((item) => item.id === threadId) ?? thread;
-        const input = contextFor(current, run === RESEARCH_RUNS_PER_STEP - 1);
+        const input = contextFor(current, lastRun);
         const fresh = () => runCodexSkill<ResearchTurn>(client, input, { ...common, developerInstructions: withProfileFramework(INSTRUCTIONS),
           keepThread: true, prepareInput: (value) => value, onAudit: (audit) => { if (audit.threadId) codexThread = audit.threadId; } });
         let result = codexThread
@@ -122,9 +126,11 @@ export function createResearchRunner(store: CrosslineStore, workspaceId: string,
           return;
         }
         const output = result.output;
-        const sources = [...(latest.sources ?? []), ...output.sources.filter((source) => !(latest.sources ?? []).some((known) => known.url === source.url))];
-        const last = run === RESEARCH_RUNS_PER_STEP - 1;
-        // Neither a conclusion nor a question: the thread runs again, up to the step's runs; the last of them closes it with what it found.
+        const added = output.sources.filter((source) => !(latest.sources ?? []).some((known) => known.url === source.url));
+        const sources = [...(latest.sources ?? []), ...added];
+        const last = lastRun;
+        // Neither a conclusion nor a question: the thread runs again while it finds something new; the run after one that found nothing
+        // closes it with what it found.
         const next: ResearchThread = { ...latest, ...(codexThread ? { threadId: codexThread } : {}), updatedAt: now(), sources,
           messages: [...latest.messages, { role: "agent", text: output.message, at: now(), ...(output.sources.length ? { sources: output.sources } : {}) }],
           status: output.conclusion ? "done" : output.ask ? "asking" : last ? "done" : "running",
@@ -133,6 +139,7 @@ export function createResearchRunner(store: CrosslineStore, workspaceId: string,
         if (!next.ask) delete next.ask;
         saveThread(store, workspaceId, sessionId, next);
         if (next.status !== "running") return;
+        if (!added.length) lastRun = true;
       }
     } finally { running.delete(key); }
   }

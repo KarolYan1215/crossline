@@ -37,12 +37,10 @@ export async function GET(request: Request) {
   const lastIndex = raw.length - 1;
   const lastQuestions = raw[lastIndex]?.role === "assistant" ? ((raw[lastIndex]!.content as { questions?: TurnQuestion[] }).questions ?? []) : [];
   const identities = identityLines(access.ctx).map((pack) => ({ id: pack.id, label: pack.label }));
-  // The start standard (main interview only): what is still missing, and the app's own questions not in the open round — so an account
-  // whose interview already ended can answer 「没有截止」 here without waiting for a new round.
+  // The start standard (main interview only): what is still missing. The app's own gap questions are no longer put beside the round
+  // (2026-11-22): the model reads the gaps and asks when it chooses; 待决事项 still lists them once the app is in use.
   const status = focus ? null : interviewStatus(access.ctx);
-  const inRound = new Set(lastQuestions.map((question) => question.id));
   const shown = lastQuestions.map((question) => ({ ...question, kind: questionKind(question) }));
-  const extra = status ? status.questions.filter((question) => !inRound.has(question.id)) : [];
   const messages = lastQuestions.length ? raw.map((message, index) => index === lastIndex
     ? { ...message, content: { ...(message.content as object), questions: shown } } : message) : raw;
   // What the background extraction still owes this conversation (2026-10-19): while it reads the last replies the facts behind the start
@@ -59,9 +57,8 @@ export async function GET(request: Request) {
     startTotal: status.checklist.filter((item) => item.start).length,
     startMissing: status.startMissing.map(({ id, label, detail, owner }) => ({ id, label, detail, owner })),
     startItems: status.checklist.filter((item) => item.start).map(({ id, label, done }) => ({ id, label, done })),
-    portraitState: (({ written, confirmed }) => ({ written, confirmed }))(portraitConfirmation(access.ctx)),
-    extraQuestions: extra
-  } : { readyToStart: true, startConfirmed: true, startTotal: 0, startMissing: [], extraQuestions: [] };
+    portraitState: (({ written, confirmed }) => ({ written, confirmed }))(portraitConfirmation(access.ctx))
+  } : { readyToStart: true, startConfirmed: true, startTotal: 0, startMissing: [] };
   const today = planToday(access.ctx);
   const week = weekSkeleton(access.ctx, today), timeline = projectTimeline(access.ctx, today);
   const { capacity, draft } = weekCapacity(access.ctx, today, week, timeline);

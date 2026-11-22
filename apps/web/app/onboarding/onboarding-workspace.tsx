@@ -6,7 +6,6 @@ import { FileReadList } from "./file-read-list";
 import { InsightCard } from "./insight-card";
 import { DiligencePanel } from "./diligence-panel";
 import { TranscriptionCard, type TranscriptionStatus } from "./transcription-card";
-import { DEEP_STAGES, type OnboardingStage } from "@crossline/core";
 import { QuestionCard } from "./question-card";
 import { cardReplyLines, NO_CARD_ANSWERS, ProfileCards, type CardAnswers } from "./profile-cards";
 import { StageBar } from "./portrait-panel";
@@ -52,6 +51,9 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const [sessionId, setSessionId] = useState("");
   // A turn still running in the background after a reload: its reply is on the way, so nothing else may be sent meanwhile.
   const [background, setBackground] = useState(false);
+  /** A message sent while a round runs (D17): being sent, queued (with how many wait) or put into the round. */
+  const [insertState, setInsertState] = useState<"" | "sending" | "queued" | "steered">("");
+  const [queued, setQueued] = useState(0);
   const [busy, setBusy] = useState<"" | "turn" | "upload" | "dates" | "milestones">("");
   const [researching, setResearching] = useState<string[]>([]);
   const [error, setError] = useState("");
@@ -189,6 +191,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     setPendingText("");
     setCurrent(0);
     setBusy("");
+    setInsertState(""); setQueued(0);
     if (document.visibilityState === "hidden" && !document.title.startsWith(newRoundMark)) document.title = newRoundMark + document.title;
     if (response?.ok && body?.state !== "blocked") announceRound(locale);
   };
@@ -266,20 +269,32 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   };
 
   const onDrop = (event: DragEvent) => { event.preventDefault(); setOver(false); void upload(event.dataTransfer.files); };
-  // The app's own questions arrive inside each round (the worker adds the ones about what the round is talking about); questions the person
-  // already answered on 待决事项 are not shown again — those answers go in front of this reply.
+  // The round's questions are the model's own (2026-11-22: the app no longer adds its gap questions beside them; the model reads the gaps
+  // and asks when it chooses). Questions the person already answered on 待决事项 are not shown again — those answers go in front of this reply.
   const answeredElsewhere = new Set(state?.answeredElsewhere ?? []);
   const roundQuestions = (open?.questions ?? []).filter((question) => !answeredElsewhere.has(question.id));
-  // The app's own questions not in this round (an account whose interview already ended can still answer 「没有截止」 here) join it, and
-  // their answers go in the same reply, read back by the worker without the model.
-  const inRound = new Set(roundQuestions.map((question) => question.id));
-  const extra = waiting ? [] : (state?.extraQuestions ?? []).filter((question) => !inRound.has(question.id) && !answeredElsewhere.has(question.id));
-  const batchQuestions = [...roundQuestions, ...extra];
+  const batchQuestions = roundQuestions;
   // The profile module's cards of this round (flow v2): their taps and words go in the same reply, read back without the model.
   const cards = open?.cards ?? [];
   const composed = [composeAnswers(batchQuestions, answers, text, state?.interviewLocale ?? locale), ...cardReplyLines(cards, cardAnswers)]
     .filter((part) => part.trim()).join("\n");
   const canSend = busy === "" && !background && (Boolean(composed.trim()) || waiting);
+  // While a round runs the box stays open (D17, 2026-11-22): what the person writes is queued for the next round, or put into this one.
+  const running = busy === "turn" || background;
+  const canInsert = running && Boolean(text.trim()) && insertState !== "sending";
+  const insert = async (mode: "queue" | "steer") => {
+    const said = text.trim();
+    if (!said) return;
+    const id = line ? `line-${line}` : sessionId || state?.session?.id || "";
+    setInsertState("sending");
+    const response = await fetch("/api/onboarding/turn", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: id, text: said, mode })
+    }).catch(() => undefined);
+    const body = await response?.json().catch(() => undefined) as { state?: string; queued?: number } | undefined;
+    if (body?.state === "steered") { setText(""); setInsertState("steered"); }
+    else if (body?.state === "queued") { setText(""); setInsertState("queued"); setQueued(body.queued ?? 1); }
+    else { setInsertState(""); setError(t("这条没有送出，可以再试一次。")); }
+  };
 
 
   if (!state) return <p className="ob-muted" role="status">{t("正在读取…")}</p>;
@@ -288,10 +303,9 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   // In a deep stage the round is the model's own questions — several when they do not depend on each other (2026-10-16) — and the app's
   // own fact questions wait in the left column. A single question keeps the large one-question view; several are answered as a batch.
   // While a round runs the questions just answered are not shown again: emptied, they read as answers lost (2026-10-15 walkthrough).
-  const deepStage = !state.focusLine && DEEP_STAGES.has(stage as OnboardingStage) && !waiting && busy !== "turn";
+  const deepStage = !state.focusLine && !waiting && busy !== "turn";
   const deep = deepStage && roundQuestions.length <= 1;
-  const centre = deepStage ? roundQuestions : batchQuestions;
-  const held = deepStage ? extra : [];
+  const centre = roundQuestions;
   const opening = !state.focusLine && messages.length === 0 && busy !== "turn" && !pendingText;
   /** A card's rating: `<seq>` for a round's first card, `<seq>.<n>` for the ones after it. */
   const ratingOf = (seq: number, index: number) => state.insightRatings?.[index ? `${seq}.${index}` : String(seq)];
@@ -318,11 +332,13 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     return <div className="ob-turn ob-assistant" key={message.seq}>
       <p className="gen">{turn.reply}</p>
       {insightCards(message, !folded, folded ? "rated" : "all")}
-      {latest && !complete && !waiting && turn.next?.trim() && <p className="ob-next">
-        <span className="gen">{turn.next}</span>
-        {/* The step the dialogue proposes (2026-11-15): the button sends the round's answers with its own line, which the next round reads as taken. */}
+      {latest && !complete && !waiting && <p className="ob-next">
+        {/* The round's one question can be passed over (2026-11-22, replacing 「好，往下」): skipped, or not to be talked about at all,
+            with whatever the person wrote in the box going with it. The Skill takes 「不想谈」 as a topic not asked again. */}
         <button type="button" className="ob-btn ob-quiet" disabled={busy !== "" || background}
-          onClick={() => void runTurn([composed, t("好，往下。")].filter((part) => part.trim()).join("\n"))}>{t("好，往下")}</button>
+          onClick={() => void runTurn([composed, t("（这一问先跳过。）")].filter((part) => part.trim()).join("\n"))}>{t("跳过这一问")}</button>
+        <button type="button" className="ob-btn ob-quiet" disabled={busy !== "" || background}
+          onClick={() => void runTurn([composed, t("这个我不想谈。")].filter((part) => part.trim()).join("\n"))}>{t("不想谈")}</button>
       </p>}
       {latest && turn.nextAction === "ready_for_milestones" && state.readyToStart && <p className="ob-done">{t("信息已基本完整，可以在下方设计里程碑；画像报告随后生成。")}</p>}
     </div>;
@@ -345,7 +361,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
 
   return <div className="ob3" onDragOver={(event) => { event.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop} data-dragging={over}>
     <LeftColumn state={state} busy={busy !== "" && busy !== "turn"} accept={ACCEPT} onUpload={(files) => void upload(files)} onChanged={() => void load()}
-      heldQuestions={held} answers={answers} onAnswer={(id, next) => setAnswers((previous) => ({ ...previous, [id]: next }))} />
+      heldQuestions={[]} answers={answers} onAnswer={(id, next) => setAnswers((previous) => ({ ...previous, [id]: next }))} />
 
     <section className="ob-centre" aria-label={t("访谈对话")}>
       <header className="ob-centre-head">
@@ -364,7 +380,8 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
       <div className="ob-thread ob-voice" aria-live="polite">
         {!state.focusLine && <AssessCard />}
         {opening && <OpeningCard linesKnown={!state.setupLines} knownLines={state.lines.map((line) => line.label)}
-          busy={busy !== ""} hasMaterials={filesRead} needsConnection={!state.focusLine && connected === false} onStart={(answer) => void start(answer)} />}
+          busy={busy !== ""} hasMaterials={filesRead} needsConnection={!state.focusLine && connected === false} onStart={(answer) => void start(answer)}
+          onAddFiles={(files) => void upload(files)} />}
         {messages.length === 0 && state.focusLine && <div className="ob-turn ob-assistant"><p>{t("「{{line}}」的访谈：现状、长期目标、项目、截止日与已有文件。", { line: state.focusLine.label })}</p></div>}
         {/* Rounds before the latest fold to one line each; an observation still waiting for 准/不准 stays out until it is rated. */}
         {foldThread(messages, (seq, index) => Boolean(ratingOf(seq, index))).map((item) => item.kind === "message" ? renderMessage(item.message, false)
@@ -425,15 +442,25 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
       {!line && <QuotaNotice rounds={state.messages.filter((message) => message.role === "assistant").length} usageLimitHit={usageLimitHit} />}
       {error && <div className="ob-error" role="alert"><p>{error}{waiting && busy === "" && <button type="button" className="ob-btn" onClick={() => void runTurn("")}>{t("重试")}</button>}</p>
           {waiting && state.lastFailure && <FailureDetail failure={state.lastFailure} />}</div>}
-      {!opening && <form className="ob-composer ob-voice" onSubmit={(event) => { event.preventDefault(); if (canSend) void runTurn(composed || ""); }}>
-        <VoiceField kind="interview"><textarea value={text} rows={deep ? 4 : open ? 2 : 3} onChange={(event) => setText(event.target.value)} disabled={busy !== ""}
-          placeholder={deep ? t("写下你的回答…") : open ? t("补充说明（可选）") : t("想说的都可以写在这里…")} aria-label={t("回答")} /></VoiceField>
+      {!opening && <form className="ob-composer ob-voice" onSubmit={(event) => { event.preventDefault(); if (running) { if (canInsert) void insert("queue"); } else if (canSend) void runTurn(composed || ""); }}>
+        <VoiceField kind="interview"><textarea value={text} rows={deep ? 4 : open ? 2 : 3} onChange={(event) => { setText(event.target.value); if (insertState !== "sending") setInsertState(""); }}
+          disabled={busy !== "" && busy !== "turn"}
+          placeholder={running ? t("这一轮还在进行，可以先写下一句…") : deep ? t("写下你的回答…") : open ? t("补充说明（可选）") : t("想说的都可以写在这里…")} aria-label={t("回答")} /></VoiceField>
         <div className="ob-composer-row">
           <label className="ob-file-button">
             <input type="file" multiple accept={ACCEPT} hidden onChange={(event) => { void upload(event.target.files ?? []); event.target.value = ""; }} />
             {busy === "upload" ? t("上传中…") : t("添加文件")}
           </label>
-          <button type="submit" className="ob-btn ob-primary" disabled={!canSend}>{deep ? t("回答") : open ? t("发送这一轮") : t("发送")}</button>
+          {running
+            ? <>
+              {insertState === "queued" && <small className="ob-muted" role="status">{t("已排队 {{count}} 条，这一轮结束后接着发。", { count: queued })}</small>}
+              {insertState === "steered" && <small className="ob-muted" role="status">{t("已插入这一轮。")}</small>}
+              <button type="button" className="ob-btn ob-quiet" disabled={!canInsert} onClick={() => void insert("steer")}
+                title={t("放进正在进行的这一轮，访谈者马上读到")}>{t("插入本轮")}</button>
+              <button type="button" className="ob-btn ob-primary" disabled={!canInsert} onClick={() => void insert("queue")}
+                title={t("这一轮结束后作为下一轮发出")}>{t("排队")}</button>
+            </>
+            : <button type="submit" className="ob-btn ob-primary" disabled={!canSend}>{deep ? t("回答") : open ? t("发送这一轮") : t("发送")}</button>}
         </div>
       </form>}
     </section>

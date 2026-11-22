@@ -52,5 +52,5 @@ const MODEL_STEP = "本人的 ChatGPT 账号，或模型 API key";
 const HOSTED_STEPS = [
   { icon: Mail, title: "用邮箱验证码登录", detail: "验证码 10 分钟内有效，之后也可以设密码" },
   { icon: Sparkles, title: "连接模型", detail: MODEL_STEP },
-  { icon: MessageCircle, title: "和 AI 做一次深度访谈", detail: "约 30 分钟，得到画像报告与第一周计划" }
+  { icon: MessageCircle, title: "和 AI 做一次深度访谈", detail: "得到画像报告与第一周计划" }
 ] as const;

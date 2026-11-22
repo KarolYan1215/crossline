@@ -20,7 +20,9 @@ const AWAY_MS = 90_000;
  * tab title and, once allowed, shows a desktop notification itself; on the installed copy the tray shows a balloon.
  */
 function callBack(ctx: Parameters<typeof sendPush>[0], result: unknown): void {
-  if ((result as { state?: string } | undefined)?.state === "blocked") return;
+  const state = (result as { state?: string } | undefined)?.state;
+  // A message queued for, or put into, the running round is no round of its own.
+  if (state === "blocked" || state === "queued" || state === "steered") return;
   const visibleAt = Date.parse(getStore().getSetting(ctx.workspaceId, PRESENCE_SETTING) ?? "");
   if (!Number.isFinite(visibleAt) || Date.now() - visibleAt < AWAY_MS) return;
   // Pushed to other devices: in the account's language, not this browser's (docs/i18n.md).
@@ -44,7 +46,9 @@ export async function POST(request: Request) {
   if ("response" in access) return access.response;
   let body: unknown = {};
   try { body = await request.json(); } catch { /* validated below */ }
-  const input = (body ?? {}) as { sessionId?: unknown; text?: unknown; reread?: unknown };
+  const input = (body ?? {}) as { sessionId?: unknown; text?: unknown; reread?: unknown; mode?: unknown };
+  // Sent while a round runs (D17): `queue` for the round after it, `steer` into the running one. With no round running it is a round.
+  const mode = input.mode === "queue" || input.mode === "steer" ? input.mode : undefined;
   const sessionId = typeof input.sessionId === "string" ? input.sessionId : "";
   const typed = typeof input.text === "string" ? input.text : "";
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(sessionId)) {
@@ -59,7 +63,7 @@ export async function POST(request: Request) {
   const text = [earlier, typed].filter(Boolean).join("\n");
   try {
     const result = await requestCodexSupervisor<unknown>(access.ctx, "/v1/onboarding/turn", {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId, text, reread: input.reread === true }),
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId, text, reread: input.reread === true, ...(mode ? { mode } : {}) }),
       signal: AbortSignal.timeout(3 * 60 * 60_000)
     });
     callBack(access.ctx, result);

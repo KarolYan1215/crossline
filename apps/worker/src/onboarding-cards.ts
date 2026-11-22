@@ -1,9 +1,9 @@
 import {
-  CARDS_OFFERED, INSIGHTS_PER_ROUND, cardCandidateIds, checkInsight, hypothesisReplies, isWebUrl, locateQuote, questionSimilarity, roughWindow, unsureAnswer,
-  type DimensionId, type Hypothesis, type LedgerQuestion, type ProfileGap, type ResearchRequest, type ResearchThread, type TurnInsight, type TurnQuestion
+  CARDS_OFFERED, INSIGHTS_PER_ROUND, cardCandidateIds, checkInsight, hypothesisReplies, isWebUrl, locateQuote, questionSimilarity, roughWindow,
+  type DimensionId, type Hypothesis, type LedgerQuestion, type OnboardingStage, type ProfileGap, type ResearchRequest, type ResearchThread, type TurnInsight,
+  type TurnProgress, type TurnQuestion
 } from "@crossline/core";
 import type { SkillTools } from "@crossline/codex";
-import { RESEARCH_OPEN_MAX } from "./onboarding-research";
 
 /**
  * What the interview's dialogue puts in front of the person — questions, the app's own waiting questions, observation cards, research
@@ -18,8 +18,6 @@ import { RESEARCH_OPEN_MAX } from "./onboarding-research";
 
 /** Questions in one round, the app's own included (the schema's `maxItems` says the same). */
 export const ROUND_QUESTIONS = 5;
-/** Research questions one round may raise (the schema's `maxItems`). */
-export const ROUND_RESEARCH = 3;
 /** A question this alike an answered one is pointed out as possibly the same (a hint, never a removal). */
 export const LIKE_ANSWERED = 0.85;
 /** About the same line and project a lower likeness is pointed out: the model rewords what it asks. */
@@ -35,11 +33,11 @@ export type CardCheck<T> = { accepted: T[]; problems: string[] };
  */
 export type QuestionContext = { ledger: LedgerQuestion[]; openItems: ProfileGap[]; dates?: DateSubject[]; today?: string };
 
-/** A date question asked before (its `about`) and the person's answer: `undecided` when they said it is not set yet. */
-export type DateSubject = { about: string; answer: string; undecided: boolean };
-
-/** An answer that leaves a day open: 「还没定」「看情况」 and the like, not only the bare words `unsureAnswer` takes. */
-export const undecidedDay = (answer: string): boolean => unsureAnswer(answer) || /还没定|没定|未定|不确定|待定|看情况|说不好|不知道|not (sure|set|decided)|undecided|tbd/iu.test(answer); // i18n-ignore: matched against the reply
+/**
+ * A date question asked before (its `about`) and the person's answer. Whether the answer left the day open is the model's to read
+ * (2026-11-22: the `undecidedDay` pattern that guessed it from 「还没定」 and the like was removed); either way it is not asked again.
+ */
+export type DateSubject = { about: string; answer: string };
 const aboutKey = (text: string) => text.replace(/[^\p{L}\p{N}]+/gu, "").toLowerCase();
 /** Whether two `about`s name the same thing: equal, or one holds the other (「复工」 and 「复工日期」). */
 export function sameAbout(a: string, b: string): boolean {
@@ -56,23 +54,6 @@ const alike = (a: { text: string; identityId: string; projectId: string }, b: { 
   const similarity = questionSimilarity(a.text, b.text);
   return similarity >= LIKE_ANSWERED || (Boolean(a.identityId) && a.identityId === b.identityId && a.projectId === b.projectId && similarity >= LIKE_SAME_LINE);
 };
-/** The longest stretch two texts share, spaces and punctuation aside (a reply saying what a card beside it says). */
-export function sharedRun(a: string, b: string): string {
-  const x = [...a.replace(/[\s\p{P}]+/gu, "")], y = [...b.replace(/[\s\p{P}]+/gu, "")];
-  let best = 0, end = 0;
-  let previous = new Array<number>(y.length + 1).fill(0);
-  for (let i = 0; i < x.length; i += 1) {
-    const current = new Array<number>(y.length + 1).fill(0);
-    for (let j = 0; j < y.length; j += 1) if (x[i] === y[j]) {
-      current[j + 1] = previous[j]! + 1;
-      if (current[j + 1]! > best) { best = current[j + 1]!; end = i + 1; }
-    }
-    previous = current;
-  }
-  return x.slice(end - best, end).join("");
-}
-/** Characters a reply and a card beside it may share before the reply is sent back. */
-export const ECHO_RUN = 15;
 const optionKey = (label: string) => label.replace(/[\s，,。.、；;：:（）()「」]/g, "").toLowerCase();
 const short = (text: string, max = 60) => text.length > max ? `${text.slice(0, max)}…` : text;
 
@@ -108,8 +89,7 @@ export function checkQuestions(questions: TurnQuestion[], context: QuestionConte
       if (!question.about?.trim()) { problems.push(`${label}问的是日子：about 写这是哪件事的日子，几个字，同一件事每次用同一个叫法。`); continue; }
       const before = (context.dates ?? []).find((item) => sameAbout(item.about, question.about!));
       if (before) {
-        problems.push(before.undecided ? `${label}问「${before.about}」的日子，本人答过「${short(before.answer, 40)}」，还没定：不再问，本人定了会说；要排就按没定写。`
-          : `${label}问「${before.about}」的日子，本人答过「${short(before.answer, 60)}」，不再问。`);
+        problems.push(`${label}问「${before.about}」的日子，本人答过「${short(before.answer, 60)}」，不再问；答的是没定，就按没定写，本人定了会说。`);
         continue;
       }
       const twinDay = round.find((other) => other.date && other.about && sameAbout(other.about, question.about!));
@@ -173,14 +153,7 @@ export type InsightContext = {
   hypotheses: Hypothesis[];
   /** Cards shown in earlier rounds: their words and the hypotheses they asked about. */
   earlier: TurnInsight[];
-  /** The latest two replies (`reply-N`, this one included): a card resting on them alone retells what was just said. */
-  recent?: ReadonlySet<string>;
-  /** Cards shown since the dialogue last came into this round's stage, before this round (`STAGE_CARDS`). */
-  stageCards?: number;
 };
-
-/** Cards one stay in a stage carries before each further one says what it adds (`why`): a soft limit, never a refusal of the card itself. */
-export const STAGE_CARDS = 3;
 
 /** A card that passed: as it will be shown, and, when it is a new inference, the dimension the log adds it under. */
 export type CheckedInsight = { card: TurnInsight; fresh?: { dimension: DimensionId | undefined } };
@@ -209,11 +182,6 @@ export function checkInsights(insights: TurnInsight[], context: InsightContext, 
     if (missing) { problems.push(`${label}的引文「${short(missing.quote ?? "", 40)}」不在 ${missing.replyId} 里：逐字照抄本人原话，不超过 40 字。`); continue; }
     const disclosed = refs.find((ref) => context.sensitive.has(ref.replyId));
     if (disclosed) { problems.push(`${label}引了 ${disclosed.replyId}：那是本人谈到自伤的回答，不作观察卡的依据。`); continue; }
-    // Replay 15: seven of the eleven cards rated 准 restated the schedule the person had just set. An observation joins what was said at
-    // different times (2026-11-15).
-    if (context.recent && refs.length && refs.every((ref) => context.recent!.has(ref.replyId))) {
-      problems.push(`${label}只引了最近两条回答：观察是把不同时候说的事连起来，至少一条引文来自更早的回答。只是刚说的事，就在 reply 里接住，不出卡。`); continue;
-    }
     const badUrl = (written.external ?? []).find((item) => !isWebUrl(item?.url));
     if (badUrl) { problems.push(`${label}的 external「${short(badUrl.text ?? "", 30)}」没有可打开的网页地址；没有来源就不写这条。`); continue; }
     if (shown.has(squeeze(written.text)) || round.some((item) => squeeze(item.card.text) === squeeze(written.text))) {
@@ -236,10 +204,6 @@ export function checkInsights(insights: TurnInsight[], context: InsightContext, 
     }
     const checked = checkInsight(written, context.replies, context.stage, minReplies);
     if (!checked) { problems.push(`${label}没有通过核对（text、falsifier、引文）。`); continue; }
-    const inStage = (context.stageCards ?? 0) + round.length;
-    if (inStage >= STAGE_CARDS && !written.why?.trim()) {
-      problems.push(`${label}：这一阶段这一遍已经有 ${inStage} 张卡。它说出了前面没说到的东西，就在 why 里写一句新在哪，照常出；没有就先问。`); continue;
-    }
     if (!context.rules) { accepted.push({ card: checked }); continue; }
     accepted.push(onRecord ? { card: { ...checked, hypothesisId: onRecord.id, dimension: onRecord.dimension } }
       : { card: checked, fresh: { dimension: written.dimension } });
@@ -249,19 +213,19 @@ export function checkInsights(insights: TurnInsight[], context: InsightContext, 
 
 const researchKey = (text: string) => text.replace(/[\s，。？?！!、,.]/gu, "").toLowerCase();
 
-/** The round's research questions, after `already`: not one a thread already has, within the threads that may be open at once. */
+/**
+ * The round's research questions, after `already`: not one a thread already has. However many (2026-11-22: the caps of three a round and
+ * four open were removed; the model gate and the spend cap bound the cost).
+ */
 export function checkResearch(asked: ResearchRequest[], threads: ResearchThread[], already: ResearchRequest[] = []): CardCheck<ResearchRequest> {
   const accepted: ResearchRequest[] = [];
   const problems: string[] = [];
-  const open = threads.filter((thread) => thread.status === "running" || thread.status === "asking").length;
   for (const item of asked) {
     const round = [...already, ...accepted];
     const key = researchKey(item.question);
     const thread = threads.find((other) => researchKey(other.question) === key);
     if (thread) { problems.push(`调研「${short(item.question)}」已经有线程（${thread.status}），不再提。`); continue; }
     if (round.some((other) => researchKey(other.question) === key)) continue;
-    if (round.length >= ROUND_RESEARCH) { problems.push(`这一轮已提 ${ROUND_RESEARCH} 个调研问题，「${short(item.question)}」放到下一轮。`); continue; }
-    if (open + round.length >= RESEARCH_OPEN_MAX) { problems.push(`同时开着的调研已有 ${RESEARCH_OPEN_MAX} 条，等有结论再提「${short(item.question)}」。`); continue; }
     accepted.push(item);
   }
   return { accepted, problems };
@@ -272,7 +236,13 @@ export function checkResearch(asked: ResearchRequest[], threads: ResearchThread[
  * The round's items handed in through the card tools (P2b-3b, docs/onboarding-agent-session.md D1): each kept the moment its check passes,
  * so the model fixes a failing one in the same turn, with the tool's answer, instead of after the whole round came back.
  */
-export type RoundDraft = { questions: TurnQuestion[]; openItems: string[]; insights: TurnInsight[]; research: ResearchRequest[] };
+export type RoundDraft = { questions: TurnQuestion[]; openItems: string[]; insights: TurnInsight[]; research: ResearchRequest[];
+  /**
+   * What the round says of itself through `mark_round` (2026-11-22, the free-text reply): the ledger part it is in, whether it answers a
+   * disclosure (`safety`), whether it asks the lesson question, its progress record, and, in a line's own interview, that it is done.
+   */
+  meta?: RoundMeta };
+export type RoundMeta = { stage?: OnboardingStage; safety?: boolean; askLesson?: boolean; progress?: TurnProgress; ready?: boolean };
 export const emptyDraft = (): RoundDraft => ({ questions: [], openItems: [], insights: [], research: [] });
 
 /* i18n-ignore-start: tool answers and problems for the model */
@@ -289,13 +259,18 @@ export function questionShape(question: TurnQuestion, ids: { lines: readonly str
   return problems;
 }
 
-export const CARD_TOOL_NAMES = ["ask_question", "ask_app_question", "show_observation", "open_research"] as const;
+export const CARD_TOOL_NAMES = ["ask_question", "ask_app_question", "show_observation", "open_research", "mark_round"] as const;
 
-/** How the dialogue is told to use the card tools, appended to its instructions on a route that calls functions. */
-export const CARD_TOOLS_INSTRUCTIONS = "这一轮的问题、应用的待问题、观察卡和调研问题用工具交：`ask_question`（你自己的一道问题，字段同 `questions` 的一项）、"
-  + "`ask_app_question`（`openItems` 里的一项，给它的 `id`）、`show_observation`（一张观察卡，字段同 `insights` 的一项）、`open_research`（一个调研问题）。"
+/**
+ * How the dialogue is told to use the tools, appended to its instructions on a route that calls functions. There the round's answer is
+ * the final message itself, in free text (2026-11-22): what the person reads. The cards, the safety mark and the part of the ledger go
+ * through the tools.
+ */
+export const CARD_TOOLS_INSTRUCTIONS = "你的最终消息就是本人读到的回复，直接写正文，不写 JSON。主问题写在回复里。"
+  + "要放在回复旁边的东西用工具交：`ask_question`（一道带选项的题，真的有几个互斥的选项时才用）、`ask_app_question`（`openItems` 里应用的一道待问题，给它的 `id`）、"
+  + "`show_observation`（一张观察卡）、`open_research`（交给后台调研线程的问题）、`mark_round`（这一轮在访谈的哪一部分、是否按「安全」一节回应、是否要问那道固定的题；单条主线的访谈问完时 `ready: true`）。"
   + "每次调用当场核对：回「收下」就已经放进这一轮；回的是问题，就按说的改好再调用，或者不要这一项。"
-  + "最后的 JSON 里 `questions`、`openItems`、`insights`、`research` 写 []：工具交过的不要再写一遍。`reply` 照常接住本人的话，`nextAction` 为 ask 时这一轮至少要交一道题。";
+  + "访谈状态（进度、开始标准、问题记录、调研线程、量表读数、日历）用 `read_interview_state` 读，账本和文件用 `read_ledger`、`read_file` 读，需要时再读。";
 
 /**
  * The card tools, over one round's draft. `check` runs the round's checks on the draft with the new item (`deskCheck` in the session):
@@ -303,7 +278,7 @@ export const CARD_TOOLS_INSTRUCTIONS = "这一轮的问题、应用的待问题�
  * nothing; the final answer's fields are merged after the draft (`withDraft`), so a model that writes them there instead is checked the same.
  */
 export function cardTools(input: {
-  schemas: { question: Record<string, unknown>; insight: Record<string, unknown>; research: Record<string, unknown> };
+  schemas: { question: Record<string, unknown>; insight: Record<string, unknown>; research: Record<string, unknown>; round?: Record<string, unknown> };
   ids: () => { lines: readonly string[]; projects: readonly string[] };
   check: (draft: RoundDraft) => string[];
   draft: () => RoundDraft;
@@ -313,7 +288,9 @@ export function cardTools(input: {
     { name: "ask_app_question", description: "问 openItems 里应用自己的一道待问题，按应用的写法和选项发给本人。给它的 id。", inputSchema: {
       type: "object", properties: { id: { type: "string", maxLength: 80 } }, required: ["id"], additionalProperties: false } },
     { name: "show_observation", description: "交一张观察卡（字段同输出的 insights 的一项）。当场核对引文和假设日志，回「收下」或要改的问题。", inputSchema: input.schemas.insight },
-    { name: "open_research", description: "提一个要上网调研的问题（字段同输出的 research 的一项）。当场核对，回「收下」或要改的问题。", inputSchema: input.schemas.research }
+    { name: "open_research", description: "提一个交给后台调研线程的问题（字段同输出的 research 的一项）。当场核对，回「收下」或要改的问题。", inputSchema: input.schemas.research },
+    ...(input.schemas.round ? [{ name: "mark_round", description: "说这一轮自己的事：stage（在访谈的哪一部分）、safety（这一轮按「安全」一节回应本人）、askLesson（问那道固定的题）、progress（进度记录）、ready（单条主线的访谈已问完）。可以调用多次，后一次覆盖前一次给的字段。",
+      inputSchema: input.schemas.round }] : [])
   ];
   const call = (name: string, args: unknown): string => {
     const value = (args && typeof args === "object" ? args : {}) as Record<string, unknown>;
@@ -336,6 +313,9 @@ export function cardTools(input: {
     } else if (name === "open_research") {
       next.research.push(value as ResearchRequest);
       label = `调研「${short(String(value.question ?? ""))}」`;
+    } else if (name === "mark_round") {
+      next.meta = { ...(draft.meta ?? {}), ...(value as RoundMeta) };
+      label = "这一轮的标记";
     } else throw new Error(`没有名为 ${name} 的工具`);
     const problems = shape.length ? shape : input.check(next);
     if (problems.length) throw new Error(`没收下，${label}要改：\n- ${problems.join("\n- ")}`);
@@ -352,7 +332,12 @@ export function withDraft(output: unknown, draft: RoundDraft): unknown {
   if (!output || typeof output !== "object" || Array.isArray(output)) return output;
   const value = output as Record<string, unknown>;
   const list = (key: string) => (Array.isArray(value[key]) ? value[key] as unknown[] : []);
-  if (!draft.questions.length && !draft.openItems.length && !draft.insights.length && !draft.research.length) return output;
-  return { ...value, questions: [...draft.questions, ...list("questions")], openItems: [...draft.openItems, ...list("openItems")],
+  const meta = draft.meta ?? {};
+  // `mark_round`'s fields stand over what the final answer said of them (a free-text answer says nothing of them).
+  const marked = { ...(meta.stage ? { stage: meta.stage } : {}), ...(meta.safety !== undefined ? { safety: meta.safety } : {}),
+    ...(meta.askLesson !== undefined ? { askLesson: meta.askLesson } : {}), ...(meta.progress ? { progress: meta.progress } : {}),
+    ...(meta.ready ? { nextAction: "ready_for_milestones" } : {}) };
+  if (!draft.questions.length && !draft.openItems.length && !draft.insights.length && !draft.research.length) return { ...value, ...marked };
+  return { ...value, ...marked, questions: [...draft.questions, ...list("questions")], openItems: [...draft.openItems, ...list("openItems")],
     insights: [...draft.insights, ...list("insights")], research: [...draft.research, ...list("research")] };
 }

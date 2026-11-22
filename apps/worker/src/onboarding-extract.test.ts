@@ -75,15 +75,12 @@ test("files over one run's budget wait for the next run, which follows at once",
   const { rpc, prompts } = runtime([round], [facts()]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "await" });
   await run({ sessionId: "s", text: "材料都传了" });
-  // The dialogue showed twelve; the extraction read those twelve, then (the next turn having queued none) nothing more waits.
+  // The dialogue showed all fourteen (thirty a turn since 2026-11-22); the extraction read twelve, and the next run, at once, the last two.
   const extractions = prompts().filter((prompt) => prompt.includes(EXTRACT));
-  expect(extractions).toHaveLength(1);
+  expect(extractions).toHaveLength(2);
   expect((extractions[0]!.match(/"fileName"/g) ?? []).length).toBe(12);
+  expect((extractions[1]!.match(/"fileName"/g) ?? []).length).toBe(2);
   expect(extractBacklog(store, workspaceId, "s").files).toBe(0);
-  // The next turn shows the last two to the dialogue, and they are extracted then.
-  await run({ sessionId: "s", text: "继续" });
-  const second = prompts().filter((prompt) => prompt.includes(EXTRACT))[1]!;
-  expect((second.match(/"fileName"/g) ?? []).length).toBe(2);
 });
 
 test("a file longer than one run reads is read on in the next runs, never marked done after its first part (W-228)", async () => {

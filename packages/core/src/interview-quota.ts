@@ -9,8 +9,11 @@ import type { CostSignal } from "./cost";
  * gone is told what to do next — Plus, or an invite code for the developer's model.
  */
 export const ONBOARDING_QUOTA_TRACE = "onboarding.quotaTrace";
-/** Rounds a full interview usually takes, start standard and portrait together (scripts/onboarding-eval.ts runs land at 10–14). */
-export const INTERVIEW_ROUNDS_EXPECTED = 12;
+/**
+ * The most rounds one interview takes (the owner, 2026-11-22): counted by the worker from the person's messages as a turn starts. Not
+ * an estimate of how long it runs — the interview has none; the person ends it when the model of them is complete enough.
+ */
+export const INTERVIEW_ROUND_LIMIT = 1000;
 
 export type QuotaReading = { round: number; at: string; long?: number; short?: number; longResetsAt?: number | null; shortResetsAt?: number | null };
 export type InterviewQuotaVerdict = "ok" | "tight" | "insufficient" | "spent";
@@ -22,7 +25,6 @@ export type InterviewQuotaOutlook = {
   perRound?: number;
   /** Rounds the remaining quota is projected to carry, when measured. */
   roundsLeft?: number;
-  remainingRounds: number;
 };
 
 /** Adds this round's reading, once per round; a window that reset starts the trace again. */
@@ -64,25 +66,25 @@ export function interviewQuotaOutlook(input: { plan?: string | undefined; signal
   // Each message is one sentence pair, the offer always its own sentence (English joins them with a space, Chinese with nothing).
   const join = (...parts: string[]) => parts.filter(Boolean).join(input.locale === "en" ? " " : "");
   const plusOrInvite = t("可以升级到 ChatGPT Plus，或申请用开发者提供的模型继续访谈（邮件审批）。");
-  const remainingRounds = input.complete ? 0 : Math.max(2, INTERVIEW_ROUNDS_EXPECTED - input.roundsDone);
-  if (input.complete) return { verdict: "ok", message: "", remainingRounds };
+  // No round count is expected of an interview (2026-11-22): a projection is only ever said as what the quota carries.
+  if (input.complete) return { verdict: "ok", message: "" };
   const free = input.plan === "free";
   const used = input.signal.available ? Math.max(input.signal.long?.usedPercent ?? 0, input.signal.short?.usedPercent ?? 0) : undefined;
   if (input.usageLimitHit || (input.signal.available && (input.signal.limitReached || (used ?? 0) >= 100)))
-    return { verdict: "spent", remainingRounds, message: join(t("这个 ChatGPT 账号的额度已用完，访谈停在这里。"), plusOrInvite) };
+    return { verdict: "spent", message: join(t("这个 ChatGPT 账号的额度已用完，访谈停在这里。"), plusOrInvite) };
   const cost = perRoundCost(input.trace);
   const left = input.signal.available ? 100 - ((cost?.window === "short" ? input.signal.short?.usedPercent : input.signal.long?.usedPercent) ?? used ?? 0) : undefined;
   if (cost && cost.cost > 0 && left !== undefined) {
     const roundsLeft = Math.floor(left / cost.cost);
-    const base = { perRound: Math.round(cost.cost * 10) / 10, roundsLeft, remainingRounds };
-    // A short window comes back within hours: running out of it only means waiting, not stopping.
-    if (roundsLeft < remainingRounds && cost.window === "long")
-      return { ...base, verdict: "insufficient", message: join(free ? t("按前几轮的用量，这个免费账号剩下的额度大约还够 {{rounds}} 轮，访谈通常还要 {{remaining}} 轮左右。", { rounds: roundsLeft, remaining: remainingRounds })
-        : t("按前几轮的用量，这个账号剩下的额度大约还够 {{rounds}} 轮，访谈通常还要 {{remaining}} 轮左右。", { rounds: roundsLeft, remaining: remainingRounds }), plusOrInvite) };
-    if (roundsLeft < remainingRounds)
-      return { ...base, verdict: "tight", message: join(t("按前几轮的用量，当前额度窗口大约还够 {{rounds}} 轮；用完后要等几个小时恢复再继续。", { rounds: roundsLeft }), free ? plusOrInvite : "") };
+    const base = { perRound: Math.round(cost.cost * 10) / 10, roundsLeft };
+    // A Free account is told what its quota carries once it is measured; a short window comes back within hours, so running out of it
+    // only means waiting. A paid account hears from this only when the quota is spent.
+    if (free && cost.window === "long")
+      return { ...base, verdict: "insufficient", message: join(t("按前几轮的用量，这个免费账号剩下的额度大约还够 {{rounds}} 轮。", { rounds: roundsLeft }), plusOrInvite) };
+    if (free)
+      return { ...base, verdict: "tight", message: join(t("按前几轮的用量，当前额度窗口大约还够 {{rounds}} 轮；用完后要等几个小时恢复再继续。", { rounds: roundsLeft }), plusOrInvite) };
     return { ...base, verdict: "ok", message: "" };
   }
-  if (free) return { verdict: "tight", remainingRounds, message: join(t("免费账号的额度较少，访谈约 {{rounds}} 轮，可能做不完；做两轮后这里会按实际用量估算还够几轮。", { rounds: INTERVIEW_ROUNDS_EXPECTED }), plusOrInvite) };
-  return { verdict: "ok", message: "", remainingRounds };
+  if (free) return { verdict: "tight", message: join(t("免费账号的额度较少，访谈可能做不完；做两轮后这里会按实际用量估算还够几轮。"), plusOrInvite) };
+  return { verdict: "ok", message: "" };
 }
