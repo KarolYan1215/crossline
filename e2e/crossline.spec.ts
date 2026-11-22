@@ -650,13 +650,12 @@ test("未达可开始标准时打开今日页回到访谈，并写明还差什�
       const workspaceId = store.listWorkspaces().map((item) => item.id).find((id) => !before.has(id));
       if (!workspaceId) throw new Error("the new account has no workspace");
       restore = store.getSetting(workspaceId, "lines.v1") ?? "";
-      const lines = JSON.parse(restore) as Array<{ label: string; goal: string; goals?: string[] }>;
-      label = lines[0]!.label;
-      lines[0] = { ...lines[0]!, goal: "", goals: [] };
-      store.setSetting(workspaceId, "lines.v1", JSON.stringify(lines));
+      // The start standard is a line and a milestone (D10, 2026-11-22): with no line of the person's, Today sends them back.
+      label = "至少有一条主线";
+      store.setSetting(workspaceId, "lines.v1", "[]");
       await page.goto("/");
       await expect(page).toHaveURL(/\/onboarding/);
-      // The interview says what is missing, in the right column's ring: here, the first line's long-term goal.
+      // The interview says what is missing, in the right column's ring: here, a line.
       const missing = page.getByRole("region", { name: "开始使用的进度" });
       await expect(missing).toContainText("开始使用前还差 1 项");
       await expect(missing).toContainText(label);
