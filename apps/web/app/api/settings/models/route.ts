@@ -7,22 +7,26 @@ import { isCrossSiteWrite } from "../../../../lib/same-origin";
 
 /** One model as the picker shows it: the catalogue's id and name, and the efforts it takes. */
 export type PickerModel = { model: string; displayName?: string; efforts: string[]; defaultEffort: string; isDefault: boolean };
-export type ModelsAnswer = { choices: ReturnType<typeof modelChoicesOf>; models: PickerModel[]; provider: boolean; unavailable?: string };
+/** The developer's sponsored model, when this account can use it: its id, and why it is held back right now if it is. */
+export type SponsorEntry = { model: string; blocked?: string };
+export type ModelsAnswer = { choices: ReturnType<typeof modelChoicesOf>; models: PickerModel[]; provider: boolean; sponsor?: SponsorEntry; unavailable?: string };
 
 /**
- * The person's own model and effort per slot (D19): GET gives the stored choices and the models the account's own Codex offers
- * (`model/list` through the worker, hidden ones left out); POST sets or clears one slot. The worker reads the choice per run.
+ * The person's own model and effort per slot (D19): GET gives the stored choices, the models the account's own Codex offers
+ * (`model/list` through the worker, hidden ones left out) and the developer's sponsored model when the account can use it (chosen as
+ * `SPONSOR_MODEL_CHOICE`); POST sets or clears one slot. The worker reads the choice per run.
  */
 export async function GET(request: Request) {
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
   const choices = modelChoicesOf(getStore().getSetting(access.ctx.workspaceId, MODEL_CHOICE_SETTING));
   try {
-    const answer = await requestCodexSupervisor<{ models?: Array<PickerModel & { hidden?: boolean }>; provider?: boolean }>(access.ctx, "/v1/codex/models",
+    const answer = await requestCodexSupervisor<{ models?: Array<PickerModel & { hidden?: boolean }>; provider?: boolean; sponsor?: SponsorEntry }>(access.ctx, "/v1/codex/models",
       { signal: AbortSignal.timeout(4_000) });
     const models = (answer.models ?? []).filter((model) => !model.hidden).map(({ model, displayName, efforts, defaultEffort, isDefault }) =>
       ({ model, ...(displayName ? { displayName } : {}), efforts, defaultEffort, isDefault }));
-    return NextResponse.json({ choices, models, provider: answer.provider === true } satisfies ModelsAnswer);
+    const sponsor = typeof answer.sponsor?.model === "string" ? { model: answer.sponsor.model, ...(typeof answer.sponsor.blocked === "string" ? { blocked: answer.sponsor.blocked } : {}) } : undefined;
+    return NextResponse.json({ choices, models, provider: answer.provider === true, ...(sponsor ? { sponsor } : {}) } satisfies ModelsAnswer);
   } catch (error) {
     return NextResponse.json({ choices, models: [], provider: false, unavailable: error instanceof Error ? error.message.slice(0, 120) : "worker unreachable" } satisfies ModelsAnswer);
   }

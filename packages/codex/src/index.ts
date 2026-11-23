@@ -7,6 +7,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readSync, writeFileSync } f
 import path from "node:path";
 import { readCostSignal } from "./cost";
 import { accountModels } from "./model-catalog";
+import { providerRoutingFor } from "./providers";
 import { createRuntimePool, type PoolMember, type RuntimePool } from "./runtime-pool";
 import { verifyCapability } from "./capability";
 import { currentUsageWorkspace, enterUsageWorkspace } from "./usage";
@@ -705,6 +706,12 @@ export async function startCodexSupervisor(options: {
     if (!runtime.ok) { sendJson(response, 503, { blocker: runtime.blocker }); return undefined; }
     return runtime.client;
   };
+  /** `modelClient` without an error answer, for a route that has something to say without the account's Codex. */
+  const quietModelClient = async (workspaceId: string): Promise<CodexRpcBoundary | undefined> => {
+    if (isOwner(workspaceId)) return runtimeBlocker ? undefined : ownerClient();
+    const runtime = runtimes!.handle(workspaceId);
+    return runtime.ok ? runtime.client : undefined;
+  };
   /**
    * A runtime's quota. A ChatGPT login reports its windows; an API key reports none (the runtime refuses the read), so its month's
    * spend against the person's cap is the reading instead — before this, an API-key login read as "unavailable" and every background
@@ -1400,10 +1407,16 @@ export async function startCodexSupervisor(options: {
       }
       // The models the caller's own Codex offers (`model/list`, D19's picker), each with the efforts it takes. A workspace served by a
       // provider says so: a choice made here moves only runs on the account's own Codex.
+      // An account that can also use the developer's sponsored model gets it as its own entry, with why it is held back if it is.
       if (request.method === "GET" && pathname === "/v1/codex/models") {
-        const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
-        const models = await accountModels(rt, callerWorkspaceId);
-        sendJson(response, 200, { models: models ?? [], provider: Boolean(options.modelProviders?.cost(callerWorkspaceId)) });
+        const routing = providerRoutingFor(callerWorkspaceId);
+        const sponsor = routing?.provider.id === "sponsor" && routing.provider.model
+          ? { model: routing.provider.model, ...(routing.blocked ? { blocked: routing.blocked.message } : {}) } : undefined;
+        // With the sponsored model on offer, a Codex that cannot be reached leaves the ChatGPT list empty rather than failing the answer.
+        const rt = sponsor ? await quietModelClient(callerWorkspaceId) : await modelClient(response, callerWorkspaceId);
+        if (!rt && !sponsor) return;
+        const models = rt ? await accountModels(rt, callerWorkspaceId).catch(() => undefined) : undefined;
+        sendJson(response, 200, { models: models ?? [], provider: Boolean(options.modelProviders?.cost(callerWorkspaceId)), ...(sponsor ? { sponsor } : {}) });
         return;
       }
       // A guest's own Codex: connect (ChatGPT in the browser, a device code, or an API key), see it, cancel, sign out.

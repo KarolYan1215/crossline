@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { MODEL_CHOICE_SLOTS, type ModelChoice, type ModelChoiceSlot, type ModelChoices } from "@crossline/core";
+import { MODEL_CHOICE_SLOTS, SPONSOR_MODEL_CHOICE, type ModelChoice, type ModelChoiceSlot, type ModelChoices } from "@crossline/core";
 import { useT } from "../locale-context";
 import type { ModelsAnswer, PickerModel } from "../api/settings/models/route";
 import "./model-picker.css";
@@ -19,11 +19,15 @@ const readModels = () => shared ??= fetch("/api/settings/models", { cache: "no-s
 const optionsFor = (models: PickerModel[], choice: ModelChoice | undefined): Array<PickerModel & { missing?: boolean }> =>
   choice && !models.some((model) => model.model === choice.model) ? [...models, { model: choice.model, efforts: [], defaultEffort: "", isDefault: false, missing: true }] : models;
 
+/** The sponsored model as the person reads it: the provider's own name without the vendor prefix or a thinking cap. */
+const sponsorName = (model: string) => (model.split("/").pop() ?? model).replace(/@think:.*$/, "");
+
 /**
  * The model and reasoning effort for one slot (D19), like Codex's own picker: the models the account's Codex lists (`model/list`), and only
  * the efforts the chosen model takes. 「默认」 leaves the slot to the route table. A choice applies from the next turn or run; it is never
  * stepped down when the quota is tight and never swapped for another model (packages/codex/src/skill-runner.ts). `compact` is the
- * interview's form beside its input box.
+ * interview's form beside its input box. An account that can also use the developer's sponsored model sees it as its own group (chosen
+ * as `SPONSOR_MODEL_CHOICE`, no effort to pick) and as the default (2026-11-22, the owner's decision).
  */
 export function ModelPicker({ slot, label, compact = false }: { slot: ModelChoiceSlot; label?: string; compact?: boolean }) {
   const t = useT();
@@ -54,12 +58,14 @@ export function ModelPicker({ slot, label, compact = false }: { slot: ModelChoic
   };
 
   if (!loaded) return compact ? null : <small className="muted">{t("正在读取模型列表…")}</small>;
-  const models = optionsFor(answer?.models ?? [], choice);
+  const sponsor = answer?.sponsor;
+  const sponsorPicked = choice?.model === SPONSOR_MODEL_CHOICE;
+  const models = optionsFor(answer?.models ?? [], sponsorPicked ? undefined : choice);
   // Nothing to choose from: the interview's box stays as it was; Settings says why.
-  if (!models.length) return compact ? null : <small className="muted">{answer?.provider
+  if (!models.length && !sponsor && !sponsorPicked) return compact ? null : <small className="muted">{answer?.provider
     ? t("这个账号的模型由「模型连接」里的服务提供；这里的选择只作用于 ChatGPT 登录。")
     : t("模型列表暂时读不到：连接 ChatGPT 后可选。")}</small>;
-  const current = models.find((model) => model.model === choice?.model);
+  const current = sponsorPicked ? undefined : models.find((model) => model.model === choice?.model);
   const efforts = current ? EFFORT_ORDER.filter((effort) => current.efforts.includes(effort)) : [];
   const name = (model: PickerModel & { missing?: boolean }) => model.missing ? t("{{model}}（这个账号没有）", { model: model.model })
     : model.displayName ?? model.model;
@@ -68,14 +74,20 @@ export function ModelPicker({ slot, label, compact = false }: { slot: ModelChoic
   return <span className={compact ? "model-picker model-picker-compact" : "model-picker"} role="group" aria-label={t("{{what}}的模型与思考强度", { what })}>
     <select aria-label={t("{{what}}的模型", { what })} value={choice?.model ?? ""}
       onChange={(event) => void save(event.target.value ? { model: event.target.value } : undefined)}>
-      <option value="">{t("默认模型")}</option>
-      {models.map((model) => <option key={model.model} value={model.model}>{name(model)}</option>)}
+      <option value="">{sponsor ? t("默认（赞助模型 {{model}}）", { model: sponsorName(sponsor.model) }) : t("默认模型")}</option>
+      {models.length > 0 && <optgroup label={t("ChatGPT")}>
+        {models.map((model) => <option key={model.model} value={model.model}>{name(model)}</option>)}
+      </optgroup>}
+      {(sponsor || sponsorPicked) && <optgroup label={t("赞助模型")}>
+        <option value={SPONSOR_MODEL_CHOICE}>{sponsor ? sponsorName(sponsor.model) : t("赞助模型（这个账号没有）")}</option>
+      </optgroup>}
     </select>
     {current && efforts.length > 0 && <select aria-label={t("{{what}}的思考强度", { what })} value={choice?.effort ?? ""}
       onChange={(event) => void save({ model: current.model, ...(event.target.value ? { effort: event.target.value } : {}) })}>
       <option value="">{current.defaultEffort ? t("默认强度（{{effort}}）", { effort: t(EFFORT_LABEL[current.defaultEffort] ?? current.defaultEffort) }) : t("默认强度")}</option>
       {efforts.map((effort) => <option key={effort} value={effort}>{t(EFFORT_LABEL[effort] ?? effort)}</option>)}
     </select>}
+    {sponsorPicked && sponsor?.blocked && <small className="st-fail">{sponsor.blocked}</small>}
     {status && <small role="status" className={status === "saved" ? "st-ok" : "st-fail"}>
       {status === "failed" ? t("未保存") : compact ? t("下一轮生效") : t("已保存，下一次运行生效")}</small>}
   </span>;

@@ -12,14 +12,14 @@ const SLOT_NOTE: Record<string, string> = {
 
 /**
  * Settings → 模型 (D19): a default model and reasoning effort for the interview, its 整理层 and 调研层, and every other Skill. A slot left
- * at 默认 keeps the existing route table (packages/codex/src/model-policy.ts). A chosen model is not stepped down when the quota is tight
+ * at 默认 keeps the existing route table (packages/codex/src/model-policy.ts), or the sponsored model where the account has it. A chosen model is not stepped down when the quota is tight
  * and is never swapped for another: a spent quota or a model the account lacks is said as such.
  */
 export function ModelChoiceCard({ locale }: { locale?: Locale }) {
   const t = tFor(locale);
   return <section className="st-card" aria-label={t("模型与思考强度")}>
     <header><h3>{t("模型与思考强度")}</h3>
-      <small>{t("未设的按每项工作的难度自动分配。选定的模型在额度紧张时也不降档；额度用尽时如实告知，不换成别的模型。只对 ChatGPT 登录生效。")}</small></header>
+      <small>{t("未设的按每项工作的难度自动分配；能用赞助模型时默认用它。选定的模型在额度紧张时也不降档；额度用尽时如实告知，不换成别的模型。")}</small></header>
     <div className="model-picker-rows">
       {MODEL_CHOICE_SLOTS.map((slot) => <div className="st-row" key={slot.key}>
         <span className="st-row-label">{t(slot.label)}<small>{t(SLOT_NOTE[slot.key]!)}</small></span>

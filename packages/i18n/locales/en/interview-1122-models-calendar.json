@@ -28,7 +28,6 @@
   "访谈中的核实与后台调研": "Checks during the interview and background research",
   "上面没单独设的其余工作": "All other work not set above",
   "模型与思考强度": "Model and reasoning effort",
-  "未设的按每项工作的难度自动分配。选定的模型在额度紧张时也不降档；额度用尽时如实告知，不换成别的模型。只对 ChatGPT 登录生效。": "Anything not set is assigned by how hard each job is. A chosen model is not stepped down when the quota is tight; when the quota runs out you are told so, and no other model is swapped in. Applies only to a ChatGPT sign-in.",
   "整理层": "Organising layer",
   "调研层": "Research layer",
   "其他 Skill": "Other Skills",

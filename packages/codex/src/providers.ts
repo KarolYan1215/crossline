@@ -131,6 +131,10 @@ export function setProviderResolver(next: ((workspaceId: string | undefined) => 
 export function currentProviderRouting(): ProviderRouting | undefined {
   try { return resolver?.(currentUsageWorkspace()); } catch { return undefined; }
 }
+/** The same routing for a named workspace, for a route answered outside a run (the model picker's list). */
+export function providerRoutingFor(workspaceId: string): ProviderRouting | undefined {
+  try { return resolver?.(workspaceId); } catch { return undefined; }
+}
 /** Where a run of this Skill would go for the current workspace, for callers that act outside a model turn (the portrait figure). */
 export const currentRoute = (skillName: string): RouteDecision => decideRoute(skillName, currentProviderRouting());
 

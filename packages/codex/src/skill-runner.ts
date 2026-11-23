@@ -5,7 +5,7 @@ import { looksLooping, repairJsonBrackets } from "./json-repair";
 import { cleanAnswerStrings, designNoteText, instructionsText, tFor, type Locale } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
 import { routeForSkill, shiftEffort, tierForSkill, tierRoutes, type ModelRoute, type RouteTier, type SpendMode } from "./model-policy";
-import { createUsageCollector, currentEffortPreference, currentModelChoice, currentSpendMode, currentUsageWorkspace, reportUsage, takeMeteredUsage, type UsageCollector } from "./usage";
+import { createUsageCollector, currentCodexChoice, currentEffortPreference, currentSpendMode, currentUsageWorkspace, reportUsage, sponsorChosen, takeMeteredUsage, type UsageCollector } from "./usage";
 import { currentProviderRouting, decideRoute, noteChatgptUsageLimit, type RouteDecision, type ThreadProvider } from "./providers";
 import { markClientBusy, priorityForSkill, withModelSlot, type ModelPriority } from "./model-gate";
 import { bindForRun } from "./runtime-pool";
@@ -589,9 +589,14 @@ async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: stri
   // The workspace's own provider when it can serve this Skill, else its own Codex sign-in, else a blocker (never the owner's runtime).
   const routing = options.provider ? undefined : currentProviderRouting();
   // The person's own model for this Skill (D19): it wins over the table, is not stepped down in economy, and is never swapped.
-  const choice = options.provider ? undefined : currentModelChoice(options.skillName);
+  const choice = options.provider ? undefined : currentCodexChoice(options.skillName);
   let decision: RouteDecision = options.provider ? { via: "provider" as const, provider: options.provider }
     : decideRoute(options.skillName, routing, options.mainModel ? { mainModel: true } : {});
+  // The sponsored model was chosen (2026-11-22): while it is held back (still being tested, or this month's cap reached) that is said,
+  // rather than the run moving to the account's ChatGPT behind the person's back.
+  if (!options.provider && routing?.blocked && decision.via !== "provider" && sponsorChosen(options.skillName)) {
+    return { ok: false, blocker: { code: routing.blocked.code, message: routing.blocked.message }, audit: {} };
+  }
   if (choice && decision.via !== "codex" && routing) {
     // A Codex model was chosen: it runs on the account's own Codex whenever that is signed in. A spent ChatGPT quota is said as such
     // rather than handed to the developer's model behind the person's back.
@@ -1338,7 +1343,7 @@ export async function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: s
   if (!onChatgpt || result.ok || result.blocker.code !== "SKILL_USAGE_LIMIT") return result;
   noteChatgptUsageLimit();
   // A model the person chose is not moved to another one: the spent quota is what they are told (D19).
-  if (currentModelChoice(options.skillName) || decideRoute(options.skillName, currentProviderRouting()).via !== "provider") return result;
+  if (currentCodexChoice(options.skillName) || decideRoute(options.skillName, currentProviderRouting()).via !== "provider") return result;
   return { ok: false, blocker: { code: "SKILL_THREAD_LOST", message: said(options.locale)("ChatGPT 额度已用尽，这段对话改由开发者提供的模型接着进行。") }, audit: result.audit };
 }
 
@@ -1388,7 +1393,7 @@ export async function runCodexSkill<T>(client: CodexRpcBoundary, input: unknown,
   // run goes there once (2026-10-21). Nothing else changes about the run.
   if (onChatgpt && !first.ok && first.blocker.code === "SKILL_USAGE_LIMIT" && !options.signal?.aborted) {
     noteChatgptUsageLimit();
-    if (!currentModelChoice(options.skillName) && decideRoute(options.skillName, currentProviderRouting()).via === "provider") {
+    if (!currentCodexChoice(options.skillName) && decideRoute(options.skillName, currentProviderRouting()).via === "provider") {
       console.log(JSON.stringify({ type: "skill.rerun_on_sponsor", skill: options.skillName }));
       first = await executeSkill(client, options, (context) => runSkillTurn(context.client, input, options, context));
     }
