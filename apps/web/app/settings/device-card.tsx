@@ -8,7 +8,7 @@ import { DEVICE_LINK_GUIDE } from "../../lib/setup-guides";
 import { useLocale, useT } from "../locale-context";
 import { intlLocale, type Locale, type Translate } from "../../lib/i18n";
 
-type NodeEntryView = { key: string; host: string; role: "device" | "standalone"; capacity: number; state: string; at: string; message?: string };
+type NodeEntryView = { key: string; host: string; role: "device" | "standalone"; capacity: number; state: string; at: string; message?: string; remote?: boolean };
 type NodeView = { available: boolean; enabled: boolean; status: { state: string; host?: string; codex?: string; at: string; message?: string; nodes?: NodeEntryView[] } | null;
   paired?: { host: string; at: string } | null };
 type Status = { linked: boolean; lastSeen: { at: string; label?: string } | null; folders: Array<{ id: string; label: string; files: number }>; documents: number };
@@ -140,6 +140,8 @@ export function ComputeNodeRow({ onReady, everyMs = 20_000, download = true }: {
     {(view.status?.nodes ?? []).filter((node) => node.key !== "?").map((node) => <div className="st-row" key={node.key}>
       <span className="st-row-label">{node.host || t("一台电脑")}<small>{`${node.role === "device" ? t("设备模式，优先") : t("独立节点")} · ${t("同时 {{count}} 路", { count: node.capacity })}`}</small></span>
       <span className="muted">{NODE_STATE_WORDS[node.state] ? t(NODE_STATE_WORDS[node.state]!) : node.state}{node.message && node.state !== "ready" ? t("（{{detail}}）", { detail: node.message }) : ""}</span></div>)}
+    {(view.status?.nodes ?? []).some((node) => node.remote) && <div className="st-row"><span className="st-row-label">{t("用这部手机遥控")}<small>{t("那台电脑开启了「从手机遥控」：配对后可以从手机开会话、执行命令、读授权文件夹")}</small></span>
+      <a className="secondary-button" href="/computer">{t("遥控电脑")}</a></div>}
     {view.paired
       ? <div className="st-row"><span className="st-row-label">{t("独立节点")}<small>{t("已配对 {{host}}（{{when}}）", { host: view.paired.host || t("一台电脑"), when: time(view.paired.at, locale) })}</small></span>
         <button type="button" className="secondary-button" onClick={() => void unpair()}>{t("解除配对")}</button></div>

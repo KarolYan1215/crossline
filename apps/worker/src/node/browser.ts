@@ -1,6 +1,6 @@
 // i18n-exempt: page text matched on the site (「我」 is Xiaohongshu's own link), never shown
 import { lookup } from "node:dns/promises";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { isIP } from "node:net";
 import path from "node:path";
@@ -291,6 +291,25 @@ export function createNodeBrowsers(options: { profilesDir: string; executable?: 
     return chromium.launchPersistentContext(profileDir, { executablePath: exe, headless: false, viewport: null,
       args: ["--no-first-run", "--no-default-browser-check", "--disable-sync", "--disable-background-mode"] });
   });
+  let lastShot: { sha: string; at: number; page: string } | undefined;
+  /**
+   * The phone's signed 「提交」 (docs/plans/remote-control-1122.md §6.5): only on the screenshot the person saw (two minutes at most, the
+   * page unchanged since), never on a page asking for a password or a payment, and only a button that reads as a submit.
+   */
+  const formSubmitFromPhone = async (input: { shot: string; button: { role: string; name: string } }): Promise<{ ok: true; picture?: Buffer } | { ok: false; why: string }> => {
+    const open = form;
+    if (!open || open.page.closed()) return { ok: false, why: "表单窗口已关闭" };
+    if (!lastShot || lastShot.sha !== input.shot || Date.now() - lastShot.at > 2 * 60_000) return { ok: false, why: "截图已过期，请重新截图" };
+    const snapshot = await open.page.snapshot();
+    if (createHash("sha256").update(snapshot).digest("hex") !== lastShot.page) return { ok: false, why: "截图之后页面变了" };
+    if ((await open.page.signals()).passwordFields > 0) return { ok: false, why: "页面要求密码" };
+    if (/card number|cvc|cvv|expiry|payment|checkout|pay now|信用卡|付款|支付/i.test(snapshot)) return { ok: false, why: "页面涉及付款" };
+    if (input.button.role !== "button" || !/submit|register|apply|sign up|rsvp|join|confirm|提交|报名|申请|注册|确认/i.test(input.button.name)) return { ok: false, why: "不是提交按钮" };
+    await open.page.click({ role: "button", name: input.button.name });
+    await open.page.settle().catch(() => undefined);
+    lastShot = undefined;
+    return { ok: true, picture: await open.page.picture([]).catch(() => Buffer.alloc(0)) };
+  };
   const closeForm = async () => { const closing = form; form = undefined; await closing?.page.close(); if (closing) rmSync(closing.uploads, { recursive: true, force: true }); };
   const formOp = async (request: Extract<BrowserOp, { op: "formOpen" | "form" | "formPicture" | "formClose" }>): Promise<unknown> => {
     if (request.op === "formOpen") {
@@ -309,7 +328,12 @@ export function createNodeBrowsers(options: { profilesDir: string; executable?: 
     if (request.op === "formClose") { await closeForm(); return undefined; }
     const open = form;
     if (!open) throw new Error("NODE_FORM_NOT_OPEN");
-    if (request.op === "formPicture") return { state: "ok", bytes: await open.page.picture(request.mask.slice(0, 40)), contentType: "image/png" };
+    if (request.op === "formPicture") {
+      const bytes = await open.page.picture(request.mask.slice(0, 40));
+      // Kept for a submit from the phone (remote.ts): what the person saw, when, and what the page held then.
+      lastShot = { sha: createHash("sha256").update(bytes).digest("hex"), at: Date.now(), page: createHash("sha256").update(await open.page.snapshot()).digest("hex") };
+      return { state: "ok", bytes, contentType: "image/png" };
+    }
     if (!(FORM_METHODS as readonly string[]).includes(request.method)) throw new Error("NODE_FORM_METHOD_REFUSED");
     const args = [...request.args];
     if (request.method === "upload") {
@@ -362,6 +386,6 @@ export function createNodeBrowsers(options: { profilesDir: string; executable?: 
     }
     return undefined;
   };
-  return { available: Boolean(executable), handle, closeAll: async () => { await current?.driver.close(); current = undefined; await closeForm(); } };
+  return { available: Boolean(executable), handle, formSubmitFromPhone, closeAll: async () => { await current?.driver.close(); current = undefined; await closeForm(); } };
 }
 export type NodeBrowsers = ReturnType<typeof createNodeBrowsers>;

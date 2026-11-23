@@ -10,6 +10,8 @@ import WebSocket from "ws";
 import { BROWSER_CHUNK_BYTES, CLOSE_WORDS, NODE_CAPACITY_MAX, marketplaceRoot, namesNodeSecret, nodePath, NODE_PROTOCOL, parseFrame, refusal, rewriteParams, turnImages, underRoots, withLocalImages, type NodeFrame } from "./protocol";
 import type { BrowserOp, NodeBrowsers } from "./browser";
 import { handleTaskOp, type TaskFileOp } from "./task-files";
+import { createRemoteControl, type RemoteControl, type RemoteHooks, type RemoteRequest } from "./remote";
+import type { RemoteLevel } from "@crossline/core/remote-control";
 
 /**
  * The computer's end of the compute node (docs/compute-node.md). On the person's switch (the local `/device` page) a linked device also
@@ -47,8 +49,17 @@ export type NodeAgentOptions = {
   livenessMs?: number;
   /** The readers' browsers on this computer (browser.ts): offered to the server when a Chrome or Edge is here. */
   browsers?: NodeBrowsers;
-  /** 「允许在这台电脑上执行命令（shell 助手）」: the person's switch on this computer, off unless set. */
+  /** 「允许在这台电脑上执行命令（shell 助手）」: the person's switch on this computer, off unless set; `true` is the level 「无人值守」. */
   shell?: boolean;
+  /**
+   * The three-way switch that replaced it (docs/plans/remote-control-1122.md §7.1): 「关」, 「只从手机遥控」 (sessions signed on the phone
+   * only; the server's own assistant gets no shell here) or 「无人值守」 (both). Wins over `shell` when given.
+   */
+  level?: RemoteLevel;
+  /** Where `remote.json` and the remote audit log live; `dir` by default. */
+  remoteDir?: string;
+  /** What only this kind of computer offers a phone: a linked device's authorised folders and transcriber. */
+  remoteHooks?: RemoteHooks;
   /** This node's own folders (its Codex home, its token): a command naming one is declined here, never asked of the server. */
   protect?: string[];
 };
@@ -83,7 +94,7 @@ export function nodeUrl(site: string): string {
   return url.toString();
 }
 
-export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; status: () => NodeAgentStatus } {
+export function startNodeAgent(options: NodeAgentOptions) {
   const log = options.log ?? (() => {});
   const spawn = options.spawn;
   const backoff = options.backoffMs ?? [5_000, 15_000, 60_000, 300_000];
@@ -91,7 +102,13 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
   const work = path.join(options.dir, "work");
   const tasksRoot = path.join(options.dir, "tasks");
   mkdirSync(work, { recursive: true });
-  const shell = options.shell === true ? { tasksRoot } : undefined;
+  const level: RemoteLevel = options.level ?? (options.shell === true ? "unattended" : "off");
+  const shell = level === "unattended" ? { tasksRoot } : undefined;
+  const host = (options.host ?? hostname()).slice(0, 60);
+  const forms = options.browsers?.available ? { submit: options.browsers.formSubmitFromPhone } : undefined;
+  const remote: RemoteControl | undefined = level === "off" ? undefined : createRemoteControl({ dir: options.remoteDir ?? options.dir, computer: host, level, tasksRoot,
+    home: homedir(), spawn, log, hooks: { ...(options.remoteHooks ?? {}), ...(forms ? { forms } : {}) } });
+  let askLedger: (() => Promise<Array<{ type: string; at: string; nonce?: string; session?: string }>>) | undefined;
   let status: NodeAgentStatus = { state: "connecting", since: new Date().toISOString() };
   const setStatus = (state: NodeAgentStatus["state"], message?: string, code?: string) => {
     status = { state, since: new Date().toISOString(), ...(code ? { code } : {}), ...(message ? { message } : {}) };
@@ -133,6 +150,7 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
     const files = new Map<number, (answer: Extract<NodeFrame, { t: "files-answer" }>) => void>();
     const images = new Map<number, (answer: Extract<NodeFrame, { t: "image-answer" }>) => void>();
     const gw = new Map<number, { response: import("node:http").ServerResponse }>();
+    const ledgers = new Map<number, (answer: Extract<NodeFrame, { t: "remote-ledger-answer" }>) => void>();
     const send = (frame: NodeFrame) => { if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(frame)); };
     const toServer = (line: string) => send({ t: "rpc", line });
     let chain = Promise.resolve();
@@ -142,6 +160,9 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
 
     const end = () => {
       clearInterval(liveness);
+      remote?.detached();
+      for (const pending of ledgers.values()) pending({ t: "remote-ledger-answer", id: 0, error: "NODE_DISCONNECTED" });
+      ledgers.clear();
       void options.browsers?.closeAll().catch(() => undefined);
       runtime?.stop();
       runtime = undefined;
@@ -182,9 +203,11 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
           capabilities: { experimentalApi: true, requestAttestation: false } } })); })
         .then((agent) => {
           runtime?.write(JSON.stringify({ method: "initialized" }));
-          send({ t: "hello", protocol: NODE_PROTOCOL, codex: agent, platform: process.platform, host: (options.host ?? hostname()).slice(0, 60),
+          const offered = remote?.status();
+          send({ t: "hello", protocol: NODE_PROTOCOL, codex: agent, platform: process.platform, host,
             role: options.role, capacity: options.capacity ?? nodeCapacity(), ...(options.browsers?.available ? { browser: true } : {}),
-            ...(shell ? { shell: true, tasks: tasksRoot, home: homedir(), ffmpeg: hasFfmpeg(), ...shellEnvironment() } : {}) });
+            ...(shell ? { shell: true, tasks: tasksRoot, home: homedir(), ffmpeg: hasFfmpeg(), ...shellEnvironment() } : {}),
+            ...(offered && level !== "off" ? { remote: { level, phones: offered.phones, folders: offered.authorised, transcribe: offered.transcribe, forms: offered.forms } } : {}) });
         });
     });
     socket.on("message", (raw) => {
@@ -196,6 +219,13 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
         gateway = frame.gateway;
         if (gateway) relayReady = startRelay();
         setStatus("ready");
+        remote?.attached((event) => send({ t: "remote-event", event }));
+        askLedger = () => new Promise((resolve, reject) => {
+          const id = ++nextId;
+          const timeout = setTimeout(() => { ledgers.delete(id); reject(new Error("NODE_LEDGER_TIMEOUT")); }, 30_000);
+          ledgers.set(id, (answer) => { clearTimeout(timeout); if (answer.events) resolve(answer.events); else reject(new Error(answer.error ?? "NODE_LEDGER_FAILED")); });
+          send({ t: "remote-ledger", id });
+        });
         log({ type: "node.agent_ready", roots: roots.length, gateway: Boolean(gateway) });
         return;
       }
@@ -207,6 +237,12 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
         catch (error) { send({ t: "task-answer", id: frame.id, error: error instanceof Error ? error.message.slice(0, 200) : "NODE_TASK_FAILED" }); }
         return;
       }
+      if (frame.t === "remote") {
+        if (!remote) { send({ t: "remote-answer", id: frame.id, result: { ok: false, code: "REMOTE_DISABLED" } }); return; }
+        void remote.handle(frame.request as RemoteRequest).then((result) => send({ t: "remote-answer", id: frame.id, result }));
+        return;
+      }
+      if (frame.t === "remote-ledger-answer") { ledgers.get(frame.id)?.(frame); ledgers.delete(frame.id); return; }
       if (frame.t === "files-answer") { files.get(frame.id)?.(frame); files.delete(frame.id); return; }
       if (frame.t === "image-answer") { images.get(frame.id)?.(frame); images.delete(frame.id); return; }
       if (frame.t === "gw-head") { const pending = gw.get(frame.id); pending?.response.writeHead(frame.status, frame.headers); return; }
@@ -221,6 +257,7 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
     });
     socket.on("close", (code, reason) => {
       end();
+      askLedger = undefined;
       if (current?.socket === socket) current = undefined;
       const why = refusedFor ?? reason.toString();
       const words = CLOSE_WORDS[why] ?? (why.startsWith("HTTP_") ? `网页版回答 ${why.slice(5)}` : why);
@@ -343,8 +380,12 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
 
   connect();
   return {
-    stop: () => { stopped = true; if (timer) clearTimeout(timer); current?.end(); current?.socket.close(1000, "NODE_STOPPED"); setStatus("off"); },
-    status: () => status
+    stop: () => { stopped = true; if (timer) clearTimeout(timer); remote?.stopAll("stopped"); current?.end(); current?.socket.close(1000, "NODE_STOPPED"); setStatus("off"); },
+    status: () => status,
+    /** Remote control on this computer, when its level is not 「关」 (the computer's own page reads and stops it). */
+    remote: () => remote,
+    /** 「核对」: the hosted ledger's `remote.*` events of the last seven days, asked over this connection (read only). */
+    remoteLedger: () => askLedger ? askLedger() : Promise.reject(new Error("NODE_NOT_CONNECTED"))
   };
 }
 

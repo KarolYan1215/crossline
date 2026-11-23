@@ -15,7 +15,9 @@ import path from "node:path";
  * - `browser` (server asks, node answers with `browser-answer`, a large picture or video first in `browser-chunk`s): one operation of a
  *   reader's browser on the person's computer (browser.ts), offered only by a node whose `hello` says `browser`;
  * - `task` (server asks, node answers with `task-answer`): one operation on the shell assistant's task directories (task-files.ts), offered
- *   only by a node whose `hello` says `shell` (the person's own switch on this computer, off by default).
+ *   only by a node whose `hello` says `shell` (the person's own switch on this computer, off by default, at 「无人值守」);
+ * - `remote` (server asks, node answers with `remote-answer`) and `remote-event` (node reports): remote control from the person's phone
+ *   (remote.ts), offered only by a node whose `hello` says `remote`; what runs is checked against the phone's signature on the computer.
  *
  * The node does not trust the server blindly: only the methods the runners use pass (`ALLOWED_METHODS`), and a thread may not ask for a
  * shell, full access or a permission profile (`refusal`), nor change them on a turn. The one exception is the person's own: with 「允许在这台
@@ -31,7 +33,9 @@ export type NodeFrame =
       /** Whether `ffmpeg` runs on this computer: the assistant's audio and video errands need it. */
       ffmpeg?: boolean;
       /** What the assistant's commands can lean on here (2026-11-04: a run on Windows wrote `python3`, curl flags and `/data`). */
-      python?: boolean; node?: string; ps?: string }
+      python?: boolean; node?: string; ps?: string;
+      /** Remote control from the person's phone is on here (docs/plans/remote-control-1122.md): the level and what this computer offers. */
+      remote?: { level: "remote" | "unattended"; phones: number; folders: boolean; transcribe: boolean; forms: boolean } }
   | { t: "welcome"; workspaceId: string; roots: string[]; gateway?: string }
   | { t: "rpc"; line: string }
   | { t: "files"; id: number; dir: string }
@@ -46,7 +50,14 @@ export type NodeFrame =
   | { t: "browser-chunk"; id: number; data: string }
   | { t: "browser-answer"; id: number; result?: unknown; error?: string }
   | { t: "task"; id: number; request: Record<string, unknown> }
-  | { t: "task-answer"; id: number; result?: unknown; error?: string };
+  | { t: "task-answer"; id: number; result?: unknown; error?: string }
+  // Remote control (remote.ts): the server carries a phone's request here and the answer back; the computer reports what its sessions do;
+  // for 「核对」 the computer asks for the ledger's own `remote.*` events of the last seven days.
+  | { t: "remote"; id: number; request: Record<string, unknown> }
+  | { t: "remote-answer"; id: number; result?: unknown; error?: string }
+  | { t: "remote-event"; event: Record<string, unknown> }
+  | { t: "remote-ledger"; id: number }
+  | { t: "remote-ledger-answer"; id: number; events?: Array<{ type: string; at: string; nonce?: string; session?: string }>; error?: string };
 /** A picture or video goes back in pieces of this size (each frame stays under the socket's limit). */
 export const BROWSER_CHUNK_BYTES = 8 * 1_048_576;
 

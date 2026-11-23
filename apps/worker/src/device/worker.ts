@@ -10,13 +10,15 @@ import { agentHistoryPass } from "../agent-history";
 import { extractText } from "../extract";
 import { runtimeOwner } from "../owner";
 import { recordingPass, recordingsOn, transcribeConcurrency } from "../recordings";
-import { addFolder, importScreenedFiles, personNames, previewFolder, removeFolder, setFolderLines, setFolderRules, syncFolders, type ScreenListed } from "../source-folders";
+import { addFolder, folderFileBytes, importScreenedFiles, listFolderEntries, personNames, readFolderFile, previewFolder, removeFolder, setFolderLines, setFolderRules, syncFolders, type ScreenListed } from "../source-folders";
 import { createTranscriber, createWhisperEngine, modelsDirectory } from "../transcribe";
 import { startNodeAgent } from "../node/agent";
 import { createNodeBrowsers } from "../node/browser";
 import { localAppServer } from "../node/local-runtime";
 import { loginNodeWithApiKey, readNodeAccount, type NodeAccount } from "../node/control";
-import { createDeviceLinkService, nodeEnabled, nodeShell, type DeviceLink } from "./link";
+import { createDeviceLinkService, nodeEnabled, nodeLevel, type DeviceLink } from "./link";
+import { REMOTE_READ_MAX_BYTES } from "@crossline/core/remote-control";
+import type { RemoteHooks } from "../node/remote";
 import { MIRROR_INTERVAL_MS, mirrorPass } from "./mirror";
 import { DEVICE_PASSES } from "./mode";
 import { createOutbox, type OutboxItem, type SendResult } from "./outbox";
@@ -144,11 +146,36 @@ export async function runDeviceWorker(options: DeviceWorkerOptions): Promise<voi
     await agentHistoryPass(store, [owner], dataDir, () => process.env.CROSSLINE_TIME_ZONE ?? "America/Chicago").catch(() => 0);
   };
 
+  // What a phone may reach here besides sessions (docs/plans/remote-control-1122.md §6.3–§6.4): this computer's authorised folders, read
+  // under the same rules as the walk, and its transcriber. Both belong to the machine's owner only.
+  const remoteHooks: RemoteHooks = {
+    folders: {
+      list: async (folder, dir, page) => owner ? listFolderEntries(store, owner, folder, dir, page) : { ok: false, message: "no owner" },
+      read: async (folder, relative, as) => {
+        if (!owner) return { ok: false, message: "no owner" };
+        if (as === "file") return folderFileBytes(store, owner, folder, relative, REMOTE_READ_MAX_BYTES);
+        const read = await readFolderFile(store, owner, folderDeps(owner), folder, relative);
+        if (!read.ok) return read;
+        // 「存进 Crossline」: the document is in the local ledger now and goes to the site with the next batch.
+        if (as === "save") { queue(sourceItems(store, owner, state)); void flush(); }
+        const text = read.doc.extractedText ?? "";
+        return { ok: true, name: read.doc.fileName || relative, size: Buffer.byteLength(text), text: text.slice(0, 64 * 1024) };
+      }
+    },
+    transcribe: async (bytes, name) => {
+      const outcome = await transcriber.transcribeSpeech(bytes, name, owner ? { locale: localeOf(store, owner) } : {});
+      return { state: outcome.state, ...("text" in outcome && typeof outcome.text === "string" ? { text: outcome.text } : {}),
+        ...("seconds" in outcome && typeof outcome.seconds === "number" ? { seconds: outcome.seconds } : {}),
+        ...("speechSeconds" in outcome && typeof outcome.speechSeconds === "number" ? { speechSeconds: outcome.speechSeconds } : {}),
+        ...("workMs" in outcome && typeof outcome.workMs === "number" ? { workMs: outcome.workMs } : {}) };
+    }
+  };
+
   // 「作为算力节点」 (docs/compute-node.md): on the person's switch this computer also offers its Codex runtime to the hosted site, which
   // sends it the account's model runs; it starts none of its own.
   const node = nodeEnabled(dataDir) && link.token && !options.runOnce
     ? startNodeAgent({ url: link.url, token: link.token, dir: path.join(deviceDir, "node"), host: label, log, spawn: localAppServer, role: "device",
-      shell: nodeShell(dataDir), browsers: createNodeBrowsers({ profilesDir: path.join(deviceDir, "node", "browser-profiles") }),
+      level: nodeLevel(dataDir), remoteDir: deviceDir, remoteHooks, browsers: createNodeBrowsers({ profilesDir: path.join(deviceDir, "node", "browser-profiles") }),
       protect: [deviceDir] }) : undefined;
   if (node) process.on("exit", () => node.stop());
   // Who this computer's Codex is signed in as, for the device page (read once; an API-key sign-in there updates it).
@@ -186,6 +213,7 @@ export async function runDeviceWorker(options: DeviceWorkerOptions): Promise<voi
     },
     link: createDeviceLinkService({ dataDir, secrets: options.secrets, fetch: fetchImpl, localeFor: (workspaceId) => localeOf(store, workspaceId), onChanged: () => { outbox.unblock(); options.restart(); },
       nodeStatus: () => ({ ...(node?.status() ?? { state: "off" }), account: nodeAccount ?? null }),
+      remote: () => ({ control: node?.remote(), ledger: node ? node.remoteLedger : undefined }),
       nodeLogin: async (apiKey) => {
         const signed = await loginNodeWithApiKey(localAppServer, apiKey);
         if (signed.ok) { nodeAccount = signed.account; log({ type: "device.node_signed_in", with: "api_key" }); }

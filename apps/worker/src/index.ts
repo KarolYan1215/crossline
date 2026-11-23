@@ -70,6 +70,8 @@ import { browserProfilesRoot, cleanGrownSkills, configureFavouritesCollector, co
   growLabel, openWorkflowLogin, resumeByPerson, sayToPerson, startWorkflowRun, workflowCollecting, workflowLoginTarget, workflowSchedulePass } from "./workflow-smith";
 import { loginMode } from "./browser-launch";
 import { createFormService } from "./form-service";
+import { createRemoteService } from "./remote-service";
+import { computerInboxPass } from "./recording-inbox";
 import { createRemoteBrowsers } from "./remote-browser";
 import { localeOf, tOfWorkspace } from "./locale";
 import { createGoalSplitter, linesAwaitingCandidateSplit, linesAwaitingSplit } from "./goal-splitter";
@@ -1916,6 +1918,29 @@ function workspaceConcurrency(workspaceId: string): number {
 // hands it to this port) and serve that account's model runs with its Codex (方案 C); with no node connected, or the switch off, nothing changes.
 const nodePort = Number(process.env.CROSSLINE_NODE_PORT ?? (hostedBeta ? 3213 : 0));
 const crosslineMarketplace = path.join(repoRoot, "skills", "marketplace", ".agents", "plugins", "marketplace.json");
+// Remote control from the phone (docs/plans/remote-control-1122.md): carried to the person's computer over its node connection, recorded
+// here, the waiting command pushed. The push is bound once the notifier exists, below.
+let remotePush: ((workspaceId: string, message: { title: string; body: string; path: string; tag: string }) => Promise<boolean>) | undefined;
+const remoteService = createRemoteService({ store: analysisStore, hub: () => nodeHub, push: (workspaceId, message) => remotePush ? remotePush(workspaceId, message) : Promise.resolve(false),
+  forms: { handle: formService.handle, pass: formService.pass }, log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });
+// Recordings uploaded from the phone go to the person's computer while it is online with 「替手机转写录音」 on (§6.4); the rest wait for the night.
+let transcribingOnComputers = false;
+setInterval(() => {
+  if (transcribingOnComputers || !nodeHub) return;
+  transcribingOnComputers = true;
+  void (async () => {
+    for (const workspace of analysisStore.listWorkspaces()) {
+      const link = nodeHub.remoteFor(workspace.id).find((item) => item.transcribe);
+      if (!link) continue;
+      const outcomes = await computerInboxPass(analysisStore, workspace.id, { dataDir, timeZone: calendarZone(workspace.id) ?? process.env.CROSSLINE_TIME_ZONE?.trim() ?? "America/Chicago",
+        transcribe: async (bytes, name) => {
+          const answer = await link.call({ op: "transcribe", name, data: bytes.toString("base64") }, 30 * 60_000) as { ok?: boolean; state?: string; text?: string; seconds?: number; speechSeconds?: number; workMs?: number } | undefined;
+          return answer?.ok && answer.state ? { state: answer.state, text: answer.text ?? "", seconds: answer.seconds ?? 0, speechSeconds: answer.speechSeconds ?? 0, workMs: answer.workMs ?? 0 } : undefined;
+        } }).catch(() => []);
+      if (outcomes.length) console.info(JSON.stringify({ type: "remote.recordings", workspaceId: workspace.id, host: link.host, outcomes }));
+    }
+  })().finally(() => { transcribingOnComputers = false; });
+}, 3 * 60_000).unref();
 const nodeHub: NodeHub | undefined = nodePort > 0 ? await createNodeHub({
   port: nodePort,
   // A linked device's token, or the standalone node's own (paired on the 「这台电脑」 card).
@@ -1948,6 +1973,9 @@ const nodeHub: NodeHub | undefined = nodePort > 0 ? await createNodeHub({
     if (missing.length) throw new Error(`CODEX_PLUGIN_SKILLS_MISSING ${missing.slice(0, 3).join(",")}`);
   },
   onStatus: (workspaceId, status) => analysisStore.setSetting(workspaceId, NODE_STATUS_SETTING, JSON.stringify(status)),
+  onRemoteEvent: (workspaceId, host, event) => remoteService.onEvent(workspaceId, host, event),
+  onRemoteChange: (workspaceId, host, online) => remoteService.onChange(workspaceId, host, online),
+  remoteLedger: (workspaceId, host) => remoteService.ledgerFor(workspaceId, host),
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() }))
 }).catch((error: unknown) => { console.warn(JSON.stringify({ type: "node.hub_failed", message: error instanceof Error ? error.message : String(error) })); return undefined; }) : undefined;
 
@@ -1989,7 +2017,7 @@ if (!capabilitySecret) {
       // 系统体检's 「立即自检」.
       { prefix: "/v1/selfcheck", handle: async (method, pathname, workspaceId) => method === "POST" && pathname === "/v1/selfcheck/run"
         ? { status: 200, body: { results: await runSelfCheck(workspaceId, true) } } : undefined }, { prefix: "/v1/import", handle: importService.handle }, { prefix: "/v1/voice", handle: dictationService.handle }, { prefix: "/v1/automations", handle: automationService.handle }, { prefix: "/v1/workflow-threads", handle: workflowThreadService.handle },
-      { prefix: "/v1/forms", handle: formService.handle }, { prefix: "/v1/apply-profile", handle: formService.handle },
+      { prefix: "/v1/forms", handle: formService.handle }, { prefix: "/v1/remote/", handle: remoteService.handle }, { prefix: "/v1/apply-profile", handle: formService.handle },
       { prefix: "/v1/skills/public", handle: publicSkillInstaller.handle },
       { prefix: "/v1/workflows/favourites-topics", handle: createFavouritesTopicsService(analysisStore).handle },
       // The login browser on the server, shown in a dialog on the page (remote-browser.ts); only where there is no screen of our own.
@@ -2212,6 +2240,7 @@ if (process.env.CROSSLINE_RUN_ONCE === "1") {
     removePushSubscriptions(analysisStore, workspaceId, devices.filter((_, index) => results[index] === "gone").map((device) => device.endpoint));
     return results.includes("sent");
   };
+  remotePush = pushToPhones;
   let notifying = false;
   if (process.env.CROSSLINE_NOTIFY !== "off") setInterval(() => {
     if (notifying) return;

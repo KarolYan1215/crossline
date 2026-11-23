@@ -1,6 +1,8 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import path from "node:path";
+import { REMOTE_LEVELS, type RemoteLevel } from "@crossline/core/remote-control";
+import { auditFile, levelOf, reconcileAudit, remoteLocalAction, remoteLocalView, type RemoteControl, type RemoteLocalAction } from "../node/remote";
 import { primaryOrigin, tFor, type Locale } from "@crossline/core";
 import type { SecretStore } from "@crossline/connectors";
 
@@ -74,20 +76,24 @@ export function nodeEnabled(dataDir: string): boolean {
 export function setNodeEnabled(dataDir: string, enabled: boolean, now = new Date()): void {
   if (!enabled) { rmSync(nodeFile(dataDir), { force: true }); return; }
   mkdirSync(path.dirname(nodeFile(dataDir)), { recursive: true });
-  writeFileSync(nodeFile(dataDir), JSON.stringify({ enabled: true, at: now.toISOString(), ...(nodeShell(dataDir) ? { shell: true } : {}) }, null, 2));
+  const level = nodeLevel(dataDir);
+  writeFileSync(nodeFile(dataDir), JSON.stringify({ enabled: true, at: now.toISOString(), ...(level !== "off" ? { level } : {}) }, null, 2));
 }
 /**
- * 「允许在这台电脑上执行命令（shell 助手）」 (docs/compute-node.md P3): off unless the person switched it on here, and only while the node is
- * on. Turning the node off forgets it.
+ * The shell's level on this computer (docs/plans/remote-control-1122.md §7.1): 「关」, 「只从手机遥控」 or 「无人值守」 (the old
+ * 「允许在这台电脑上执行命令」, docs/compute-node.md P3; a kept `shell: true` reads as it). Off unless the person set it here, and only while
+ * the node is on; turning the node off forgets it. The hosted site cannot change it.
  */
-export function nodeShell(dataDir: string): boolean {
-  try { const kept = JSON.parse(readFileSync(nodeFile(dataDir), "utf8")) as { enabled?: unknown; shell?: unknown }; return kept.enabled === true && kept.shell === true; }
-  catch { return false; }
+export function nodeLevel(dataDir: string): RemoteLevel {
+  try { const kept = JSON.parse(readFileSync(nodeFile(dataDir), "utf8")) as { enabled?: unknown; level?: unknown; shell?: unknown }; return kept.enabled === true ? levelOf(kept) : "off"; }
+  catch { return "off"; }
 }
-export function setNodeShell(dataDir: string, shell: boolean): void {
+/** Whether the server's own assistant may run commands here: only at 「无人值守」. */
+export const nodeShell = (dataDir: string): boolean => nodeLevel(dataDir) === "unattended";
+export function setNodeLevel(dataDir: string, level: RemoteLevel): void {
   if (!nodeEnabled(dataDir)) return;
-  const kept = JSON.parse(readFileSync(nodeFile(dataDir), "utf8")) as Record<string, unknown>;
-  writeFileSync(nodeFile(dataDir), JSON.stringify({ ...kept, shell }, null, 2));
+  const { shell: _old, ...kept } = JSON.parse(readFileSync(nodeFile(dataDir), "utf8")) as Record<string, unknown>;
+  writeFileSync(nodeFile(dataDir), JSON.stringify({ ...kept, level }, null, 2));
 }
 
 type DeviceHandle = (method: string, pathname: string, workspaceId: string, body: Record<string, unknown> | undefined) => Promise<{ status: number; body: unknown } | undefined>;
@@ -111,6 +117,8 @@ export function createDeviceLinkService(deps: { dataDir: string; secrets: Secret
   /** Signs this computer's Codex in with an OpenAI API key for the compute node (never kept or logged here; Codex keeps it). */
   nodeLogin?: (apiKey: string) => Promise<{ ok: true; account: unknown } | { ok: false; message: string }>;
   onChanged: () => void;
+  /** Remote control on this computer (docs/plans/remote-control-1122.md): the running node's controller and its ledger check, when on. */
+  remote?: () => { control?: RemoteControl | undefined; ledger?: (() => Promise<Array<{ type: string; at: string; nonce?: string; session?: string }>>) | undefined };
   /** The workspace's language, for the answers this service words itself (docs/i18n.md). */
   localeFor?: (workspaceId: string) => Locale | undefined }) {
   return {
@@ -126,21 +134,47 @@ export function createDeviceLinkService(deps: { dataDir: string; secrets: Secret
           const signed = await deps.nodeLogin(body.apiKey.trim());
           return signed.ok ? { status: 200, body: { ok: true, account: signed.account } } : { status: 400, body: { ok: false, code: "NODE_API_KEY_REFUSED", message: signed.message } };
         }
-        if (typeof body?.shell === "boolean") {
+        const level = typeof body?.shell === "boolean" ? (body.shell ? "unattended" : "off") : (REMOTE_LEVELS as readonly unknown[]).includes(body?.level) ? body!.level as RemoteLevel : undefined;
+        if (level) {
           if (!nodeEnabled(deps.dataDir)) return { status: 400, body: { ok: false, code: "NODE_NOT_ENABLED", message: t("先开启算力节点。") } };
-          if (body.shell !== nodeShell(deps.dataDir)) { setNodeShell(deps.dataDir, body.shell); deps.onChanged(); }
-          return { status: 200, body: { ok: true, enabled: true, shell: body.shell } };
+          // A level change ends every session from the phone at once (§7.2), then the worker restarts the node at the new level.
+          if (level !== nodeLevel(deps.dataDir)) { deps.remote?.().control?.stopAll("level"); setNodeLevel(deps.dataDir, level); deps.onChanged(); }
+          return { status: 200, body: { ok: true, enabled: true, level, shell: level === "unattended" } };
         }
         const enabled = body?.enabled === true;
         if (enabled !== nodeEnabled(deps.dataDir)) { setNodeEnabled(deps.dataDir, enabled); deps.onChanged(); }
         return { status: 200, body: { ok: true, enabled } };
+      }
+      // Remote control, set only here on this computer (§5.1, §7.1–§7.3): phones, the session folders, transcription, the audit log.
+      if (pathname === "/v1/device/remote") {
+        const dir = path.join(deps.dataDir, "device");
+        const live = deps.remote?.();
+        const view = () => ({ ok: true, level: nodeLevel(deps.dataDir), ...remoteLocalView(dir), session: live?.control?.status().session ?? null, auditFile: auditFile(dir) });
+        if (method === "GET") return { status: 200, body: view() };
+        if (method !== "POST") return { status: 405, body: { ok: false, code: "METHOD_NOT_ALLOWED" } };
+        if (body?.disconnect === true) { live?.control?.stopAll("computer"); return { status: 200, body: view() }; }
+        if (body?.check === true) {
+          if (!live?.ledger) return { status: 200, body: { ok: false, code: "NODE_NOT_CONNECTED", message: t("电脑没有连上网页版，现在不能核对。") } };
+          const events = await live.ledger().catch(() => undefined);
+          if (!events) return { status: 200, body: { ok: false, code: "NODE_NOT_CONNECTED", message: t("电脑没有连上网页版，现在不能核对。") } };
+          return { status: 200, body: { ...view(), missing: reconcileAudit(dir, events), checked: events.length } };
+        }
+        const action = body?.pair === "start" || body?.pair === "cancel" ? { pair: body.pair } : typeof body?.confirm === "string" ? { confirm: body.confirm }
+          : typeof body?.remove === "string" ? { remove: body.remove } : Array.isArray(body?.folders) ? { folders: body.folders } : typeof body?.transcribe === "boolean" ? { transcribe: body.transcribe } : undefined;
+        if (!action) return { status: 200, body: { ok: false, code: "REMOTE_ACTION_UNKNOWN" } };
+        if (action && "pair" in action && action.pair === "start" && nodeLevel(deps.dataDir) === "off") return { status: 200, body: { ok: false, code: "REMOTE_DISABLED", message: t("先把「在这台电脑上执行命令」设为「只从手机遥控」或「无人值守」。") } };
+        const done = remoteLocalAction(dir, action as RemoteLocalAction);
+        if (!done.ok) return { status: 200, body: { ok: false, code: done.code, message: t(done.message) } };
+        // A phone removed mid-session: its session ends with it.
+        if ("remove" in action && live?.control?.status().session) live.control.stopAll("phone_removed");
+        return { status: 200, body: view() };
       }
       if (pathname !== "/v1/device/link") return undefined;
       if (method === "GET") {
         const link = await readDeviceLink(deps.dataDir, deps.secrets);
         return { status: 200, body: { ok: true, linked: Boolean(link), ...(link ? { url: link.url, label: link.label, linkedAt: link.linkedAt, tokenReadable: Boolean(link.token) } : {}),
           ...(deps.status ? { device: deps.status() } : {}),
-          node: { enabled: nodeEnabled(deps.dataDir), shell: nodeShell(deps.dataDir), ...(deps.nodeStatus ? { status: deps.nodeStatus() } : {}) } } };
+          node: { enabled: nodeEnabled(deps.dataDir), shell: nodeShell(deps.dataDir), level: nodeLevel(deps.dataDir), ...(deps.nodeStatus ? { status: deps.nodeStatus() } : {}) } } };
       }
       if (method === "POST") {
         const url = typeof body?.url === "string" ? primaryOrigin(body.url) : undefined;

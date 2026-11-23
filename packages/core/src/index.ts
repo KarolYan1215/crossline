@@ -597,6 +597,7 @@ export * from "./task-import";
 export * from "./automations";
 export * from "./workflow-authoring";
 export * from "./device";
+export * from "./remote-control";
 export * from "./opportunity";
 export * from "./opportunity-discovery";
 export * from "./opportunity-tags";

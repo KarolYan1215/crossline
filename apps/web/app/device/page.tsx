@@ -10,6 +10,7 @@ import { LocalActivityToggle } from "../settings/local-activity-toggle";
 import { RecordingCard } from "../settings/recording-card";
 import { SubpageShell } from "../subpage-shell";
 import { DeviceLinkCard, DeviceSignals } from "./device-link-card";
+import { RemoteControlCard } from "./remote-control-card";
 import { localeFor } from "../../lib/locale";
 import { tFor } from "../../lib/i18n";
 
@@ -51,6 +52,7 @@ export default async function DevicePage() {
   return <SubpageShell title={t("这台电脑")} serif active={"设置"} description={t("本机读什么、发到哪里。连接网页版后，这是电脑上唯一留下的页面。")}>
     <div className="st-modules">
       <DeviceLinkCard />
+      <RemoteControlCard />
       {machine ? <>
         <LocalActivityToggle consent={level(setting(LOCAL_ACTIVITY_CONSENT))} detail={detail} pausedUntil={setting(ACTIVITY_PAUSED_UNTIL) || null} blacklist={blacklist}
           hours={hours} categories={[...byCategory].sort((a, b) => b[1] - a[1]).map(([category, minutes]) => ({ label: activityCategoryLabel(category, locale), minutes }))} />

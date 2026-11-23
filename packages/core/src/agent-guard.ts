@@ -156,3 +156,15 @@ export function decideMcpTool(server: string, tool: string, locale?: Locale): Gu
   if (READ_ONLY_TOOL.test(tool)) return { decision: "allow", rule: "mcp.read", reason: "" };
   return { decision: "ask", rule: "mcp.write", reason: t("「{{server}}」的 {{tool}} 可能会改动账号数据", { server, tool }) };
 }
+
+/**
+ * Whether a command stays inside the given folders (docs/plans/remote-control-1122.md §7.1, 「会话文件夹内自动」): every drive path in it lies
+ * inside one of them, and it names nothing that could point elsewhere — no home, environment variable, parent, UNC or root path, no change
+ * of directory. URLs are not paths. A command with no path at all stays where it runs, which is the session's folder.
+ */
+export function confinedTo(command: string, roots: string[]): boolean {
+  const text = withoutShell(command.replace(/["'`]/g, "")).replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, "");
+  if (/~|\$env:|\$home|%[a-z_]+%|\.\.|(^|[\s=(])\\\\|(^|[\s='"(])\/|(^|[\s;|&])(cd|chdir|set-location|push-location|sl|pushd)\b/i.test(text)) return false;
+  const paths = text.match(/[a-z]:[\\/][^\s;|&"'()]*/gi) ?? [];
+  return roots.length > 0 && paths.every((path) => roots.some((root) => inside(path, root)));
+}

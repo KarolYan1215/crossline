@@ -29,7 +29,9 @@ import { codexVersionOf, IMAGE_FILE, IMAGE_MAX_BYTES, NODE_CAPACITY_MAX, NODE_PR
  */
 export type NodeRole = "device" | "standalone";
 export type NodeEntry = { key: string; host: string; role: NodeRole; codex: string; capacity: number; state: "connected" | "ready" | "refused" | "offline";
-  at: string; message?: string; shell?: boolean };
+  at: string; message?: string; shell?: boolean;
+  /** Remote control from the phone is on there (its level is not 「关」). */
+  remote?: boolean };
 /** The account's nodes as the card shows them: the best state among them, the strongest ready one's host and Codex, and each node. */
 export type NodeStatus = { state: "connected" | "ready" | "refused" | "offline"; host?: string; codex?: string; at: string; message?: string; nodes?: NodeEntry[] };
 
@@ -64,7 +66,17 @@ export type NodeHubOptions = {
   heartbeatMs?: number;
   /** A node silent this long (no pong) is let go; longer than one beat, so a pong late under load never drops a working node. */
   deadAfterMs?: number;
+  /** What a computer with remote control on reports about its sessions (docs/plans/remote-control-1122.md), as it arrives. */
+  onRemoteEvent?: (workspaceId: string, host: string, event: Record<string, unknown>) => void;
+  /** A computer with remote control on came online (「电脑上线时通知我」, §8) or went away. */
+  onRemoteChange?: (workspaceId: string, host: string, online: boolean) => void;
+  /** 「核对」 (§7.3): the ledger's `remote.*` events of the last seven days for this computer, read only. */
+  remoteLedger?: (workspaceId: string, host: string) => Array<{ type: string; at: string; nonce?: string; session?: string }>;
 };
+
+/** A computer of the account with remote control on: what it offers, and one request carried to it (remote.ts answers). */
+export type NodeRemoteLink = { key: string; host: string; role: NodeRole; level: "remote" | "unattended"; phones: number; folders: boolean; transcribe: boolean; forms: boolean;
+  call: (request: Record<string, unknown>, timeoutMs?: number) => Promise<unknown> };
 
 /** A reader's browser on one of the account's computers: the operations of browser.ts, answered over its connection. */
 export type NodeBrowserLink = { host: string; call: (request: Record<string, unknown>, timeoutMs?: number) => Promise<unknown> };
@@ -78,6 +90,8 @@ export type NodeHub = {
   capacity: (workspaceId: string) => number;
   /** A ready node of the account whose person allowed the shell assistant on it (strongest kind first), or undefined. */
   shellFor: (workspaceId: string) => NodeShellLink | undefined;
+  /** The account's connected computers with remote control on (strongest kind first); a phone picks one by host. */
+  remoteFor: (workspaceId: string) => NodeRemoteLink[];
   /** The strongest ready node's runtime, or undefined. */
   clientFor: (workspaceId: string) => CodexRpcBoundary | undefined;
   status: (workspaceId: string) => NodeStatus | undefined;
@@ -128,9 +142,12 @@ type Connection = { socket: WebSocket; workspaceId: string; token: string; clien
   /** Said to every shell run bound to this node (`nodeEnvironmentNote`). */
   note?: string | undefined;
   tasking: Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>;
+  remote?: { level: "remote" | "unattended"; phones: number; folders: boolean; transcribe: boolean; forms: boolean };
+  remoting: Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>;
   browsing: Map<number, { chunks: Buffer[]; resolve: (value: unknown) => void; reject: (error: Error) => void }> };
 let browserIds = 0;
 let taskIds = 0;
+let remoteIds = 0;
 /** A path a node names for its task directories or home: absolute on its own platform, short, no control characters. */
 const nodeDir = (value: unknown, windows: boolean): string | undefined =>
   typeof value === "string" && value.length < 300 && !/[\0\r\n]/.test(value) && (windows ? path.win32 : path.posix).isAbsolute(value) ? value : undefined;
@@ -170,7 +187,7 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
     try { options.onStatus?.(workspaceId, status); } catch { /* the record is a courtesy */ }
   };
   const entryOf = (connection: Connection, state: NodeEntry["state"], message?: string): Omit<NodeEntry, "at"> => ({ key: connection.key, host: connection.host,
-    role: connection.role, codex: connection.codex, capacity: connection.capacity, state, ...(message ? { message } : {}), ...(connection.shell ? { shell: true } : {}) });
+    role: connection.role, codex: connection.codex, capacity: connection.capacity, state, ...(message ? { message } : {}), ...(connection.shell ? { shell: true } : {}), ...(connection.remote ? { remote: true } : {}) });
   const send = (socket: WebSocket, frame: NodeFrame) => { if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(frame)); };
 
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1_048_576 });
@@ -191,7 +208,7 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
 
   function accept(socket: WebSocket, workspaceId: string, token: string): void {
     const connection: Connection = { socket, workspaceId, token, ready: false, heardAt: Date.now(), host: "", codex: "", role: "device", capacity: 2, key: "",
-      browser: false, tasking: new Map(), browsing: new Map() };
+      browser: false, tasking: new Map(), browsing: new Map(), remoting: new Map() };
     const hello = setTimeout(() => socket.close(4001, "NODE_HELLO_MISSING"), 15_000);
     const pendingGw = new Map<number, AbortController>();
     socket.on("pong", () => { connection.heardAt = Date.now(); });
@@ -213,6 +230,22 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
         if (frame.error) pending?.reject(new Error(frame.error)); else pending?.resolve(frame.result);
         return;
       }
+      if (frame.t === "remote-answer") {
+        const pending = connection.remoting.get(frame.id);
+        connection.remoting.delete(frame.id);
+        if (frame.error) pending?.reject(new Error(frame.error)); else pending?.resolve(frame.result);
+        return;
+      }
+      if (frame.t === "remote-event") {
+        if (connection.remote && frame.event && typeof frame.event === "object") { try { options.onRemoteEvent?.(workspaceId, connection.host, frame.event); } catch (error) { log({ type: "node.remote_event_failed", message: String(error).slice(0, 200) }); } }
+        return;
+      }
+      if (frame.t === "remote-ledger") {
+        let events: Array<{ type: string; at: string; nonce?: string; session?: string }> = [];
+        try { events = connection.remote ? options.remoteLedger?.(workspaceId, connection.host) ?? [] : []; } catch { events = []; }
+        send(socket, { t: "remote-ledger-answer", id: frame.id, events });
+        return;
+      }
       if (frame.t === "browser-chunk") { connection.browsing.get(frame.id)?.chunks.push(Buffer.from(frame.data, "base64")); return; }
       if (frame.t === "browser-answer") {
         const pending = connection.browsing.get(frame.id);
@@ -231,7 +264,10 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
       connection.browsing.clear();
       for (const pending of connection.tasking.values()) pending.reject(new Error("NODE_DISCONNECTED"));
       connection.tasking.clear();
+      for (const pending of connection.remoting.values()) pending.reject(new Error("NODE_DISCONNECTED"));
+      connection.remoting.clear();
       if (!isCurrent(connection)) return;
+      if (connection.remote) { try { options.onRemoteChange?.(workspaceId, connection.host, false); } catch { /* a courtesy */ } }
       connections.get(workspaceId)?.delete(connection.key);
       connection.client?.disconnect(new Error("CROSSLINE_NODE_DISCONNECTED"));
       setStatus(workspaceId, entryOf(connection, "offline", reason.toString() || String(code)));
@@ -253,6 +289,9 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
     const home = hello.shell === true ? nodeDir(hello.home, windows) : undefined;
     if (tasks && home) connection.shell = { tasks, home, windows, ...(typeof hello.ffmpeg === "boolean" ? { ffmpeg: hello.ffmpeg } : {}) };
     connection.note = nodeEnvironmentNote(hello);
+    const remote = hello.remote;
+    if (remote && (remote.level === "remote" || remote.level === "unattended"))
+      connection.remote = { level: remote.level, phones: Math.max(0, Math.min(50, Math.floor(Number(remote.phones) || 0))), folders: remote.folders === true, transcribe: remote.transcribe === true, forms: remote.forms === true };
     const server = codexVersionOf({ userAgent: options.serverCodex() });
     // The server's own runtime is not up yet (the worker just restarted and a node was quicker): come back in a moment, not in ten minutes.
     if (!server) { log({ type: "node.server_starting", workspaceId, host: connection.host }); socket.close(4006, "NODE_SERVER_STARTING"); return; }
@@ -272,6 +311,7 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
     const raw = connection.client.request.bind(connection.client);
     connection.client.request = (method, params) => raw(method, withNote(method, params, connection.note));
     setStatus(workspaceId, entryOf(connection, "connected"));
+    if (connection.remote) { try { options.onRemoteChange?.(workspaceId, connection.host, true); } catch { /* a courtesy */ } }
     log({ type: "node.connected", workspaceId, host: connection.host, role: connection.role, capacity: connection.capacity, codex: connection.codex });
     try {
       await options.prepare(connection.client, workspaceId);
@@ -405,6 +445,17 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
           send(connection.socket, { t: "task", id, request: request as Record<string, unknown> });
         }) };
     },
+    remoteFor: (workspaceId) => [...(connections.get(workspaceId)?.values() ?? [])]
+      .filter((connection) => connection.remote && connection.client && connection.socket.readyState === connection.socket.OPEN)
+      .sort((a, b) => ROLE_PRIORITY[b.role] - ROLE_PRIORITY[a.role])
+      .map((connection) => ({ key: connection.key, host: connection.host, role: connection.role, ...connection.remote!,
+        call: (request: Record<string, unknown>, timeoutMs = 60_000) => new Promise<unknown>((resolve, reject) => {
+          if (!isCurrent(connection)) { reject(new Error("NODE_DISCONNECTED")); return; }
+          const id = ++remoteIds;
+          const timer = setTimeout(() => { connection.remoting.delete(id); reject(new Error("NODE_REMOTE_TIMEOUT")); }, timeoutMs);
+          connection.remoting.set(id, { resolve: (value) => { clearTimeout(timer); resolve(value); }, reject: (error) => { clearTimeout(timer); reject(error); } });
+          send(connection.socket, { t: "remote", id, request });
+        }) })),
     clientFor: (workspaceId) => ready(workspaceId)[0]?.client,
     status: (workspaceId) => statuses.get(workspaceId),
     close: async () => {

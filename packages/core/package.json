@@ -10,6 +10,8 @@
     "./assess-wants": "./src/assess-wants.ts",
     "./energy-rhythm": "./src/energy-rhythm.ts",
     "./device": "./src/device.ts",
+    "./agent-guard": "./src/agent-guard.ts",
+    "./remote-control": "./src/remote-control.ts",
     "./i18n": "./src/i18n.ts"
   },
   "scripts": {

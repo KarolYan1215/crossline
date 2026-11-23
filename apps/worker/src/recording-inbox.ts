@@ -90,3 +90,39 @@ export async function processInbox(store: CrosslineStore, workspaceId: string, d
   }
   return outcomes;
 }
+
+/** The most audio one recording may be to go to the person's computer in one frame (base64 within the node socket's 64 MB). */
+export const COMPUTER_TRANSCRIBE_MAX_BYTES = 40 * 1_048_576;
+export type ComputerTranscribe = (bytes: Buffer, name: string) => Promise<{ state: string; text?: string; seconds?: number; speechSeconds?: number; workMs?: number } | undefined>;
+
+/**
+ * The inbox through the person's own computer (docs/plans/remote-control-1122.md §6.4): while it is online with 「替手机转写录音」 on, each
+ * recording goes there now instead of waiting for the night, and only the text comes back. Keyed by the recording's SHA-256 like the night
+ * pass, so nothing is transcribed twice; a recording the computer could not do (offline midway, no model, too large) stays for the night.
+ */
+export async function computerInboxPass(store: CrosslineStore, workspaceId: string, deps: { dataDir: string; timeZone: string; transcribe: ComputerTranscribe; now?: () => Date }): Promise<InboxOutcome[]> {
+  const now = deps.now ?? (() => new Date());
+  const outcomes: InboxOutcome[] = [];
+  if (!serverRecordingsOn(store, workspaceId)) return outcomes;
+  for (const item of inboxFiles(deps.dataDir, workspaceId)) {
+    if (item.size > COMPUTER_TRANSCRIBE_MAX_BYTES) continue;
+    let bytes: Buffer;
+    try { bytes = readFileSync(item.file); } catch { continue; }
+    const audioSha = createHash("sha256").update(bytes).digest("hex");
+    if (priorRecording(store, workspaceId, audioSha)) { remove(item); outcomes.push({ state: "duplicate", name: item.name }); continue; }
+    const began = now().getTime();
+    const result = await deps.transcribe(bytes, path.basename(item.file)).catch(() => undefined);
+    if (!result || (result.state !== "transcribed" && result.state !== "silent") || !serverRecordingsOn(store, workspaceId)) break;
+    const done = { text: result.text ?? "", seconds: result.seconds ?? 0, speechSeconds: result.speechSeconds ?? 0, workMs: result.workMs ?? 0, wallMs: now().getTime() - began };
+    if (result.state === "silent") {
+      store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `${RECORDING_SILENT_EVENT}:${audioSha}`, type: RECORDING_SILENT_EVENT,
+        entityId: audioSha, payload: { fileName: item.name, seconds: done.seconds, speechSeconds: done.speechSeconds, workMs: done.workMs, wallMs: done.wallMs, where: "computer" } });
+    } else {
+      saveTranscript(store, workspaceId, { dataDir: deps.dataDir, timeZone: deps.timeZone, label: "手机上传" /* i18n-ignore: a folder label in the transcript's file name */, file: item.name, endedAtMs: item.receivedAt, audioSha,
+        where: tOfWorkspace(store, workspaceId)("电脑转写"), result: done, extra: { where: "computer" }, now: now() });
+    }
+    remove(item);
+    outcomes.push({ state: result.state, name: item.name });
+  }
+  return outcomes;
+}

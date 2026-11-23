@@ -370,7 +370,7 @@ test("paths: only the server's skill roots are mirrored; a run's cwd goes to the
 test("a node with a browser drives a reader's page for the server: operations in order, a large video back in pieces; one without is not offered", async () => {
   const seen: string[] = [];
   const video = Buffer.alloc(20 * 1_048_576, 7);
-  const browsers: NodeBrowsers = { available: true, closeAll: async () => {},
+  const browsers: NodeBrowsers = { available: true, closeAll: async () => {}, formSubmitFromPhone: async () => ({ ok: false, why: "test" }),
     handle: async (request) => { seen.push(request.op); return request.op === "goto" ? 200 : request.op === "fetchMedia" ? { state: "ok", bytes: video, contentType: "video/mp4" } : null; } };
   await setUp({ browsers });
   const link = await until(() => hub!.browserFor("ws-owner"));

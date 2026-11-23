@@ -10,6 +10,8 @@ import { startNodeAgent, type AppServerLines, type NodeAgentStatus } from "./age
 import { API_KEY_SHAPE, loginNodeWithApiKey, withControl } from "./control";
 import { NODE_RUNTIME_FLAGS, TOKEN_GONE } from "./protocol";
 import { createNodeBrowsers } from "./browser";
+import { levelOf, remoteLocalAction, remoteLocalView, type RemoteLocalAction } from "./remote";
+import type { RemoteLevel } from "@crossline/core/remote-control";
 import { listenForBrowser } from "../browser-port";
 // The launcher's updater and its signature check, bundled in as they are (scripts/package-node.ts allows exactly these two files).
 import { checkForUpdate, downloadInstaller, type UpdateManifest } from "../../../launcher/src/update";
@@ -55,7 +57,9 @@ function log(event: Record<string, unknown>): void {
 }
 
 /** `shell`: 「允许在这台电脑上执行命令（shell 助手）」, the person's own switch here, off unless turned on (docs/compute-node.md P3). */
-type State = { site: string; paired?: { at: string; host: string }; shell?: boolean };
+type State = { site: string; paired?: { at: string; host: string }; shell?: boolean;
+  /** The three-way level that replaced `shell` (docs/plans/remote-control-1122.md §7.1); a kept `shell: true` reads as 「无人值守」. */
+  level?: RemoteLevel };
 const readState = (): State => { try { return JSON.parse(readFileSync(stateFile, "utf8")) as State; } catch { return { site: "https://app.crossline.lol" }; } };
 const writeState = (state: State) => writeFileSync(stateFile, JSON.stringify(state, null, 2));
 let state = readState();
@@ -166,7 +170,7 @@ async function pair(): Promise<void> {
     while (!readToken()) {
       const started = await fetch(new URL("/api/node/pair", state.site), { method: "POST", headers: { "content-type": "application/json" },
         // What the person sees before binding this computer: its name, system, this program's version and whether the shell is on.
-        body: JSON.stringify({ host: hostname(), os: `${osType()} ${osRelease()}`, version: release.version ?? "", shell: state.shell === true }), signal: AbortSignal.timeout(20_000) }).then((response) => response.json() as Promise<{ ok?: boolean; id?: string; code?: string; expiresAt?: string }>)
+        body: JSON.stringify({ host: hostname(), os: `${osType()} ${osRelease()}`, version: release.version ?? "", shell: levelOf(state) === "unattended" }), signal: AbortSignal.timeout(20_000) }).then((response) => response.json() as Promise<{ ok?: boolean; id?: string; code?: string; expiresAt?: string }>)
         .catch(() => undefined);
       if (!started?.ok || !started.id || !started.code) { pairingError = "连不上网页版，稍后自动重试"; pairing = undefined; await sleep(30_000); continue; }
       pairingError = undefined;
@@ -193,7 +197,7 @@ async function pair(): Promise<void> {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // ── The relay, once paired and signed in ──────────────────────────────────────────────────────────────────────────────────────
-let agent: { stop: () => void; status: () => NodeAgentStatus } | undefined;
+let agent: ReturnType<typeof startNodeAgent> | undefined;
 /**
  * 「暂停算力」 from the tray: the relay stops (the site's runs go back to the server, as when the computer is off) until 继续 or the next
  * start. Pairing and the sign-in are kept.
@@ -205,7 +209,7 @@ function reconcile(): void {
   if (!account) return;
   if (paused) { if (agent) { agent.stop(); agent = undefined; log({ type: "node.paused" }); } return; }
   if (!agent) {
-    agent = startNodeAgent({ url: state.site, token: current, dir: path.join(home, "relay"), spawn: appServer, host: hostname(), role: "standalone", shell: state.shell === true,
+    agent = startNodeAgent({ url: state.site, token: current, dir: path.join(home, "relay"), spawn: appServer, host: hostname(), role: "standalone", level: levelOf(state), remoteDir: home,
       browsers: createNodeBrowsers({ profilesDir: path.join(home, "browser-profiles") }),
       log: (event) => log(event) });
     log({ type: "node.relay_started" });
@@ -228,7 +232,8 @@ function view() {
   return { site: state.site, host: hostname(), codex: codexVersion, paired: Boolean(readToken()), pairedAt: state.paired?.at ?? null,
     code: pairing?.code ?? null, codeExpires: pairing?.expiresAt ?? null, pairingError: pairingError ?? null,
     account: account ? { email: account.email ?? "", type: account.type ?? "" } : null, accountKnown: account !== undefined,
-    login: login ?? null, node: agent?.status() ?? null, paused, shell: state.shell === true };
+    login: login ?? null, node: agent?.status() ?? null, paused, shell: levelOf(state) === "unattended", level: levelOf(state),
+    remote: { ...remoteLocalView(home), session: agent?.remote()?.status().session ?? null } };
 }
 
 const PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -248,8 +253,9 @@ button.primary{background:var(--accent);border-color:var(--accent);color:var(--p
 <p><input id="apikey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" style="font:inherit;padding:5px 8px;width:22em;max-width:100%">
 <button id="usekey">用 API key 登录</button></p><p class="muted" id="keynote"></p></div></section>
 <section><h2>3. 运行状态</h2><div id="node"></div></section>
-<section><h2>4. 执行命令（可选）</h2><p class="muted">打开后，网页版的助手可以在这台电脑上执行命令（剪辑、转码、跑脚本、生长工作流），只在节点自己的任务文件夹里工作，每条命令先经过网页版同一套检查；发送、报名和付款的最后一步始终留给本人。命令以这台电脑当前用户的身份运行。</p>
-<p><label><input type="checkbox" id="shell"> 允许在这台电脑上执行命令（shell 助手）</label></p></section>
+<section><h2>4. 执行命令（可选）</h2><p class="muted">「只从手机遥控」：只有本人在已配对的手机上签名的会话能在这台电脑上执行命令。「无人值守」：网页版的助手也可以在节点自己的任务文件夹里执行命令（剪辑、转码、跑脚本、生长工作流），每条命令先经过同一套检查。发送、报名和付款的最后一步始终留给本人。命令以这台电脑当前用户的身份运行。</p>
+<p><label><input type="radio" name="level" value="off"> 关</label> <label><input type="radio" name="level" value="remote"> 只从手机遥控</label> <label><input type="radio" name="level" value="unattended"> 无人值守</label></p></section>
+<section id="remotebox"><h2>5. 从手机遥控</h2><div id="remote"></div></section>
 <p><small id="meta"></small></p><p><button id="quit">退出节点</button></p></main>
 <script>
 const post=(p)=>fetch(p,{method:"POST",headers:{"x-crossline-node":"1"}}).then(r=>r.json());
@@ -265,10 +271,23 @@ $("login").innerHTML=v.account?'<p class="ok">已登录'+(v.account.type==="apiK
 :v.login&&v.login.state==="pending"?'<p>浏览器已打开 ChatGPT 登录页，登录后这里自动更新。</p>'+((v.login.authUrl||"").startsWith("https://")?'<p><a href="'+esc(v.login.authUrl)+'" target="_blank" rel="noreferrer">没打开就点这里</a></p>':'')
 :'<p>用本人的 ChatGPT 账号登录，模型工作花的是这个账号的额度。</p>'+(v.login&&v.login.message?'<p class="muted">上次没有完成：'+esc(v.login.message)+'</p>':'')+'<button class="primary" id="signin">登录 ChatGPT</button>';
 const n=v.node;$("node").innerHTML=!v.paired||!v.account?'<p class="muted">配对并登录后自动开始。</p>':v.paused?'<p>已暂停：模型工作暂时回到服务器。托盘菜单的「继续提供算力」可以恢复。</p>':'<p>'+(n?words[n.state]||n.state:"正在启动")+(n&&n.message?"（"+esc(n.message)+"）":"")+'</p><p class="muted">电脑关机或断网时，模型工作自动回到服务器。</p>';
-$("shell").checked=Boolean(v.shell);
+for(const r of document.querySelectorAll('input[name=level]'))r.checked=r.value===v.level;
+const R=v.remote;$("remotebox").style.display=v.level==="off"?"none":"block";
+$("remote").innerHTML=(R.session?'<p class="ok">进行中的会话：'+esc(R.session.folder)+'</p><button id="rdisc">断开遥控</button>':'')
++(R.phones.length?'<p>已配对的手机：</p>'+R.phones.map(p=>'<p>'+esc(p.label)+' · <code>'+esc(p.groups)+'</code> <button data-rm="'+esc(p.id)+'">移除</button></p>').join(""):'<p class="muted">还没有配对的手机。</p>')
++(R.pairing?(R.pairing.candidate?'<p>手机上显示的指纹应为：</p><div class="code" style="font-size:20px">'+esc(R.pairing.candidate.groups)+'</div><p>一致才点确认。</p><button class="primary" id="rconfirm" data-id="'+esc(R.pairing.candidate.id)+'">确认添加「'+esc(R.pairing.candidate.label)+'」</button> <button id="rcancel">取消</button>'
+:'<p>在手机上打开网页版 设置 →「这台电脑」→「用这部手机遥控」，输入：</p><div class="code">'+esc(R.pairing.code)+'</div><button id="rcancel">取消</button>'):'<p><button id="radd">添加手机</button></p>')
++'<p class="muted">遥控可用的文件夹（每行一个完整路径；不填时会话只在自己的临时文件夹里工作）：</p><p><textarea id="rfolders" rows="3" style="width:100%;font:inherit">'+esc(R.folders.join("
+"))+'</textarea></p><p><button id="rsave">保存文件夹</button> <span class="muted" id="rnote"></span></p>'
++'<p class="muted">审计日志：'+R.chain.lines+' 条，'+(R.chain.ok?'哈希链完整':'第 '+R.chain.brokenAt+' 条之后对不上')+'</p>';
+const rp=(b)=>fetch("/remote",{method:"POST",headers:{"x-crossline-node":"1","content-type":"application/json"},body:JSON.stringify(b)}).then(r=>r.json()).then(a=>{if(a&&a.message)$("rnote").textContent=a.message;load();});
+const q=(id,f)=>{const e=$(id);if(e)e.onclick=f;};q("radd",()=>rp({pair:"start"}));q("rcancel",()=>rp({pair:"cancel"}));q("rdisc",()=>rp({disconnect:true}));
+q("rconfirm",(e)=>rp({confirm:e.target.dataset.id}));q("rsave",()=>rp({folders:$("rfolders").value.split("
+")}));
+for(const b of document.querySelectorAll("[data-rm]"))b.onclick=()=>rp({remove:b.dataset.rm});
 $("meta").textContent=v.host+" · "+(v.codex||"Codex 未找到")+" · "+v.site;
 const s=$("signin");if(s)s.onclick=()=>post("/login").then(load);const o=$("signout");if(o)o.onclick=()=>post("/logout").then(load);const u=$("unpair");if(u)u.onclick=()=>post("/unpair").then(load);}
-$("shell").onchange=(e)=>fetch("/shell",{method:"POST",headers:{"x-crossline-node":"1","content-type":"application/json"},body:JSON.stringify({on:e.target.checked})}).then(load);
+for(const r of document.querySelectorAll('input[name=level]'))r.onchange=(e)=>fetch("/shell",{method:"POST",headers:{"x-crossline-node":"1","content-type":"application/json"},body:JSON.stringify({level:e.target.value})}).then(load);
 $("usekey").onclick=()=>{const k=$("apikey").value;$("keynote").textContent="正在验证……";
 fetch("/login-key",{method:"POST",headers:{"x-crossline-node":"1","content-type":"application/json"},body:JSON.stringify({apiKey:k})}).then(r=>r.json())
 .then(a=>{$("apikey").value="";$("keynote").textContent=a.ok?"":a.message||"没有登录";load();});};
@@ -295,14 +314,28 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
   }
   if (url.pathname === "/logout") { await logout(); json(200, view()); return; }
   if (url.pathname === "/shell") {
-    const on = (await readBody(request)).on === true;
-    if (on !== (state.shell === true)) {
-      state = { ...state, shell: on }; writeState(state);
-      // The hub hears the switch in the next `hello`: the relay starts again with it.
+    const body = await readBody(request);
+    const level: RemoteLevel = body.level === "remote" || body.level === "unattended" ? body.level : body.level === undefined && body.on === true ? "unattended" : "off";
+    if (level !== levelOf(state)) {
+      const { shell: _old, ...rest } = state;
+      state = { ...rest, level }; writeState(state);
+      // The hub hears the level in the next `hello`: the relay (and every session from the phone) starts again with it.
       agent?.stop(); agent = undefined; reconcile();
-      log({ type: on ? "node.shell_on" : "node.shell_off" });
+      log({ type: "node.level", level });
     }
     json(200, view()); return;
+  }
+  // Remote control, set only here (docs/plans/remote-control-1122.md §5.1, §7.2): phones, session folders, 「断开遥控」.
+  if (url.pathname === "/remote") {
+    const body = await readBody(request);
+    if (body.disconnect === true) { agent?.remote()?.stopAll("computer"); json(200, view()); return; }
+    const action = body.pair === "start" || body.pair === "cancel" ? { pair: body.pair } : typeof body.confirm === "string" ? { confirm: body.confirm }
+      : typeof body.remove === "string" ? { remove: body.remove } : Array.isArray(body.folders) ? { folders: body.folders } : undefined;
+    if (!action) { json(400, { ok: false }); return; }
+    if ("pair" in action && action.pair === "start" && levelOf(state) === "off") { json(400, { ok: false, message: "先选「只从手机遥控」或「无人值守」" }); return; }
+    const done = remoteLocalAction(home, action as RemoteLocalAction);
+    if ("remove" in action) agent?.remote()?.stopAll("phone_removed");
+    json(done.ok ? 200 : 400, done.ok ? view() : { ok: false, message: done.message }); return;
   }
   if (url.pathname === "/refresh") { await readAccount(); reconcile(); json(200, view()); return; }
   if (url.pathname === "/unpair") {

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { lstat, open, readdir, realpath, stat } from "node:fs/promises";
+import { lstat, open, readdir, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -540,6 +540,29 @@ export async function readFolderFile(store: CrosslineStore, workspaceId: string,
   if (!entry.documentId) return { ok: false, message: t("这个文件的内容含{{what}}，不读。", { what: entry.sensitive ?? "" }) };
   const doc = store.listSourceDocuments(workspaceId).find((item) => item.id === entry.documentId);
   return doc ? { ok: true, doc } : { ok: false, message: t("读不到这个文件。") };
+}
+
+/**
+ * One file of an authorized folder as its bytes, for the phone (docs/plans/remote-control-1122.md §6.3): the same checks as reading it —
+ * inside the folder, no link, nothing excluded, no credential, no private paper — and 20 MB at most. Nothing is read into the ledger.
+ */
+export async function folderFileBytes(store: CrosslineStore, workspaceId: string, folderId: string, rawRelative: string, maxBytes: number):
+  Promise<{ ok: true; name: string; size: number; data: Buffer } | { ok: false; message: string }> {
+  const locale = localeOf(store, workspaceId);
+  const t = tFor(locale);
+  const folder = list(store, workspaceId).find((item) => item.id === folderId);
+  if (!folder) return { ok: false, message: t("没有 id 为「{{id}}」的授权文件夹。", { id: folderId }) };
+  const relative = cleanRelative(rawRelative);
+  const real = relative ? await inside(folder, relative) : undefined;
+  if (!relative || !real) return { ok: false, message: t("只能读授权文件夹以内的文件。") };
+  const refused = leftOutOf(folder, relative, personNames(store, workspaceId, folder.names), locale);
+  if (refused) return { ok: false, message: refused };
+  const info = await stat(real).catch(() => undefined);
+  if (!info?.isFile()) return { ok: false, message: t("找不到这个文件。") };
+  if (info.size > maxBytes) return { ok: false, message: t("文件超过 {{mb}} MB。", { mb: Math.round(maxBytes / 1_048_576) }) };
+  const known = readIndex(store, workspaceId, folder.id)[Object.keys(readIndex(store, workspaceId, folder.id)).find((item) => slash(item) === relative) ?? ""];
+  if (known?.sensitive || known?.hard) return { ok: false, message: t("这个文件的内容含{{what}}，不读。", { what: known.sensitive ?? "" }) };
+  return { ok: true, name: path.basename(real), size: info.size, data: await readFile(real) };
 }
 
 /** A listed file as the screening sees it: the relative path with `/`, its size and its modification time. */
