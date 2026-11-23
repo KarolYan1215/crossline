@@ -3,7 +3,7 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { createOnboardingSessionRunner, ONBOARDING_SKILL } from "./onboarding-session";
-import { fakeRuntime } from "./testing/fake-runtime";
+import { fakeRuntime, type AgentScript } from "./testing/fake-runtime";
 
 /**
  * The interview replayed through the shared fake runtime (2026-11-22, the native-Codex rewrite). The same four replies and the same model
@@ -40,8 +40,8 @@ beforeEach(() => {
 });
 afterEach(() => store.close());
 
-async function replay(given: string[] = answers) {
-  const runtime = fakeRuntime(given, ONBOARDING_SKILL);
+async function replay(given: string[] = answers, script?: AgentScript) {
+  const runtime = fakeRuntime(given, ONBOARDING_SKILL, script ? { script } : {});
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => runtime.rpc, { extract: "off" });
   for (const text of said) { const outcome = await run({ sessionId: "s1", text }); if (outcome.state === "blocked") console.log(JSON.stringify(outcome)); expect(outcome.state).toBe("asked"); }
   const replies = store.listOnboardingMessages(workspaceId, "s1").filter((message) => message.role === "assistant")
@@ -72,7 +72,11 @@ test("the same interview answered in free text, as the native thread answers: ea
   const free = ["先把两条线分开看：科研和创业各自现在卡在哪？", "你说的两件事都在推进。先说说哪条线更急？", "那就从科研开始：上一次真正推进是哪一天，做了什么？",
     "「两边都推不动」是一个模式：先命名它，再看它每次在哪一步出现。说一个最近的具体场景。"];
   // i18n-ignore-end
-  const now = await replay(free);
+  // The native thread marks each round's part with `mark_round` (an unmarked free-text round is sent back once since 2026-11-23).
+  const marks: AgentScript = async ({ ask, turnId }) => {
+    await ask("item/tool/call", { callId: `m-${turnId}`, tool: "mark_round", arguments: { stage: "narrative" } });
+  };
+  const now = await replay(free, marks);
   if (process.env.CROSSLINE_REPLAY_PRINT) console.log(JSON.stringify(now));
   expect(now.replies).toEqual(free);
   expect(now.dialogueTurns).toBe(free.length);

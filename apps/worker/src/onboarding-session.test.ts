@@ -178,8 +178,9 @@ test("a fact citing a sentence number the extraction was not shown is dropped wi
 });
 
 test("retrying after a failure does not save the person's message a second time", async () => {
-  // An empty answer fails the round (free text is a reply now, 2026-11-22, so "not json" no longer does).
-  const { rpc } = fakeRuntime(["", firstAnswer]);
+  // Two empty answers fail the round (free text is a reply now, 2026-11-22, so "not json" no longer does; one empty answer is asked
+  // for again in the same run since 2026-11-23).
+  const { rpc } = fakeRuntime(["", "", firstAnswer]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   const failed = await run({ sessionId: "s", text: "西湖那篇 10/31 前要投出" });
   expect(failed.state).toBe("blocked");
@@ -889,6 +890,29 @@ test("free text is the round's reply, with the cards and marks the tools handed 
   expect(content).toMatchObject({ reply: "你说周末在家。那周末的时间给了哪条线？", stage: "compass" });
   expect(turnParams().filter((params) => params.outputSchema !== undefined)).toEqual([]);
   expect(dialogue(prompts)[1]!.startsWith("周末一般在家。\n\n〔reply-3｜")).toBe(true);
+});
+
+test("a free-text round that never marked its part is sent back once for `mark_round`, so the part moves on (replay 2026-11-23)", async () => {
+  const reply = "那接下来谈精力：最近哪一件事最消耗你？";
+  const { rpc, prompts } = fakeRuntime([turn(), reply, reply]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  await run({ sessionId: "s", text: "先说经历" });
+  // Unmarked, it is sent back once naming the tool; its second answer stands, marked or not.
+  expect(await run({ sessionId: "s", text: "工作给我的是自由。" })).toEqual({ state: "asked", sessionId: "s" });
+  expect(prompts()).toHaveLength(3);
+  expect(prompts().at(-1)).toContain("mark_round");
+  expect(store.listOnboardingMessages(workspaceId, "s").at(-1)!.content).toMatchObject({ reply });
+
+  // A round that marked its part goes through on its first answer, in the part it marked.
+  const marks: AgentScript = async ({ ask }) => {
+    await ask("item/tool/call", { callId: "m1", tool: "mark_round", arguments: { stage: "energy" } });
+  };
+  const marked = fakeRuntime([turn(), reply], { script: marks });
+  const again = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => marked.rpc, { extract: "off" });
+  await again({ sessionId: "t", text: "先说经历" });
+  await again({ sessionId: "t", text: "健身回血。" });
+  expect(marked.prompts()).toHaveLength(2);
+  expect(store.listOnboardingMessages(workspaceId, "t").at(-1)!.content).toMatchObject({ reply, stage: "energy" });
 });
 
 test("the person's messages are at most a thousand a session, counted as a turn starts (2026-11-22)", async () => {

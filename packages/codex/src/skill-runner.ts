@@ -16,6 +16,8 @@ import { registerAgentThread, SANDBOX_PROFILE, sandboxProfile, type AgentMode } 
 export type AnalysisAudit = { threadId?: string; turnId?: string;
   /** How many times a turn went silent for so long it was interrupted and sent again. Absent means none did. */
   stalls?: number;
+  /** How many turns ended without a final message and were asked for it again (at most one a run). Absent means none did. */
+  emptyAnswers?: number;
   /** How many times the validator sent the answer back to be fixed. Absent means it passed first try. */
   repairs?: number;
   /**
@@ -1227,11 +1229,26 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
     }
   };
 
-  /** A silent turn is interrupted and the same prompt sent again, a couple of times; every other failure ends the run as before. */
+  /**
+   * A silent turn is interrupted and the same prompt sent again, a couple of times. A turn that ended without a final message (its
+   * thinking or tool calls, then nothing) is asked once, in the same thread, for that message: replay 2026-11-23 on gpt-6.1-terra ended
+   * four of 24 interview rounds that way, each answered in full when the person pressed retry. Every other failure ends the run as before.
+   */
+  let askedForAnswer = false;
   const runTurnOrRetryStall = async (prompt: string | string[], images: string[] = []): Promise<string> => {
     for (let stalls = 0; ; stalls += 1) {
       try { return await runTurn(prompt, images); }
       catch (error) {
+        if (error instanceof Error && error.message === "SKILL_REFUSED" && !askedForAnswer) {
+          askedForAnswer = true;
+          audit.emptyAnswers = (audit.emptyAnswers ?? 0) + 1;
+          run.onAudit({ ...audit });
+          console.log(JSON.stringify({ type: "skill.empty_answer", skill: run.skillName }));
+          prompt = "Your turn ended without a final message. Write your final answer now, as the instructions ask; do not explain.";
+          images = [];
+          stalls -= 1;
+          continue;
+        }
         if (!(error instanceof Error) || error.message !== "SKILL_STALLED" || stalls >= MAX_STALL_RETRIES) throw error;
         if (audit.turnId) abandoned.add(audit.turnId);
         if (audit.threadId && audit.turnId) void client.request("turn/interrupt", { threadId: audit.threadId, turnId: audit.turnId }).catch(() => {});

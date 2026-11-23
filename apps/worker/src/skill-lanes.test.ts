@@ -130,6 +130,18 @@ test("a run that keeps going silent gives up with a name that says so, instead o
   expect(turns()).toBe(3);
 });
 
+test("a turn that ends without a final message is asked for it once in the same thread, and a second empty one ends the run", async () => {
+  // Replay 2026-11-23: four interview rounds ended with no final message and were answered in full on the person's retry.
+  const once = fakeRuntime(["", "{}"], TOP);
+  expect(await runCodexSkill(once.rpc, {}, options(TOP))).toMatchObject({ ok: true, audit: { emptyAnswers: 1 } });
+  expect(once.turns()).toBe(2);
+  expect(once.prompts()[1]).toContain("without a final message");
+
+  const twice = fakeRuntime(["", ""], TOP);
+  expect(await runCodexSkill(twice.rpc, {}, options(TOP))).toMatchObject({ ok: false, blocker: { code: "SKILL_REFUSED" } });
+  expect(twice.turns()).toBe(2);
+});
+
 test("slow work that keeps producing events is never mistaken for a hang", async () => {
   // The answer takes longer than the silence limit, but usage notifications arrive while it is produced.
   const { rpc } = fakeRuntime(["{}"], TOP, { delayMs: 300, usage: { input: 10, output: 10 } });
