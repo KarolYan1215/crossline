@@ -370,7 +370,7 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     code: { file: `${WORKER}/onboarding-session.ts`, symbol: "asRound", test: `${WORKER}/onboarding-session.test.ts`, by: "free text is the round's reply" } },
   { id: "IR-169", layer: "L0", verdict: "keep", status: "active", rule: "运行时卸下的线程先用 thread/resume 从 rollout 接着走，rollout 也没了才从账本重建",
     code: { file: `${WORKER}/onboarding-session.ts`, symbol: "resumeOnly", test: `${WORKER}/onboarding-session.test.ts`, by: "resumed from its rollout" } },
-  { id: "IR-170", layer: "L2", verdict: "model", status: "active", rule: "每轮命名一个模式、只看行为解读、点出漏洞，只问一个带约束的主问题",
+  { id: "IR-170", layer: "L2", verdict: "model", status: "active", rule: "每轮接住本人的话、最多多一层第二级推断，只问一个带约束的主问题；模式、漏洞和动机猜测不在对话里说，留给报告",
     text: { file: INTERVIEW_SKILL, anchor: "**每轮只问一个主问题，带约束。**" } },
   { id: "IR-171", layer: "L2", verdict: "model", status: "active", rule: "可核实的信念当场联网核对，用「你的认知｜判定｜数据与纠偏」带链接，搜索词不带本人信息",
     text: { file: INTERVIEW_SKILL, anchor: "「你的认知｜判定｜数据与纠偏」" } },
@@ -394,5 +394,7 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     text: { file: EXTRACT_SKILL, anchor: "**每条假设标一个级别（`level`）。**" } },
   { id: "IR-180", layer: "L2", verdict: "model", status: "active", rule: "叙事部分一个场景问到之后一周、当时和现在的说法、结果由谁来判",
     text: { file: `${SKILLS}/crossline-onboarding/stages/narrative.md`, anchor: "**一个场景问到它的前后，不只是它本身。**" } },
+  { id: "IR-181", layer: "L0", verdict: "keep", status: "active", rule: "自由文本的一轮没调用 mark_round 时退回一次要它标出所在部分，第二次的回答照收",
+    code: { file: `${WORKER}/onboarding-session.ts`, symbol: "stageAsked", test: `${WORKER}/onboarding-session.test.ts`, by: "never marked its part" } },
 ];
 /* i18n-ignore-end */

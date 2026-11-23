@@ -581,8 +581,10 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
           if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return withDraft(parsed, draft);
         } catch { /* free text that happens to open with a brace */ }
       }
+      freeText = true;
       return withDraft({ reply: text, questions: [], coverage: [], nextAction: "ask", stage: stageNow, safety: false, insights: [], research: [], openItems: [] }, draft);
     };
+    let freeText = false;
     const validateOutput = (output: unknown) => {
       const valid = validateOnboardingDialogue(asRound(output), known);
       const invented = setDates(valid.reply);
@@ -601,6 +603,14 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         pendingChecked = true;
         throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { reply: true,
           detail: `回复说「${pending[0]}」。在线程里找到那一问（哪一轮、原话）：本人确实还没答，保持原样；找不到，就去掉这个说法，当新问题问。` }); // i18n-ignore: model-facing repair note
+      }
+      // A free-text round that never called `mark_round` keeps the part it started in (replay 2026-11-23: all 24 rounds stayed
+      // `narrative` while the talk went through 处境, 指南针, 能量 and the lines, so the progress and the completeness never moved).
+      // Sent back once; its second answer stands.
+      if (freeText && !focusLine && !draft.meta?.stage && !stageAsked) {
+        stageAsked = true;
+        throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { reply: true,
+          detail: "这一轮没有调用 `mark_round`。调用它：stage 写这一轮实际在谈的部分（话题已经换了，就写新的部分），progress 写这一部分已清楚的、还不清楚的和是否做完；回复照原样再写一遍。" }); // i18n-ignore: model-facing repair note
       }
       const lessonWhy = lessonRefused(valid);
       if (lessonWhy) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { detail: `askLesson 写 false：${lessonWhy}。` }); // i18n-ignore: model-facing repair note
@@ -624,6 +634,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     };
     let safetyAsked = false;
     let pendingChecked = false;
+    let stageAsked = false;
     const noteOnce = (what: string) => { if (!noted.includes(what)) noted.push(what); };
     /** The scale's readings in words (`instrumentReadings`), never the taps: what the dialogue reads of the cards (2026-11-15). */
     const scaleReadings = (): { scaleReadings?: string[] } => {
