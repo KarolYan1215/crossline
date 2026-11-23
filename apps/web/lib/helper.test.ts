@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
@@ -6,7 +6,7 @@ import { CrosslineStore } from "@crossline/db";
 vi.mock("server-only", () => ({}));
 vi.mock("./runtime-status", () => ({ runtimeStatus: vi.fn(async () => undefined) }));
 import { helperState } from "./helper";
-import { addFigure, chooseFigure, figureFolder, listFigures } from "./figures";
+import { addFigure, chooseFigure, DESKTOP_FACE_FILE, figureFolder, listFigures } from "./figures";
 import { undoOp } from "./undo";
 import { TEST_CTX } from "./test-support";
 
@@ -68,4 +68,26 @@ test("the person picks any figure drawn before, or adds one, as the 小帮手; t
   expect((await chooseFigure(TEST_CTX, null)).ok).toBe(true);
   expect((await helperState(TEST_CTX)).avatar).toContain("file=v7-character.png");
   expect(readdirSync(folder).sort()).toEqual(["u1-character.png", "v2-cover.png", "v5-character.png", "v6-character.png", "v7-character.png"]);
+});
+
+test("the installed copy's tray is told which figure is the 小帮手, so its window takes the person's face as its icon", async () => {
+  dir = mkdtempSync(path.join(tmpdir(), "figures-"));
+  vi.stubEnv("CROSSLINE_DATA_DIR", dir);
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  const folder = figureFolder(TEST_CTX.workspaceId);
+  mkdirSync(folder, { recursive: true });
+  for (const file of ["v5-character.png", "v6-character.png"]) writeFileSync(path.join(folder, file), PNG);
+  store.setSetting(TEST_CTX.workspaceId, "portrait.images", JSON.stringify({ version: 6, images: { character: { file: "v6-character.png", at: "2026-10-20T22:02:39Z" } } }));
+  const face = path.join(folder, DESKTOP_FACE_FILE);
+  // Outside the installed copy nothing is written.
+  await helperState(TEST_CTX);
+  expect(existsSync(face)).toBe(false);
+  vi.stubEnv("CROSSLINE_INSTALL_MODE", "local");
+  await helperState(TEST_CTX);
+  expect(readFileSync(face, "utf8")).toBe("v6-character.png");
+  await chooseFigure(TEST_CTX, "v5-character.png");
+  await helperState(TEST_CTX);
+  expect(readFileSync(face, "utf8")).toBe("v5-character.png");
+  // The face file is not taken for a figure.
+  expect(listFigures(TEST_CTX).map((figure) => figure.file)).not.toContain(DESKTOP_FACE_FILE);
 });

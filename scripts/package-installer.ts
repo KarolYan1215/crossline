@@ -173,15 +173,39 @@ writeFileSync(path.join(notices, "README.txt"), [
   "- OpenAI Codex（codex\\codex.exe、codex\\codex-code-mode-host.exe），Apache-2.0，见 codex-LICENSE.txt 与 codex-NOTICE.txt；",
   "  源码固定在 https://github.com/openai/codex 的 rust-v0.163.0（83086188ae0614bd882818ff1aa23f3194962012），附一处 Windows 迁移校验和补丁",
   "- Microsoft Visual C++ 运行库（msvcp140*.dll、vcruntime140*.dll，放在用到它们的模块旁边），按 Visual Studio 许可条款中的可分发代码条款随附",
+  "- Microsoft Edge WebView2 SDK 1.0.4370.26（Microsoft.Web.WebView2.Core.dll、Microsoft.Web.WebView2.WinForms.dll、WebView2Loader.dll），见 webview2-LICENSE.txt",
   "- node_modules 下各软件包的许可证在各自目录中",
   ""
 ].join("\r\n"));
 
 const icon = path.join(out, "crossline.ico");
 run("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.join(repoRoot, "installer", "make-icon.ps1"), "-Out", icon], repoRoot);
+// The tray's own window (docs/plans/desktop-window-1123.md): Microsoft's WebView2 SDK, pinned by version and hash, its managed
+// assemblies and loader shipped beside Crossline.exe. The browser engine itself is the Evergreen runtime Windows 11 already has.
+const webView2 = { version: "1.0.4370.26", sha256: "1c0dacac84b70109b3fd42f90c53a0ba942abc3a87590d7a4e0ccd86e4a06cf4" };
+const webView2Package = path.join(out, "cache", `microsoft.web.webview2.${webView2.version}.nupkg`);
+if (!existsSync(webView2Package) || sha256(webView2Package) !== webView2.sha256) {
+  const response = await fetch(`https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/${webView2.version}/microsoft.web.webview2.${webView2.version}.nupkg`);
+  if (!response.ok) throw new Error(`WEBVIEW2_SDK_DOWNLOAD_FAILED ${response.status}`);
+  mkdirSync(path.dirname(webView2Package), { recursive: true });
+  writeFileSync(webView2Package, Buffer.from(await response.arrayBuffer()));
+}
+if (sha256(webView2Package) !== webView2.sha256) throw new Error("WEBVIEW2_SDK_HASH_MISMATCH");
+const webView2Dir = path.join(out, "cache", `webview2-${webView2.version}`);
+rmSync(webView2Dir, { recursive: true, force: true });
+mkdirSync(webView2Dir, { recursive: true });
+// Windows' own bsdtar reads zip archives (a nupkg is one).
+run(path.join(process.env.WINDIR ?? "C:\\Windows", "System32", "tar.exe"), ["-xf", webView2Package, "-C", webView2Dir], repoRoot);
+const webView2Files = [path.join("lib", "net462", "Microsoft.Web.WebView2.Core.dll"), path.join("lib", "net462", "Microsoft.Web.WebView2.WinForms.dll"),
+  path.join("runtimes", "win-x64", "native", "WebView2Loader.dll")];
+for (const file of webView2Files) cpSync(path.join(webView2Dir, file), path.join(stage, path.basename(file)));
+cpSync(path.join(webView2Dir, "LICENSE.txt"), path.join(notices, "webview2-LICENSE.txt"));
+if (existsSync(path.join(webView2Dir, "NOTICE.txt"))) cpSync(path.join(webView2Dir, "NOTICE.txt"), path.join(notices, "webview2-NOTICE.txt"));
 const csc = path.join(process.env.WINDIR ?? "C:\\Windows", "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe");
-run(csc, ["-nologo", "-target:winexe", "-optimize", `-win32icon:${icon}`, `-out:${path.join(stage, "Crossline.exe")}`,
-  "-r:System.Windows.Forms.dll", "-r:System.Drawing.dll", path.join(repoRoot, "installer", "tray", "Crossline.cs")], repoRoot);
+run(csc, ["-nologo", "-utf8output", "-target:winexe", "-platform:x64", "-optimize", `-win32icon:${icon}`, `-out:${path.join(stage, "Crossline.exe")}`,
+  "-r:System.Windows.Forms.dll", "-r:System.Drawing.dll", "-r:System.Web.Extensions.dll", "-r:System.Core.dll",
+  `-r:${path.join(webView2Dir, webView2Files[0]!)}`, `-r:${path.join(webView2Dir, webView2Files[1]!)}`,
+  path.join(repoRoot, "installer", "tray", "Crossline.cs"), path.join(repoRoot, "installer", "tray", "AppWindow.cs")], repoRoot);
 
 const msClientId = option("ms-client-id") ?? (personal ? process.env.CROSSLINE_MS_CLIENT_ID?.trim() || undefined : undefined);
 const msTenantId = option("ms-tenant-id") ?? (personal ? process.env.CROSSLINE_MS_TENANT_ID?.trim() || undefined : undefined) ?? "common";

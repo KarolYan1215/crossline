@@ -1,8 +1,9 @@
-import { FOLDER_LINES_SCHEMA, FOLDER_SCREEN_SCHEMA, SOURCE_FOLDERS_SETTING, readSourceFolders, sourceFolderIndexSetting, validateFolderLines, validateFolderScreen,
+import { DEVICE_FOLDER_SCREEN_LIMIT, FOLDER_LINES_SCHEMA, FOLDER_SCREEN_SCHEMA, SOURCE_FOLDERS_SETTING, readSourceFolders, sourceFolderIndexSetting, validateFolderLines, validateFolderScreen,
   type FolderIndexEntry, type FolderLinesAnswer, type FolderScreenAnswer } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
+import type { ScreenListed } from "./source-folders";
 
 export const FOLDER_CLASSIFIER = "crossline:crossline-folder-classifier";
 
@@ -32,6 +33,23 @@ export function createFolderScreener(store: CrosslineStore, workspaceId: string,
       prepareInput: () => context, validateOutput: (output) => validateFolderScreen(output, offered.length, limit), onAudit: () => {}, timeoutMs: 3 * 60_000 });
     if (!result.ok) return { blocked: result.blocker.code };
     return { keep: result.output.keep.map((index) => offered[index]!.path), why: result.output.why };
+  };
+}
+
+/** A run that could not happen at all (no runtime, not signed in, no model, no quota): nothing was judged, so nothing is decided. */
+const NOT_RUN = /^(CODEX|RUNTIME|MODEL|SPEND|AUTH|ACCOUNT)_/;
+
+/**
+ * The screening for this computer's own folders (the person's decision of 2026-11-23, docs/plans/desktop-window-1123.md §6): what a folder
+ * held when it was authorized is listed by `syncFolder`, already without credentials and private papers, and this asks the model which of
+ * the listed files are worth reading by name, format, size and date, as a linked device asks its site. A run that could not happen leaves
+ * the files listed for the next pass (undefined); a run that failed on its own answer keeps the most recently changed ("unavailable").
+ */
+export function screenListedWith(screen: ReturnType<typeof createFolderScreener>, limit = DEVICE_FOLDER_SCREEN_LIMIT): ScreenListed {
+  return async (folder, files) => {
+    const answer = await screen(folder, files, limit);
+    if ("keep" in answer) return answer.keep;
+    return NOT_RUN.test(answer.blocked) ? undefined : "unavailable";
   };
 }
 

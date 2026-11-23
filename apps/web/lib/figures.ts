@@ -1,9 +1,10 @@
 import "server-only";
-import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { FIGURE_FILE, figureVersionOf, nextUploadedFigureFile, PORTRAIT_FIGURE_SETTING, type AccessContext } from "@crossline/core";
 import { dataDirectory, getStore } from "./crossline";
 import { withUndo } from "./undo";
+import { isLocalInstall } from "./install-mode";
 import { tOf } from "./locale";
 
 /**
@@ -40,6 +41,27 @@ export function chosenFigure(ctx: AccessContext): Figure | null {
 
 export function currentFigure(ctx: AccessContext): Figure | null {
   return chosenFigure(ctx) ?? latestFigure(ctx);
+}
+
+/** The file beside the figures that names the current one for the installed copy's tray (docs/plans/desktop-window-1123.md). */
+export const DESKTOP_FACE_FILE = "desktop-face.txt";
+
+/**
+ * The installed copy's 小帮手 window takes the person's figure as its icon (2026-11-23). The tray cannot read the ledger, so the current
+ * figure's file name is written beside the figures whenever the 小帮手 reads it and it changed; an empty file means no figure (the tray then
+ * keeps the app's own icon). Only in the installed copy: nothing else reads it.
+ */
+export function noteDesktopFace(ctx: AccessContext, figure: Figure | null): void {
+  if (!isLocalInstall()) return;
+  const folder = figureFolder(ctx.workspaceId);
+  const target = path.join(folder, DESKTOP_FACE_FILE);
+  const value = figure?.file ?? "";
+  try {
+    if (existsSync(target) && readFileSync(target, "utf8") === value) return;
+    if (!value && !existsSync(folder)) return;
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(target, value);
+  } catch { /* the icon is a nicety: a full disk or a locked file leaves the old one */ }
 }
 
 /** Addressed by file and time, so a new choice is fetched once and an old one stays cached. */

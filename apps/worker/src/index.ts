@@ -100,8 +100,8 @@ import { createRecordingDigester, transcriptsAwaitingDigest } from "./recording-
 import { createBackgroundFactsExtractor } from "./background-facts-runner";
 import { createGraphSync, type SyncOutcome } from "./graph-sync";
 import { addSubscription, hasSubscriptions, removeSubscription, subscriptionSources } from "./calendar-subscriptions";
-import { addFolder, configureFolderReading, personNames, previewFolder, removeFolder, setFolderLines, setFolderRules, syncFolders, type FolderDeps } from "./source-folders";
-import { createFolderClassifier, createFolderScreener } from "./folder-classifier";
+import { addFolder, configureFolderReading, importScreenedFiles, personNames, previewFolder, removeFolder, setFolderLines, setFolderRules, syncFolders, type FolderDeps } from "./source-folders";
+import { createFolderClassifier, createFolderScreener, screenListedWith } from "./folder-classifier";
 import { homedir, tmpdir } from "node:os";
 import { defaultSafeGetDeps } from "./safe-fetch";
 import { REQUIRED_SKILLS } from "./required-skills";
@@ -346,7 +346,9 @@ const ownerOnlyFolder = (workspaceId: string) => ({ state: "blocked" as const, c
 const folderDeps: FolderDeps = { dataDir, home: homedir(), readText: (bytes, kind, locale, fileName) => readSourceText(bytes, kind, fileName ?? "", locale) };
 /**
  * With 录音自动转写 on, the folder pass also queues the recordings it finds (recordings.ts). Folders are this computer's own (the pass runs
- * for the machine owner only), so they are listed rather than imported and the interview opens what it needs (D3, 2026-11-22).
+ * for the machine owner only): what a folder held when it was authorized is listed (D3, 2026-11-22), then screened by the model by name and
+ * only the files it keeps are read in (the person's decision of 2026-11-23, docs/plans/desktop-window-1123.md §6); the interview can still
+ * open any listed file when it needs it.
  */
 const folderDepsFor = (workspaceId: string): FolderDeps => ({ ...folderDeps, audio: recordingsOn(analysisStore, workspaceId), onDemand: true });
 configureFolderReading({ deps: folderDeps, allowed: machineOwner });
@@ -367,6 +369,9 @@ async function folderPass(workspaceId: string, checkedAt: string): Promise<void>
     void digestPass(workspaceId).catch(() => undefined);
     if (!codexSupervisor || !spendAllows(await spendFor(workspaceId), "intake")) return;
     enterUsageWorkspace(workspaceId);
+    const screen = screenListedWith(createFolderScreener(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId)));
+    const screened = await importScreenedFiles(analysisStore, workspaceId, folderDepsFor(workspaceId), screen).catch(() => 0);
+    if (screened) console.info(JSON.stringify({ type: "sources.folders_screened", checkedAt, workspaceId, read: screened }));
     const filed = await createFolderClassifier(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))().catch(() => undefined);
     if (filed && "filed" in filed && filed.filed) console.info(JSON.stringify({ type: "sources.folder_lines_filed", checkedAt, workspaceId, ...filed }));
   } finally {

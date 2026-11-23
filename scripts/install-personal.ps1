@@ -8,7 +8,9 @@
 # Never touches the resident checkout's app (127.0.0.1:3210) or its data.
 #
 # Run it from an ordinary PowerShell window. From a Claude desktop session, which runs inside an MSIX container whose writes to
-# %LOCALAPPDATA% land in a private overlay, start it through WMI (Win32_Process Create) so it runs outside the container.
+# %LOCALAPPDATA% land in a private overlay, start it through WMI (Win32_Process Create) so it runs outside the container. Where
+# WMI may start cmd.exe but PowerShell is refused ("Access is denied", seen 2026-11-23), run the same three steps from a .cmd file:
+# taskkill /T /F /IM Crossline.exe, robocopy data\ to backups\, then the setup with the arguments below.
 param(
   [Parameter(Mandatory = $true)][string]$Setup
 )

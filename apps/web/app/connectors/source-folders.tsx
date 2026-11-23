@@ -4,6 +4,7 @@ import { groupPattern, type SourceFolder } from "@crossline/core";
 import { useLocale, useT } from "../locale-context";
 import { SetupGuide } from "../ui/setup-guide";
 import { SOURCE_FOLDER_GUIDE } from "../../lib/setup-guides";
+import { FOLDERS_CHANGED_EVENT, useDesktopShell } from "../../lib/desktop-bridge";
 
 /** Windows' 「复制为路径」 wraps the path in quotes; the worker takes the path as typed, so they are taken off here. */
 export const withoutQuotes = (value: string) => value.replace(/^\s*["'“”]|["'“”]\s*$/g, "");
@@ -49,6 +50,8 @@ export function SourceFolders({ onChanged }: { onChanged?: () => void }) {
   // server, so the card shows only on that computer and the interview's 「选择文件夹」 uploads from the browser instead.
   const [local, setLocal] = useState(false);
   useEffect(() => { setLocal(["127.0.0.1", "localhost"].includes(location.hostname)); }, []);
+  // In the installed copy's own window: the system's folder dialog fills the path, and each folder opens in File Explorer.
+  const shell = useDesktopShell();
 
   const load = useCallback(async () => {
     const response = await fetch("/api/sources/folders", { cache: "no-store" }).catch(() => undefined);
@@ -61,6 +64,12 @@ export function SourceFolders({ onChanged }: { onChanged?: () => void }) {
     setResults(body?.results ?? {});
   }, []);
   useEffect(() => { void load(); }, [load]);
+  // A folder authorized elsewhere on the page (the interview's 「选择文件夹」 in the window).
+  useEffect(() => {
+    const reload = () => void load();
+    window.addEventListener(FOLDERS_CHANGED_EVENT, reload);
+    return () => window.removeEventListener(FOLDERS_CHANGED_EVENT, reload);
+  }, [load]);
   // While a folder is being read for the first time, look again every few seconds.
   const reading = folders?.some((folder) => !folder.lastScanAt) ?? false;
   // 「正在后台读取」 is said only while it is true.
@@ -76,10 +85,10 @@ export function SourceFolders({ onChanged }: { onChanged?: () => void }) {
     const response = await fetch("/api/sources/folders", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => undefined);
     return await response?.json().catch(() => undefined) as ({ state?: string; message?: string; saved?: boolean; removed?: number } & Partial<Omit<Preview, "state">>) | undefined;
   };
-  const look = async () => {
+  const look = async (path = draft) => {
     setBusy(true); setMessage(""); setPreview(undefined);
     setOffGroups(new Set()); setOffFiles(new Set()); setOnSensitive(new Set()); setRecent(false);
-    const answer = await post({ action: "preview", path: draft });
+    const answer = await post({ action: "preview", path });
     if (answer?.state === "preview") setPreview(answer as Preview); else setMessage(answer?.message ?? t("后台服务没有连上，稍后再试。"));
     setBusy(false);
   };
@@ -149,6 +158,8 @@ export function SourceFolders({ onChanged }: { onChanged?: () => void }) {
               ...(folder.duplicates ? [t("{{count}} 个相同副本只读一份", { count: folder.duplicates })] : [])].join(en ? ", " : "，")
               + (folder.over ? (en ? "; " : "；") + t("超出上限，最早改动的 {{count}} 个未读", { count: folder.over }) : "")}</small>
         </span>
+        {shell && <button type="button" className="ob-btn ob-quiet secondary-button"
+          onClick={() => void shell.openFolder(folder.path).catch(() => setMessage(t("这个文件夹打不开（移动、改名或拔掉了磁盘？）")))}>{t("打开文件夹")}</button>}
         <button type="button" className="ob-btn ob-quiet secondary-button" disabled={busy} onClick={() => setRevoking(revoking === folder.id ? undefined : folder.id)}>{t("取消授权")}</button>
       </div>
       {revoking === folder.id && <div className="source-folder-revoke" role="group" aria-label={t("取消授权 {{folder}}", { folder: folder.label })}>
@@ -179,6 +190,8 @@ export function SourceFolders({ onChanged }: { onChanged?: () => void }) {
     <form className="source-folders-form" onSubmit={(event) => { event.preventDefault(); if (draft.trim()) void look(); }}>
       <input value={draft} onChange={(event) => { setDraft(withoutQuotes(event.target.value)); setPreview(undefined); }} placeholder={t("文件夹完整路径，如 D:\\资料")}
         aria-label={t("文件夹路径")} disabled={busy} spellCheck={false} />
+      {shell && <button type="button" className="ob-btn secondary-button" disabled={busy}
+        onClick={() => void shell.pickFolder(t("选择要授权给 Crossline 的文件夹")).then((path) => { if (path) { setDraft(path); void look(path); } }).catch(() => setMessage(t("没能打开选文件夹的窗口。")))}>{t("浏览…")}</button>}
       <button type="submit" className="ob-btn secondary-button" disabled={busy || !draft.trim()}>{busy && !preview ? t("查看中…") : t("查看")}</button>
     </form>
     <SetupGuide guide={SOURCE_FOLDER_GUIDE} />
