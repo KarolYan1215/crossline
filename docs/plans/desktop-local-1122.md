@@ -2,7 +2,7 @@
 
 本人要一个双击就能启动的 Crossline 本地版：数据在这台电脑上，模型用本人自己的 Codex 登录。本文是清单和结果：第一节是 `origin/main` 上更新完的内容，第二节是网页端（托管内测）做不到、本地版能做的功能，第三节是怎么构建、安装和更新。
 
-基线：`origin/main` d3f04d416f。画像深度（`docs/plans/portrait-depth-1122.md`）还在另一个工作树里改，没有推到 main；推上去以后按第三节重建一次即可，本地版不需要改别的。
+基线：`origin/main` d3f04d416f；装在本机的 0.3.1 已含画像深度（`docs/plans/portrait-depth-1122.md`，main 7bd159ec4f）。
 
 ## 〇、本地版是什么
 
@@ -43,7 +43,7 @@
 
 ### 画像深度（`docs/plans/portrait-depth-1122.md`）
 
-⏸ 未进本地版：截至本文，它在 `claude/portrait-depth` 工作树里尚未提交，也没推到 main。推上 main 后按第三节重建、重装即可。
+✅ 在 0.3.1 里：`/api/portrait/narrative` 和画像页的「人生叙事与洞察」都在安装包里。这一节只在有叙事时出现；本机账本里现有的第 7 版画像写于改动之前，仍带原来的类型卡，下一次重写画像后才按新规则（无 16 型）。
 
 ## 二、网页端做不到、本地版能做的
 
@@ -111,11 +111,11 @@ pnpm build:prod
 ```
 
 ```powershell
-pnpm exec tsx scripts/package-installer.ts --personal --skip-web-build --version 0.3.0 --codex-dir C:\Users\karol\Documents\ChatGPT\Multi-ID\vendor\codex\codex-rs\target\release
+pnpm exec tsx scripts/package-installer.ts --personal --skip-web-build --version 0.3.1 --codex-dir C:\Users\karol\Documents\ChatGPT\Multi-ID\vendor\codex\codex-rs\target\release
 ```
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\install-personal.ps1 -Setup dist\installer\Crossline-Personal-0.3.0.exe
+powershell -ExecutionPolicy Bypass -File scripts\install-personal.ps1 -Setup dist\installer\Crossline-Personal-0.3.1.exe
 ```
 
 `install-personal.ps1` 先停掉正在运行的本地版，把 `data\` 复制到 `backups\before-personal-<时间>`（保留最近三份），再静默安装并在桌面放快捷方式，安装结束自动启动托盘。打包时如果环境里有 `CROSSLINE_MS_CLIENT_ID` / `CROSSLINE_MS_TENANT_ID`，会写进 `release.json`，Outlook 日历才能用。
@@ -124,7 +124,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install-personal.ps1 -Setup dis
 
 ## 四、验证结果
 
-2026-11-22 在这台电脑上装好 `Crossline-Personal-0.3.0`（基线 d3f04d416f），桌面有快捷方式，托盘、启动器、web（14892）、worker（14893）都在跑。
+2026-11-22 在这台电脑上装好 `Crossline-Personal-0.3.0`（基线 d3f04d416f），同晚合入画像深度后重装为 0.3.1（备份 `backups\before-personal-20261122-215735`），桌面有快捷方式，托盘、启动器、web（14892）、worker（14893）都在跑。
 
 **本次改动**
 
