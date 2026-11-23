@@ -91,6 +91,14 @@ test("the next card is chosen from the log: hypotheses never carded that rest on
   expect(cardCandidates([hypothesis({ id: "h7", dimension: "D2", basis: two, alternative: "截止临近才快" })])[0]).toMatch(/；另一种解释（写进 falsifier，不写上卡面）：截止临近才快$/);
 });
 
+test("only the second level goes on a card: a restatement and a reading against the person's own account wait for the report", () => {
+  const two = [{ kind: "quote" as const, text: "有人看的时候我做得更快", ref: "reply-2" }, { kind: "behavior" as const, text: "交给导师前一晚写到三点", ref: "reply-4" }];
+  const ids = cardCandidateIds([hypothesis({ id: "h1", dimension: "D2", basis: two, level: 1 }), hypothesis({ id: "h2", dimension: "D5", basis: two, level: 3 }),
+    hypothesis({ id: "h3", dimension: "D7", basis: two, level: 2 }), hypothesis({ id: "h4", dimension: "D1", basis: two })], 4);
+  // h4 has no level (written before 2026-11-22) and reads as the second.
+  expect(ids).toEqual(["h3", "h4"]);
+});
+
 test("the extraction's new hypotheses are numbered after the log's h ids, never as a card's, and the careers follow", () => {
   const out = numberNewHypotheses([hypothesis({ id: "h2" }), hypothesis({ id: "c5" })],
     [hypothesis({ id: "c5", status: "supported" }), hypothesis({ id: "c33" }), hypothesis({ id: "h9" })], [{ hypothesisIds: ["c33", "c5"] }]);

@@ -67,6 +67,7 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-insight-compiler": "mid",
   "crossline-skill-scout": "mid",
   "crossline-portrait-writer": "top",
+  "crossline-portrait-narrative": "top",
   "crossline-portrait-illustrator": "low",
   "crossline-eval-persona": "low",
   // Test-only: measures a model connection (provider-conformance.ts); always given the provider under test explicitly.
@@ -124,7 +125,8 @@ export const SKILL_OVERRIDES: Record<string, Partial<ModelRoute>> = {};
 export const NEVER_DOWNGRADED = new Set(["crossline-milestone-gate", "crossline-automation-stripper", "crossline-agent",
   // The interview (2026-11-17, the owner: no limit on the model in the interview, at least as free as Codex itself): its dialogue, its
   // extraction and research threads and the portrait it ends in keep their tier when the budget is tight.
-  "crossline-onboarding", "crossline-onboarding-extract", "crossline-onboarding-research", "crossline-portrait-writer"]);
+  "crossline-onboarding", "crossline-onboarding-extract", "crossline-onboarding-research", "crossline-portrait-writer",
+  "crossline-portrait-narrative"]);
 
 const TIERS: RouteTier[] = ["top", "mid", "low"];
 const skillKey = (skillName: string) => skillName.replace(/^crossline:/, "");

@@ -29,7 +29,9 @@ const CONFIRMING_STAGES: OnboardingStage[] = ["situation", "compass", "energy"];
 export const ONBOARDING_INSIGHTS = "onboarding.insights";
 export type InsightVerdict = "fits" | "off" | "partial";
 export type InsightRatings = Record<string, { verdict: InsightVerdict; stage: string; at: string; text?: string; correction?: string;
-  hypothesisId?: string; pointId?: string; prior?: { status: "open" | "supported" | "refuted" | "undecided"; rated?: "fits" | "off" | "partial" } }>;
+  hypothesisId?: string; pointId?: string; prior?: { status: "open" | "supported" | "refuted" | "undecided"; rated?: "fits" | "off" | "partial" };
+  /** The card's second question (2026-11-22): had the person thought of it before. */
+  novel?: "new" | "known" }>;
 export function readInsightRatings(raw: string | null | undefined): InsightRatings {
   try {
     const value = JSON.parse(raw ?? "{}") as InsightRatings;

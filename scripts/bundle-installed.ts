@@ -36,7 +36,7 @@ const outside: import("esbuild").Plugin = {
 
 type Bundle = { name: string; entry: string; out: string; allowed: RegExp };
 const BUNDLES: Bundle[] = [
-  { name: "worker", entry: "apps/worker/src/index.ts", out: "apps/worker/dist/index.mjs", allowed: /^(apps\/worker\/src|packages\/[a-z-]+\/src)\// },
+  { name: "worker", entry: "apps/worker/src/index.ts", out: "apps/worker/dist/index.mjs", allowed: /^(apps\/worker\/src\/|packages\/[a-z0-9-]+\/src\/|packages\/i18n\/locales\/[a-z-]+\/[a-z0-9-]+\.json$)/ },
   { name: "launcher", entry: "apps/launcher/src/main.ts", out: "apps/launcher/dist/main.mjs", allowed: /^apps\/launcher\/src\// }
 ];
 const NOT_SHIPPED = /\.test\.tsx?$|\/testing\/|\/fixtures\//;

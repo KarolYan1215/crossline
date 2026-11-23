@@ -357,8 +357,9 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     return cardsOf(turn).map((card, index) => {
       const rating = ratingOf(message.seq, index);
       if ((which === "rated" && !rating) || (which === "unrated" && rating)) return null;
+      const novel = state.insightNovelty?.[index ? `${message.seq}.${index}` : String(message.seq)];
       return <InsightCard key={`insight-${message.seq}-${index}`} sessionId={sessionId} seq={message.seq} index={index} insight={card}
-        rating={rating} onRated={() => void load()} vanish={vanish} />;
+        rating={rating} {...(novel ? { novel } : {})} onRated={() => void load()} vanish={vanish} />;
     });
   };
   /** One message of the thread; in a fold the observation shows rated (changeable), on the open round it goes once rated. */

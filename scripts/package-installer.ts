@@ -30,15 +30,22 @@ import { signManifestFile } from "./release-sign";
  */
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const args = process.argv.slice(2);
-if (!args.includes("--final-release")) {
+/**
+ * `--personal` (docs/plans/desktop-local-1122.md, 2026-11-22): the owner's own desktop copy, built from the checkout and installed on
+ * this machine only by scripts/install-personal.ps1. Nothing is published: no update feed, no telemetry, no latest.json, no signature,
+ * so the 「停发」 decision (only the node package is published) still holds for everyone else.
+ */
+const personal = args.includes("--personal");
+if (!personal && !args.includes("--final-release")) {
   throw new Error("FULL_INSTALLER_DISCONTINUED: the full installed copy is no longer published (docs/local-installer.md 「停发」); "
-    + "build the node package (scripts/package-node.ts) instead, or pass --final-release for the one last build");
+    + "build the node package (scripts/package-node.ts) instead, --personal for the owner's own copy, or --final-release for the one last build");
 }
-if (!process.env.CROSSLINE_RELEASE_KEY) throw new Error("RELEASE_KEY_NOT_SET: the final release's latest.json must be signed (scripts/release-sign.ts)");
+if (!personal && !process.env.CROSSLINE_RELEASE_KEY) throw new Error("RELEASE_KEY_NOT_SET: the final release's latest.json must be signed (scripts/release-sign.ts)");
 const option = (name: string) => { const index = args.indexOf(`--${name}`); return index >= 0 ? args[index + 1] : undefined; };
 const version = option("version") ?? (JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8")) as { version: string }).version;
 if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`VERSION_INVALID ${version}`);
-const out = path.join(repoRoot, "dist", "installer");
+if (personal && (option("update-feed") || option("telemetry-url"))) throw new Error("PERSONAL_PUBLISHES_NOTHING: --personal takes no --update-feed or --telemetry-url");
+const out = option("out") ? path.resolve(option("out")!) : path.join(repoRoot, "dist", "installer");
 const stage = path.join(out, "stage");
 const isWindows = process.platform === "win32";
 if (!isWindows) throw new Error("PACKAGE_WINDOWS_ONLY");
@@ -77,6 +84,9 @@ const notShippedBuild = (source: string) => {
 copy("apps/web/.next-prod", "apps/web/.next-prod", notShippedBuild);
 copy("apps/web/public", "apps/web/public");
 copy("apps/web/next.config.mjs", "apps/web/next.config.mjs");
+// Plain modules `next start` loads outside the build: the CSP the config imports, and the HiGHS thread (lib/solver-pool.ts).
+copy("apps/web/lib/csp-policy.mjs", "apps/web/lib/csp-policy.mjs");
+copy("apps/web/solver-thread.mjs", "apps/web/solver-thread.mjs");
 // The Skills stay as they are: the Codex runtime reads each SKILL.md as text.
 copy("skills", "skills");
 const bundles = await bundleInstalled(stage);
@@ -134,7 +144,8 @@ if (missing.length) throw new Error(`VC_RUNTIME_UNRESOLVED ${missing.join(", ")}
 
 // 3. The runtime, the tray and what this build is.
 cpSync(node, path.join(stage, "node.exe"));
-const codexOut = path.join(repoRoot, "vendor", "codex", "codex-rs", "target", "release");
+// A worktree has no Rust build of its own: --codex-dir names one (the main checkout's target/release), checked against the pinned hash.
+const codexOut = option("codex-dir") ? path.resolve(option("codex-dir")!) : path.join(repoRoot, "vendor", "codex", "codex-rs", "target", "release");
 const codexDir = path.join(stage, "codex");
 mkdirSync(codexDir, { recursive: true });
 for (const binary of ["codex.exe", "codex-code-mode-host.exe"]) {
@@ -172,9 +183,11 @@ const csc = path.join(process.env.WINDIR ?? "C:\\Windows", "Microsoft.NET", "Fra
 run(csc, ["-nologo", "-target:winexe", "-optimize", `-win32icon:${icon}`, `-out:${path.join(stage, "Crossline.exe")}`,
   "-r:System.Windows.Forms.dll", "-r:System.Drawing.dll", path.join(repoRoot, "installer", "tray", "Crossline.cs")], repoRoot);
 
-const release = { version, ...(option("telemetry-url") ? { telemetryUrl: option("telemetry-url") } : {}),
+const msClientId = option("ms-client-id") ?? (personal ? process.env.CROSSLINE_MS_CLIENT_ID?.trim() || undefined : undefined);
+const msTenantId = option("ms-tenant-id") ?? (personal ? process.env.CROSSLINE_MS_TENANT_ID?.trim() || undefined : undefined) ?? "common";
+const release = { version, ...(personal ? { personal: true } : {}), ...(option("telemetry-url") ? { telemetryUrl: option("telemetry-url") } : {}),
   ...(option("update-feed") ? { updateFeed: option("update-feed") } : {}),
-  ...(option("ms-client-id") ? { msClientId: option("ms-client-id"), msTenantId: option("ms-tenant-id") ?? "common" } : {}) };
+  ...(msClientId ? { msClientId, msTenantId } : {}) };
 writeFileSync(path.join(stage, "release.json"), `${JSON.stringify(release, null, 2)}\n`);
 
 // 4. The installer.
@@ -184,10 +197,14 @@ if (!iscc) throw new Error("INNO_SETUP_MISSING: install Inno Setup 6 (winget ins
 const languages = path.join(path.dirname(iscc), "Languages");
 const chinese = [path.join(languages, "ChineseSimplified.isl"), path.join(languages, "Unofficial", "ChineseSimplified.isl"),
   path.join(repoRoot, "installer", "ChineseSimplified.isl")].find((file) => existsSync(file)) ?? path.join(path.dirname(iscc), "Default.isl");
-run(iscc, [`/DAppVersion=${version}`, `/DStage=${stage}`, `/DOutputDir=${out}`, `/DIconFile=${icon}`, `/DLanguageFile=${chinese}`, "/Q",
+run(iscc, [`/DAppVersion=${version}`, ...(personal ? ["/DPersonal=1"] : []), `/DStage=${stage}`, `/DOutputDir=${out}`, `/DIconFile=${icon}`, `/DLanguageFile=${chinese}`, "/Q",
   path.join(repoRoot, "installer", "crossline.iss")], repoRoot);
 
-const setup = path.join(out, `Crossline-Setup-${version}.exe`);
+const setup = path.join(out, `Crossline-${personal ? "Personal" : "Setup"}-${version}.exe`);
+if (personal) {
+  console.log(JSON.stringify({ setup, personal: true, msGraph: Boolean(msClientId) }));
+  process.exit(0);
+}
 // The public releases repository serves the file as a release asset named after its tag (docs/local-installer.md, 更新).
 const base = option("release-base") ?? "https://github.com/KarolYan1215/crossline-releases/releases/download";
 const manifest = { product: "crossline", version, url: `${base}/v${version}/${path.basename(setup)}`, sha256: sha256(setup), size: statSync(setup).size,
