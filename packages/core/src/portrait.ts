@@ -117,8 +117,8 @@ export const PORTRAIT_SCHEMA = object({
   gap: GAP,
   insights: { type: "array", maxItems: 6, items: object({ insight: text(300), advice: text(400), solves: text(200), priority: { type: "string", enum: ["high", "medium", "low"] },
     impact: score(1, 5), effort: score(1, 5) }) },
-  type: object({ collab: score(0, 100), purpose: score(0, 100), build: score(0, 100), lines: score(0, 100),
-    evidence: object({ collab: text(80), purpose: text(80), build: text(80), lines: text(80) }), summary: text(160) }),
+  // No `type` since 2026-11-22 (docs/plans/portrait-depth-1122.md D12): a label from four scores read as the verdict on a person; reports
+  // written before keep theirs and the page still draws it.
   character: object({ outfit: text(80), props: list(3, 40), pose: { type: "string", enum: [...CHARACTER_POSES] }, expression: { type: "string", enum: [...CHARACTER_EXPRESSIONS] },
     appearance: text(160) }),
   claims: WRITTEN_CLAIMS_SCHEMA,

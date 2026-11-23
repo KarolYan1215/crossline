@@ -67,8 +67,10 @@ export async function GET(request: Request) {
   const unstarted = !focus && !(session?.coverage as { flow?: unknown } | undefined)?.flow && !raw.some((message) => message.role === "assistant");
   const flow = unstarted ? "v2" : flowOf(session?.coverage);
   const stageNow = String((session?.coverage as { stage?: string } | undefined)?.stage ?? INTERVIEW_FLOW_STAGES[flow][0]);
-  const ratings = Object.fromEntries(Object.entries(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS)))
-    .filter(([key]) => session && key.startsWith(`${session.id}#`)).map(([key, rating]) => [key.slice(key.indexOf("#") + 1), rating.verdict]));
+  const ownRatings = Object.entries(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS))).filter(([key]) => session && key.startsWith(`${session.id}#`));
+  const ratings = Object.fromEntries(ownRatings.map(([key, rating]) => [key.slice(key.indexOf("#") + 1), rating.verdict]));
+  // The card's second answer (2026-11-22): had the person thought of it before.
+  const novelty = Object.fromEntries(ownRatings.flatMap(([key, rating]) => rating.novel ? [[key.slice(key.indexOf("#") + 1), rating.novel]] : []));
   return NextResponse.json({
     ...start,
     // Where the interview is, by its own record (`progress` of the last round), for the right column.
@@ -77,15 +79,16 @@ export async function GET(request: Request) {
     flow,
     capacity, skeleton: start.readyToStart ? draft : [],
     insightRatings: ratings,
+    insightNovelty: novelty,
     // The portrait's sections whose stage is over: under the points rules a stage's view is shown only then (2026-11-12).
     sectionsFinal: Object.entries(json<Record<string, SectionRecord>>(PROFILE_SECTIONS_SETTING, {})).filter(([, record]) => sectionClosed(record)).map(([section]) => section),
     // The 「结束并出报告」 button (2026-11-12): off below the start standard, filled by how complete the portrait is, full well above it.
     completeness: (() => {
-      const model = json<{ dimensions?: Array<{ id: string; evidenced: boolean }>; hypotheses?: Array<{ status: string }>; careers?: Array<{ trial?: { task?: string } }> } | null>("profile.model", null);
+      const model = json<{ dimensions?: Array<{ id: string; evidenced: boolean }>; hypotheses?: Array<{ status: string }>; careers?: Array<{ trial?: { task?: string } }>; points?: Array<{ section?: string; retracted?: boolean }> } | null>("profile.model", null);
       return interviewCompleteness({ lowerBound: ready, lowerMissing: start.startMissing.map((item) => item.label),
         stagesSeen: raw.filter((message) => message.role === "assistant").map((message) => String((message.content as { stage?: unknown }).stage ?? "")),
         ...(model?.dimensions ? { dimensions: model.dimensions } : {}), ...(model?.hypotheses ? { hypotheses: model.hypotheses } : {}),
-        ...(model?.careers ? { careers: model.careers } : {}), ...(interviewLocale(store, workspaceId) ? { locale: interviewLocale(store, workspaceId)! } : {}) });
+        ...(model?.careers ? { careers: model.careers } : {}), ...(Array.isArray(model?.points) ? { points: model.points } : {}), ...(interviewLocale(store, workspaceId) ? { locale: interviewLocale(store, workspaceId)! } : {}) });
     })(),
     // The research threads beside the conversation (worker onboarding-research.ts): listed, their questions shown as side cards.
     research: session ? readResearchThreads(workspaceId, session.id) : [],

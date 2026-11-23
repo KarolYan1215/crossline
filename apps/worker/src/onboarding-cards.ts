@@ -1,5 +1,5 @@
 import {
-  CARDS_OFFERED, INSIGHTS_PER_ROUND, cardCandidateIds, checkInsight, hypothesisReplies, isWebUrl, locateQuote, questionSimilarity, roughWindow,
+  CARDS_OFFERED, INSIGHTS_PER_ROUND, cardCandidateIds, checkInsight, hypothesisReplies, isWebUrl, levelOf, locateQuote, questionSimilarity, roughWindow,
   type DimensionId, type Hypothesis, type LedgerQuestion, type OnboardingStage, type ProfileGap, type ResearchRequest, type ResearchThread, type TurnInsight,
   type TurnProgress, type TurnQuestion
 } from "@crossline/core";
@@ -195,6 +195,11 @@ export function checkInsights(insights: TurnInsight[], context: InsightContext, 
     if (named && !onRecord) { problems.push(`${label}的 hypothesisId「${named}」不在假设日志里；从 cardFrom 选，新推断写 ""。`); continue; }
     if (onRecord && (onRecord.cardKey || askedIds.has(onRecord.id) || onRecord.status === "refuted")) {
       problems.push(`${label}问的假设 ${onRecord.id} 已经出过卡或被推翻，不再出。`); continue;
+    }
+    // Only the second level goes on a card (2026-11-22, docs/plans/portrait-depth-1122.md §一).
+    if (onRecord && levelOf(onRecord) !== 2) {
+      problems.push(levelOf(onRecord) === 3 ? `${label}问的假设 ${onRecord.id} 是第三级（和本人对自己的解释相反）：留给报告，不上卡，也不在回复里说。`
+        : `${label}问的假设 ${onRecord.id} 是第一级（本人自己说过的）：上卡只是复述，不出。`); continue;
     }
     if (onRecord && round.some((item) => item.card.hypothesisId === onRecord.id)) { problems.push(`${label}和这一轮另一张卡问的是同一条假设 ${onRecord.id}。`); continue; }
     // The log's candidates are offered, not imposed (2026-11-17, the owner: give the model information and a goal, not a gate). A new

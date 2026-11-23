@@ -13,6 +13,10 @@ export const PORTRAIT_DIMENSION_LABEL: Record<DimensionId, string> = {
 };
 export const HYPOTHESIS_STATUSES = ["open", "supported", "refuted", "undecided"] as const;
 export const BASIS_KINDS = ["quote", "behavior", "external"] as const;
+export const HYPOTHESIS_LEVELS = [1, 2, 3] as const;
+export type HypothesisLevel = (typeof HYPOTHESIS_LEVELS)[number];
+/** A hypothesis's level, 2 when it has none (a log written before levels). */
+export const levelOf = (item: { level?: unknown }): HypothesisLevel => item.level === 1 || item.level === 3 ? item.level : 2;
 /**
  * One inference about the person: the extraction rewrites the whole list every run, keeping each id across runs. `basis` is what it rests
  * on — the person's words (`quote`, verbatim in the reply or file `ref` names), what they did (`behavior`), or outside data (`external`,
@@ -29,6 +33,14 @@ export type Hypothesis = {
   status: (typeof HYPOTHESIS_STATUSES)[number];
   reference?: { text: string; url: string };
   rated?: "fits" | "off" | "partial";
+  /**
+   * How far it sits from the person's own account (2026-11-22, docs/plans/portrait-depth-1122.md §一, after Finn's levels of findings):
+   * 1 says again what they said of themselves, 2 links two things they said or adds a layer beside their reason, 3 runs against their own
+   * explanation. Only level 2 goes on a card; level 3 waits for the report, rated once it has been read whole. Absent before: read as 2.
+   */
+  level?: HypothesisLevel;
+  /** On a card the person also said whether they had thought of it before: `new` or `known` (the depth measure, not a verdict). */
+  novel?: "new" | "known";
   /**
    * The observation card that asked the person about it (`session#seq`, 2026-11-12: every card is one hypothesis of this log) and, when
    * they said 「准」 or 「部分对」, the point it put in the ledger. A hypothesis the person rated 准 or 不准 on a card is theirs: the
@@ -85,7 +97,8 @@ export const HYPOTHESIS_ITEM_FIELD = object({
   id: HYPOTHESIS_REF, dimension: DIMENSION_FIELD, statement: text(400),
   basis: { type: "array", maxItems: 8, items: object({ kind: { type: "string", enum: [...BASIS_KINDS] }, text: text(300), ref: text(500) }) },
   falsifier: text(300), alternative: { type: "string", maxLength: 300 }, status: { type: "string", enum: [...HYPOTHESIS_STATUSES] },
-  reference: { anyOf: [object({ text: text(300), url: URL_FIELD }), { type: "null" }] }
+  reference: { anyOf: [object({ text: text(300), url: URL_FIELD }), { type: "null" }] },
+  level: { type: "integer", enum: [...HYPOTHESIS_LEVELS] }
 });
 /** A career direction; `line` is the field a line id is written in (an enum of the person's lines when the caller knows them). */
 export const careerItemSchema = (line: unknown = { type: "string", maxLength: 80 }) => object({
@@ -129,7 +142,7 @@ export function cleanHypotheses(list: unknown[], textOf?: (ref: string) => strin
       ? { text: str(item.reference.text, 300), url: item.reference.url.trim() } : undefined;
     const rated = ratedOf?.(id);
     return [{ id, dimension: item!.dimension!, statement, basis, falsifier, alternative: str(item?.alternative, 300), status: item!.status!,
-      ...(reference ? { reference } : {}), ...(rated ? { rated } : {}) }];
+      level: levelOf(item ?? {}), ...(reference ? { reference } : {}), ...(rated ? { rated } : {}) }];
   });
 }
 
@@ -196,7 +209,8 @@ export function mergeProfileInsights(
     const index = hypotheses.findIndex((other) => other.id === item.id);
     const old = index >= 0 ? hypotheses[index]! : undefined;
     if (old && settledOnCard(old)) continue;
-    const next = { ...item, ...(old?.rated ? { rated: old.rated } : {}), ...(old?.cardKey ? { cardKey: old.cardKey } : {}), ...(old?.pointId ? { pointId: old.pointId } : {}) };
+    const next = { ...item, ...(old?.rated ? { rated: old.rated } : {}), ...(old?.cardKey ? { cardKey: old.cardKey } : {}), ...(old?.pointId ? { pointId: old.pointId } : {}),
+      ...(old?.novel ? { novel: old.novel } : {}) };
     if (old) hypotheses[index] = next; else hypotheses.push(next);
   }
   const role = (value: string | undefined) => loose(value ?? "").toLowerCase();

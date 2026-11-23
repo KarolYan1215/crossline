@@ -3,7 +3,9 @@
  * below it the button is off. Above it the person may end whenever they like; `score` fills the button, and `full` — a standard well above
  * the lower bound — is when the page reminds them once that they can end. Nothing here ends the interview.
  */
-export type InterviewCompleteness = { lowerBound: boolean; score: number; full: boolean; missing: string[] };
+export type InterviewCompleteness = { lowerBound: boolean; score: number; full: boolean; missing: string[];
+  /** Fewer than `STORY_POINTS_WANTED` points in the life-story section (2026-11-22): the button says the report's narrative will be short. */
+  storyShort?: boolean };
 
 import { tFor, type Locale } from "./i18n";
 
@@ -18,6 +20,8 @@ const PART_NAME: Record<(typeof COMPLETENESS_PARTS)[number], string> = {
  * extraction keeps adding hypotheses, and on the 2026-11-12 replay 25 of them with 13 open held the button at 85% for good.
  */
 export const HYPOTHESES_WANTED = 5;
+/** Points about the life story below which the portrait's narrative has little to tell (docs/plans/portrait-depth-1122.md §五). */
+export const STORY_POINTS_WANTED = 3;
 
 export type CompletenessInput = {
   /** The start standard stands (`readyToStart`). */
@@ -30,6 +34,8 @@ export type CompletenessInput = {
   dimensions?: Array<{ id: string; evidenced: boolean }>;
   hypotheses?: Array<{ status: string }>;
   careers?: Array<{ trial?: { task?: string } | null }>;
+  /** The points ledger (absent on an older portrait): only its life-story points are counted. */
+  points?: Array<{ section?: string; retracted?: boolean }>;
   /** The language `missing` is written in (the page's). */
   locale?: Locale;
 };
@@ -55,5 +61,7 @@ export function interviewCompleteness(input: CompletenessInput): InterviewComple
       ...(trials ? [] : [t("还没有带试做的职业方向")])
     ];
   const full = input.lowerBound && missing.length === 0;
-  return { lowerBound: input.lowerBound, score: full ? 1 : Math.min(0.99, Math.round(score * 100) / 100), full, missing };
+  const story = input.points?.filter((point) => point.section === "narrative" && !point.retracted).length;
+  return { lowerBound: input.lowerBound, score: full ? 1 : Math.min(0.99, Math.round(score * 100) / 100), full, missing,
+    ...(story !== undefined && story < STORY_POINTS_WANTED ? { storyShort: true } : {}) };
 }

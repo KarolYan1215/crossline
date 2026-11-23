@@ -361,3 +361,10 @@ html:has(.portrait-page){background:var(--ds-bg)}
 .pt-basis{margin:0;padding-left:18px;font-size:13px;color:var(--pt-muted)}
 .pt-fits{font-size:12px}
 @media (max-width:600px){.pt-trial dl{grid-template-columns:1fr}}
+/* The narrative (2026-11-22): prose first, the rating under each section. */
+.pt-narrative-section{border-top:1px solid var(--line, currentColor);padding:14px 0 8px}
+.pt-narrative-section h3{margin:0 0 8px;font-size:17px}
+.pt-narrative-section p{margin:0 0 10px;font-size:15px;line-height:1.8}
+.pt-narrative-rate{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.pt-narrative-rate button[aria-pressed="true"]{border-color:var(--ink);font-weight:600}
+.pt-narrative-far{font-size:13px}

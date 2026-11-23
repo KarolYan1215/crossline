@@ -85,6 +85,7 @@ export function FinishButton({ sessionId, completeness, disabled: busy = false, 
     </button>
     {missing.length > 0 && <small id="ob-finish-missing" className="ob-finish-missing">
       {t("开始使用前还差：{{items}}", { items: missing.slice(0, 4).join(t("、")) })}{missing.length > 4 ? t(" 等 {{count}} 项", { count: missing.length }) : ""}</small>}
+    {!view.disabled && completeness?.storyShort && <small className="ob-finish-missing">{t("人生故事还没讲，报告里的叙事会很短")}</small>}
     {error && <small className="ob-finish-missing" role="alert">{error}</small>}
     {reminder && <p className="ob-finish-reminder" role="status">
       <span>{reminder === "full" ? t("访谈已经很完整，可以结束出报告；也可以继续聊")

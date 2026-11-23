@@ -343,8 +343,9 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     reason: "对话读得到整场回答，整理的候选只是其中一部分；挡掉它自己的推断等于限制综合。候选改为给对话的材料，日志有没有被问到由回放看", replacedBy: "IR-159" },
   { id: "IR-159", layer: "L2", verdict: "model", status: "active", rule: "cardFrom 是证据已齐的候选，对话自己的推断更站得住时照样出卡",
     text: { file: INTERVIEW_SKILL, anchor: "**自己的推断比剩下的候选更站得住时就出，不必等候选用完。**" } },
-  { id: "IR-160", layer: "L2", verdict: "model", status: "active", rule: "动机和原因可以从话、行为和数据外推，写最有把握的那个、依据和把握；不否定本人说过的原因",
-    text: { file: INTERVIEW_SKILL, anchor: "**推断是补充，不是替换；原因可以推，要写把握。**" } },
+  { id: "IR-160", layer: "L2", verdict: "model", status: "retired", rule: "动机和原因可以从话、行为和数据外推，写最有把握的那个、依据和把握；不否定本人说过的原因",
+    text: { file: INTERVIEW_SKILL, anchor: "**推断是补充，不是替换；原因可以推，要写把握。**" },
+    reason: "2026-11-22 画像深度（docs/plans/portrait-depth-1122.md §一）：把「准」率当目标会把推断推向本人已经知道的；只保护感受和动机，行为的名字可以重新解释", replacedBy: "IR-176" },
   { id: "IR-161", layer: "L2", verdict: "model", status: "retired", rule: "一轮问几题由对话按本人的回答和状态判断，应用只管五题的上限",
     text: { file: INTERVIEW_SKILL, anchor: "**一轮问几题由你判断：**" },
     reason: "2026-11-22 原生改写：每轮只问一个主问题", replacedBy: "IR-170" },
@@ -381,5 +382,17 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     text: { file: INTERVIEW_SKILL, anchor: "**主线由本人先列，随时可以改。**" } },
   { id: "IR-175", layer: "L2", verdict: "model", status: "active", rule: "语气客观、理性、平静，对谁都一样（语气选择删掉）",
     text: { file: INTERVIEW_SKILL, anchor: "**语气客观、理性、平静，对谁都一样。**" } },
+  // 2026-11-22, portrait depth (docs/plans/portrait-depth-1122.md): inferences sorted by distance from the person's own account (Finn's
+  // levels); only the middle level goes on a card, the farthest waits for the report and is rated after it has been read whole.
+  { id: "IR-176", layer: "L2", verdict: "model", status: "active", rule: "感受和动机以本人为准；本人给行为起的名字可以换一种有事实依据的解释；第三级推断不在对话里说",
+    text: { file: INTERVIEW_SKILL, anchor: "**感受和动机以本人为准；行为的名字可以重新解释。**" } },
+  { id: "IR-177", layer: "L2", verdict: "model", status: "active", rule: "观察卡只放第二级推断：第一级是复述，第三级留给报告",
+    text: { file: INTERVIEW_SKILL, anchor: "**卡只放第二级。**" } },
+  { id: "IR-178", layer: "L0", verdict: "keep", status: "active", rule: "出卡候选只取第二级、未上过卡、未被推翻的假设",
+    code: { file: `${CORE}/profile-points.ts`, symbol: "cardCandidates", test: `${CORE}/profile-points.test.ts`, by: "only the second level" } },
+  { id: "IR-179", layer: "L4", verdict: "model", status: "active", rule: "整理给每条假设标离本人自述的距离（1 复述、2 联系或多一层、3 与本人的解释相反）",
+    text: { file: EXTRACT_SKILL, anchor: "**每条假设标一个级别（`level`）。**" } },
+  { id: "IR-180", layer: "L2", verdict: "model", status: "active", rule: "叙事部分一个场景问到之后一周、当时和现在的说法、结果由谁来判",
+    text: { file: `${SKILLS}/crossline-onboarding/stages/narrative.md`, anchor: "**一个场景问到它的前后，不只是它本身。**" } },
 ];
 /* i18n-ignore-end */

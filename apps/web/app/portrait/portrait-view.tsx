@@ -7,6 +7,7 @@ import { portraitLabels, portraitType, redactPortrait, type EnergyRhythm, type P
 import { LineNetwork, type NetworkEdge } from "../ui/line-network";
 import { FigurePicker } from "./figure-picker";
 import { ProfileSections } from "./profile-sections";
+import { NarrativeSection, type NarrativeView } from "./narrative-section";
 import { CareerSection, HypothesesSection } from "./career-sections";
 import { AdviceMatrix, DivergingAxes, EnergyScatter, Fit, GapChart, IdentityBars, RhythmChart, ValuesRadar } from "./portrait-charts";
 import { radarValues, rhythmStats } from "./poster-geometry";
@@ -21,15 +22,16 @@ type State = {
   next: { lines: Array<{ id: string; label: string; approved: string[]; drafts: string[] }>; hoursProposed: boolean; hoursSet: boolean };
   confirmation: { written: boolean; confirmed: boolean; at: string | null };
   appearance: { text: string; skipped: boolean };
+  narrative?: NarrativeView | null;
 };
 const ICON = { size: 17, strokeWidth: 1.75, "aria-hidden": true } as const;
 
 /** The report's contents in two groups: what is shared, then what only the person sees (2026-10-28 redesign). */
 const SHARED_SECTIONS = [["type", "超级个体类型"], ["rhythm", "精力节律"], ["values", "价值与能量"], ["lines", "主线飞轮"]] as const;
-const PRIVATE_SECTIONS = [["claims", "逐条核对"], ["problem", "真问题"], ["compass", "指南针、能量与主线"], ["gap", "言行落差与锚"], ["insights", "现况洞察与可行建议"],
+const PRIVATE_SECTIONS = [["narrative", "人生叙事与洞察"], ["claims", "逐条核对"], ["problem", "真问题"], ["compass", "指南针、能量与主线"], ["gap", "言行落差与锚"], ["insights", "现况洞察与可行建议"],
   ["careers", "职业方向"], ["hypotheses", "假设"], ["next", "Crossline 下一步"]] as const;
 /** Sections only some reports have (contract B, 2026-11-12): listed in the contents only when the report holds them. */
-const OPTIONAL_SECTIONS = new Set(["careers", "hypotheses"]);
+const OPTIONAL_SECTIONS = new Set(["narrative", "careers", "hypotheses"]);
 
 /** The contents beside the report, the section in view marked. */
 function Contents({ present = [] }: { present?: string[] }) {
@@ -337,7 +339,7 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
     <p className="muted pt-agent-hint" data-no-export="">{t("「导出给 Agent」得到一份 Markdown，可贴进 ChatGPT、Claude 或 Codex，作为 AGENTS.md 或自定义指令，让它们按本人的方式协作。")}</p>
     <div className="pt-layout">
       <aside className="pt-side" data-no-export="">
-        <Contents present={numbering} />
+        <Contents present={state.narrative ? ["narrative", ...numbering] : numbering} />
         <FigurePicker onCurrent={showFigure} appearance={state.appearance} />
       </aside>
     <div className="pt-doc">
@@ -345,6 +347,7 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
         afterType={state.confirmation.written ? <ConfirmBar confirmation={state.confirmation} onAnswered={(next) => setState((current) => ({ ...current, ...next }))} /> : null} />
 
       <p className="pt-private" data-no-export="">{t("以下为个人细节与建议，不包含在分享内容中")}</p>
+      {state.narrative && <NarrativeSection narrative={state.narrative} onChange={(narrative) => setState((current) => ({ ...current, narrative }))} />}
       <ProfileSections />
       <section className="pt-page" data-private="" id="pt-s-problem">
         <h2><small>05</small>{t("真问题")}</h2>

@@ -88,7 +88,7 @@ process.env.CROSSLINE_DATA_DIR = path.join(scratch, "data");
 process.env.CROSSLINE_RECORD_DIR ??= path.join(out, "answers");
 
 // ---- usage, the gateway and the routing: what the worker gives an invited account, the model pinned ----
-const SKILLS = ["crossline-onboarding", "crossline-onboarding-extract", "crossline-onboarding-research", "crossline-portrait-writer", "crossline-eval-persona"];
+const SKILLS = ["crossline-onboarding", "crossline-onboarding-extract", "crossline-onboarding-research", "crossline-portrait-writer", "crossline-portrait-narrative", "crossline-eval-persona"];
 // The interview's runs get the web as an invited account's do (2026-11-12): Crossline's own search through the configured search API.
 const search = webSearchFromEnv();
 const keyOf = (name: string, role: "interview" | "player") => `persona-eval:${name}:${role}`;
