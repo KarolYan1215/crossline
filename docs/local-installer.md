@@ -7,6 +7,7 @@
 - `scripts/package-installer.ts` 默认拒绝运行（`FULL_INSTALLER_DISCONTINUED`）。只留一次 `--final-release`：最后一版，用来把能读懂签名清单和「停发说明」的启动器送到已装的电脑上；它同样要求 `CROSSLINE_RELEASE_KEY`，因为写出的 `latest.json` 必须签名。
 - 已装的用户不会被删任何数据。发布顺序：① 用 `--final-release` 打最后一版并发布（旧启动器不验签，照常提示更新、安装）；② 再把公开仓库的 `latest.json` 换成签名的停发说明：`pnpm exec tsx scripts/release-sign.ts discontinued --product crossline --version <最后一版的版本号> --notice "……" --link https://app.crossline.lol/settings --out latest.json`。新启动器读到它，每次启动说一次（托盘气泡「Crossline 本机版已停止更新」，点击打开 `link`，只接受 https），菜单里的「检查更新」改为「已停止更新」，此后不再提示安装任何东西。
 - 本机版继续能用：账本、登录、设置都在原处；本人自己决定何时卸载（卸载时仍可选择保留数据）。
+- 本人自己的一份（2026-11-22）：`--personal` 打 `Crossline-Personal-<版本>.exe`，不签名、不写 `latest.json`、不带更新源和回传地址（给了就拒绝，`PERSONAL_PUBLISHES_NOTHING`），只用 `scripts/install-personal.ps1`（或在 Claude 桌面会话里经 WMI 跑的 `install-personal.cmd`）装在这台电脑上。对外停发不变。清单、构建与验证见 `docs/plans/desktop-local-1122.md`。
 
 ## 目标与约束
 
