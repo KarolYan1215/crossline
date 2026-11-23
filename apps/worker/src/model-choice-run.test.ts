@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { runCodexSkill, setEffortPreferenceProvider, setModelChoiceProvider, setProviderResolver, setSpendModeProvider, setUsageSink, type SkillUsage } from "@crossline/codex";
+import { SPONSOR_MODEL_CHOICE } from "@crossline/core";
 import { fakeRuntime } from "./testing/fake-runtime";
 
 // A top-tier Skill that steps down when the budget is tight, so the choice's exemption shows.
@@ -42,4 +43,26 @@ test("without a choice the table still decides, economy and all", async () => {
   const { rpc } = fakeRuntime(["{}"], SKILL);
   await runCodexSkill(rpc, {}, options(SKILL));
   expect(usage[0]).toMatchObject({ spendMode: "economy", model: "gpt-5.6-terra", effort: "medium" });
+});
+
+const sponsorRouting = (extra: Record<string, unknown>) => ({ provider: { id: "sponsor", kind: "responses", label: "开发者提供的模型",
+  baseUrl: "https://example.invalid/v1", model: "dev-model", keyLast4: null, updatedAt: "2026-11-22T00:00:00Z" }, gatewayUrl: "http://127.0.0.1:1/x",
+  admitted: new Set(["crossline-milestone-architect"]), codexSignedIn: true, ...extra }) as never;
+
+test("choosing the sponsored model keeps the run on it, not on the account's ChatGPT (2026-11-22)", async () => {
+  setProviderResolver(() => sponsorRouting({}));
+  setModelChoiceProvider(() => ({ model: SPONSOR_MODEL_CHOICE }));
+  const { rpc } = fakeRuntime(["{}"], SKILL);
+  const result = await runCodexSkill(rpc, {}, options(SKILL));
+  expect(result.ok).toBe(true);
+  expect(usage[0]?.model).toBe("dev-model");
+});
+
+test("a chosen sponsored model that is held back is said, not swapped for ChatGPT", async () => {
+  setProviderResolver(() => sponsorRouting({ blocked: { code: "MODEL_SPONSOR_BUDGET", message: "本月额度已用完" } }));
+  setModelChoiceProvider(() => ({ model: SPONSOR_MODEL_CHOICE }));
+  const { rpc, turns } = fakeRuntime(["{}"], SKILL);
+  const result = await runCodexSkill(rpc, {}, options(SKILL));
+  expect(result).toMatchObject({ ok: false, blocker: { code: "MODEL_SPONSOR_BUDGET", message: "本月额度已用完" } });
+  expect(turns()).toBe(0);
 });

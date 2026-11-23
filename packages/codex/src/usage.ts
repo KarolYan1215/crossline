@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { EffortPreference, ModelChoice } from "@crossline/core";
+import { SPONSOR_MODEL_CHOICE, type EffortPreference, type ModelChoice } from "@crossline/core";
 import type { SpendMode } from "./model-policy";
 
 /**
@@ -171,3 +171,10 @@ export function setModelChoiceProvider(provider: ((workspaceId: string | undefin
 export function currentModelChoice(skillName: string): ModelChoice | undefined {
   try { return choiceProvider?.(workspaceContext.getStore()?.workspaceId, skillName); } catch { return undefined; }
 }
+/** The person's choice of a model on the account's own Codex. Choosing the sponsored model is not one: that run keeps the sponsor's route. */
+export function currentCodexChoice(skillName: string): ModelChoice | undefined {
+  const choice = currentModelChoice(skillName);
+  return choice && choice.model !== SPONSOR_MODEL_CHOICE ? choice : undefined;
+}
+/** Whether the person chose the sponsored model for this Skill (`SPONSOR_MODEL_CHOICE`). */
+export const sponsorChosen = (skillName: string): boolean => currentModelChoice(skillName)?.model === SPONSOR_MODEL_CHOICE;

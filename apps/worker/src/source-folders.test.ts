@@ -184,6 +184,18 @@ test("on this computer a folder is listed, not imported; what is written there a
   expect(names()).toEqual(["course/week2/report.md"]);
 });
 
+// D14 on this computer (docs/plans/desktop-local-1122.md): AI conversations in an authorized folder are read even when the rest is listed.
+test("on this computer AI conversation logs in an authorized folder are read, not only listed", async () => {
+  const old = new Date(Date.UTC(2026, 0, 1));
+  put("codex/rollout-2026-01-01T00-00-00-abc.jsonl", `${JSON.stringify({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "plan my thesis" }] } })}
+`);
+  for (const file of ["syllabus.md", "week1/notes.txt", "week1/slides.pptx", "codex/rollout-2026-01-01T00-00-00-abc.jsonl"]) utimesSync(path.join(root, "course", file), old, old);
+  const folder = await addCourse();
+  const outcome = await syncFolder(store, workspaceId, folder, { ...deps(), onDemand: true });
+  expect(outcome.read).toBe(1);
+  expect(names()).toEqual(["course/codex/rollout-2026-01-01T00-00-00-abc.jsonl"]);
+});
+
 // D3 on a linked device (R2-B, 2026-11-22): the site cannot open a file later, so the list is screened there first and only what it keeps is read.
 test("a linked device sends only the list to be screened, reads in what the screening keeps, and never offers the rest again", async () => {
   const old = new Date(Date.UTC(2026, 0, 1));

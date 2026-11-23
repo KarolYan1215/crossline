@@ -592,6 +592,16 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       const echo = safetyRound(valid) ? "" : echoOf(valid.reply);
       if (echo) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
         detail: `回复${echo}。那段经历整场不复述：去掉那句，接着说别的。` }); // i18n-ignore: model-facing repair note
+      const notation = valid.reply.match(CARD_NOTATION)?.[0];
+      if (notation) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { reply: true,
+        detail: `回复里有「${notation.trim()}」：这是应用给你看的卡片答案的写法，本人没写过它。去掉它，要提就用本人的话说。` }); // i18n-ignore: model-facing repair note
+      // Sent back once: whether that question was asked is for the model to find in the thread; its second answer stands.
+      const pending = pendingChecked ? null : PENDING_TALK.exec(valid.reply);
+      if (pending) {
+        pendingChecked = true;
+        throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { reply: true,
+          detail: `回复说「${pending[0]}」。在线程里找到那一问（哪一轮、原话）：本人确实还没答，保持原样；找不到，就去掉这个说法，当新问题问。` }); // i18n-ignore: model-facing repair note
+      }
       const lessonWhy = lessonRefused(valid);
       if (lessonWhy) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { detail: `askLesson 写 false：${lessonWhy}。` }); // i18n-ignore: model-facing repair note
       // Each question, waiting item, card and research question through its check (verbatim quotes, real links, the ledger's askings):
@@ -613,6 +623,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       return valid;
     };
     let safetyAsked = false;
+    let pendingChecked = false;
     const noteOnce = (what: string) => { if (!noted.includes(what)) noted.push(what); };
     /** The scale's readings in words (`instrumentReadings`), never the taps: what the dialogue reads of the cards (2026-11-15). */
     const scaleReadings = (): { scaleReadings?: string[] } => {
@@ -636,12 +647,15 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       const kept = keepOnboardingDialogue(asRound(output), known);
       if (!kept) return kept;
       const quiet = safetyRound(kept);
-      return { ...kept, reply: withoutInventedDates(quiet ? kept.reply : withoutEchoes(kept.reply)), ...(lessonRefused(kept) ? { askLesson: false } : {}) };
+      const reply = withoutInventedDates(quiet ? kept.reply : withoutEchoes(kept.reply)).replace(CARD_NOTATION, "").trim();
+      return { ...kept, reply, ...(lessonRefused(kept) ? { askLesson: false } : {}) };
     };
     // A turn that only needs one or two questions dropped is kept now instead of rewritten in full by a repair; one that lists the research is not.
     const keepEarly = (rejection: Error, output: unknown) => {
-      // The safety question and the items' own problems are the model's to answer, never settled by keeping the answer as it is.
-      if ((rejection as Error & { safety?: boolean; cards?: boolean }).safety || (rejection as Error & { cards?: boolean }).cards) return undefined;
+      // The safety question, the items' own problems and the reply's own (a card's notation, a question said to be waiting) are the
+      // model's to answer, never settled by keeping the answer as it is.
+      const why = rejection as Error & { safety?: boolean; cards?: boolean; reply?: boolean };
+      if (why.safety || why.cards || why.reply) return undefined;
       const merged = asRound(output);
       const kept = keepOnboardingDialogue(merged, known);
       return kept && droppedOnboardingItems(merged, kept) <= ONBOARDING_KEEP_EARLY_MAX && !setDates(kept.reply).length
@@ -972,6 +986,10 @@ export const endHinted = (reply: string): boolean => END_HINT.test(reply);
 /** A card's tap line (`scaleAnswerLine`, 「【题】点选：5/5（…）」) as the dialogue reads it: the score is the readings' to say (2026-11-15). */
 const TAP_LINE = /^(\s*【[^】\n]+】)点选：[1-5]\/5(?:（[^）\n]*）)?/gmu; // i18n-ignore: the tap line's own form
 export const withoutTaps = (text: string): string => text.replace(TAP_LINE, "$1已点选（读数见 scaleReadings）"); // i18n-ignore: model-facing
+/** A card's answer in the app's own notation (「【题】已点选」) copied into the reply: the person never wrote it (2026-11-23, W-315). */
+export const CARD_NOTATION = /\[?【[^】\n]{1,40}】(?:已)?点选[^\n。！？\]]*\]?/gu; // i18n-ignore: the app's notation
+/** A reply saying a question is still waiting for the person (2026-11-22/23, W-307, W-314: it had never been asked). */
+export const PENDING_TALK = /还没答|还没回答|还在等你|上面那一?问|刚才那一?问|那一问还/u; // i18n-ignore: matched against the model's words
 /** The scale talked about in its own numbers or the cards' words, which the dialogue reads off taps and gets wrong (replay 15). */
 export const SCORE_TALK = /(?<![\d/])[1-5]\s*\/\s*5(?![\d/])|\d{1,3}\s*\/\s*100|自评|最重那一档/u; // i18n-ignore: matched against the model's words
 

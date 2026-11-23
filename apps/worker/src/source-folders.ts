@@ -4,7 +4,7 @@ import { lstat, open, readdir, readFile, realpath, stat } from "node:fs/promises
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
-  DEVICE_FOLDER_SCREEN_LIMIT, FOLDER_MAX_ENTRIES, FOLDER_MAX_FILES, RECORDING_SETTLE_MS, SOURCE_FOLDERS_SETTING, cleanFolderNames, cleanFolderRules, credentialName, credentialText, excludedByRules, folderFileAction, folderGroup, folderLabel,
+  DEVICE_FOLDER_SCREEN_LIMIT, FOLDER_MAX_ENTRIES, chatHistoryName, FOLDER_MAX_FILES, RECORDING_SETTLE_MS, SOURCE_FOLDERS_SETTING, cleanFolderNames, cleanFolderRules, credentialName, credentialText, excludedByRules, folderFileAction, folderGroup, folderLabel,
   folderPathProblem, readSourceFolders, redactSecrets, sensitiveName, sensitiveText, skipFolderDirectory, sourceFolderIndexSetting, sourceKindFor,
   type FolderIndexEntry, type SourceFolder, type SourceKind, tFor, type Locale
 } from "@crossline/core";
@@ -316,7 +316,10 @@ export async function syncFolder(store: CrosslineStore, workspaceId: string, fol
   // listed, and the interview opens a file when it needs it (`readFolderFile`). What the person writes there afterwards is read as before —
   // it is new work, which the deliverable check compares with their tasks — and so is anything already read that changed.
   const authorizedAt = Date.parse(saved.addedAt);
-  const listOnly = (file: ScannedFile) => Boolean(deps.onDemand) && !index[file.relative]?.documentId && !(Number.isFinite(authorizedAt) && file.mtimeMs >= authorizedAt);
+  // AI conversations (D14) are the exception: a folder of Codex, Claude Code or ChatGPT exports is given to be read and digested segment
+  // by segment (chat-digest.ts), which only works on what was read; listing them would leave the history unused (docs/plans/desktop-local-1122.md).
+  const listOnly = (file: ScannedFile) => Boolean(deps.onDemand) && !chatHistoryName(file.relative) && !index[file.relative]?.documentId
+    && !(Number.isFinite(authorizedAt) && file.mtimeMs >= authorizedAt);
   for (const file of changed.filter(listOnly)) index[file.relative] = { size: file.size, mtimeMs: file.mtimeMs, documentId: "", listed: true };
   const toRead = changed.filter((file) => !listOnly(file));
   const reading = readingContext(store, workspaceId, index);

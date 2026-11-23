@@ -10,6 +10,12 @@ export const MODEL_CHOICE_SETTING = "model.choice";
 /** The slot for every Skill without a choice of its own. */
 export const OTHER_SKILLS = "*";
 
+/**
+ * The choice that names the developer's sponsored model (2026-11-22, the owner: an account that can also use it sees it as its own entry,
+ * apart from ChatGPT's list). It is not a Codex model id: a run with this choice goes to the sponsor's route, never to the account's Codex.
+ */
+export const SPONSOR_MODEL_CHOICE = "crossline:sponsor";
+
 export type ModelChoice = { model: string; effort?: string };
 /** Keyed by a Skill's own name (without the `crossline:` prefix), or `OTHER_SKILLS`. */
 export type ModelChoices = Record<string, ModelChoice>;

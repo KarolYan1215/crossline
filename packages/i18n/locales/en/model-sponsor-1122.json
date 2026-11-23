@@ -1,0 +1,6 @@
+{
+  "默认（赞助模型 {{model}}）": "Default (sponsored model {{model}})",
+  "赞助模型": "Sponsored model",
+  "赞助模型（这个账号没有）": "Sponsored model (not available to this account)",
+  "未设的按每项工作的难度自动分配；能用赞助模型时默认用它。选定的模型在额度紧张时也不降档；额度用尽时如实告知，不换成别的模型。": "Anything not set is assigned by how hard each job is; where the sponsored model is available it is the default. A chosen model is not stepped down when the quota is tight; when the quota runs out you are told so, and no other model is swapped in."
+}

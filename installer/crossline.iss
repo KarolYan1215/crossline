@@ -26,7 +26,11 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.17763
 OutputDir={#OutputDir}
+#ifdef Personal
+OutputBaseFilename=Crossline-Personal-{#AppVersion}
+#else
 OutputBaseFilename=Crossline-Setup-{#AppVersion}
+#endif
 SetupIconFile={#IconFile}
 UninstallDisplayIcon={app}\Crossline.exe
 UninstallDisplayName=Crossline
