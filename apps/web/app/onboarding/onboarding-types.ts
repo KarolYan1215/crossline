@@ -99,6 +99,8 @@ export type OnboardingState = {
   research?: import("./interview-contract").ResearchThread[];
   /** The person's 准 / 不准 per round (round seq → verdict). */
   insightRatings?: Record<string, "fits" | "off" | "partial">;
+  /** Whether the person had thought of each rated card before (2026-11-22), by the same keys. */
+  insightNovelty?: Record<string, "new" | "known">;
   /** The portrait's sections whose stage is over (under the points rules, a stage's view is shown only then). */
   sectionsFinal?: string[];
   identities: Identity[];

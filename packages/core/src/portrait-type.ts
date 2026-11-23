@@ -190,7 +190,9 @@ const LINE_COLOUR_NAME: Record<string, string> = { research: "deep blue (#0A5198
 export function characterPrompt(report: PortraitReport): string | null {
   const type = portraitType(report);
   const character = redactPortrait(report).character;
-  if (!type || !character) return null;
+  if (!character) return null;
+  // A report written since 2026-11-22 has no type: the circle takes a neutral tint.
+  const tint = type?.group.tint ?? "soft warm grey";
   const base = [...report.lines.items].sort((a, b) => (b.targetShare ?? b.share ?? 0) - (a.targetShare ?? a.share ?? 0))[0]?.lineId ?? "";
   const outfitColour = LINE_COLOUR_NAME[base] ?? "near-black";
   const accent = Object.entries(LINE_COLOUR_NAME).find(([id]) => id !== base && report.lines.items.some((item) => item.lineId === id))?.[1] ?? "white";
@@ -199,14 +201,14 @@ export function characterPrompt(report: PortraitReport): string | null {
   const appearance = character.appearance?.trim();
   if (appearance) return [CHARACTER_STANDARD.replace(/Simplified face:[^.]*\.\s*/, "Simplified face: small dot eyes, a small mouth, no nose detail; not a portrait of a real face. ")
       .replace("Exactly one main outfit colour and one accent colour; ", ""),
-    `Group tint for the circle: ${type.group.tint}.`,
+    `Group tint for the circle: ${tint}.`,
     `Appearance, as the person describes themselves: ${appearance}. Clothing colours follow this description.`,
     `Outfit: ${character.outfit.trim()}. Accessories and small details (a strap, a badge, a pen, a prop's trim) in ${outfitColour}, with ${accent} as a second detail colour.`,
     character.props.length ? `Holding or carrying: ${character.props.map((prop) => prop.trim()).join(", ")}.` : "",
     `Pose: ${character.pose}. Expression: ${character.expression}.`
   ].filter(Boolean).join(" ");
   return [CHARACTER_STANDARD,
-    `Group tint for the circle: ${type.group.tint}.`,
+    `Group tint for the circle: ${tint}.`,
     `Outfit: ${character.outfit.trim()}, main colour ${outfitColour}, accent ${accent}.`,
     character.props.length ? `Holding or carrying: ${character.props.map((prop) => prop.trim()).join(", ")}.` : "",
     `Pose: ${character.pose}. Expression: ${character.expression}.`

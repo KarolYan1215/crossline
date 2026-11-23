@@ -100,6 +100,9 @@ test("an observation card comes back naming what to fix: a quote not in its repl
   // The card on h1 is kept under its id.
   expect(checkInsights([card({ hypothesisId: "h1" })], insightContext([hypothesis("h1")])).accepted)
     .toEqual([{ card: expect.objectContaining({ hypothesisId: "h1", dimension: "D2" }) }]);
+  // Only the second level is carded (2026-11-22): a third-level reading waits for the report, a first-level one only says it back.
+  expect(checkInsights([card({ hypothesisId: "h1" })], insightContext([hypothesis("h1", { level: 3 })])).problems).toEqual([expect.stringContaining("第三级")]);
+  expect(checkInsights([card({ hypothesisId: "h1" })], insightContext([hypothesis("h1", { level: 1 })])).problems).toEqual([expect.stringContaining("第一级")]);
   // One already put on a card is not asked again; with an empty log a new inference is kept for the log.
   expect(checkInsights([card({ hypothesisId: "h1" })], insightContext([hypothesis("h1", { cardKey: "s#3" })])).problems).toEqual([expect.stringContaining("已经出过卡")]);
   expect(checkInsights([card()], insightContext()).accepted).toEqual([{ card: expect.objectContaining({ text: card().text }), fresh: { dimension: "D2" } }]);

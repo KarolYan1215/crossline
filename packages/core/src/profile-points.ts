@@ -1,4 +1,4 @@
-import { DIMENSION_IDS, isWebUrl, oneOf, type DimensionId, type Hypothesis } from "./profile-hypotheses";
+import { DIMENSION_IDS, isWebUrl, levelOf, oneOf, type DimensionId, type Hypothesis } from "./profile-hypotheses";
 
 /**
  * The points ledger (要点账本, the owner's decisions of 2026-11-12): what is settled about the person, as points rather than paragraphs.
@@ -186,6 +186,18 @@ export function rateHypothesis(profile: { hypotheses: Hypothesis[]; points: Prof
     prior: { status: old.status, ...(old.rated ? { rated: old.rated } : {}) } };
 }
 
+/**
+ * The card's second question (2026-11-22): whether the person had thought of it before. Kept on the hypothesis as the depth measure — a
+ * card rated 准 that they had already thought of told them nothing — and handed to the portrait narrative, never used as a verdict.
+ */
+export function markNovel(hypotheses: Hypothesis[], hypothesisId: string, novel: "new" | "known" | null): Hypothesis[] {
+  return hypotheses.map((item) => {
+    if (item.id !== hypothesisId) return item;
+    const { novel: _old, ...rest } = item;
+    return novel ? { ...rest, novel } : rest;
+  });
+}
+
 /** A rating taken back: the point it made goes, and the hypothesis is as it was before. */
 export function unrateHypothesis(profile: { hypotheses: Hypothesis[]; points: ProfilePoint[] }, input: {
   hypothesisId: string; pointId?: string; prior?: Pick<Hypothesis, "status" | "rated">;
@@ -215,7 +227,8 @@ export function hypothesisFromCard(card: RatedCard & { falsifier: string }, id: 
  * already settled: the open ones (to pick from by id), and the ones they rated, with how.
  */
 export function hypothesisLogLines(hypotheses: Hypothesis[], limit = 16): string[] {
-  const open = hypotheses.filter((item) => !item.cardKey && item.status !== "refuted").slice(-limit)
+  // The third level is the report's, never asked in the dialogue; the first is the person's own account (2026-11-22).
+  const open = hypotheses.filter((item) => !item.cardKey && item.status !== "refuted" && levelOf(item) === 2).slice(-limit)
     .map((item) => `${item.id} [${item.dimension}] ${item.statement.slice(0, 120)}（待问）`);
   const rated = hypotheses.filter((item) => item.cardKey).slice(-limit).map((item) => `${item.id} ${item.statement.slice(0, 80)}（本人说${
     item.rated === "fits" ? "准，已记进要点" : item.rated === "off" ? "不准，不再提" : item.rated === "partial" ? "部分对，已记下更正" : "未答"}）`);
@@ -277,7 +290,10 @@ function candidateRows(hypotheses: Hypothesis[], limit: number) {
   for (const item of hypotheses) if (item.cardKey) asked.set(item.dimension, (asked.get(item.dimension) ?? 0) + 1);
   type Row = { item: Hypothesis; index: number; cited: Array<[string, string]> };
   const order = (a: Row, b: Row) => (asked.get(a.item.dimension) ?? 0) - (asked.get(b.item.dimension) ?? 0) || b.cited.length - a.cited.length || a.index - b.index;
-  const rows: Row[] = hypotheses.map((item, index) => ({ item, index, cited: hypothesisReplies(item) })).filter(({ item }) => !item.cardKey && item.status !== "refuted");
+  // Only the second level goes on a card (2026-11-22, docs/plans/portrait-depth-1122.md §一): the first says again what the person said,
+  // the third runs against their own account and waits for the report, where it is rated after being read whole.
+  const rows: Row[] = hypotheses.map((item, index) => ({ item, index, cited: hypothesisReplies(item) }))
+    .filter(({ item }) => !item.cardKey && item.status !== "refuted" && levelOf(item) === 2);
   const backed = rows.filter((row) => row.cited.length >= 2).sort(order);
   const unsure = rows.filter((row) => row.cited.length === 1 && row.item.alternative.trim()).sort(order);
   return [...backed, ...unsure].slice(0, limit);

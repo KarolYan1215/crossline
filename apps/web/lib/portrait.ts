@@ -14,6 +14,7 @@ import { localeFor, tOf } from "./locale";
 import type { AgentKitInput } from "./agent-kit";
 import { allClaims } from "./profile-report";
 import { startSummary } from "./start-confirm";
+import { loadNarrative, type NarrativeView } from "./portrait-narrative";
 
 export type PortraitState = {
   report: PortraitReport | null; version: number; at: string | null;
@@ -32,6 +33,8 @@ export type PortraitState = {
   confirmation: PortraitConfirmation;
   /** How the person says they look, the one description the figure is drawn from (`appearance` facts); empty when not said. */
   appearance: { text: string; skipped: boolean };
+  /** The narrative written before the report (2026-11-22), by section, with the person's ratings; null before one exists. */
+  narrative: NarrativeView | null;
 };
 export type PortraitConfirmation = { written: boolean; confirmed: boolean; at: string | null };
 
@@ -83,7 +86,8 @@ export function loadPortrait(ctx: AccessContext): PortraitState {
       hoursSet: Boolean(store.getSetting(ctx.workspaceId, "schedule.availability"))
     },
     confirmation: portraitConfirmation(ctx),
-    appearance: appearanceOf(ctx)
+    appearance: appearanceOf(ctx),
+    narrative: loadNarrative(ctx)
   };
 }
 

@@ -539,6 +539,7 @@ export * from "./fixed-events";
 export * from "./life";
 export * from "./event-merge";
 export * from "./portrait";
+export * from "./portrait-narrative";
 export * from "./portrait-figure";
 export * from "./planning-profile";
 export * from "./context-selection";

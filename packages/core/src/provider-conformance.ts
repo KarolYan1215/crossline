@@ -112,6 +112,7 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-insight-compiler": { label: "主线 skill 整理", schemas: ["MINE_SKILL_SCHEMA"], webSearch: true },
   "crossline-skill-scout": { label: "公开 skill 检索", schemas: ["SKILL_SCOUT_SCHEMA"], webSearch: true },
   "crossline-portrait-writer": { label: "画像", schemas: ["PORTRAIT_SCHEMA", "PORTRAIT_GAP_SCHEMA"] },
+  "crossline-portrait-narrative": { label: "画像叙事", schemas: [] },
   "crossline-portrait-illustrator": { label: "画像插图", schemas: [], image: true },
   "crossline-eval-persona": { label: "访谈评测", schemas: [], testOnly: true },
   "crossline-conformance": { label: "模型检验", schemas: [], testOnly: true },

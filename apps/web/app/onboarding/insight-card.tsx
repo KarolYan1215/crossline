@@ -28,11 +28,15 @@ export function falsifierCondition(falsifier: string | undefined): string {
  *
  * Rating is a one-shot step (2026-11-10): with `vanish` the card leaves a receipt for about 1.5 s with 撤销 (which clears the rating and
  * brings the card back), then is gone; its round's fold keeps it, rated, where it can be changed (`vanish` off).
+ *
+ * Since 2026-11-22 (docs/plans/portrait-depth-1122.md §一、§四) the card shows the inference and its falsifier, not the quotes it rests
+ * on (they stay in the data, where the app checks them), and asks a second question beside the rating: had the person thought of it
+ * before. An answer given before the rating is held and sent once the rating is in.
  */
-export function InsightCard({ sessionId, seq, index = 0, insight, rating, onRated, vanish = false }: {
+export function InsightCard({ sessionId, seq, index = 0, insight, rating, novel: novelOnRecord, onRated, vanish = false }: {
   /** Which of the round's cards it is (0 the first; cards ready together come in one round, 2026-11-14). */
   sessionId: string; seq: number; index?: number; insight: TurnInsightView;
-  rating: "fits" | "off" | "partial" | undefined; onRated: () => void; vanish?: boolean;
+  rating: "fits" | "off" | "partial" | undefined; novel?: "new" | "known"; onRated: () => void; vanish?: boolean;
 }) {
   const t = useT();
   const [busy, setBusy] = useState(false);
@@ -40,8 +44,19 @@ export function InsightCard({ sessionId, seq, index = 0, insight, rating, onRate
   const [receipt, setReceipt] = useState(false);
   const [correcting, setCorrecting] = useState(false);
   const [correction, setCorrection] = useState("");
+  const [novel, setNovel] = useState(novelOnRecord);
   // A rating read back from the server (after a reload, or another device) wins; the one just pressed shows until then.
   useEffect(() => { setShown(rating); }, [rating]);
+  useEffect(() => { setNovel(novelOnRecord); }, [novelOnRecord]);
+  const sendNovel = async (value: "new" | "known") => {
+    const response = await fetch("/api/onboarding/insight", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId, seq, ...(index ? { index } : {}), novel: value }) }).catch(() => undefined);
+    return Boolean(response?.ok);
+  };
+  const answerNovel = async (value: "new" | "known") => {
+    setNovel(value);
+    if (shown) await sendNovel(value);
+  };
   const send = async (verdict: "fits" | "off" | "partial" | "clear") => {
     setBusy(true);
     const response = await fetch("/api/onboarding/insight", { method: "POST", headers: { "content-type": "application/json" },
@@ -51,6 +66,7 @@ export function InsightCard({ sessionId, seq, index = 0, insight, rating, onRate
   };
   const rate = async (verdict: "fits" | "off" | "partial") => {
     if (!await send(verdict)) return;
+    if (novel && novel !== novelOnRecord) await sendNovel(novel);
     setShown(verdict); setCorrecting(false);
     if (vanish) setReceipt(true); else onRated();
   };
@@ -66,7 +82,6 @@ export function InsightCard({ sessionId, seq, index = 0, insight, rating, onRate
   return <aside className="ob-insight" aria-label={t("观察")}>
     <b className="ob-insight-label">{t("观察")}</b>
     <p className="gen">{insight.text}</p>
-    <ul className="ob-insight-quotes">{insight.refs.map((ref) => <li key={`${ref.replyId}:${ref.quote}`}>「{ref.quote}」</li>)}</ul>
     {(insight.external?.length ?? 0) > 0 && <ul className="ob-insight-external" aria-label={t("外部来源")}>{insight.external!.map((item) =>
       <li key={item.url}><a href={item.url} target="_blank" rel="noreferrer noopener" className="gen">{item.text || item.url}</a></li>)}</ul>}
     {condition && <small className="ob-insight-falsifier">{t("如果{{falsifier}}，这条就不准", { falsifier: condition })}</small>}
@@ -76,6 +91,11 @@ export function InsightCard({ sessionId, seq, index = 0, insight, rating, onRate
       {insight.hypothesisId && <button type="button" className="ob-btn ob-quiet" aria-pressed={shown === "partial" || correcting} aria-expanded={correcting}
         disabled={busy} onClick={() => setCorrecting((open) => !open)}>{t("部分对")}</button>}
       {shown && !correcting && <small className="ob-muted">{noted}</small>}
+    </div>
+    <div className="ob-insight-rate ob-insight-novel" role="group" aria-label={t("以前想到过吗")}>
+      <small className="ob-muted">{t("以前想到过吗")}</small>
+      <button type="button" className="ob-btn ob-quiet" aria-pressed={novel === "new"} disabled={busy} onClick={() => void answerNovel("new")}>{t("没想过")}</button>
+      <button type="button" className="ob-btn ob-quiet" aria-pressed={novel === "known"} disabled={busy} onClick={() => void answerNovel("known")}>{t("想到过")}</button>
     </div>
     {correcting && <form className="ob-insight-correction" onSubmit={(event) => { event.preventDefault(); if (correction.trim()) void rate("partial"); }}>
       <label>{t("哪部分对？用你的话说一句")}<VoiceField kind="note"><textarea value={correction} maxLength={300} onChange={(event) => setCorrection(event.target.value)} /></VoiceField></label>

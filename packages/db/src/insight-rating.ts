@@ -1,4 +1,4 @@
-import { EMPTY_PROFILE_MODEL, ONBOARDING_INSIGHTS, pointSectionFor, rateHypothesis, readInsightRatings, readPoints, unrateHypothesis,
+import { EMPTY_PROFILE_MODEL, ONBOARDING_INSIGHTS, markNovel, pointSectionFor, rateHypothesis, readInsightRatings, readPoints, unrateHypothesis,
   type DimensionId, type InsightRatings, type ProfileModel } from "@crossline/core";
 import type { CrosslineStore } from "./index";
 
@@ -47,8 +47,33 @@ export function rateInsight(store: CrosslineStore, workspaceId: string, input: {
     }
     if (input.verdict === "clear") delete ratings[key];
     else ratings[key] = { verdict: input.verdict, stage: content?.stage ?? "", at, text: card.text!.slice(0, 300),
-      ...(correction && input.verdict === "partial" ? { correction } : {}), ...meta };
+      ...(correction && input.verdict === "partial" ? { correction } : {}), ...meta, ...(previous?.novel ? { novel: previous.novel } : {}) };
     store.setSetting(workspaceId, ONBOARDING_INSIGHTS, JSON.stringify(ratings));
   });
   return { ok: true, ...(card.hypothesisId ? { hypothesisId: card.hypothesisId } : {}) };
+}
+
+/**
+ * The card's second question (2026-11-22, docs/plans/portrait-depth-1122.md §一): whether the person had thought of it before, kept with
+ * the rating and on the hypothesis. It measures depth (a card rated 准 that they already knew told them nothing); it never changes the
+ * verdict, and it can only be answered once the card has one.
+ */
+export function markInsightNovel(store: CrosslineStore, workspaceId: string, input: { sessionId: string; seq: number; index?: number; novel: "new" | "known" | null }):
+  { ok: true } | { ok: false; code: "INSIGHT_NOT_RATED" } {
+  const key = insightKey(input.sessionId, input.seq, input.index ?? 0);
+  let result: { ok: true } | { ok: false; code: "INSIGHT_NOT_RATED" } = { ok: true };
+  store.atomically(() => {
+    const ratings: InsightRatings = readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS));
+    const rating = ratings[key];
+    if (!rating) { result = { ok: false, code: "INSIGHT_NOT_RATED" }; return; }
+    const { novel: _old, ...rest } = rating;
+    ratings[key] = input.novel ? { ...rest, novel: input.novel } : rest;
+    store.setSetting(workspaceId, ONBOARDING_INSIGHTS, JSON.stringify(ratings));
+    if (rating.hypothesisId) {
+      let profile: ProfileModel = EMPTY_PROFILE_MODEL;
+      try { profile = { ...EMPTY_PROFILE_MODEL, ...(JSON.parse(store.getSetting(workspaceId, "profile.model") ?? "{}") as Partial<ProfileModel>) }; } catch { /* none yet */ }
+      store.setSetting(workspaceId, "profile.model", JSON.stringify({ ...profile, hypotheses: markNovel(profile.hypotheses ?? [], rating.hypothesisId, input.novel) }));
+    }
+  });
+  return result;
 }
