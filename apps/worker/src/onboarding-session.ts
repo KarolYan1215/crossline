@@ -980,9 +980,10 @@ export const SCORE_TALK = /(?<![\d/])[1-5]\s*\/\s*5(?![\d/])|\d{1,3}\s*\/\s*100|
 /**
  * How long the person waits after 「结束并出报告」 for the extraction before the portrait is written from what is on record. The writer reads
  * every reply word for word, so what a late extraction adds is the last replies' points, not the person's story. Replay 10 (2026-11-14)
- * waited 65 minutes: the provider wrote the last two runs at three tokens a second, steadily enough that no stall watchdog fired.
+ * waited 65 minutes: the provider wrote the last two runs at three tokens a second, steadily enough that no stall watchdog fired. 3 minutes
+ * since 2026-11-22 (W-313): with 8 the replays waited 12 and 18 minutes, the writer itself taking about four of them.
  */
-export const FINISH_BUDGET_MS = 8 * 60_000;
+export const FINISH_BUDGET_MS = 3 * 60_000;
 
 /**
  * The person's 「结束并出报告」 (the owner, 2026-11-12): the interview is marked complete, the extraction finishes every section from what was
