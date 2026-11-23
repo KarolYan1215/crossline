@@ -84,7 +84,7 @@ export function LeftColumn({ state, busy, accept, onUpload, onFolders, uploadNot
         <b>{t("添加文件或录音")}</b>
         <small>{t("简历、计划、笔记、与 AI 的对话导出；可多选，也可以把文件或文件夹拖进页面")}</small>
       </label>
-      <FolderPicker onFolders={onFolders} />
+      <FolderPicker onFolders={onFolders} onAuthorized={onChanged} />
       {uploadNote && <p className="ob-muted" role="status">{uploadNote}</p>}
       {removed && <p className="ob-muted" role="status">{"failed" in removed ? removed.failed : <>
         {t("已删除「{{name}}」。", { name: removed.name })}

@@ -2,7 +2,7 @@ import "server-only";
 import type { AccessContext } from "@crossline/core";
 import { listAgentTasks } from "@crossline/db";
 import { getStore } from "./crossline";
-import { currentFigure, figureUrl } from "./figures";
+import { currentFigure, figureUrl, noteDesktopFace } from "./figures";
 import { runtimeStatus } from "./runtime-status";
 import { personCalls, type PersonCall } from "./person-calls";
 import { loadTimeline } from "./timeline";
@@ -46,6 +46,7 @@ export type HelperState = { avatar: string | null; working: boolean; down: boole
 export async function helperState(ctx: AccessContext): Promise<HelperState> {
   const store = getStore();
   const figure = currentFigure(ctx);
+  noteDesktopFace(ctx, figure);
   const status = await runtimeStatus(ctx);
   return {
     avatar: figure ? figureUrl(figure) : null,

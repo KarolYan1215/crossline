@@ -1,0 +1,11 @@
+{
+  "选择要授权给 Crossline 的文件夹": "Choose a folder to authorize for Crossline",
+  "已经打开了一个选文件夹的窗口。": "A folder dialog is already open.",
+  "没能打开选文件夹的窗口。": "Could not open the folder dialog.",
+  "已授权「{{name}}」，正在后台读取。": "Authorized “{{name}}”; reading it in the background.",
+  "正在授权…": "Authorizing…",
+  "选中就授权：先按规则跳过密钥和私人证件单据，再由模型按文件名挑出值得读的导入": "Choosing authorizes it: keys and private papers are skipped by rule, then the model picks the files worth reading by name and imports them",
+  "浏览…": "Browse…",
+  "打开文件夹": "Open folder",
+  "这个文件夹打不开（移动、改名或拔掉了磁盘？）": "This folder cannot be opened (moved, renamed or on a removed drive?)"
+}
