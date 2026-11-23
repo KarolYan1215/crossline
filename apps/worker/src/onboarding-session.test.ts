@@ -1005,6 +1005,16 @@ test("a reply that sets a date nobody gave is sent back once; the rewrite leaves
   expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string }).reply).toBe("试做是约两位从业者聊一次，哪天由你定。");
 });
 
+test("a reply copying a card's notation, or saying a question still waits, goes back to the model (2026-11-23, W-314, W-315)", async () => {
+  const { rpc, prompts } = fakeRuntime([turn({ reply: "清洗先定一条规则。[【问卷清洗】已点选]" }), turn({ reply: "上面那问还没答：接下来三四年你在做什么？" }),
+    turn({ reply: "接下来三四年你在做什么？说一个具体动作。" })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });
+  await run({ sessionId: "s", text: "卡在清洗缺失值。" });
+  expect(dialogue(prompts).some((prompt) => prompt.includes("卡片答案的写法"))).toBe(true);
+  expect(dialogue(prompts).filter((prompt) => prompt.includes("在线程里找到那一问"))).toHaveLength(1);
+  expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string }).reply).toBe("接下来三四年你在做什么？说一个具体动作。");
+});
+
 test("a line with fewer than three goal candidates is told it has not enough, and the round does not ask for a goal yet", async () => {
   store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ media: { description: "小红书科普", attributes: [{ text: "有趣", kind: "ability", sourceRef: "reply-0" }] } }));
   const { rpc, prompts } = fakeRuntime([turn()]);
