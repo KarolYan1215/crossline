@@ -203,16 +203,6 @@ test("the main interview never ends itself: a model that is done says so in its 
   expect(store.listEvents(workspaceId, { type: "onboarding.finish_requested" })).toHaveLength(1);
 });
 
-test("after 「结束并出报告」 the portrait waits for the extraction only so long: a provider that never answers settles it as late", async () => {
-  const now = new Date().toISOString();
-  store.saveOnboardingSession({ id: "s", ownerId: "user-1", workspaceId, state: "active", coverage: {}, createdAt: now, updatedAt: now });
-  store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text: "都说完了" }, createdAt: now });
-  const silent = { request: () => new Promise(() => {}), onNotification: () => () => {} } as never;
-  const { settled } = finishInterview(store, workspaceId, "C:\\repo", () => silent, "s", { lanes: false, budgetMs: 50 });
-  expect(await settled).toBe("late");
-  expect(store.getOnboardingSession(workspaceId, "s")?.state).toBe("complete");
-});
-
 test("before the start standard stands, the model is told what is still owed, and the app adds no question of its own", async () => {
   const { rpc, prompts } = fakeRuntime([turn({ questions: [], nextAction: "ready_for_milestones" })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });

@@ -359,8 +359,10 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       prepareInput: () => context, tools,
       // The ledger lane of an interview under way is what the person waits on (the start standard, the next round's questions): it goes
       // as a turn, outside the account's two background slots, which the portrait's two lanes may both hold for minutes. They queue as
-      // planning, ahead of discretionary work.
-      ...(portraitLane(lane) ? { priority: "planning" as const } : lane === "ledger" && session?.state === "active" ? { priority: "interactive" as const } : {}),
+      // planning, ahead of discretionary work. After 「结束并出报告」 every lane is what the person waits on (the report waits for all of
+      // them, with no time limit since 2026-11-22, W-313): they go as turns too.
+      ...(finishing || (lane === "ledger" && session?.state === "active") ? { priority: "interactive" as const }
+        : portraitLane(lane) ? { priority: "planning" as const } : {}),
       // The prompt cache (docs/token-economy.md §2.5): the lines, projects and portrait first, the facts on record (which grow) after
       // them, and this run's replies, files, task and date last.
       stableKeys: ["version", "lane", "timeZone", "lines", "domainGuides", "lineProfiles", "projects", "focusLine", "profile", "facts"],

@@ -322,21 +322,22 @@ async function runPerson(name: string, opening: Opening) {
     // The interview said it is done (or ran out of rounds): the extraction's finishing runs write the synthesis, as the worker's tick asks
     // for them in the app; then the portrait writer, as the worker runs it once the interview is complete.
     const extractor = createOnboardingExtractor(store, workspaceId, repoRoot, () => client);
-    // As the app does it: the portrait is written once the finishing runs are done or `FINISH_BUDGET_MS` has passed, and the minutes from
+    // As the app does it: the portrait is written once the finishing runs are done (no time limit since 2026-11-22), and the minutes from
     // the press to the report are what the person waits.
     const pressed = Date.now();
     const finish = await withUsageWorkspace(interviewKey, async () => {
       // Research threads still running finish first (at most 30 minutes): their conclusions are part of what the portrait reads.
       for (let waited = 0; waited < 30 && readResearch(store, workspaceId, "eval").some((item) => item.status === "running"); waited += 1) await wait(60_000);
       const finishing = finishInterview(store, workspaceId, repoRoot, () => client, "eval");
-      return { how: await finishing.settled, complete: finishing.complete };
+      await finishing.complete;
+      return { complete: finishing.complete };
     });
     // Chips the finishing runs wrote are adopted too: the person can tap them on the left column at any time.
     goalsAdopted += adoptGoals();
     const written = await withUsageWorkspace(interviewKey, () => createPortraitWriter(store, workspaceId, repoRoot, () => client)());
     const waitedMinutes = Math.round((Date.now() - pressed) / 60_000);
-    log({ portrait: written.state, finish: finish.how, waitedMinutes, ...(written.state === "blocked" ? { code: written.code } : {}) });
-    transcript.push(`画像：${written.state}${written.state === "blocked" ? ` ${written.code} ${written.message}` : ""}（按下后 ${waitedMinutes} 分钟${finish.how === "late" ? "，整理未跑完" : ""}）`);
+    log({ portrait: written.state, waitedMinutes, ...(written.state === "blocked" ? { code: written.code } : {}) });
+    transcript.push(`画像：${written.state}${written.state === "blocked" ? ` ${written.code} ${written.message}` : ""}（按下后 ${waitedMinutes} 分钟）`);
     // The rest of the record, for the files below: the finishing runs, and the synthesis if they left none.
     await withUsageWorkspace(interviewKey, async () => {
       await finish.complete;

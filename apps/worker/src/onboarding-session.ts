@@ -978,26 +978,19 @@ export const SCORE_TALK = /(?<![\d/])[1-5]\s*\/\s*5(?![\d/])|\d{1,3}\s*\/\s*100|
 /** A session id the browser can mint for itself before the first turn. */
 
 /**
- * How long the person waits after 「结束并出报告」 for the extraction before the portrait is written from what is on record. The writer reads
- * every reply word for word, so what a late extraction adds is the last replies' points, not the person's story. Replay 10 (2026-11-14)
- * waited 65 minutes: the provider wrote the last two runs at three tokens a second, steadily enough that no stall watchdog fired. 3 minutes
- * since 2026-11-22 (W-313): with 8 the replays waited 12 and 18 minutes, the writer itself taking about four of them.
- */
-export const FINISH_BUDGET_MS = 3 * 60_000;
-
-/**
  * The person's 「结束并出报告」 (the owner, 2026-11-12): the interview is marked complete, the extraction finishes every section from what was
- * said, and `settled` resolves once it has — or once `FINISH_BUDGET_MS` has passed, with `"late"` — so the caller writes the portrait. The
- * extraction carries on after a late settle; `complete` resolves when it is done. The start standard (the lower bound) is checked by the
- * web route before it calls this; the interview can be taken up again afterwards, and a new report written.
+ * said, and `complete` resolves once it has, so the caller writes the portrait. No time limit (the owner, 2026-11-22, W-313: quality
+ * first, make it fast instead): the 8-minute budget wrote the report from a half-finished record; the extraction's runs go as turns now
+ * (`priority: "interactive"` while finishing). The start standard (the lower bound) is checked by the web route before it calls this; the
+ * interview can be taken up again afterwards, and a new report written.
  */
 export function finishInterview(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined, sessionId: string,
   /** `extract: false` leaves the extraction alone (tests of the ending itself); `lanes: false` finishes with single runs. */
-  options: { extract?: boolean; lanes?: boolean; budgetMs?: number } = {}):
-  { outcome: { state: "finished"; sessionId: string } | { state: "blocked"; code: string; message: string }; settled: Promise<"done" | "late">; complete: Promise<void> } {
+  options: { extract?: boolean; lanes?: boolean } = {}):
+  { outcome: { state: "finished"; sessionId: string } | { state: "blocked"; code: string; message: string }; complete: Promise<void> } {
   const session = store.getOnboardingSession(workspaceId, sessionId);
   if (!session) return { outcome: { state: "blocked", code: "ONBOARDING_SESSION_UNKNOWN", message: tFor(localeOf(store, workspaceId))("找不到这次访谈。") },
-    settled: Promise.resolve("done"), complete: Promise.resolve() };
+    complete: Promise.resolve() };
   const now = new Date().toISOString();
   markFinishing(store, workspaceId, sessionId);
   store.saveOnboardingSession({ ...session, state: "complete", updatedAt: now });
@@ -1009,25 +1002,16 @@ export function finishInterview(store: CrosslineStore, workspaceId: string, cwd:
   const ask = lanes ? () => requestAllLanes(workspaceId, (preferred, which) => extractor.runOnce(preferred, which), sessionId)
     : () => requestExtraction(workspaceId, (preferred) => extractor.runOnce(preferred), sessionId);
   const lastReply = store.listOnboardingMessages(workspaceId, sessionId).filter((message) => message.role === "user").at(-1)?.seq;
-  if (options.extract === false) return { outcome: { state: "finished", sessionId }, settled: Promise.resolve("done"), complete: Promise.resolve() };
+  if (options.extract === false) return { outcome: { state: "finished", sessionId }, complete: Promise.resolve() };
   const complete = (async () => {
-    // Every reply recorded first (the ledger, then the inferences and the sections, within one 20-minute budget), then the finishing run
-    // that writes the synthesis (as a round that ended the interview used to): the sections' lane, with lanes.
-    const until = Date.now() + 20 * 60_000;
-    const left = () => Math.max(0, until - Date.now());
+    // Every reply recorded first (the ledger, then the inferences and the sections, side by side), then the finishing run that writes the
+    // synthesis (as a round that ended the interview used to): the sections' lane, with lanes.
     if (lastReply !== undefined) {
-      await extractionReached(store, workspaceId, sessionId, lastReply, ask, left()).catch(() => false);
-      if (lanes) for (const which of ["insights", "sections"] as const)
-        await extractionReached(store, workspaceId, sessionId, lastReply, lane(which), left(), which).catch(() => false);
+      await extractionReached(store, workspaceId, sessionId, lastReply, ask).catch(() => false);
+      if (lanes) await Promise.all((["insights", "sections"] as const).map((which) =>
+        extractionReached(store, workspaceId, sessionId, lastReply, lane(which), Number.POSITIVE_INFINITY, which).catch(() => false)));
     }
     await (lanes ? lane("sections")() : ask()).catch(() => undefined);
   })();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const budget = new Promise<"late">((resolve) => { timer = setTimeout(() => resolve("late"), options.budgetMs ?? FINISH_BUDGET_MS); });
-  const settled = Promise.race([complete.then(() => "done" as const), budget]).then((how) => {
-    clearTimeout(timer);
-    if (how === "late") console.log(JSON.stringify({ type: "onboarding.finish_late", workspaceId, sessionId, budgetMinutes: Math.round((options.budgetMs ?? FINISH_BUDGET_MS) / 60_000) }));
-    return how;
-  });
-  return { outcome: { state: "finished", sessionId }, settled, complete };
+  return { outcome: { state: "finished", sessionId }, complete };
 }

@@ -2029,12 +2029,12 @@ if (!capabilitySecret) {
           if (outcome.state === "ready") { void firstDraftsPass(workspaceId).catch(() => undefined); void publicSkillPass(workspaceId, new Date().toISOString()).catch(() => undefined); }
           return outcome; }),
     onboardingFinish: async (_client, sessionId, workspaceId) => {
-      const { outcome, settled } = finishInterview(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId), sessionId);
+      const { outcome, complete } = finishInterview(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId), sessionId);
       if (outcome.state !== "finished") return outcome;
       // Marked as being written at once, so the page says so and the background pass does not write a report before the extraction finished.
       analysisStore.appendEvent({ ownerId: analysisStore.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `portrait.requested:${Date.now()}`,
         type: "portrait.requested", entityId: workspaceId, payload: { via: "finish" } });
-      void settled.then(() => writePortraitFor(workspaceId)).catch(() => undefined).finally(() => {
+      void complete.then(() => writePortraitFor(workspaceId)).catch(() => undefined).finally(() => {
         void firstDraftsPass(workspaceId).catch(() => undefined); void publicSkillPass(workspaceId, new Date().toISOString()).catch(() => undefined);
         void methodResearchPass(workspaceId, new Date().toISOString()).catch(() => undefined); });
       return outcome;
