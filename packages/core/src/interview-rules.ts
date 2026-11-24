@@ -396,5 +396,15 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     text: { file: `${SKILLS}/crossline-onboarding/stages/narrative.md`, anchor: "**一个场景问到它的前后，不只是它本身。**" } },
   { id: "IR-181", layer: "L0", verdict: "keep", status: "active", rule: "自由文本的一轮没调用 mark_round 时退回一次要它标出所在部分，第二次的回答照收",
     code: { file: `${WORKER}/onboarding-session.ts`, symbol: "stageAsked", test: `${WORKER}/onboarding-session.test.ts`, by: "never marked its part" } },
+  // Replay of yaohuaqishu (2026-11-23, 30 rounds): a direct question went unanswered, the recommended direction changed every round, and
+  // three parts took 29 rounds between them.
+  { id: "IR-182", layer: "L0", verdict: "keep", status: "active", rule: "本人在回答里问了访谈者的问题，每轮说明里写出来；一部分到第六轮，每轮说明里写出已到第几轮",
+    code: { file: `${WORKER}/onboarding-session.ts`, symbol: "questionsAsked", test: `${WORKER}/onboarding-session.test.ts`, by: "says what the person asked" } },
+  { id: "IR-183", layer: "L2", verdict: "model", status: "active", rule: "本人问访谈者的，这一轮第一句先答，判断写在回复里",
+    text: { file: INTERVIEW_SKILL, anchor: "**本人问你的，这一轮先答。**" } },
+  { id: "IR-184", layer: "L2", verdict: "model", status: "active", rule: "候选方向排成一个次序记在 progress.said，新回答只调整次序，不每轮换一个",
+    text: { file: INTERVIEW_SKILL, anchor: "**候选方向排成一个次序，不每轮换一个。**" } },
+  { id: "IR-185", layer: "L2", verdict: "model", status: "active", rule: "一部分最多六轮，到了就收尾，没清楚的记成不确定，进下一部分",
+    text: { file: INTERVIEW_SKILL, anchor: "**一部分最多六轮。**" } },
 ];
 /* i18n-ignore-end */

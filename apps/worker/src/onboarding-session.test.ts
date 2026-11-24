@@ -915,6 +915,25 @@ test("a free-text round that never marked its part is sent back once for `mark_r
   expect(store.listOnboardingMessages(workspaceId, "t").at(-1)!.content).toMatchObject({ reply, stage: "energy" });
 });
 
+test("a round's note says what the person asked the interviewer, and how long the part has run from its sixth round (replay 2026-11-23)", async () => {
+  const replies = Array.from({ length: 7 }, () => "接着说。");
+  const marks: AgentScript = async ({ ask }) => {
+    await ask("item/tool/call", { callId: "m", tool: "mark_round", arguments: { stage: "situation" } });
+  };
+  const { rpc, prompts } = fakeRuntime([turn(), ...replies], { script: marks });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  await run({ sessionId: "s", text: "先说经历" });
+  // The card's own question 【…？】 is not the person's; their own is said back in the note.
+  await run({ sessionId: "s", text: "【最想先试哪个？】选择：咨询。你每轮都换一个方向，到底哪个最适合我？" });
+  const note = () => prompts().at(-1)!.split("〔")[1] ?? "";
+  expect(note()).toContain("本人在这条里问了你：「你每轮都换一个方向，到底哪个最适合我？」");
+  expect(note()).not.toContain("最想先试哪个");
+  expect(note()).not.toContain("已到第");
+  for (let round = 3; round <= 6; round += 1) await run({ sessionId: "s", text: "好。" });
+  expect(note()).not.toContain("问了你");
+  expect(note()).toContain("当前部分 situation 连这一轮已到第 6 轮");
+});
+
 test("the person's messages are at most a thousand a session, counted as a turn starts (2026-11-22)", async () => {
   const now = new Date().toISOString();
   store.saveOnboardingSession({ id: "s", ownerId: store.getWorkspaceOwnerId(workspaceId)!, workspaceId, state: "active", coverage: {}, createdAt: now, updatedAt: now });

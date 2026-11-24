@@ -21,7 +21,7 @@ import { localeOf } from "./locale";
 import { adoptLineGoal, identityLines } from "./lines";
 import { checklistAnswered, interviewLedger, ledgerForModel, linesAnsweredUnread, recordReplyAnswers, recordRound, syncGapQuestions } from "./question-ledger";
 import { mergeTools } from "./ledger-index";
-import { SATURATED_RUNS, standingLines } from "./onboarding-standing";
+import { PART_ROUNDS, SATURATED_RUNS, questionsAsked, roundsInPart, standingLines } from "./onboarding-standing";
 import { interviewReadTools, READ_TOOLS_INSTRUCTIONS } from "./onboarding-read-tools";
 import { CARD_TOOLS_INSTRUCTIONS, cardTools, checkInsights, checkOpenItems, checkQuestions, checkResearch, emptyDraft, withDraft,
   type DateSubject } from "./onboarding-cards";
@@ -732,7 +732,13 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
      * came (read with `read_file`), a calendar that changed — and where the rest is. A disclosure's note stays in it: it is a safety rule.
      */
     const roundLine = (newSources: Array<{ id: string; fileName: string }>) => {
+      // Two facts said every round rather than left in `read_interview_state` (replay of 2026-11-23): a question the person put to the
+      // interviewer, and a part that has run `PART_ROUNDS` rounds. What to do with them is the Skill's.
+      const asked = questionsAsked(withoutTaps(replyText));
+      const inPart = focusLine ? 0 : roundsInPart(assistantRounds.map((message) => String((message.content as { stage?: string }).stage ?? "")), stageNow);
       const parts = [replyId, // i18n-ignore-start: the round's note to the model
+        ...(asked.length ? [`本人在这条里问了你：${asked.map((item) => `「${item}」`).join("")}`] : []),
+        ...(inPart >= PART_ROUNDS ? [`当前部分 ${stageNow} 连这一轮已到第 ${inPart} 轮`] : []),
         ...(newSources.length ? [`新文件 ${newSources.length} 份：${newSources.map((source) => `《${source.fileName}》(${source.id})`).join("、")}，用 read_file 读`] : []),
         ...(waiting > 0 ? [`还有 ${waiting} 份文件排在后面`] : []),
         ...(calendarChanged ? ["日历本周有变化"] : []),
