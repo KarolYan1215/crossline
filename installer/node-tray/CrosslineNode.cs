@@ -467,6 +467,9 @@ namespace CrosslineNode
             Location = SavedLocation(Size);
             LocationChanged += (s, e) => { if (petMode && Visible) Save(); };
             pointer.Tick += (s, e) => TellPage();
+            redraw.Tick += (s, e) => { redraw.Stop(); Redraw(); };
+            SystemEvents.PowerModeChanged += OnPowerModeChanged;
+            SystemEvents.SessionSwitch += OnSessionSwitch;
             FormClosing += (s, e) =>
             {
                 // The close box of the sign-in window, or Alt+F4 on the pet: hidden, not destroyed, so the session stays.
@@ -695,6 +698,26 @@ namespace CrosslineNode
 
         public void HideAndRemember() { Hide(); Save(); }
 
+        /**
+         * After the computer wakes from sleep (modern standby) or the session is unlocked, WebView2 kept running the page but stopped
+         * presenting it: the window's cut stayed and showed only its white paper, two white blocks where the 小帮手 stood (seen
+         * 2026-11-23). Hiding and showing the view makes it present again; done a moment after, once the display is back.
+         */
+        readonly System.Windows.Forms.Timer redraw = new System.Windows.Forms.Timer { Interval = 1500 };
+        void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e) { if (e.Mode == PowerModes.Resume) LaterRedraw(); }
+        void OnSessionSwitch(object sender, SessionSwitchEventArgs e) { if (e.Reason == SessionSwitchReason.SessionUnlock) LaterRedraw(); }
+        void LaterRedraw()
+        {
+            if (!IsHandleCreated || IsDisposed) return;
+            BeginInvoke(new Action(() => { redraw.Stop(); redraw.Start(); }));
+        }
+        void Redraw()
+        {
+            if (!ready || !Visible) return;
+            view.Visible = false;
+            view.Visible = true;
+        }
+
         // ---- where it stands, kept in %LOCALAPPDATA%\Crossline Node\pet.json ------------------------------------------------------
         void Save()
         {
@@ -750,7 +773,13 @@ namespace CrosslineNode
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { pointer.Dispose(); dragging.Dispose(); view.Dispose(); }
+            if (disposing)
+            {
+                // SystemEvents are static: a handler left on them keeps this window alive.
+                SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+                SystemEvents.SessionSwitch -= OnSessionSwitch;
+                pointer.Dispose(); dragging.Dispose(); redraw.Dispose(); view.Dispose();
+            }
             base.Dispose(disposing);
         }
 
