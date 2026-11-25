@@ -79,3 +79,12 @@
 3. ✅（已做 2026-11-25：节点的 `NodeVault`（设备模式用本机 DPAPI 密钥库，独立节点用自己的 DPAPI 文件），`hello.vault`；保存、删除经节点连接（`vaultPut` 只回读回值的 sha256）；填表时引擎只拿 `{{profile.<slot>}}`，由电脑代入并在回传前打码；旧的服务器副本在电脑连上时搬走，哈希一致才删。见 docs/claude/registration-forms.md。没有实测真实节点连接。）**托管节点账户的敏感资料只存本机**：电话、生日、学号、地址、证件号只进电脑上的 secret store，托管服务器只记有/无（`apply.sensitive`）。已存在服务器上的：电脑下次连上时搬进本机，按哈希核对成功后再删服务器那份（删除不可撤销，核对不过不删）。纯托管账户本来就跑不了代填（`FORM_NEEDS_SCREEN`），不受影响。
 4. ✅（已做 2026-11-25：本来就排队——网页的报名直接排队，worker 只在有窗口时开跑；补上 `/v1/forms/queue` 对有电脑的账户在电脑离线时也收；`computerAskDue` 截止日 0 点（UTC）前 48 小时内仍在排队就推一次 `form_computer`（`interrupt`），记 `computerAskedAt`。节点账户的每一份报名都要电脑的浏览器，所以没有另写「需不需要登录或敏感项」的判断。）**24/7 与「保险箱只在本机」：等电脑醒来。** 侦察照常在云上 24/7；需要登录或敏感项的代填排队，电脑醒来后在本机跑（仍是可见窗口、仍按 §13 的提交规则）。截止前 **48 小时**电脑仍没醒，推送提醒本人开机或自己去交（`push-policy`：需要本人现在行动）。
 5. ✅（已做 2026-11-25：`workLeavesMachine(title, model)` 在 `packages/core/src/workflows.ts`；步骤的 `external` 现在随计划存进 `task_steps.detail_json`，之前存计划时会丢；三处显示与分类改用它，闸门不变。）**`stepLeavesMachine`：闸门留词表兜底。** 分类与显示（任务弹窗「对外 · 本人操作」、机会页区分准备与提交 `opportunities.ts`、`step-owner.ts`）改读模型的 `external` 字段，词表只记分歧（`owner-disputes`）；安全闸门（助手写的 workflow 清单 `workflows.ts` / `workflow-authoring.ts`、自动化邮件草稿 `automations.ts`）保留「模型说对外 **或** 词表命中」——清单本身是模型写的，只信它会放松边界。
+
+### §9 实测（2026-11-25，本人电脑）
+
+- 本机独立节点已卸载（本人：独立节点是给其他用户的，本机只用安装版本地 app，它自带节点的功能）。安装版升到 0.3.4（`package-installer.ts --personal`，带原有的 `--ms-client-id`/`--ms-tenant-id`，经 WMI 跑 `install-personal.cmd`，`data\` 先备份到 `backups\before-personal-20261125-073610`）。
+- Codex 以 `-c features.prefer_mxc=true` 启动，`state\codex-home\.sandbox\sandbox.<日>.log` 从 `selection: disabled` 变为 `selection: mxc`。
+- 网站登录：经 `/api/apply-logins` 存一条测试登录（假主机 `vault-check.example.com`、生成的密码）→ 账本 `apply.logins` 只有主机和时间，全库搜密码 0 处，事件只带主机；`data\secrets\<ws>\login-vault-check_example_com.bin` 是 DPAPI 密文；删除后文件与账本条目都没了。
+- shell 助手真实回合：今日输入框建任务（模型判 `external: false`），`/api/agent/dispatch` 交给助手；`agent.task.requested` 记 `isolation: "mxc"`、`profile: research`，`audit.json` 为 `egress: "packages"`、2 条命令、`reproduced: true`（worker 在沙箱里重跑 run.py，HTML 哈希一致），49 秒。测试任务已归档。
+- 本机是完整模式，敏感资料本来就在本机密钥库，服务器→电脑的迁移与 48 小时提醒在这台电脑上不适用（单元与真 Chrome 测试见 `form-vault.test.ts`）。
+- 打包时发现 `scripts/package-node.ts` 的白名单漏了 `apps/worker/src/browser-port.ts`（ffffbd2cbc 引入，只用 `node:net`），已补；独立节点安装包 1.2.2 能构建，但没发布。

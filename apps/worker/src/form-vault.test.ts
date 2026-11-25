@@ -17,6 +17,8 @@ import type { NodeBrowserLink } from "./node/hub";
  * (docs/plans/harness-1125.md §9.3); a run queued for a sleeping computer waits and, two days before the deadline, pushes once (§9.4).
  */
 const PHONE = "+1 608 555 0123";
+/** The phone in any shape a leak would take: as typed, or its digits. "555" alone also matched random ids and timestamps in an export. */
+const leaksPhone = (text: string) => text.includes(PHONE) || text.replace(/\D/g, "").includes("6085550123");
 let store: CrosslineStore;
 let ws = "";
 let dir = "";
@@ -62,8 +64,8 @@ describe("moving the server's copies to the computer", () => {
     // The ledger still says held; the move is recorded on the profile's own event, with the computer and never the value.
     expect(applicationProfile(store, ws).find((item) => item.slot === "phone")).toMatchObject({ present: true });
     expect(store.listEvents(ws, { type: "apply.profile.saved" }).some((event) => (event.payload as { movedToComputer?: string }).movedToComputer === "kai-pc")).toBe(true);
-    expect(JSON.stringify(store.exportSnapshot(ws))).not.toContain("555");
-    expect(JSON.stringify(logged)).not.toContain("555");
+    expect(leaksPhone(JSON.stringify(store.exportSnapshot(ws)))).toBe(false);
+    expect(leaksPhone(JSON.stringify(logged))).toBe(false);
     expect(logged).toContainEqual(expect.objectContaining({ event: "apply.sensitive.moved", slot: "phone" }));
   });
 
@@ -82,7 +84,7 @@ describe("moving the server's copies to the computer", () => {
     expect(await moveSensitiveToComputer(store, serverStore, ws, old, log)).toEqual({ moved: [], kept: [] });
     expect(old.calls).toEqual([]);
     expect(server.get(`${ws}/apply-phone`)).toBe(PHONE);
-    expect(JSON.stringify(logged)).not.toContain("555");
+    expect(leaksPhone(JSON.stringify(logged))).toBe(false);
     expect(logged.filter((event) => event.event === "apply.sensitive.move_failed")).toHaveLength(3);
   });
 
@@ -240,9 +242,9 @@ describe.skipIf(!chrome)("a form on the person's computer", () => {
     expect(run.filled).toContainEqual(expect.objectContaining({ slot: "phone", verified: true }));
     // The value went from the computer's own store into the page; nothing the server received, kept or showed a model carries it.
     expect(link.calls.find((call) => call.op === "formOpen")).toMatchObject({ vault: ["phone"] });
-    expect(JSON.stringify(link.calls)).not.toContain("555");
-    expect(JSON.stringify(seen)).not.toContain("555");
-    expect(JSON.stringify(store.exportSnapshot(ws))).not.toContain("555");
+    expect(leaksPhone(JSON.stringify(link.calls))).toBe(false);
+    expect(leaksPhone(JSON.stringify(seen))).toBe(false);
+    expect(leaksPhone(JSON.stringify(store.exportSnapshot(ws)))).toBe(false);
     expect(body).toBe("");
     await forms.closeAll();
     await link.closeAll();

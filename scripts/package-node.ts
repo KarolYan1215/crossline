@@ -71,7 +71,9 @@ const allowed = ["apps/worker/src/node/standalone.ts", "apps/worker/src/node/age
   // Remote control from the phone (2026-11-22, docs/plans/remote-control-1122.md §7.1): the computer checks signatures and judges commands
   // itself, so its own copy of the guard comes along — the guard and its words' lookup (i18next), and the signature checks (WebCrypto only).
   "apps/worker/src/node/remote.ts", "packages/core/src/agent-guard.ts", "packages/core/src/remote-control.ts", "packages/core/src/i18n.ts",
-  "packages/i18n/src/index.ts"];
+  "packages/i18n/src/index.ts",
+  // The form browser's local port (ffffbd2cbc: skips ports browsers refuse); it imports only node:net.
+  "apps/worker/src/browser-port.ts"];
 const unexpected = ours.filter((file) => !allowed.some((name) => file.endsWith(name)));
 if (unexpected.length) throw new Error(`NODE_BUNDLE_TOO_WIDE ${unexpected.join(", ")}`);
 console.log(JSON.stringify({ bundle: "main.mjs", kilobytes: Math.round(statSync(path.join(stage, "main.mjs")).size / 1024), sources: ours }));
