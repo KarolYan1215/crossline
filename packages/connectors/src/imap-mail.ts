@@ -277,6 +277,36 @@ export function createImapMail(server: MailServer, user: string, rawPassword: st
       }, () => ({ matched: [], sentFolder: false }));
     },
 
+    /**
+     * What the person sent since `lastUid` from the sent folder (opened read-only), as evidence that something went out
+     * (docs/plans/execution-gates-1124.md J1). Same numbering rules as `newSince`. No sent folder: `sentFolder: false` and nothing read.
+     */
+    async sentSince(state: { uidValidity?: string; lastUid?: number }, limit = 50, sinceDays = 14):
+      Promise<{ uidValidity: string; lastUid: number; messages: MailHeader[]; sentFolder: boolean }> {
+      type Sent = { uidValidity: string; lastUid: number; messages: MailHeader[]; sentFolder: boolean };
+      return withBox<Sent>(sentFolder, async (client, box) => {
+        const fresh = !state.lastUid || state.uidValidity !== box.uidValidity;
+        const uids = fresh
+          ? ((await client.search({ since: new Date(Date.now() - sinceDays * 86_400_000) }, { uid: true })) || [])
+          : ((await client.search({ uid: `${state.lastUid! + 1}:*` }, { uid: true })) || []).filter((uid) => uid > state.lastUid!);
+        const take = [...uids].sort((a, b) => a - b).slice(-limit);
+        const lastUid = Math.max(state.lastUid && !fresh ? state.lastUid : 0, box.uidNext - 1, ...take);
+        if (!take.length) return { uidValidity: box.uidValidity, lastUid, messages: [], sentFolder: true };
+        const fetched = await client.fetchAll(take, QUERY, { uid: true });
+        const messages = await Promise.all(fetched.map(header));
+        return { uidValidity: box.uidValidity, lastUid, messages: messages.sort((a, b) => a.uid - b.uid), sentFolder: true };
+      }, () => ({ uidValidity: state.uidValidity ?? "", lastUid: state.lastUid ?? 0, messages: [], sentFolder: false }));
+    },
+
+    /** Sent messages' text again by uid (the body is never kept, so a later judgement reads it anew). */
+    async readSent(uids: number[]): Promise<MailHeader[]> {
+      if (!uids.length) return [];
+      return withBox(sentFolder, async (client) => {
+        const fetched = await client.fetchAll(uids.slice(0, 30), QUERY, { uid: true });
+        return Promise.all(fetched.map(header));
+      }, () => []);
+    },
+
     /** One message's text (up to 2 MB of source read), without marking it read. */
     async read(uid: number): Promise<MailMessage | undefined> {
       return withInbox(async (client) => {

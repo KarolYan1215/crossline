@@ -70,6 +70,15 @@ import { browserProfilesRoot, cleanGrownSkills, configureFavouritesCollector, co
   growLabel, openWorkflowLogin, resumeByPerson, sayToPerson, startWorkflowRun, workflowCollecting, workflowLoginTarget, workflowSchedulePass } from "./workflow-smith";
 import { loginMode } from "./browser-launch";
 import { createFormService } from "./form-service";
+import { localCommitPass } from "./git-commits";
+import { admissionGatePass, admissionPending, reconcileParked } from "./gates/admission";
+import { attentionDue, attentionGatePass } from "./gates/attention";
+import { completionDue, completionGatePass } from "./gates/completion";
+import { drillGradePass, drillIssuePass, ungradedDrillAnswers } from "./gates/drill";
+import { frontDue, frontGatePass } from "./gates/front";
+import { nightWeekDue, nightWeekPass } from "./gates/night";
+import { priorityGatePass, unlabelled } from "./gates/priority";
+import { pendingSetbacks, setbackGatePass } from "./gates/setback";
 import { createRemoteService } from "./remote-service";
 import { computerInboxPass } from "./recording-inbox";
 import { createRemoteBrowsers } from "./remote-browser";
@@ -446,6 +455,58 @@ async function deliverablePass(workspaceId: string, checkedAt = new Date().toISO
       console.warn(JSON.stringify({ type: "deliverables.check_failed", workspaceId, error: String(error), checkedAt })); return 0; });
     if (judged) console.info(JSON.stringify({ type: "deliverables.judged", workspaceId, judged, checkedAt }));
   } finally { checkingDeliverables.delete(workspaceId); }
+}
+
+/**
+ * The model-judged execution gates (docs/plans/execution-gates-1124.md §四). Each pass decides by its own record whether it is due
+ * (`pendingGateSubjects`, or its trigger); they run one after another so a workspace never has two gate runs at once, and the tick does
+ * not wait for them. Judgements are records (`gate.judged`); only J2a parks a milestone (undoable) and J6 holds a form, the rest change
+ * nothing by themselves. Part of the core loop: they run while core work is allowed. Days and weeks are the person's, in their zone
+ * (`calendarZone`); without one, UTC.
+ */
+const judgingGates = new Set<string>();
+/** Excerpts of mail just read from the sent folders, held in memory only until the next completion pass (never stored). */
+const sentExcerptsByWorkspace = new Map<string, Map<string, string>>();
+/** Issuing a drill is tried at most this often: without a simulator it can only log that one is missing. */
+const DRILL_ISSUE_EVERY_MS = 3_600_000;
+const drillTriedAt = new Map<string, number>();
+async function gatesPass(workspaceId: string, checkedAt = new Date().toISOString()): Promise<void> {
+  if (paused(workspaceId, "planning") || judgingGates.has(workspaceId) || !codexSupervisor) return;
+  reconcileParked(analysisStore, workspaceId);
+  const client = accountClient(workspaceId);
+  if (!client || !spendAllows(await spendFor(workspaceId), "core")) return;
+  judgingGates.add(workspaceId);
+  const now = new Date(checkedAt);
+  const timeZone = calendarZone(workspaceId);
+  const base = { store: analysisStore, workspaceId, client, cwd: repoRoot, now, ...(timeZone ? { timeZone } : {}) };
+  const step = async (name: string, due: boolean, run: () => Promise<unknown>) => {
+    if (!due) return;
+    try {
+      const result = await run();
+      const count = Array.isArray(result) ? result.length : typeof result === "number" ? result : result ? 1 : 0;
+      if (count) console.info(JSON.stringify({ type: `gates.${name}`, workspaceId, judged: count, checkedAt }));
+    } catch (error) { console.warn(JSON.stringify({ type: `gates.${name}_failed`, workspaceId, error: String(error).slice(0, 300), checkedAt })); }
+  };
+  try {
+    enterUsageWorkspace(workspaceId);
+    await step("priority", unlabelled(analysisStore, workspaceId, now, timeZone).length > 0, () => priorityGatePass(base));
+    const completion = completionDue(analysisStore, workspaceId, now);
+    await step("completion", completion.due, async () => {
+      const excerpts = sentExcerptsByWorkspace.get(workspaceId);
+      sentExcerptsByWorkspace.delete(workspaceId);
+      return completionGatePass({ ...base, full: completion.full, openMail: (accountId) => mailService.open(workspaceId, accountId), ...(excerpts ? { excerpts } : {}) });
+    });
+    await step("front", frontDue(analysisStore, workspaceId, now, timeZone), () => frontGatePass(base));
+    await step("admission", admissionPending(analysisStore, workspaceId, now).length > 0, () => admissionGatePass(base));
+    await step("setback", pendingSetbacks(analysisStore, workspaceId, now).length > 0, () => setbackGatePass(base));
+    await step("attention", attentionDue(analysisStore, workspaceId, now, timeZone), () => attentionGatePass(base));
+    await step("night", nightWeekDue(analysisStore, workspaceId, now, timeZone), () => nightWeekPass(base));
+    await step("drill_grade", ungradedDrillAnswers(analysisStore, workspaceId).length > 0, () => drillGradePass(analysisStore, workspaceId, client, repoRoot, now));
+    await step("drill_issue", now.getTime() - (drillTriedAt.get(workspaceId) ?? 0) >= DRILL_ISSUE_EVERY_MS, () => {
+      drillTriedAt.set(workspaceId, now.getTime());
+      return drillIssuePass(analysisStore, workspaceId, client, repoRoot, now, timeZone ? { timeZone } : {});
+    });
+  } finally { judgingGates.delete(workspaceId); }
 }
 
 /**
@@ -1039,6 +1100,7 @@ async function workspaceTick(workspace: { id: string }, checkedAt: string): Prom
   await goalSplitPass(workspace.id, checkedAt);
   await milestoneRiskPass(workspace.id, checkedAt);
   await deliverablePass(workspace.id, checkedAt);
+  void gatesPass(workspace.id, checkedAt).catch((error) => console.warn(JSON.stringify({ type: "gates.pass_failed", workspaceId: workspace.id, error: String(error).slice(0, 300), checkedAt })));
   void firstDraftsPass(workspace.id, checkedAt).catch(() => undefined);
   void methodResearchPass(workspace.id, checkedAt).catch(() => undefined);
   // The milestone gate. Without this it existed only inside `scripts/gate-loop-check.ts`, so on the
@@ -1458,6 +1520,7 @@ const accountClient = (workspaceId: string) => {
 // Filling registration forms for the machine owner (docs/opportunity-agent.md §10): a visible window of Crossline's own profile per
 // site where this computer has a screen; on the hosted server, in the browser of the owner's connected compute node (§10.1).
 const formService = createFormService({ store: analysisStore, secrets, cwd: repoRoot, dataDir, client: accountClient,
+  timeZone: (workspaceId) => calendarZone(workspaceId),
   owner: () => runtimeOwner(analysisStore), screen: loginMode() === "local",
   // Any account that paired its own computer fills forms in that computer's browser (docs/compute-node.md 方案 C).
   nodeAccount: (workspaceId) => nodeComputeOn(analysisStore, workspaceId),
@@ -1476,6 +1539,13 @@ const mailService = createMailService({ store: analysisStore, secrets, cwd: repo
     console.info(JSON.stringify({ type: "automation.mail", workspaceId, messages: messages.length, queued, checkedAt: new Date().toISOString() })); void formService.onNewMail(workspaceId, messages).catch(() => undefined); },
   // Sorting's to-dos are captures: analysed at once, not at the next tick's intake.
   onCaptured: (workspaceId) => { void autoAnalyzePass(workspaceId).catch(() => undefined); },
+  // The completion gate's evidence (J1): sent mail read as metadata into the ledger; the excerpts stay in memory for one pass.
+  readSent: true,
+  onSent: (workspaceId, messages) => {
+    const held = sentExcerptsByWorkspace.get(workspaceId) ?? new Map<string, string>();
+    for (const message of messages) held.set(`${message.accountId}:${message.uid}`, message.excerpt);
+    sentExcerptsByWorkspace.set(workspaceId, held);
+  },
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });
 // Lists brought from Todoist, TickTick, Notion, a paste, a CSV or a screenshot (docs/personal-agent.md §9): tokens in the secret store,
 // sorting is intake work like mail's, a screenshot is read by the picture reader on the account's own Codex.
@@ -2285,6 +2355,17 @@ if (process.env.CROSSLINE_RUN_ONCE === "1") {
     });
     if (stale) historyPass();
   }, 5 * 60_000);
+  // Commits in the repositories the person authorized on this computer (`git.repos`), as the completion gate's evidence: names and
+  // subjects only, masked for 「仅本地」 and PDK terms (git-commits.ts). A device sends them up itself; this is the local install's own.
+  let readingCommits = false;
+  setInterval(() => {
+    if (readingCommits) return;
+    readingCommits = true;
+    void Promise.all(analysisStore.listWorkspaces().map((workspace) => workspace.id).filter(machineOwner).map((workspaceId) => localCommitPass(analysisStore, workspaceId)
+      .then((added) => { if (added) console.info(JSON.stringify({ type: "git.commits_seen", workspaceId, added })); })))
+      .catch((error) => console.warn(JSON.stringify({ type: "git.commits_failed", message: error instanceof Error ? error.message : "" })))
+      .finally(() => { readingCommits = false; });
+  }, 15 * 60_000);
   // An installed copy's usage metadata (docs/local-installer.md, 回传): a no-op unless the launcher set the collector up.
   let reporting = false;
   const report = () => {

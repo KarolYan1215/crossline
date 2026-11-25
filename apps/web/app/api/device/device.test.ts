@@ -13,6 +13,7 @@ vi.mock("../../../lib/access-guard", () => ({
 import { issueDeviceToken } from "../../../lib/energy";
 import { TEST_CTX } from "../../../lib/test-support";
 import { POST as activity } from "./activity/route";
+import { POST as commits } from "./commits/route";
 import { GET as computeStatus, POST as compute } from "./compute/route";
 import { GET as linkStatus, POST as link } from "./link/route";
 import { POST as nodeSwitch } from "./node/route";
@@ -54,7 +55,7 @@ test("only the device token sends, and a request without an idempotency key is r
   expect((await hello(new Request("https://app.crossline.lol/api/device/hello", { headers: { authorization: `Bearer ${capture}` } }))).status).toBe(401);
 });
 
-test("activity keeps no title and no app name, and a consent turned off deletes what it covered here", async () => {
+test("activity keeps no app name and only the device's (masked) titles, and a consent turned off deletes what it covered here", async () => {
   const device = issueDeviceToken(ctx, "device");
   const body = {
     consents,
@@ -83,6 +84,39 @@ test("activity keeps no title and no app name, and a consent turned off deletes 
   expect(store.getSetting(ctx.workspaceId, INPUT_RHYTHM_BUCKETS)).toBeUndefined();
   expect(store.recentActivityEntries(ctx.workspaceId, 10)).toEqual([]);
   expect(store.getSetting(ctx.workspaceId, ACTIVITY_HOURLY)).toBeDefined();
+});
+
+test("segments with titles are kept one row per start and app: a resend or a grown segment updates it; old titles are blanked here too", async () => {
+  const device = issueDeviceToken(ctx, "device");
+  const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+  const segments = [
+    { start: ago(60), end: ago(50), category: "writing", idle: false, app: "a1b2c3d4", title: "Cover letter.docx - Word" },
+    { start: ago(50), end: ago(40), category: "coding", idle: false, app: "b2c3d4e5", title: "[仅本地]" },
+    { start: ago(20 * 1440), end: ago(20 * 1440 - 5), category: "reading", idle: false, app: "c3d4e5f6", title: "old title" }
+  ];
+  expect(await (await send(activity, "/api/device/activity", device, "activity:tt111111", { consents, segmentsSince: ago(30 * 1440), segments })).json()).toMatchObject({ segments: 3 });
+  // Sent again under another key, the last segment grown: still three rows, the grown one's end moved.
+  const grown = [...segments.slice(0, 2), { ...segments[1]!, start: ago(40), end: ago(1), app: "a1b2c3d4", title: "Cover letter.docx - Word" }];
+  await send(activity, "/api/device/activity", device, "activity:tt222222", { consents, segments: [...segments, ...grown] });
+  await send(activity, "/api/device/activity", device, "activity:tt333333", { consents, segments: [...segments, { ...grown[2]!, end: ago(0) }] });
+  const kept = store.recentActivityEntries(ctx.workspaceId, 10).sort((a, b) => a.start.localeCompare(b.start));
+  expect(kept.map((entry) => [entry.app, entry.title])).toEqual([["c3d4e5f6", ""], ["a1b2c3d4", "Cover letter.docx - Word"], ["b2c3d4e5", "[仅本地]"], ["a1b2c3d4", "Cover letter.docx - Word"]]);
+  expect(Date.parse(kept.at(-1)!.end)).toBeGreaterThan(Date.now() - 60_000);
+});
+
+test("commits become one git.commit_seen event each, by repository and id, and a resend adds none", async () => {
+  const device = issueDeviceToken(ctx, "device");
+  const commit = { repo: "thesis", sha: "a".repeat(40), at: "2026-11-24T10:00:00+08:00", subject: "Draft intro\nbody", files: ["paper/intro.tex", "[仅本地]"], onDefaultBranch: true,
+    diff: "never kept" };
+  expect(await (await send(commits, "/api/device/commits", device, "commits:c1c1c1c1", { commits: [commit, { ...commit, sha: "not-a-sha" }] })).json()).toMatchObject({ added: 1, existing: 0 });
+  expect(await (await send(commits, "/api/device/commits", device, "commits:c1c1c1c1", { commits: [commit] })).json()).toMatchObject({ duplicate: true });
+  expect(await (await send(commits, "/api/device/commits", device, "commits:c2c2c2c2", { commits: [commit] })).json()).toMatchObject({ added: 0, existing: 1 });
+  const events = store.listEvents(ctx.workspaceId, { type: "git.commit_seen" });
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({ entityId: "a".repeat(40), idempotencyKey: `git.commit_seen:thesis:${"a".repeat(40)}`,
+    payload: { repo: "thesis", sha: "a".repeat(40), at: "2026-11-24T02:00:00.000Z", subject: "Draft intro", files: ["paper/intro.tex", "[仅本地]"], onDefaultBranch: true } });
+  expect(JSON.stringify(events)).not.toContain("never kept");
+  expect((await send(commits, "/api/device/commits", issueDeviceToken(ctx, "capture"), "commits:c3c3c3c3", { commits: [commit] })).status).toBe(401);
 });
 
 test("a repeated key is applied once, a file is kept once by its sha256, and only a device's own file is removed", async () => {

@@ -38,6 +38,7 @@ import { answerApplicationResult, answerOpportunityApplyReady, answerOpportunity
 import { agentBlockedAsks, answerAgentAsk } from "./agent-ask";
 import { foldAsks, foldFingerprint, foldId, isFolded, splitFold } from "./ask-fold";
 import { answerOutcome, outcomeAsks } from "./outcome-check";
+import { answerGateCheck, gateCheckAsks } from "./gates";
 import { answerGap, gapAsks } from "./deliverables";
 import { answerProgress, progressAsks } from "./progress-check";
 import { memoByLedger } from "./ledger-memo";
@@ -1210,7 +1211,8 @@ export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
   return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskDigestAsks, weeklyCommitAsks, overdueFoldAsks, missedAsks, ledgerDuplicateAsks, wealthBalanceAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, interviewSettingAsks, mergeAsks, eventAsks, mailEventCards, examTimeAsks, travelAsks, stepQuestionAsks,
     ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks, ({ ctx: context, now: at }: Source) => outcomeAsks(context, at), ({ ctx: context }: Source) => gapAsks(context),
     ({ ctx: context, now: at }: Source) => progressAsks(context, at),
-    ({ ctx: context, now: at }: Source) => opportunityOfferAsks(context, at), ({ ctx: context, now: at }: Source) => opportunityApplyReadyAsks(context, at)]
+    ({ ctx: context, now: at }: Source) => opportunityOfferAsks(context, at), ({ ctx: context, now: at }: Source) => opportunityApplyReadyAsks(context, at),
+    ({ ctx: context, now: at }: Source) => gateCheckAsks(context, at)]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } })
     // One card per id: two with one id are the same question twice, and answering finds only the first.
     .filter((ask, index, all) => all.findIndex((other) => other.id === ask.id) === index);
@@ -1696,6 +1698,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
     case "relation_check": return answerRelationCheck(ctx, ask, optionId, values);
     case "opportunity_offer": return answerOpportunityOffer(ctx, ask, optionId, values, appNow());
     case "opportunity_result": return answerApplicationResult(ctx, ask, optionId);
+    case "gate_check": return answerGateCheck(ctx, ask, optionId, choice.note ?? "");
     case "opportunity_apply_ready": return answerOpportunityApplyReady(ctx, ask, optionId);
     case "outcome_check": return answerOutcome(ctx, ask, optionId, values, choice.note);
     case "progress_check": return answerProgress(ctx, ask, optionId, choice.note);

@@ -12,6 +12,7 @@ import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { mailRepliesView, recordMoneyEvidence, voidByEvidence, type CrosslineStore } from "@crossline/db";
 import type { MailLookup } from "./agent-tools";
 import { draftReplies, followUpReplies, replyKey, type ReplyCandidate } from "./mail-replies";
+import { readSentMail, type SentMessage } from "./gates/sent-mail";
 import { identityLines } from "./lines";
 import { briefIds, buildLedgerBrief } from "./ledger-brief";
 import { addMailCandidate, mailCandidateLine, opportunityAgentOn } from "./opportunities";
@@ -446,11 +447,15 @@ export function createMailService(deps: MailDeps & { cwd: string; client: (works
   onCaptured?: (workspaceId: string) => void;
   /** Where reply drafts are written (`<dataDir>/mail-drafts/<workspace>`); without it no draft is written. */
   dataDir?: string;
+  /** Read the sent folders as evidence for the completion gate (docs/plans/execution-gates-1124.md J1). */
+  readSent?: boolean;
+  onSent?: (workspaceId: string, messages: SentMessage[]) => void;
   log?: (event: Record<string, unknown>) => void }) {
   const running = new Set<string>();
   const rerun = new Set<string>();
   /** When each workspace's sent folders were last looked at: no more often than new mail is read. */
   const sentCheckedAt = new Map<string, number>();
+  const sentReadAt = new Map<string, number>();
   const replyDeps = (workspaceId: string) => ({ store: deps.store, dataDir: deps.dataDir ?? "", cwd: deps.cwd, client: deps.client(workspaceId), ...(deps.now ? { now: deps.now } : {}),
     open: async (accountId: string) => {
       const account = accounts(deps.store, workspaceId).find((item) => item.id === accountId);
@@ -505,6 +510,12 @@ export function createMailService(deps: MailDeps & { cwd: string; client: (works
         if (checkSent) sentCheckedAt.set(workspaceId, now);
         followUp = await followUpReplies(replyDeps(workspaceId), workspaceId, { checkSent });
       }
+      // What the person sent, as evidence for the completion gate (gates/sent-mail.ts): read as often as the sent folders are checked.
+      if (deps.readSent && (force || now - (sentReadAt.get(workspaceId) ?? 0) >= MAIL_CHECK_MINUTES * 60_000 - 30_000)) {
+        sentReadAt.set(workspaceId, now);
+        const sent = await readSentMail(deps.store, workspaceId, accounts(deps.store, workspaceId), replyDeps(workspaceId).open).catch(() => []);
+        if (sent.length) { try { deps.onSent?.(workspaceId, sent); } catch { /* the gate reads them at its own pass too */ } }
+      }
       if (fresh.length || sorted || drafts || followUp?.closed || followUp?.told) {
         deps.log?.({ type: "mail.pass", workspaceId, read: fresh.length, ...(sorted ?? {}), ...(sorted?.state === "done" ? { needsReply: sorted.needsReply.length } : {}),
           ...(drafts ? { drafts: { drafted: drafts.drafted, notNeeded: drafts.notNeeded, skipped: drafts.skipped.length } } : {}), ...(followUp ? { followUp } : {}) });
@@ -536,7 +547,9 @@ export function createMailService(deps: MailDeps & { cwd: string; client: (works
     if (one && method === "POST" && one[2] === "/bookkeeping") return { status: 200, body: { ok: setMailBookkeeping(deps.store, workspaceId, one[1]!, body?.on === true) } };
     return undefined;
   }
-  return { pass, handle, lookup: (workspaceId: string) => mailLookupFor(deps, workspaceId) };
+  return { pass, handle, lookup: (workspaceId: string) => mailLookupFor(deps, workspaceId),
+    /** A workspace's mailbox by account, for gates that read sent mail again (the text is never kept). */
+    open: (workspaceId: string, accountId: string) => replyDeps(workspaceId).open(accountId) };
 }
 
 export const MAIL_ARRIVED_NUDGE_KIND = "waiting_mail";

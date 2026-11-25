@@ -6,7 +6,7 @@
 export type WorkerMode = "full" | "device";
 
 /** What a device does: read this machine, send, and take the hosted ledger back as a read-only mirror. */
-export const DEVICE_PASSES = ["screen_activity", "folders", "recordings_local", "agent_history", "uplink", "mirror"] as const;
+export const DEVICE_PASSES = ["screen_activity", "folders", "recordings_local", "agent_history", "git_commits", "uplink", "mirror"] as const;
 
 /** Passes that run a model, by the name the full worker gives them: never on a device. */
 export const MODEL_PASSES = [

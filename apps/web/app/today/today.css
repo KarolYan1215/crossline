@@ -208,3 +208,9 @@ body:has(.today-page) .running-head{background:var(--ds-bg)}
   .td-card{padding:14px}
   .nd-title{white-space:normal}
 }
+
+/* J4: today's one outside gate, first on Today (docs/plans/execution-gates-1124.md §四 J4). */
+.td-front { border-left: 3px solid var(--accent, currentColor); }
+.td-front-title { margin: 0.25rem 0; }
+.td-front-cost { margin: 0 0 0.5rem; color: var(--muted, inherit); }
+.td-front-dismiss { font-size: 0.85em; }

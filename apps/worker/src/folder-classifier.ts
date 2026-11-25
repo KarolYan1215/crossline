@@ -3,7 +3,7 @@ import { DEVICE_FOLDER_SCREEN_LIMIT, FOLDER_LINES_SCHEMA, FOLDER_SCREEN_SCHEMA, 
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
-import type { ScreenListed } from "./source-folders";
+import { localOnlyFile, pdkTermsOf, shownFolderLabel, type ScreenListed } from "./source-folders";
 
 export const FOLDER_CLASSIFIER = "crossline:crossline-folder-classifier";
 
@@ -60,7 +60,9 @@ export function screenListedWith(screen: ReturnType<typeof createFolderScreener>
 export function createFolderClassifier(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined) {
   return async function classify(): Promise<{ filed: number } | { blocked: string }> {
     const folders = readSourceFolders(store.getSetting(workspaceId, SOURCE_FOLDERS_SETTING))
-      .filter((folder) => folder.linesBy === "" && folder.lastScanAt && ((folder.files ?? 0) + (folder.nameOnly ?? 0)) > 0);
+      // A 「仅本地」 folder is never shown to a model, not even by its files' names (docs/plans/execution-gates-1124.md 四.0).
+      .filter((folder) => folder.linesBy === "" && !folder.localOnly && folder.lastScanAt && ((folder.files ?? 0) + (folder.nameOnly ?? 0)) > 0);
+    const terms = pdkTermsOf(store, workspaceId);
     if (!folders.length) return { filed: 0 };
     let profiles: Record<string, { description?: string }> = {};
     try { profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") ?? {}; } catch { /* none yet */ }
@@ -72,10 +74,10 @@ export function createFolderClassifier(store: CrosslineStore, workspaceId: strin
     const asked = folders.slice(0, 10).map((folder) => {
       let index: Record<string, FolderIndexEntry> = {};
       try { index = JSON.parse(store.getSetting(workspaceId, sourceFolderIndexSetting(folder.id)) ?? "{}") as Record<string, FolderIndexEntry>; } catch { /* unread */ }
-      const files = Object.keys(index).slice(0, 40).map((name) => name.replace(/\\/g, "/"));
-      const openings = Object.entries(index).map(([name, entry]) => ({ name: name.replace(/\\/g, "/"), text: documents.get(entry.documentId)?.extractedText.slice(0, 400) ?? "" }))
+      const files = Object.keys(index).filter((name) => !localOnlyFile(folder, name, terms)).slice(0, 40).map((name) => name.replace(/\\/g, "/"));
+      const openings = Object.entries(index).filter(([name]) => !localOnlyFile(folder, name, terms)).map(([name, entry]) => ({ name: name.replace(/\\/g, "/"), text: documents.get(entry.documentId)?.extractedText.slice(0, 400) ?? "" }))
         .filter((item) => item.text.trim()).slice(0, 4);
-      return { id: folder.id, name: folder.label, files, openings };
+      return { id: folder.id, name: shownFolderLabel(folder, terms), files, openings };
     });
     const projects = store.listProjects(workspaceId).map((project) => ({ name: project.name, lineId: project.identityId }));
     const context = { version: "crossline.folder-lines.v1", lines, projects, folders: asked };

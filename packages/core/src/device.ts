@@ -4,8 +4,10 @@ import type { AgentHistorySummary } from "./agent-history";
 /**
  * Device mode (docs/device-mode.md, the owner's decision of 2026-10-22): the hosted site is the one primary ledger, and a local install
  * linked to it is a *device* of that account. The device does only what needs its own machine — screen activity, idle stretches, input
- * rhythm, authorized folders, local recordings, the coding-agent time summary — and sends the results here, in the shapes below. Nothing
- * else of the machine travels: no window title, no app name (only a salted hash used to count switches), no audio.
+ * rhythm, authorized folders, local recordings, the coding-agent time summary, commits of authorized git repositories — and sends the
+ * results here, in the shapes below. Nothing else of the machine travels: no app name (only a salted hash used to count switches), no
+ * audio. Window titles travel since 2026-11-24 (the owner's decision, docs/plans/execution-gates-1124.md round 3–4), under the detail
+ * consent only and masked on the device first (`maskPrivate`: 「仅本地」 folders and PDK terms become `[仅本地]`).
  */
 
 /** The request header carrying a send's idempotency key; a repeated key is answered `duplicate: true` and applied once. */
@@ -45,12 +47,36 @@ export const normalizePairCode = (code: string) => code.toUpperCase().replace(/[
 
 /** Limits on what one send may carry; anything past them is cut, not refused. */
 export const DEVICE_LIMITS = { daily: 14, hourly: 28 * 24, gaps: 40, rhythm: 14 * 96, segments: 3000, documents: 20, text: 1_500_000, remove: 500,
-  folders: 50, transcripts: 10, silent: 50, bodyBytes: 8_000_000 } as const;
+  folders: 50, transcripts: 10, silent: 50, bodyBytes: 8_000_000, titleChars: 300, commits: 200, commitFiles: 30 } as const;
+
+/** How far back segments with titles are sent: J3 reads the last week (docs/plans/execution-gates-1124.md J3), and a day more for the edge. */
+export const DEVICE_TITLE_DAYS = 8;
+
+/**
+ * Git commits as evidence (docs/plans/execution-gates-1124.md J1 「git 提交」, 2026-11-24): the repositories the person authorized on this
+ * computer (`git.repos`, a JSON array of absolute paths), what was already seen of each (`git.seen`), and one ledger event per commit.
+ * Only the commit's id, author time, subject and changed file names are read — never a diff — and names and subject pass `maskPrivate`.
+ */
+export const GIT_REPOS_SETTING = "git.repos";
+export const GIT_SEEN_SETTING = "git.seen";
+export const GIT_COMMIT_SEEN_EVENT = "git.commit_seen";
+/** `repo` is the folder's own name (masked), never its path. */
+export type DeviceCommit = { repo: string; sha: string; at: string; subject: string; files: string[]; onDefaultBranch: boolean };
+export type DeviceCommitsPayload = { commits: DeviceCommit[] };
+
+/** The ledger event for one commit seen, the same whether a device sent it or this computer's own worker read it. */
+export function gitCommitEvent(commit: DeviceCommit): { type: string; entityId: string; idempotencyKey: string; payload: DeviceCommit } {
+  return { type: GIT_COMMIT_SEEN_EVENT, entityId: commit.sha, idempotencyKey: `${GIT_COMMIT_SEEN_EVENT}:${commit.repo}:${commit.sha}`,
+    payload: { repo: commit.repo, sha: commit.sha, at: commit.at, subject: commit.subject, files: commit.files, onDefaultBranch: commit.onDefaultBranch } };
+}
 
 export type DeviceConsents = { activity: boolean; detail: boolean; sleep: boolean; rhythm: boolean; agentHistory: boolean };
 export type DeviceDaily = { day: string; activeMinutes: number; idleMinutes: number; windowSwitches: number; sampleCount: number };
-/** A stretch of screen activity: when, which category, whether idle — and `app` only as an opaque 8-hex token, for counting switches. */
-export type DeviceSegment = { start: string; end: string; category: string; idle: boolean; app: string };
+/**
+ * A stretch of screen activity: when, which category, whether idle — and `app` only as an opaque 8-hex token, for counting switches.
+ * `title` only under the detail consent, already masked on the device (2026-11-24).
+ */
+export type DeviceSegment = { start: string; end: string; category: string; idle: boolean; app: string; title?: string };
 export type DeviceActivityPayload = {
   consents: DeviceConsents;
   daily: DeviceDaily[];
@@ -81,8 +107,9 @@ const list = (value: unknown, max: number): unknown[] => Array.isArray(value) ? 
 const obj = (value: unknown): Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
 
 /**
- * What the hosted side keeps of an activity send: only the known fields, each range-checked; anything else — a `title`, an app's name, a
- * field nobody defined — is dropped here, so no route can store it by accident.
+ * What the hosted side keeps of an activity send: only the known fields, each range-checked; anything else — an app's name, a field
+ * nobody defined — is dropped here, so no route can store it by accident. A segment's title (masked on the device) is kept only under
+ * the detail consent, cut to `DEVICE_LIMITS.titleChars`.
  */
 export function cleanActivityPayload(raw: unknown): DeviceActivityPayload {
   const body = obj(raw), consents = obj(body.consents);
@@ -110,7 +137,8 @@ export function cleanActivityPayload(raw: unknown): DeviceActivityPayload {
     const row = obj(item), start = iso(row.start), end = iso(row.end);
     const category = typeof row.category === "string" && categories.has(row.category) ? row.category : "other";
     const app = typeof row.app === "string" && APP_TOKEN.test(row.app) ? row.app : "";
-    return start && end && Date.parse(end) >= Date.parse(start) ? [{ start, end, category, idle: row.idle === true, app }] : [];
+    const title = consents.detail === true && !row.idle ? str(row.title, DEVICE_LIMITS.titleChars).trim() : "";
+    return start && end && Date.parse(end) >= Date.parse(start) ? [{ start, end, category, idle: row.idle === true, app, ...(title ? { title } : {}) }] : [];
   });
   const lastActive = iso(body.lastActive), segmentsSince = iso(body.segmentsSince);
   const history = obj(body.agentHistory);
@@ -160,6 +188,17 @@ export function cleanRecordingsPayload(raw: unknown): Required<DeviceRecordingsP
       workMs: num(row.workMs, 1e9) ?? 0 }];
   });
   return { transcripts, silent };
+}
+
+/** A commits send as the hosted side keeps it: a git object id, a time, the subject's first line and at most 30 file names per commit. */
+export function cleanCommitsPayload(raw: unknown): DeviceCommitsPayload {
+  const commits = list(obj(raw).commits, DEVICE_LIMITS.commits).flatMap((item): DeviceCommit[] => {
+    const row = obj(item), sha = str(row.sha, 64).toLowerCase(), at = iso(row.at), repo = str(row.repo, 120).trim();
+    if (!/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(sha) || !at || !repo) return [];
+    const files = list(row.files, DEVICE_LIMITS.commitFiles).filter((file): file is string => typeof file === "string").map((file) => str(file, 300)).filter(Boolean);
+    return [{ repo, sha, at, subject: str(row.subject, 300).split("\n")[0]!.trim(), files, onDefaultBranch: row.onDefaultBranch === true }];
+  });
+  return { commits };
 }
 
 /**

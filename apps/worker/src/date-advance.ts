@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import {
-  advanceResults, conservativeFinish, onPersonsBoard, taskTitleOf, daysBetween, engagementTier, MILESTONE_RISKS_SETTING, milestoneReadingOf, monthDay, parseMilestoneRisks, overdueTarget, RESULT_EXPIRE_DAYS, RESULT_REVIEW_DAYS, shiftWithChain, tFor, type Locale
+  advanceResults, conservativeFinish, MILESTONE_PARKED, MILESTONE_UNPARKED, onPersonsBoard, parkedMilestones, taskTitleOf, daysBetween, engagementTier, MILESTONE_RISKS_SETTING, milestoneReadingOf, monthDay, parseMilestoneRisks, overdueTarget, RESULT_EXPIRE_DAYS, RESULT_REVIEW_DAYS, shiftWithChain, tFor, type Locale
 } from "@crossline/core";
 import { localeOf } from "./locale";
 import { designKnob, DUE_ADVANCED_EVENT, listAgentTasks, overdueStartedTasks, SILENT_TASK_SHIFTS_MAX, reviewAgentTask, settleAgentResult, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
@@ -242,7 +242,9 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
   const cutoff = new Date(now.getTime() - STALE_DAYS * DAY).toISOString();
   const lastAt = (type: string) => { const out = new Map<string, string>(); for (const event of store.listEvents(workspaceId, { type })) if ((out.get(event.entityId) ?? "") < event.createdAt) out.set(event.entityId, event.createdAt); return out; };
   const proposed = lastAt("milestone.proposed"), revised = lastAt("milestone.revised");
-  for (const draft of store.listMilestones(workspaceId).filter((milestone) => milestone.status === "draft" && !revised.has(milestone.id)
+  // A milestone the admission gate parked (J2a) is a draft that waits for the one before it, not a stale proposal.
+  const parked = parkedMilestones(store.listEvents(workspaceId, { type: [MILESTONE_PARKED, MILESTONE_UNPARKED] }));
+  for (const draft of store.listMilestones(workspaceId).filter((milestone) => milestone.status === "draft" && !revised.has(milestone.id) && !parked.has(milestone.id)
     && (proposed.get(milestone.id) ?? "") !== "" && proposed.get(milestone.id)! <= cutoff)) {
     store.saveMilestone({ ...draft, status: "archived" });
     outcome.drafts.push({ id: draft.id, title: draft.title });

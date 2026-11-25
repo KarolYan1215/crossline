@@ -51,6 +51,11 @@ export type SourceFolder = {
    * have been (opened by the interview, or written there after authorizing).
    */
   onDemand?: true;
+  /**
+   * 「仅本地」 (docs/plans/execution-gates-1124.md, round 2): the person's unpublished data or a process design kit. Its files are never
+   * read; only a masked name, the modified time and the size may leave the computer, as evidence that something changed.
+   */
+  localOnly?: true;
   imported?: number;
   lastError?: string;
   /**

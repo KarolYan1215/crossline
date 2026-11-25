@@ -98,6 +98,16 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-validation-reviewer": { label: "复核", schemas: ["VALIDATION_REVIEW_SCHEMA", "PUBLIC_SKILL_REVIEW_SCHEMA", "PUBLIC_SKILL_BATCH_REVIEW_SCHEMA", "TASK_MERGE_REVIEW_SCHEMA"] },
   "crossline-progress-judge": { label: "进度判断", schemas: ["PROGRESS_ASSESSMENT_SCHEMA"] },
   "crossline-deliverable-check": { label: "交付物验收", schemas: ["DELIVERABLE_CHECK_SCHEMA"] },
+  // The execution gates (docs/plans/execution-gates-1124.md): each builds its schema per run from its verdict list (`gateBatchSchema`), so no
+  // exported schema names them; they run on the account's own Codex until a fixed case measures a provider on them.
+  "crossline-gate-completion": { label: "完成判定", schemas: [] },
+  "crossline-gate-priority": { label: "P1 标注", schemas: [] },
+  "crossline-gate-front": { label: "外部小关口", schemas: [] },
+  "crossline-gate-admission": { label: "里程碑准入", schemas: [] },
+  "crossline-gate-setback": { label: "挫折分类", schemas: [] },
+  "crossline-gate-attention": { label: "注意力审计", schemas: [] },
+  "crossline-gate-night": { label: "深夜操作", schemas: [] },
+  "crossline-gate-drill": { label: "找错练习", schemas: [] },
   "crossline-concierge": { label: "输入框", schemas: ["CONCIERGE_SCHEMA"], tools: true },
   "crossline-task-titler": { label: "任务命名", schemas: ["TASK_TITLES_SCHEMA"] },
   "crossline-dictation-corrector": { label: "语音输入纠错", schemas: ["DICTATION_CORRECTION_SCHEMA"] },

@@ -8,6 +8,7 @@ import { createActivityTracker } from "../activity-recorder";
 import { createWindowsActivitySource } from "../activity-source";
 import { agentHistoryPass } from "../agent-history";
 import { extractText } from "../extract";
+import { gitRepos, privacyOf, readGitSeen, readNewCommits, saveGitSeen } from "../git-commits";
 import { runtimeOwner } from "../owner";
 import { recordingPass, recordingsOn, transcribeConcurrency } from "../recordings";
 import { addFolder, folderFileBytes, importScreenedFiles, listFolderEntries, personNames, readFolderFile, previewFolder, removeFolder, setFolderLines, setFolderRules, syncFolders, type ScreenListed } from "../source-folders";
@@ -22,7 +23,7 @@ import type { RemoteHooks } from "../node/remote";
 import { MIRROR_INTERVAL_MS, mirrorPass } from "./mirror";
 import { DEVICE_PASSES } from "./mode";
 import { createOutbox, type OutboxItem, type SendResult } from "./outbox";
-import { activityItem, readDeviceState, recordingItems, reviveDocuments, sourceItems, tooLargeForSite, writeDeviceState, type QueuedItem } from "./payloads";
+import { activityItem, commitItems, readDeviceState, recordingItems, reviveDocuments, sourceItems, tooLargeForSite, writeDeviceState, type QueuedItem } from "./payloads";
 import { startDeviceServer } from "./server";
 
 /**
@@ -146,6 +147,18 @@ export async function runDeviceWorker(options: DeviceWorkerOptions): Promise<voi
     await agentHistoryPass(store, [owner], dataDir, () => process.env.CROSSLINE_TIME_ZONE ?? "America/Chicago").catch(() => 0);
   };
 
+  // Commits of the repositories the person authorized here (docs/plans/execution-gates-1124.md J1): ids, times, subjects and file names,
+  // masked before they are queued; what was seen is kept only once they are in the outbox.
+  const commits = async () => {
+    if (!owner) return;
+    const repos = gitRepos(store, owner);
+    if (!repos.length) return;
+    const read = await readNewCommits(repos, readGitSeen(store, owner), privacyOf(store, owner));
+    queue(commitItems(read.commits));
+    saveGitSeen(store, owner, read.seen);
+    if (read.commits.length) log({ type: "device.commits", commits: read.commits.length });
+  };
+
   // What a phone may reach here besides sessions (docs/plans/remote-control-1122.md §6.3–§6.4): this computer's authorised folders, read
   // under the same rules as the walk, and its transcriber. Both belong to the machine's owner only.
   const remoteHooks: RemoteHooks = {
@@ -241,6 +254,7 @@ export async function runDeviceWorker(options: DeviceWorkerOptions): Promise<voi
     await step("prune", () => tracker.prune());
     await step("folders", folders);
     await step("agent_history", history);
+    await step("git_commits", commits);
     await step("activity", activity);
     state.lastPassAt = new Date().toISOString();
     await step("state", () => writeDeviceState(deviceDir, state));

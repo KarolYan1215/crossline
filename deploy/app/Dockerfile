@@ -85,7 +85,9 @@ FROM base AS runtime
 # bubblewrap and python3 for the sandboxed shell assistant (docs/personal-agent.md §8): Codex runs each command of a guest's assistant inside
 # bubblewrap, and python3 is what most of those scripts are. Without the container options and host setting it also needs, the worker's own
 # probe (sandbox-probe.ts) finds no working sandbox and the assistant stays in tools mode. The owner's unsandboxed shell never runs here.
-RUN apt-get update && apt-get install -y --no-install-recommends libsecret-1-0 ca-certificates ffmpeg bubblewrap python3 \
+# iverilog (Icarus Verilog, with vvp) simulates the weekly bug-finding drill before it is issued (apps/worker/src/gates/drill.ts, J7):
+# the clean design must pass its testbench and every planted bug must make it fail; without it no drill is issued.
+RUN apt-get update && apt-get install -y --no-install-recommends libsecret-1-0 ca-certificates ffmpeg bubblewrap python3 iverilog \
   && rm -rf /var/lib/apt/lists/*
 # /tmp/.X11-unix world-writable and sticky: Xvfb runs as the node user and makes its socket there (server-display.ts).
 RUN mkdir -p /data /state /tmp/.X11-unix && chown node:node /data /state && chmod 1777 /tmp/.X11-unix

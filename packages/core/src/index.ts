@@ -552,6 +552,8 @@ export * from "./energy-best";
 export * from "./schedule-frozen";
 export * from "./step-carry";
 export * from "./deliverables";
+export * from "./gates";
+export * from "./drill";
 export * from "./arxiv";
 export * from "./calendar-apps";
 export * from "./calendar-write";

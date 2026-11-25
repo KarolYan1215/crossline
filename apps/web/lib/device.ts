@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   ACTIVITY_HOURLY, ACTIVITY_HOURLY_DAYS, ACTIVITY_LAST_ACTIVE, ACTIVITY_LONG_GAPS, AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, DEVICE_DOCUMENTS_SETTING,
   DEVICE_FOLDERS_SETTING, DEVICE_IDEMPOTENCY_HEADER, DEVICE_LIMITS, DEVICE_LAST_SEEN_SETTING, DEVICE_SEEN_KEEP, DEVICE_SEEN_SETTING, INPUT_RHYTHM_BUCKETS, INPUT_RHYTHM_CONSENT,
-  NODE_COMPUTE_SETTING, NODE_STATUS_SETTING, RECORDING_SILENT_EVENT, RECORDING_TRANSCRIBED_EVENT, SLEEP_TRACKING_CONSENT,
+  NODE_COMPUTE_SETTING, NODE_STATUS_SETTING, RECORDING_SILENT_EVENT, RECORDING_TRANSCRIBED_EVENT, SLEEP_TRACKING_CONSENT, gitCommitEvent, type DeviceCommitsPayload,
   type AccessContext, type ActivityHour, type DeviceActivityPayload, type DeviceFolder, type DeviceRecordingsPayload, type DeviceSourcesPayload, type InputRhythmBucket
 } from "@crossline/core";
 import { ACTIVITY_DETAIL_CONSENT, dataDirectory, getStore, LOCAL_ACTIVITY_CONSENT } from "./crossline";
@@ -22,6 +22,9 @@ import { tOf } from "./locale";
  * keep ever reach these functions.
  */
 const MAX_PER_HOUR = 600;
+/** The device's own retention for screen activity (apps/worker/src/activity-recorder.ts), kept here for what it sends. */
+const ACTIVITY_TITLE_DAYS = 14;
+const ACTIVITY_ROW_DAYS = 90;
 const RECENT_SETTING = "device.recent";
 const read = <T>(raw: string | null | undefined, fallback: T): T => { try { return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; } };
 
@@ -140,8 +143,13 @@ export function applyDeviceActivity(ctx: AccessContext, payload: DeviceActivityP
     counted.hourly = payload.hourly.length;
   } else drop(ws, ACTIVITY_HOURLY);
 
-  if (consents.detail && payload.segmentsSince) counted.segments = store.replaceDeviceActivitySegments(ws, payload.segmentsSince, payload.segments);
-  else if (!consents.detail) store.deleteActivitySegments(ws);
+  // Segments, with their titles masked on the device (2026-11-24), are kept one row per start and app, so a resend never adds a second;
+  // the device's retention holds here too: titles blanked after 14 days, rows gone after 90.
+  if (consents.detail) {
+    const before = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
+    counted.segments = store.upsertDeviceActivitySegments(ws, payload.segments, before(ACTIVITY_TITLE_DAYS));
+    store.pruneActivity(ws, before(ACTIVITY_TITLE_DAYS), before(ACTIVITY_ROW_DAYS));
+  } else store.deleteActivitySegments(ws);
 
   if (consents.sleep) {
     set(ws, ACTIVITY_LONG_GAPS, payload.gaps);
@@ -246,6 +254,20 @@ export function applyDeviceRecordings(ctx: AccessContext, payload: Required<Devi
       entityId: item.audioSha, payload: { fileName: item.fileName, seconds: item.seconds, speechSeconds: item.speechSeconds, workMs: item.workMs, where: "device",
         folderId: item.folderId } });
     counted.silent += 1;
+  }
+  return counted;
+}
+
+/**
+ * Commits of the repositories authorized on the device (docs/plans/execution-gates-1124.md J1 「git 提交」): one `git.commit_seen` event
+ * each, keyed by repository and id, so a resend adds nothing. Names and subjects arrive masked; no diff ever comes here.
+ */
+export function applyDeviceCommits(ctx: AccessContext, payload: DeviceCommitsPayload): { added: number; existing: number } {
+  const store = getStore();
+  const counted = { added: 0, existing: 0 };
+  for (const commit of payload.commits) {
+    if (store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, ...gitCommitEvent(commit) }).inserted) counted.added += 1;
+    else counted.existing += 1;
   }
   return counted;
 }

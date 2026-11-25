@@ -48,6 +48,7 @@ const OUTCOMES: Record<AskKind, { answered: string; unanswered: string }> = {
   risk_digest: { answered: "审查过的里程碑，任务提前 1–2 天排完；这周不再提醒，风险变高时再说。", unanswered: "排程不变；下周汇总再列一次。" },
   weekly_commit: { answered: "推的从下周一起排，砍的归档（可恢复），一次撤销可全部恢复。", unanswered: "排程照旧，本周的工作可能排不完。" },
   opportunity_offer: { answered: "报名进代填队列；申请或加入计划写一个已批准的里程碑并倒推准备；少来按原因调整，周报里可撤销；不要记成偏好。", unanswered: "截止前留在这里，过了截止自动消失。" },
+  gate_check: { answered: "判断记为对或改成所选，周回顾计入推翻次数；停放的里程碑按所选开、继续停或归档。", unanswered: "判断保持原样，只作记录，不改任务状态。" },
   opportunity_result: { answered: "结果记到找到它的监视项上，监视项的产出按结果算。", unanswered: "四个月后不再问。" },
   opportunity_apply_ready: { answered: "代填打开报名网站填好，停在提交前等本人提交；自己去交则不再问。", unanswered: "不代填，截止前留在这里。" }
 };

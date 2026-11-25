@@ -1,3 +1,5 @@
+import { GateGoalCard } from "./gate-goal-card";
+import { gateGoal } from "../../lib/gates";
 import { BIRTH_DATE_SETTING, BIRTH_YEAR_SETTING, readSelfCheck, SELF_CHECK_SETTING, ACTIVITY_HOURLY, BRIEF_TIME_SETTING, DEFAULT_QUIET, QUIET_HOURS_SETTING, atComputerByHour, type ActivityHour, AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, activityCategoryLabel, SLEEP_TRACKING_CONSENT, TELEMETRY_ENABLED_SETTING, type ActivityCategory, type AgentHistorySummary } from "@crossline/core";
 import { assistantAvailable, nodeShellHost } from "@crossline/db";
 import { AppShell } from "../app-shell";
@@ -262,6 +264,7 @@ export default async function SettingsPage({ searchParams }: { searchParams?: Pr
 
         <section id="design" className="st-section" aria-labelledby="st-design"><h2 id="st-design" className="ds-serif">{t("规则与指令")}</h2>
           <InstructionsCard view={instructionsView(ctx)} />
+          <GateGoalCard initial={gateGoal(ctx)} />
           <DesignCard {...designView(ctx)} />
         </section>
 
