@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { accessProfileSlug, grownSkillId, monthlyFromDays, scanForDeclaredAccess, reassignedSteps, scheduleLabel, stepLeavesMachine, validateAutomationPlan,
+import { accessProfileSlug, grownSkillId, monthlyFromDays, scanForDeclaredAccess, reassignedSteps, scheduleLabel, stepLeavesMachine, validateAutomationPlan, workLeavesMachine,
   validateWorkflowManifest, workflowDue, type WorkflowManifest } from "./index";
 
 const manifest: WorkflowManifest = {
@@ -81,6 +81,13 @@ test("a step leaves the machine by what it does, not by a noun built on the verb
   expect(stepLeavesMachine("发布到小红书")).toBe(true);
   expect(stepLeavesMachine("上传成片并提交审核")).toBe(true);
   expect(stepLeavesMachine("Email the draft to the editor")).toBe(true);
+});
+
+test("what is shown and sorted follows the model's external; the words read only work written before the field", () => {
+  expect(workLeavesMachine("发布到小红书", false)).toBe(false);
+  expect(workLeavesMachine("整理素材", true)).toBe(true);
+  expect(workLeavesMachine("发布到小红书", undefined)).toBe(true);
+  expect(workLeavesMachine("整理发布包，不发布", undefined)).toBe(false);
 });
 
 test("a workflow that reads the person's account says what it reads and what could go wrong; an older one reads nothing", () => {

@@ -79,7 +79,9 @@ export type NodeRemoteLink = { key: string; host: string; role: NodeRole; level:
   call: (request: Record<string, unknown>, timeoutMs?: number) => Promise<unknown> };
 
 /** A reader's browser on one of the account's computers: the operations of browser.ts, answered over its connection. */
-export type NodeBrowserLink = { host: string; call: (request: Record<string, unknown>, timeoutMs?: number) => Promise<unknown> };
+export type NodeBrowserLink = { host: string; call: (request: Record<string, unknown>, timeoutMs?: number) => Promise<unknown>;
+  /** The computer keeps the sensitive profile items in its own secret store (`hello.vault`, browser.ts `NodeVault`). */
+  vault?: boolean };
 
 export type NodeHub = {
   /** A ready node of the account that runs a reader's browser (strongest kind first), or undefined. */
@@ -137,7 +139,7 @@ export const ROLE_PRIORITY: Record<NodeRole, number> = { device: 2, standalone: 
 const GONE_SHOWN_MS = 24 * 3_600_000;
 
 type Connection = { socket: WebSocket; workspaceId: string; token: string; client?: JsonLineRpcClient; ready: boolean; heardAt: number;
-  host: string; codex: string; role: NodeRole; capacity: number; key: string; browser: boolean;
+  host: string; codex: string; role: NodeRole; capacity: number; key: string; browser: boolean; vault: boolean;
   shell?: { tasks: string; home: string; windows: boolean; ffmpeg?: boolean };
   /** Said to every shell run bound to this node (`nodeEnvironmentNote`). */
   note?: string | undefined;
@@ -208,7 +210,7 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
 
   function accept(socket: WebSocket, workspaceId: string, token: string): void {
     const connection: Connection = { socket, workspaceId, token, ready: false, heardAt: Date.now(), host: "", codex: "", role: "device", capacity: 2, key: "",
-      browser: false, tasking: new Map(), browsing: new Map(), remoting: new Map() };
+      browser: false, vault: false, tasking: new Map(), browsing: new Map(), remoting: new Map() };
     const hello = setTimeout(() => socket.close(4001, "NODE_HELLO_MISSING"), 15_000);
     const pendingGw = new Map<number, AbortController>();
     socket.on("pong", () => { connection.heardAt = Date.now(); });
@@ -284,6 +286,7 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
     connection.capacity = Math.max(1, Math.min(NODE_CAPACITY_MAX, Math.floor(Number(hello.capacity) || 4)));
     connection.key = `${connection.role}:${connection.host}`;
     connection.browser = hello.browser === true;
+    connection.vault = connection.browser && hello.vault === true;
     const windows = hello.platform === "win32";
     const tasks = hello.shell === true ? nodeDir(hello.tasks, windows) : undefined;
     const home = hello.shell === true ? nodeDir(hello.home, windows) : undefined;
@@ -419,9 +422,10 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
   return {
     port,
     browserFor: (workspaceId) => {
-      const connection = ready(workspaceId).find((item) => item.browser);
+      // A computer that holds the sensitive profile items is preferred: a form typed elsewhere would miss them.
+      const connection = ready(workspaceId).find((item) => item.vault) ?? ready(workspaceId).find((item) => item.browser);
       if (!connection) return undefined;
-      return { host: connection.host, call: (request, timeoutMs = 10 * 60_000) => new Promise<unknown>((resolve, reject) => {
+      return { host: connection.host, ...(connection.vault ? { vault: true } : {}), call: (request, timeoutMs = 10 * 60_000) => new Promise<unknown>((resolve, reject) => {
         const id = ++browserIds;
         const timer = setTimeout(() => { connection.browsing.delete(id); reject(new Error("NODE_BROWSER_TIMEOUT")); }, timeoutMs);
         connection.browsing.set(id, { chunks: [], resolve: (value) => { clearTimeout(timer); resolve(value); }, reject: (error) => { clearTimeout(timer); reject(error); } });

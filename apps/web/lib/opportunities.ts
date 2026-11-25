@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   DAY_PART_LABEL, LESS_REASONS, LESS_REASON_LABEL, RUNTIME_OWNER_SETTING, SCOUT_STATS_SETTING, WEEKDAY_LABEL, eligibilityAnswer, exploreAccount,
-  nextDeadline, prepStartFor, readScoutStats, stepLeavesMachine, taskTitleOf, watchYield, OPPORTUNITY_TYPE_LABEL, SLOT_LABEL, STOP_LABEL, bestRelevance, isSensitiveSlot,
+  nextDeadline, prepStartFor, readScoutStats, taskTitleOf, workLeavesMachine, externalOf, watchYield, OPPORTUNITY_TYPE_LABEL, SLOT_LABEL, STOP_LABEL, bestRelevance, isSensitiveSlot,
   kitDrafts, opportunityTypeOf, previewFields, isReading, OPPORTUNITY_TYPE_LABEL as TYPE_LABEL, WATCH_TUNING_SETTING, type OpportunityType, type AccessContext, type Ask, type AskField, type AskFormTrack, type AskOption, type AskTag, type ApplicationSlot,
   type FormRunState, type FormStop, type PreviewRow, type StoredFormRun,
   type LessEntry, type LessReason, type OpportunityOutcome, type StoredWatch, type WatchTarget
@@ -451,7 +451,7 @@ type ApplyReady = { row: StoredOpportunity; milestoneId: string; deadline?: stri
 
 /**
  * Applications whose preparation is done (§9 「材料齐了，⑥ 才开始」): the opportunity the person chose to apply for, its milestone's work
- * all accepted but a submission step (the person's, `stepLeavesMachine`), no form run yet, its deadline not passed, not handed in by the
+ * all accepted but a submission step (the person's, `workLeavesMachine`), no form run yet, its deadline not passed, not handed in by the
  * person themselves. Filling then starts only on the person's press: no tracker or agent studied starts filling an application when
  * materials are ready, and a tailored résumé or essay going out unseen is what Simplify's own help warns against.
  */
@@ -468,7 +468,7 @@ function applicationsReady(ctx: AccessContext, today: string): ApplyReady[] {
     const milestoneId = (written?.payload as { milestoneId?: string } | undefined)?.milestoneId;
     if (!milestoneId) return [];
     const work = orders.filter((order) => order.milestoneId === milestoneId && order.state !== "archived");
-    const preparation = work.filter((order) => !stepLeavesMachine(taskTitleOf(order)));
+    const preparation = work.filter((order) => !workLeavesMachine(taskTitleOf(order), externalOf(order)));
     if (!preparation.length || preparation.some((order) => order.state !== "accepted")) return [];
     // Approved drafts for long answers: the accepted preparation's own text files (the person's or the assistant's), never anything else.
     const drafts: ApplyReady["drafts"] = {};

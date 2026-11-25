@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { reproduceDeliverables, reproductionReason } from "./reproduce";
+import { reproduceDeliverables, reproductionReason, sandboxedCommand } from "./reproduce";
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(path.join(tmpdir(), "crossline-repro-")); });
@@ -55,3 +55,27 @@ test("a script that names a connection is not re-run; one that fails or never en
   expect(await reproduceDeliverables(dir, made("throw new Error('boom');\n", { "table.csv": "x" }))).toMatchObject({ reproduced: false, problem: "failed", detail: expect.stringContaining("boom") });
   expect(await reproduceDeliverables(dir, made("for (;;) {}\n", { "table.csv": "x" }), { timeoutMs: 1_000 })).toMatchObject({ reproduced: false, problem: "timeout" });
 }, 20_000);
+
+test("a run made in a Windows sandbox is re-run in the same one: the copy writable, the same secrets denied, no network", () => {
+  const [command, args] = sandboxedCommand({ command: "C:\\codex\\codex.exe", args: [] }, { backend: "mxc", deny: ["C:\\Users\\k\\.ssh"] },
+    "C:\\Temp\\crossline-reproduce-1", "python", ["run.py"]);
+  expect(command).toBe("C:\\codex\\codex.exe");
+  expect(args).toEqual(["-c", "features.prefer_mxc=true",
+    "-c", 'permissions.crossline-reproduce={filesystem={":root"="read", "C:\\\\Users\\\\k\\\\.ssh"="deny", "C:\\\\Temp\\\\crossline-reproduce-1"="write"}, network={enabled=false}}',
+    "sandbox", "-P", "crossline-reproduce", "-C", "C:\\Temp\\crossline-reproduce-1", "--", "python", "run.py"]);
+  // An elevated sandbox is the one already configured: no MXC preference.
+  expect(sandboxedCommand({ command: "codex", args: [] }, { backend: "elevated", deny: [] }, "C:\\c", "node", ["run.mjs"])[1]).toEqual([
+    "-c", 'permissions.crossline-reproduce={filesystem={":root"="read", "C:\\\\c"="write"}, network={enabled=false}}', "sandbox", "-P", "crossline-reproduce", "-C", "C:\\c", "--", "node", "run.mjs"]);
+});
+
+test("the sandboxed re-run goes through the runtime's sandbox command and still compares what it made", async () => {
+  // A stand-in for `codex sandbox`: runs what follows `--` in the directory given with `-C`, as the real one does inside its sandbox.
+  const shim = path.join(dir, "..", `codex-shim-${path.basename(dir)}.mjs`);
+  writeFileSync(shim, "import { spawnSync } from 'node:child_process';\nconst a = process.argv.slice(2);\nconst cwd = a[a.indexOf('-C') + 1];\n"
+    + "const rest = a.slice(a.indexOf('--') + 1);\nconst r = spawnSync(rest[0], rest.slice(1), { cwd, stdio: 'inherit' });\nprocess.exit(r.status ?? 1);\n");
+  try {
+    const artifacts = made(WRITE_TABLE, { "table.csv": "a,b\n1,2\n" });
+    expect(await reproduceDeliverables(dir, artifacts, { sandbox: { backend: "mxc", deny: [] }, codex: { command: process.execPath, args: [shim], env: {} } }))
+      .toEqual({ needed: true, reproduced: true, script: "run.mjs", files: ["table.csv"] });
+  } finally { rmSync(shim, { force: true }); }
+});

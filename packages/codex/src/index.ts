@@ -240,6 +240,15 @@ export function spawnAppServerLines(codexHome?: string, flags: string[] = []): {
   };
 }
 
+/**
+ * On Windows the runtime is launched preferring Codex's MXC sandbox (docs/plans/harness-1125.md §9, the owner's decision of 2026-11-25):
+ * `windowsSandbox/readiness` reports the selection the process was launched with, not a thread's, so the owner's shell can only see
+ * whether MXC is there when the runtime itself prefers it. Where MXC is unavailable the runtime keeps its configured backend.
+ */
+export function appServerLaunchFlags(platform: string = process.platform): string[] {
+  return platform === "win32" ? ["-c", "features.prefer_mxc=true"] : [];
+}
+
 /** A guest runtime's `oom_score_adj` (Linux): above the owner's runtime and the worker (0), below Chromium's renderers (300). */
 export const GUEST_OOM_SCORE_ADJ = 200;
 
@@ -255,7 +264,7 @@ export async function startCodexAppServer(codexHome?: string): Promise<{
   const env = { ...codexProcessEnvironment(), ...(codexHome ? { CODEX_HOME: codexHome, CROSSLINE_CODEX_HOME: codexHome } : {}) };
   mkdirSync(env.CODEX_HOME!, { recursive: true });
   const codex = resolveCodexCommand(env);
-  const child = spawn(codex.command, [...codex.args, "app-server", "--listen", "stdio://", "--strict-config"], {
+  const child = spawn(codex.command, [...codex.args, ...appServerLaunchFlags(), "app-server", "--listen", "stdio://", "--strict-config"], {
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
     env

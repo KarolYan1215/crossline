@@ -13,7 +13,8 @@ import path from "node:path";
  *   picture), copied to the node first;
  * - `gw*`: an HTTP request a provider thread made to the model gateway, relayed to the server's gateway, which adds the key;
  * - `browser` (server asks, node answers with `browser-answer`, a large picture or video first in `browser-chunk`s): one operation of a
- *   reader's browser on the person's computer (browser.ts), offered only by a node whose `hello` says `browser`;
+ *   reader's browser on the person's computer (browser.ts), offered only by a node whose `hello` says `browser`; the sensitive profile
+ *   items' vault (`vaultPut`/`vaultRemove`, a form typing a held value for its placeholder) only by one whose `hello` also says `vault`;
  * - `task` (server asks, node answers with `task-answer`): one operation on the shell assistant's task directories (task-files.ts), offered
  *   only by a node whose `hello` says `shell` (the person's own switch on this computer, off by default, at 「无人值守」);
  * - `remote` (server asks, node answers with `remote-answer`) and `remote-event` (node reports): remote control from the person's phone
@@ -28,6 +29,8 @@ export const NODE_PROTOCOL = 1;
 
 export type NodeFrame =
   | { t: "hello"; protocol: number; codex: string; platform: string; host: string; role?: "device" | "standalone"; capacity?: number; browser?: boolean;
+      /** This computer keeps the account's sensitive profile items in its own secret store (browser.ts `NodeVault`, §9.3 of docs/plans/harness-1125.md). */
+      vault?: boolean;
       /** The shell assistant may run here (the person's switch), in task directories under `tasks`; `home` is this computer's user folder (for the guard). */
       shell?: boolean; tasks?: string; home?: string;
       /** Whether `ffmpeg` runs on this computer: the assistant's audio and video errands need it. */

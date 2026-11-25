@@ -32,6 +32,13 @@ export type AgentMode = {
    */
   webSearch?: "live" | "cached" | "disabled";
   /**
+   * The machine owner's shell on Windows under a real sandbox (docs/plans/harness-1125.md §9): `mxc` is Codex's MXC backend (no
+   * administrator, no sandbox user), `elevated` the legacy one someone already set up. Reads anywhere but `deny`, writes only in
+   * `writable`; `egress: "none"` has no network, `packages` reaches only `PACKAGE_DOMAINS` through Codex's managed proxy. Absent: full
+   * access behind the guard (the owner's shell on a computer with neither).
+   */
+  windowsSandbox?: WindowsShellSandbox;
+  /**
    * Run before each answer is validated: a run on a compute node copies the files it wrote back to the server here, so the validator's
    * artifact check reads them (docs/compute-node.md P3).
    */
@@ -50,6 +57,54 @@ export function sandboxProfile(sandbox: NonNullable<AgentMode["sandbox"]>): Reco
     for (const helper of ["arg0-linux", "arg0"]) filesystem[`${sandbox.runtimeTmp.replace(/\/+$/, "")}/${helper}`] = "read";
   }
   return { [SANDBOX_PROFILE]: { description: "Crossline assistant task", filesystem, network: { enabled: false } } };
+}
+
+export type WindowsShellSandbox = { backend: "mxc" | "elevated"; writable: string[]; deny: string[]; egress: "none" | "packages"; env?: Record<string, string> };
+
+/** The permission profile the owner's shell runs under on Windows (Codex `[permissions.<id>]`). */
+export const WINDOWS_SHELL_PROFILE = "crossline-shell";
+/** The only hosts a run that may install packages reaches (the owner's decision of 2026-11-25, docs/plans/harness-1125.md §9.2). */
+export const PACKAGE_DOMAINS = ["pypi.org", "files.pythonhosted.org", "registry.npmjs.org"] as const;
+/** Folders under the person's home whose contents the shell never reads: keys, cloud credentials, the person's own Codex, browser profiles. */
+export const SHELL_DENIED_IN_HOME = [".ssh", ".aws", ".gnupg", ".kube", ".azure", ".codex", "AppData\\Local\\Google\\Chrome\\User Data",
+  "AppData\\Local\\Microsoft\\Edge\\User Data", "AppData\\Local\\BraveSoftware", "AppData\\Roaming\\Mozilla\\Firefox"] as const;
+
+/**
+ * The thread config for the owner's shell under a Windows sandbox. The profile carries at least one `deny`: Codex re-runs a command
+ * that failed in the sandbox without it once the command was approved (`tools/orchestrator.rs`), unless the profile denies a read
+ * (`unsandboxed_execution_allowed`) — so the deny is what keeps every command inside. `features.network_proxy` starts Codex's managed
+ * proxy, which takes the profile's domain list; MXC itself denies every direct connection off the computer.
+ */
+export function windowsShellConfig(sandbox: WindowsShellSandbox): Record<string, unknown> {
+  const filesystem: Record<string, string> = { ":root": "read" };
+  for (const path of sandbox.deny) filesystem[path] = "deny";
+  for (const path of sandbox.writable) filesystem[path] = "write";
+  const network = sandbox.egress === "packages"
+    ? { enabled: true, domains: Object.fromEntries(PACKAGE_DOMAINS.map((domain) => [domain, "allow"])) } : { enabled: false };
+  return {
+    default_permissions: WINDOWS_SHELL_PROFILE,
+    permissions: { [WINDOWS_SHELL_PROFILE]: { description: "Crossline owner's shell", filesystem, network } },
+    ...(sandbox.backend === "mxc" ? { "features.prefer_mxc": true } : {}),
+    ...(sandbox.egress === "packages" ? { "features.network_proxy": true } : {}),
+    ...(sandbox.env ? { shell_environment_policy: { set: sandbox.env } } : {})
+  };
+}
+
+/**
+ * The runtime's own word on its Windows sandbox: `windowsSandbox/readiness` (the effective local selection of the runtime as launched)
+ * and the configured `windows.sandbox`. Undefined when it does not answer within `timeoutMs` (an older runtime, a runtime gone).
+ */
+export async function readWindowsSandbox(client: CodexRpcBoundary, timeoutMs = 5_000): Promise<{ readiness: string; configured?: string } | undefined> {
+  const within = <T>(promise: Promise<T>) => Promise.race([promise, new Promise<undefined>((resolve) => { setTimeout(() => resolve(undefined), timeoutMs).unref?.(); })]);
+  const field = (value: unknown, key: string) => typeof value === "object" && value !== null ? (value as Record<string, unknown>)[key] : undefined;
+  try {
+    const readiness = field(await within(client.request("windowsSandbox/readiness", {})), "status");
+    if (typeof readiness !== "string") return undefined;
+    const configured = field(field(field(await within(client.request("config/read", { includeLayers: false })), "config"), "windows"), "sandbox");
+    return { readiness, ...(typeof configured === "string" ? { configured } : {}) };
+  } catch {
+    return undefined;
+  }
 }
 
 type Handler = AgentMode["answer"];

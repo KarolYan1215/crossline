@@ -322,6 +322,45 @@ export function findBrowser(env: NodeJS.ProcessEnv = process.env): string | unde
   return candidates.find((file) => existsSync(file));
 }
 
+/**
+ * The sensitive profile items of an account whose forms open on this computer (docs/plans/harness-1125.md §9.3, the owner's decision of
+ * 2026-11-25): phone, birth date, student id, address, id and passport numbers live only in this computer's secret store (`apply-<slot>`);
+ * the hosted server keeps only that one is held. The device worker gives its DPAPI store, the standalone node its own DPAPI files.
+ */
+export type NodeVault = {
+  read: (name: string) => Promise<string | undefined>;
+  write: (name: string, value: string) => Promise<void>;
+  remove: (name: string) => Promise<void> | void;
+};
+/** A slot name as the server names it (`phone`, `id_number`); nothing else becomes a file name here. */
+const VAULT_SLOT = /^[a-z][a-z_]{1,39}$/;
+/** The server's placeholder for a sensitive slot (core's `profilePlaceholder`): typed here as the held value, never as itself. */
+const PLACEHOLDER = /^\{\{profile\.([a-z][a-z_]{1,39})\}\}$/;
+export const vaultName = (slot: string) => `apply-${slot}`;
+export const vaultHash = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
+/**
+ * Every held value (and its digits-only form, for a phone the page reformats) replaced by its placeholder, in everything a form answer
+ * carries back to the server — the same rule as core's `redactSensitive`, which this bundle cannot import. Values under four characters
+ * are left: they would blank ordinary words.
+ */
+export function redactHeld<T>(value: T, held: ReadonlyMap<string, string>): T {
+  if (!held.size) return value;
+  const text = (input: string) => {
+    let out = input;
+    for (const [slot, secret] of held) {
+      const plain = secret.trim();
+      if (plain.length < 4) continue;
+      out = out.split(plain).join(`{{profile.${slot}}}`);
+      const digits = plain.replace(/\D/g, "");
+      if (digits.length >= 6) out = out.replace(new RegExp(digits.split("").join("[\\s().+-]*"), "g"), `{{profile.${slot}}}`);
+    }
+    return out;
+  };
+  const walk = (item: unknown): unknown => typeof item === "string" ? text(item) : Array.isArray(item) ? item.map(walk)
+    : item && typeof item === "object" && !Buffer.isBuffer(item) ? Object.fromEntries(Object.entries(item).map(([key, inner]) => [key, walk(inner)])) : item;
+  return walk(value) as T;
+}
+
 /** One operation of the driver, sent by the server; `capture` is the URL patterns whose answers are kept (regular expression sources). */
 export type BrowserOp =
   | { op: "open"; site: string; capture: string[]; listOnly?: boolean }
@@ -329,8 +368,11 @@ export type BrowserOp =
   | { op: "noteState" } | { op: "selfProfile" } | { op: "metrics" } | { op: "front" } | { op: "showMedia"; on: boolean }
   | { op: "fetchMedia"; url: string; referer: string; maxBytes: number } | { op: "close" }
   // The registration-form driver (docs/opportunity-agent.md §10.1): a page of its own beside the reader's, answered with what it blocked.
-  | { op: "formOpen"; host: string; hosts: string[] } | { op: "form"; method: FormMethod; args: unknown[] } | { op: "formPicture"; mask: FormTarget[] }
-  | { op: "formClose" };
+  // `vault` names the sensitive slots the ledger says are held: read here once for the open form, to type and to redact.
+  | { op: "formOpen"; host: string; hosts: string[]; vault?: string[] } | { op: "form"; method: FormMethod; args: unknown[] } | { op: "formPicture"; mask: FormTarget[] }
+  | { op: "formClose" }
+  // The vault (`NodeVault`): a value saved here, answered with the sha256 of what reads back (never the value); a value removed.
+  | { op: "vaultPut"; slot: string; value: string } | { op: "vaultRemove"; slot: string };
 /** The form driver's methods a server may call on a node; `picture` and `close` go through their own ops; `html` and `login` do not go at all. */
 export const FORM_METHODS = ["open", "snapshot", "signals", "multiline", "inputValue", "fill", "select", "check", "upload", "click", "settle", "front", "egress"] as const;
 export type FormMethod = typeof FORM_METHODS[number];
@@ -343,11 +385,13 @@ const HOST_NAME = /^(?=.{1,253}$)[a-z0-9-]+(\.[a-z0-9-]+)+$/;
  * visible window of the person's own Chrome or Edge, as they logged in to it there; a second `open` of the same site reuses the window.
  */
 export function createNodeBrowsers(options: { profilesDir: string; executable?: string; launch?: (profileDir: string, executable: string) => Promise<Context>;
-  /** Where the browsers may go; a test serves its pages on loopback. */ allow?: (url: string) => Promise<boolean> }) {
+  /** Where the browsers may go; a test serves its pages on loopback. */ allow?: (url: string) => Promise<boolean>;
+  /** This computer's secret store for the sensitive profile items; without one the node says no `vault` and the server never asks. */
+  vault?: NodeVault }) {
   const executable = options.executable ?? findBrowser();
   const allow = options.allow ?? publicHttpsOnly();
   let current: { site: string; driver: ReaderDriver & { showMedia: (on: boolean) => void } } | undefined;
-  let form: { page: FormPage; blocked: Array<{ url: string; why: string }>; uploads: string } | undefined;
+  let form: { page: FormPage; blocked: Array<{ url: string; why: string }>; uploads: string; held: Map<string, string> } | undefined;
   const launch = options.launch ?? (async (profileDir: string, exe: string) => {
     const { chromium } = await import("playwright-core");
     return chromium.launchPersistentContext(profileDir, { executablePath: exe, headless: false, viewport: null,
@@ -383,8 +427,14 @@ export function createNodeBrowsers(options: { profilesDir: string; executable?: 
       const profileDir = path.join(options.profilesDir, "forms", host);
       mkdirSync(profileDir, { recursive: true });
       const blocked: Array<{ url: string; why: string }> = [];
+      // The held values, in memory for this form only (gone at `formClose`); a slot the store does not have is simply not typed.
+      const held = new Map<string, string>();
+      for (const slot of (Array.isArray(request.vault) ? request.vault : []).map(String).filter((item) => VAULT_SLOT.test(item)).slice(0, 12)) {
+        const value = await options.vault?.read(vaultName(slot)).catch(() => undefined);
+        if (value) held.set(slot, value);
+      }
       const page = await driveFormContext(await launch(profileDir, executable), { hosts, allow, onBlocked: (url, why) => { if (blocked.length < 50) blocked.push({ url: url.slice(0, 300), why }); } });
-      form = { page, blocked, uploads: path.join(options.profilesDir, "form-uploads", randomUUID()) };
+      form = { page, blocked, uploads: path.join(options.profilesDir, "form-uploads", randomUUID()), held };
       return { ok: true };
     }
     if (request.op === "formClose") { await closeForm(); return undefined; }
@@ -407,15 +457,41 @@ export function createNodeBrowsers(options: { profilesDir: string; executable?: 
       writeFileSync(local, Buffer.from(String(file?.data ?? ""), "base64"));
       args[1] = local;
     }
+    if (request.method === "fill" || request.method === "select") {
+      // A sensitive slot comes as its placeholder and is typed as the value held here; a placeholder is never typed as itself.
+      const given = String(args[1] ?? "");
+      const slot = PLACEHOLDER.exec(given)?.[1];
+      if (slot) {
+        const held = open.held.get(slot);
+        if (!held) throw new Error("NODE_VAULT_MISSING");
+        args[1] = held;
+      } else if (given.includes("{{profile.")) throw new Error("NODE_PLACEHOLDER_REFUSED");
+    }
     const method = open.page[request.method] as (...values: unknown[]) => Promise<unknown>;
     // A failed method still answers with what was refused meanwhile: a navigation the guard aborted is why `open` failed.
     let value: unknown = null;
     let error: string | undefined;
     try { value = await method(...args); } catch (failure) { error = failure instanceof Error ? failure.message.slice(0, 300) : "NODE_FORM_FAILED"; }
     const answer: FormAnswer = { value: value ?? null, url: open.page.url(), closed: open.page.closed(), blocked: open.blocked.splice(0, open.blocked.length), ...(error ? { error } : {}) };
-    return answer;
+    // What the page shows back (a snapshot, a box's value, an address, an error) carries placeholders, never a held value.
+    return redactHeld(answer, open.held);
+  };
+  /** The vault's two operations; the answer to a save is the hash of what reads back, so the server can check it without the value. */
+  const vaultOp = async (request: Extract<BrowserOp, { op: "vaultPut" | "vaultRemove" }>): Promise<unknown> => {
+    const vault = options.vault;
+    if (!vault) throw new Error("NODE_VAULT_MISSING");
+    const slot = String(request.slot);
+    if (!VAULT_SLOT.test(slot)) throw new Error("NODE_VAULT_SLOT_INVALID");
+    if (request.op === "vaultRemove") { await vault.remove(vaultName(slot)); form?.held.delete(slot); return { ok: true }; }
+    const value = typeof request.value === "string" ? request.value : "";
+    if (!value || value.length > 500) throw new Error("NODE_VAULT_VALUE_INVALID");
+    await vault.write(vaultName(slot), value);
+    const back = await vault.read(vaultName(slot)).catch(() => undefined);
+    if (back === undefined) throw new Error("NODE_VAULT_UNREADABLE");
+    return { sha256: vaultHash(back) };
   };
   const handle = async (request: BrowserOp): Promise<unknown> => {
+    if (request.op === "vaultPut" || request.op === "vaultRemove") return vaultOp(request);
     if (request.op === "formOpen" || request.op === "form" || request.op === "formPicture" || request.op === "formClose") return formOp(request);
     if (request.op === "open") {
       if (!executable) throw new Error("NODE_BROWSER_MISSING");
@@ -448,6 +524,6 @@ export function createNodeBrowsers(options: { profilesDir: string; executable?: 
     }
     return undefined;
   };
-  return { available: Boolean(executable), handle, formSubmitFromPhone, closeAll: async () => { await current?.driver.close(); current = undefined; await closeForm(); } };
+  return { available: Boolean(executable), vault: Boolean(options.vault), handle, formSubmitFromPhone, closeAll: async () => { await current?.driver.close(); current = undefined; await closeForm(); } };
 }
 export type NodeBrowsers = ReturnType<typeof createNodeBrowsers>;

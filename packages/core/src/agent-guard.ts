@@ -265,6 +265,34 @@ export function classifyAgentRun(run: { inputs: string[]; homeDir: string; untru
     : { profile: "research", egress: "packages", webSearch: "cached", untrusted: [] };
 }
 
+/**
+ * What enforces the owner's shell on this computer (docs/plans/harness-1125.md §9.1): Codex's MXC Windows sandbox, the legacy elevated
+ * Windows sandbox someone already set up, or nothing but the guard.
+ */
+export type ShellSandbox = "mxc" | "elevated" | "guard-only";
+/**
+ * Reads the runtime's `windowsSandbox/readiness` (a runtime launched with `features.prefer_mxc=true`) and the configured `windows.sandbox`.
+ * With no legacy backend configured, `ready` can only mean MXC (an unconfigured legacy sandbox reports `notConfigured`). With `elevated`
+ * configured, `ready` means MXC or a finished elevated setup — both real sandboxes, recorded as the weaker one. With `unelevated`, `ready`
+ * says nothing (that backend blocks the network only through proxy variables), so it counts as none.
+ */
+export function shellSandboxFrom(readiness: string | undefined, configured: string | undefined): Exclude<ShellSandbox, "guard-only"> | undefined {
+  if (readiness !== "ready") return undefined;
+  if (configured === undefined || configured === "mxc") return "mxc";
+  return configured === "elevated" ? "elevated" : undefined;
+}
+/**
+ * The owner's decision of 2026-11-25 (docs/plans/harness-1125.md §9.1): with a sandbox, the run keeps its profile and the sandbox enforces
+ * it. Without one, a run handed untrusted content is refused, and a research run goes on with no network from its shell at all (`egress:
+ * "none"`, the guard alone) — it then neither uses the network nor reads untrusted content.
+ */
+export function decideShellIsolation(run: RunIsolation, sandbox: Exclude<ShellSandbox, "guard-only"> | undefined):
+  { ok: true; isolation: RunIsolation; sandbox: ShellSandbox } | { ok: false } {
+  if (sandbox) return { ok: true, isolation: run, sandbox };
+  if (run.profile === "untrusted-input") return { ok: false };
+  return { ok: true, isolation: { ...run, egress: "none" }, sandbox: "guard-only" };
+}
+
 /** A change the agent wants to make to files: confined to the task's own directories. */
 export function decideFileChange(paths: string[], context: GuardContext): GuardDecision {
   const t = tFor(context.locale);

@@ -1,4 +1,4 @@
-import { PRODUCT_OWNER, STEP_PRODUCTS, STEP_ROLES, isLinkNeed, mailLinksKey, ownerPreferenceKey, productOf, stepLeavesMachine, tFor, type StepRole } from "@crossline/core";
+import { PRODUCT_OWNER, STEP_PRODUCTS, STEP_ROLES, isLinkNeed, mailLinksKey, ownerPreferenceKey, productOf, tFor, workLeavesMachine, type StepRole } from "@crossline/core";
 import type { CrosslineStore, StoredStepPlan, StoredTaskStep } from "./index";
 import { readLocale } from "./locale";
 
@@ -26,10 +26,10 @@ export function ownerPreferencesFor(store: CrosslineStore, workspaceId: string, 
 }
 
 /** Why a step cannot be handed to the assistant, or "" when it can. */
-export function cannotHandOver(step: Pick<StoredTaskStep, "role" | "title" | "product" | "provides">): string {
+export function cannotHandOver(step: Pick<StoredTaskStep, "role" | "title" | "product" | "provides" | "external">): string {
   if (step.provides) return "这一步是交出本人手里的材料";
   const product = productOf(step.role, step.product);
-  if (product === "action" || stepLeavesMachine(step.title)) return "对外的动作由本人做";
+  if (product === "action" || workLeavesMachine(step.title, step.external)) return "对外的动作由本人做";
   if (product === "ability") return "能力要本人练";
   if (step.role === "decide") return "有后果的选择由本人做";
   return "";

@@ -74,6 +74,15 @@ export function stepLeavesMachine(title: string): boolean {
   // The one word list (`external-action.ts`) carries 「上传」「付款」 and "upload"/"pay" since 2026-11-25.
   return mentionsExternalAction(cleaned);
 }
+/**
+ * Whether a piece of work leaves the machine, for what is shown and sorted (the task's 「对外 · 本人操作」, an application's submission
+ * step, who may take a step): the model's `external` when the work carries it (docs/plans/harness-1125.md §9.5), else the words of
+ * `stepLeavesMachine` (work written before the field). The safety gates — a grown workflow's manifest, an automation's mail draft — do not
+ * use this: they keep 「the model says external **or** the words do」, because there the manifest itself is the model's.
+ */
+export function workLeavesMachine(title: string, model: boolean | undefined): boolean {
+  return typeof model === "boolean" ? model : stepLeavesMachine(title);
+}
 const READS = /只读|读取|采集|浏览|核验|调研|搜索|检索|查找|下载公开|read|fetch|scrape|search|verify|browse|collect|look up|check|download public/i;
 const short = (value: unknown, max: number) => typeof value === "string" && value.trim().length > 0 && value.length <= max;
 

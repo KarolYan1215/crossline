@@ -45,7 +45,9 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
   /** What the runtime does during a turn before it answers: tool items, and requests the client has to answer. */
   script?: AgentScript; threadResponse?: Record<string, unknown>;
   /** Skills of the person's library the runtime has installed (off until a run switches them on), e.g. `crossline-mine:media`. */
-  library?: string[] } = {}): {
+  library?: string[];
+  /** What `windowsSandbox/readiness` answers, and the `windows.sandbox` that `config/read` shows (docs/plans/harness-1125.md §9). */
+  windowsSandbox?: { status: string; configured?: string } } = {}): {
   rpc: JsonLineRpcClient;
   turns: () => number;
   /** The first text part of each turn (a fresh run's: the Skill named and its input). */
@@ -134,7 +136,8 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
         ...(options.library ?? []).map((name) => ({ name, path: libraryPath(name), enabled: libraryEnabled.get(libraryPath(name)) ?? false }))] }] }
       : request.method === "skills/config/write" ? { effectiveEnabled: request.params?.enabled === true }
       : request.method === "account/read" ? { account: { type: "chatgpt" } }
-      : request.method === "config/read" ? { config: {} }
+      : request.method === "config/read" ? { config: options.windowsSandbox?.configured ? { windows: { sandbox: options.windowsSandbox.configured } } : {} }
+      : request.method === "windowsSandbox/readiness" ? { status: options.windowsSandbox?.status ?? "notConfigured" }
       : request.method === "thread/loaded/list" ? { data: startedThreads.filter((id) => !options.lostThreads?.includes(id) && !options.unloadedThreads?.includes(id)), nextCursor: null }
       : request.method === "thread/resume" ? { thread: { id: String(request.params?.threadId) }, approvalPolicy: "untrusted", sandbox: { type: "readOnly" }, instructionSources: [], ...(options.threadResponse ?? {}) }
       : request.method === "thread/compact/start" ? {}

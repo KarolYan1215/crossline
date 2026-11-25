@@ -49,7 +49,9 @@ export async function openFormBrowser(options: FormBrowserOptions): Promise<Form
  * worker has no screen). The node keeps its own per-site profile and its own address rules (public https only); every answer carries the
  * page's address, whether it was closed and what the node refused, which go to `onBlocked` here. An upload is sent as the file's bytes.
  */
-export async function openNodeFormBrowser(link: NodeBrowserLink, options: { host: string; hosts: string[]; onBlocked: (url: string, why: string) => void }): Promise<FormBrowser & { node: string }> {
+export async function openNodeFormBrowser(link: NodeBrowserLink, options: { host: string; hosts: string[]; onBlocked: (url: string, why: string) => void;
+  /** The sensitive slots the computer holds and types for their placeholders (docs/plans/harness-1125.md §9.3); never a value. */
+  vault?: string[] }): Promise<FormBrowser & { node: string }> {
   let url = "";
   let closed = false;
   const call = async (method: FormMethod, args: unknown[] = [], timeoutMs = 120_000): Promise<unknown> => {
@@ -65,7 +67,7 @@ export async function openNodeFormBrowser(link: NodeBrowserLink, options: { host
     if (answer.error) throw new Error(answer.error);
     return answer.value;
   };
-  await link.call({ op: "formOpen", host: options.host, hosts: options.hosts }, 120_000);
+  await link.call({ op: "formOpen", host: options.host, hosts: options.hosts, ...(options.vault?.length ? { vault: options.vault } : {}) }, 120_000);
   const target = (item: DriverTarget) => ({ ...(item.ref ? { ref: item.ref } : {}), role: item.role, name: item.name });
   return {
     node: link.host,

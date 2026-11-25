@@ -370,7 +370,7 @@ test("paths: only the server's skill roots are mirrored; a run's cwd goes to the
 test("a node with a browser drives a reader's page for the server: operations in order, a large video back in pieces; one without is not offered", async () => {
   const seen: string[] = [];
   const video = Buffer.alloc(20 * 1_048_576, 7);
-  const browsers: NodeBrowsers = { available: true, closeAll: async () => {}, formSubmitFromPhone: async () => ({ ok: false, why: "test" }),
+  const browsers: NodeBrowsers = { available: true, vault: false, closeAll: async () => {}, formSubmitFromPhone: async () => ({ ok: false, why: "test" }),
     handle: async (request) => { seen.push(request.op); return request.op === "goto" ? 200 : request.op === "fetchMedia" ? { state: "ok", bytes: video, contentType: "video/mp4" } : null; } };
   await setUp({ browsers });
   const link = await until(() => hub!.browserFor("ws-owner"));
@@ -381,6 +381,17 @@ test("a node with a browser drives a reader's page for the server: operations in
   expect(media).toMatchObject({ state: "ok", contentType: "video/mp4" });
   expect(media.bytes.equals(video)).toBe(true);
   expect(seen).toEqual(["open", "goto", "fetchMedia"]);
+  // It said nothing of a vault, so the server never treats it as holding the sensitive profile items.
+  expect(link.vault).toBeUndefined();
+});
+
+test("a node whose browser keeps the sensitive profile items says so, and the server's link knows it (docs/plans/harness-1125.md §9.3)", async () => {
+  const browsers: NodeBrowsers = { available: true, vault: true, closeAll: async () => {}, formSubmitFromPhone: async () => ({ ok: false, why: "test" }),
+    handle: async (request) => request.op === "vaultPut" ? { sha256: "h" } : null };
+  await setUp({ browsers });
+  const link = await until(() => hub!.browserFor("ws-owner"));
+  expect(link.vault).toBe(true);
+  expect(await link.call({ op: "vaultPut", slot: "phone", value: "x" })).toEqual({ sha256: "h" });
 });
 
 test("a node without a browser is not offered one", async () => {

@@ -105,5 +105,9 @@
   "代填遇到这个网站自己的登录页时，由程序填入并登录；密码只存在本机密钥库，不进账本、模型、截图和备份。不用于付款；验证码和二次验证仍交本人。": "When filling meets this site's own login page, the program types the login and signs in; the password stays in this computer's secret store, never in the ledger, a model, a screenshot or a backup. Never used for payment; captchas and two-factor checks are still yours.",
   "网站登录只能存在本人电脑上的 Crossline 里": "Website logins can only be kept in Crossline on your own computer",
   "用户名": "Username",
-  "添加网站登录": "Add a website login"
+  "添加网站登录": "Add a website login",
+  "敏感项只存在本人电脑上：电脑上的 Crossline 连上后再保存或删除": "Sensitive items are kept only on your own computer: save or delete them once Crossline on that computer is connected",
+  "电脑上没有核对通过，没有保存": "Your computer did not confirm it; not saved",
+  "已保存在本人电脑上": "Saved on your computer",
+  "{{act}}「{{title}}」在等本人的电脑：截止前两天电脑还没连上。请打开电脑上的 Crossline，或自己去网站提交。": "The {{act}} for \"{{title}}\" is waiting for your computer, which has not connected with two days left before the deadline. Turn on Crossline on your computer, or submit it on the site yourself."
 }

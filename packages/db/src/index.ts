@@ -133,7 +133,9 @@ export type StepPlanInput = {
     /** What the step produces (`STEP_TYPES`), the needs it uses, and on a provide step the need it asks for (packages/core/src/steps.ts). */
     product?: "material" | "output" | "ability" | "action"; uses?: string[]; provides?: string;
     /** The planner's readings (core `PlannedStep`, 2026-11-22): going to an event at its own time; physical exercise. */
-    attends?: boolean; workout?: boolean }>;
+    attends?: boolean; workout?: boolean;
+    /** The model's reading that the step leaves the machine or commits the person (core `external-action.ts`); absent on plans before 2026-11-25. */
+    external?: boolean }>;
   /** Material only the person has, asked for before anything that uses it (provide steps). */
   needs?: Array<{ id: string; what: string; why: string; basis?: string; kind?: "personal" | "reference" }>;
   /** The content units read from the person's material, and what only the person can answer (packages/core/src/steps.ts). */
@@ -3222,7 +3224,8 @@ export class CrosslineStore {
           JSON.stringify(step.dependsOn.map((dep) => rename.get(dep) ?? dep)), step.notBefore, step.dueBy, step.schedulable ? 1 : 0,
           step.executor, step.tickOutcome, now, JSON.stringify({ covers: step.covers ?? [], why: step.why ?? "", ...(step.aiAssist?.tool ? { aiAssist: step.aiAssist } : {}), ...(step.firstAction ? { firstAction: step.firstAction } : {}),
             ...(step.product ? { product: step.product } : {}), ...(step.uses?.length ? { uses: step.uses } : {}), ...(step.provides ? { provides: step.provides } : {}),
-            ...(step.attends ? { attends: true } : {}), ...(step.workout ? { workout: true } : {}) }));
+            ...(step.attends ? { attends: true } : {}), ...(step.workout ? { workout: true } : {}),
+            ...(typeof step.external === "boolean" ? { external: step.external } : {}) }));
       });
       this.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.steps_planned:${workOrderId}:${version}`, type: "task.steps_planned",
         entityId: workOrderId, payload: { version, archetypeId: plan.archetypeId, steps: plan.steps.length, kept: kept.length, reason } });
@@ -3249,7 +3252,7 @@ export class CrosslineStore {
         dependsOn: JSON.parse(String(row.depends_on_json)) as string[], notBefore: String(row.not_before), dueBy: String(row.due_by),
         schedulable: Number(row.schedulable) === 1, executor: row.executor as StoredTaskStep["executor"], tickOutcome: String(row.tick_outcome),
         status: row.status as StoredTaskStep["status"], progressQuarter: Number(row.progress_quarter), updatedAt: String(row.updated_at),
-        ...(JSON.parse(String(row.detail_json ?? "{}")) as Pick<StoredTaskStep, "covers" | "why" | "aiAssist" | "firstAction" | "product" | "uses" | "provides" | "attends" | "workout">) });
+        ...(JSON.parse(String(row.detail_json ?? "{}")) as Pick<StoredTaskStep, "covers" | "why" | "aiAssist" | "firstAction" | "product" | "uses" | "provides" | "attends" | "workout" | "external">) });
       byOrder.set(String(row.work_order_id), list);
     }
     return plans.map((row) => ({ workOrderId: String(row.work_order_id), version: Number(row.version), archetypeId: String(row.archetype_id),

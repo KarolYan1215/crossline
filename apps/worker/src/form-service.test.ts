@@ -200,7 +200,10 @@ describe("form service", () => {
     expect(await forms.handle("GET", "/v1/forms", other, undefined)).toMatchObject({ status: 403 });
     paired = true;
     expect(await forms.handle("GET", "/v1/forms", other, undefined)).toMatchObject({ status: 200, body: { screen: false } });
-    expect(await forms.handle("POST", "/v1/forms/queue", other, { opportunity: opportunity(), choice: "register" })).toMatchObject({ status: 409, body: { code: "FORM_NEEDS_SCREEN" } });
+    // Its computer is not connected: the run waits in the queue for it (docs/plans/harness-1125.md §9.4), never on this machine's screen.
+    expect(await forms.handle("POST", "/v1/forms/queue", other, { opportunity: opportunity(), choice: "register" })).toMatchObject({ status: 200 });
+    await forms.pass(other);
+    expect(readFormRuns(store, other)[0]?.state).toBe("queued");
     // The owner still has this computer's screen.
     expect(await forms.handle("GET", "/v1/forms", ws, undefined)).toMatchObject({ status: 200, body: { screen: true } });
   });

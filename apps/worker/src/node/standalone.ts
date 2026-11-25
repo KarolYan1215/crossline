@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { startNodeAgent, type AppServerLines, type NodeAgentStatus } from "./agent";
 import { API_KEY_SHAPE, loginNodeWithApiKey, withControl } from "./control";
 import { NODE_RUNTIME_FLAGS, TOKEN_GONE } from "./protocol";
-import { createNodeBrowsers } from "./browser";
+import { createNodeBrowsers, type NodeVault } from "./browser";
 import { levelOf, remoteLocalAction, remoteLocalView, type RemoteLocalAction } from "./remote";
 import type { RemoteLevel } from "@crossline/core/remote-control";
 import { listenForBrowser } from "../browser-port";
@@ -79,6 +79,17 @@ let token: string | undefined = (() => { try { return dpapi("Unprotect", readFil
 const readToken = () => token;
 const saveToken = (value: string) => { writeFileSync(tokenFile, dpapi("Protect", Buffer.from(value, "utf8")), { mode: 0o600 }); token = value; };
 const forgetToken = () => { rmSync(tokenFile, { force: true }); token = undefined; };
+/**
+ * The account's sensitive profile items (docs/plans/harness-1125.md §9.3): one DPAPI file each under `vault/`, only on Windows — off it
+ * there is no data protection and nothing is written in plain text, so the node offers no vault.
+ */
+const vaultDir = path.join(home, "vault");
+const vaultFile = (name: string) => path.join(vaultDir, `${name.replace(/[^a-z0-9_-]/gi, "_")}.bin`);
+const vault: NodeVault | undefined = process.platform === "win32" ? {
+  read: async (name) => { const file = vaultFile(name); if (!existsSync(file)) return undefined; return dpapi("Unprotect", readFileSync(file)).toString("utf8"); },
+  write: async (name, value) => { mkdirSync(vaultDir, { recursive: true }); writeFileSync(vaultFile(name), dpapi("Protect", Buffer.from(value, "utf8")), { mode: 0o600 }); },
+  remove: (name) => { rmSync(vaultFile(name), { force: true }); }
+} : undefined;
 
 // ── Codex, in this program's own home ───────────────────────────────────────────────────────────────────────────────────────────
 function appServer(): AppServerLines {
@@ -210,7 +221,7 @@ function reconcile(): void {
   if (paused) { if (agent) { agent.stop(); agent = undefined; log({ type: "node.paused" }); } return; }
   if (!agent) {
     agent = startNodeAgent({ url: state.site, token: current, dir: path.join(home, "relay"), spawn: appServer, host: hostname(), role: "standalone", level: levelOf(state), remoteDir: home,
-      browsers: createNodeBrowsers({ profilesDir: path.join(home, "browser-profiles") }),
+      browsers: createNodeBrowsers({ profilesDir: path.join(home, "browser-profiles"), ...(vault ? { vault } : {}) }),
       log: (event) => log(event) });
     log({ type: "node.relay_started" });
   }

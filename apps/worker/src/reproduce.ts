@@ -4,13 +4,15 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { codeUsesNetwork, tFor, type Locale } from "@crossline/core";
+import { codexProcessEnvironment, resolveCodexCommand } from "@crossline/codex";
 
 /**
  * Reproducible deliverables (docs/plans/harness-1125.md §7): when the assistant hands over an HTML report, a chart or a data file, the
  * result counts only if the `run.*` script it left beside them makes the same files again. The worker re-runs it once, in a copy of the
- * task directory with the deliverables removed, without the network (dead proxies and a script that names no connection; the machine
- * has no sandbox for it, so this is the guard's level, not an enforced one), and compares hashes. What is checked is the re-run, not
- * the assistant's word.
+ * task directory with the deliverables removed, without the network (dead proxies and a script that names no connection), and compares
+ * hashes. A run that worked in a Windows sandbox (docs/plans/harness-1125.md §9) is re-run in the same one, through `codex sandbox`:
+ * reads anywhere but the same secrets, writes only in the copy, no network at all. Otherwise this is the guard's level, not an enforced
+ * one. What is checked is the re-run, not the assistant's word.
  */
 export const REPRODUCIBLE = /\.(html?|png|jpe?g|svg|csv|tsv|json|xlsx|parquet)$/i;
 export const RUN_SCRIPTS = ["run.py", "run.mjs", "run.ps1"] as const;
@@ -27,7 +29,8 @@ const OWN_FILES = /^(audit|progress)\.json$/i;
 
 /** The worker's environment minus everything of its own (tokens, keys, paths to the ledger), with every proxy pointed at a dead port. */
 function offlineEnv(copy: string): NodeJS.ProcessEnv {
-  const keep = ["PATH", "SystemRoot", "SYSTEMROOT", "windir", "COMSPEC", "PATHEXT", "USERPROFILE", "HOME", "APPDATA", "LOCALAPPDATA", "HOMEDRIVE", "HOMEPATH", "LANG", "LC_ALL"];
+  // SystemDrive and LOCALAPPDATA: MXC refuses to start without the host's own values of both.
+  const keep = ["PATH", "SystemRoot", "SYSTEMROOT", "SystemDrive", "windir", "COMSPEC", "PATHEXT", "USERPROFILE", "HOME", "APPDATA", "LOCALAPPDATA", "HOMEDRIVE", "HOMEPATH", "LANG", "LC_ALL"];
   const env: NodeJS.ProcessEnv = {};
   for (const name of keep) if (process.env[name] !== undefined) env[name] = process.env[name];
   const dead = "http://127.0.0.1:9";
@@ -46,11 +49,29 @@ function launcher(script: string, copy: string): [string, string[]] {
   return [process.platform === "win32" ? "python" : "python3", [script]];
 }
 
-function runScript(command: string, args: string[], cwd: string, timeoutMs: number): Promise<{ code: number | null; timedOut: boolean; stderr: string }> {
+/** The re-run's own sandbox: the profile the shell had, minus the network, with only the copy writable. */
+export type ReproduceSandbox = { backend: "mxc" | "elevated"; deny: string[] };
+const REPRODUCE_PROFILE = "crossline-reproduce";
+/** A TOML basic string (JSON's escapes are TOML's) for a `-c` override. */
+const toml = (value: string) => JSON.stringify(value);
+
+/**
+ * The command that runs `command args` inside `codex sandbox` with a named profile given as `-c` overrides (the runtime's own CLI, no
+ * config file written): `:root` readable, `deny` unreadable, the copy writable, no network. MXC is chosen with `features.prefer_mxc`; an
+ * elevated sandbox is the one already configured in the runtime's home.
+ */
+export function sandboxedCommand(codex: { command: string; args: string[] }, sandbox: ReproduceSandbox, copy: string, command: string, args: string[]): [string, string[]] {
+  const filesystem = [`":root"="read"`, ...sandbox.deny.map((entry) => `${toml(entry)}="deny"`), `${toml(copy)}="write"`].join(", ");
+  return [codex.command, [...codex.args, ...(sandbox.backend === "mxc" ? ["-c", "features.prefer_mxc=true"] : []),
+    "-c", `permissions.${REPRODUCE_PROFILE}={filesystem={${filesystem}}, network={enabled=false}}`,
+    "sandbox", "-P", REPRODUCE_PROFILE, "-C", copy, "--", command, ...args]];
+}
+
+function runScript(command: string, args: string[], cwd: string, timeoutMs: number, extraEnv: NodeJS.ProcessEnv = {}): Promise<{ code: number | null; timedOut: boolean; stderr: string }> {
   return new Promise((resolve) => {
     let stderr = "";
     let timedOut = false;
-    const child = spawn(command, args, { cwd, env: offlineEnv(cwd), windowsHide: true, stdio: ["ignore", "ignore", "pipe"], detached: process.platform !== "win32" });
+    const child = spawn(command, args, { cwd, env: { ...offlineEnv(cwd), ...extraEnv }, windowsHide: true, stdio: ["ignore", "ignore", "pipe"], detached: process.platform !== "win32" });
     child.stderr?.on("data", (chunk: Buffer) => { stderr = (stderr + chunk.toString("utf8")).slice(-2000); });
     const timer = setTimeout(() => {
       timedOut = true;
@@ -68,7 +89,8 @@ function runScript(command: string, args: string[], cwd: string, timeoutMs: numb
  * a run that delivered none of them needs nothing. Exact hashes only (a PNG or a report with a timestamp in it is a mismatch, reported
  * as one).
  */
-export async function reproduceDeliverables(directory: string, artifacts: Array<{ path: string; sha256: string }>, options: { timeoutMs?: number } = {}): Promise<Reproduction> {
+export async function reproduceDeliverables(directory: string, artifacts: Array<{ path: string; sha256: string }>,
+  options: { timeoutMs?: number; sandbox?: ReproduceSandbox; codex?: { command: string; args: string[]; env: NodeJS.ProcessEnv } } = {}): Promise<Reproduction> {
   const delivered = artifacts.filter((artifact) => REPRODUCIBLE.test(artifact.path) && !OWN_FILES.test(artifact.path));
   if (!delivered.length) return { needed: false };
   const files = delivered.map((artifact) => artifact.path);
@@ -79,10 +101,24 @@ export async function reproduceDeliverables(directory: string, artifacts: Array<
   const skip = new Set([...delivered.map((artifact) => path.resolve(directory, artifact.path).toLowerCase()),
     ...["audit.json", "progress.json"].map((name) => path.join(directory, name).toLowerCase())]);
   try {
-    cpSync(directory, copy, { recursive: true, filter: (source) => path.basename(source) !== ".git" && !skip.has(path.resolve(source).toLowerCase()) });
+    // A sandboxed run kept its temp files and package caches in `.tmp` (agent-task.ts `windowsShellSandbox`): never part of the result.
+    const ownTmp = path.join(directory, ".tmp").toLowerCase();
+    cpSync(directory, copy, { recursive: true, filter: (source) => path.basename(source) !== ".git" && !skip.has(path.resolve(source).toLowerCase()) && path.resolve(source).toLowerCase() !== ownTmp });
     mkdirSync(path.join(copy, ".tmp"), { recursive: true });
-    const [command, args] = launcher(script, copy);
-    const ran = await runScript(command, args, copy, options.timeoutMs ?? REPRODUCE_TIMEOUT_MS);
+    const [bare, bareArgs] = launcher(script, copy);
+    let launch: [string, string[]] = [bare, bareArgs];
+    let extraEnv: NodeJS.ProcessEnv = {};
+    if (options.sandbox) {
+      // The same sandbox as the run, through the runtime's CLI; a runtime that cannot be found fails the check rather than running bare.
+      let codex = options.codex;
+      if (!codex) {
+        try { const env = codexProcessEnvironment(); codex = { ...resolveCodexCommand(env), env }; }
+        catch (error) { return { needed: true, reproduced: false, script, files, problem: "failed", detail: error instanceof Error ? error.message.slice(0, 300) : "" }; }
+      }
+      launch = sandboxedCommand(codex, options.sandbox, copy, bare, bareArgs);
+      extraEnv = { ...(codex.env.CODEX_HOME ? { CODEX_HOME: codex.env.CODEX_HOME } : {}) };
+    }
+    const ran = await runScript(launch[0], launch[1], copy, options.timeoutMs ?? REPRODUCE_TIMEOUT_MS, extraEnv);
     if (ran.timedOut) return { needed: true, reproduced: false, script, files, problem: "timeout" };
     if (ran.code !== 0) {
       // The error line itself (Python's last `XError: …`, Node's `Error: …`), not the stack around it.

@@ -27,7 +27,10 @@ export function ApplyCard({ items, runs, screen, kit, logins = [] }: { items: Ap
     const response = await fetch(url, { method, headers: { "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) }).catch(() => undefined);
     if (!response?.ok) {
       const code = await response?.json().then((json: { code?: string }) => json.code ?? "").catch(() => "") ?? "";
-      setNote(code === "FORM_NEEDS_SCREEN" ? t("没有连上带浏览器的电脑节点，代填要在本人电脑上运行") : code.startsWith("PROFILE_") ? t("格式不对，没有保存") : t("没有完成，请重试"));
+      setNote(code === "FORM_NEEDS_SCREEN" ? t("没有连上带浏览器的电脑节点，代填要在本人电脑上运行")
+        : code === "SENSITIVE_NEEDS_COMPUTER" ? t("敏感项只存在本人电脑上：电脑上的 Crossline 连上后再保存或删除")
+        : code === "SENSITIVE_VERIFY_FAILED" ? t("电脑上没有核对通过，没有保存")
+        : code.startsWith("PROFILE_") ? t("格式不对，没有保存") : t("没有完成，请重试"));
       return false;
     }
     setNote("");
@@ -40,7 +43,7 @@ export function ApplyCard({ items, runs, screen, kit, logins = [] }: { items: Ap
     <header><h3>{t("报名资料卡")}</h3><small>{t("代填报名表时只用这里的内容；敏感项只存在本机密钥库，不进账本、导出和备份")}</small></header>
     {items.map((item) => <div className="st-row" key={item.slot}>
       <span className="st-row-label">{t(SLOT_LABEL[item.slot])}{item.sensitive && <> · {t("敏感")}</>}
-        <small>{!item.present ? t("未填") : item.sensitive ? t("已保存在本机") : item.value}
+        <small>{!item.present ? t("未填") : item.sensitive ? (screen ? t("已保存在本机") : t("已保存在本人电脑上")) : item.value}
           {item.usedBy.length > 0 && <> · {t("用于 {{count}} 次报名：{{titles}}", { count: item.usedBy.length, titles: item.usedBy.slice(0, 3).map((use) => use.title).join("、") })}</>}</small></span>
       {editing === item.slot
         ? <span className="st-inline-form">

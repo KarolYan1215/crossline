@@ -3,7 +3,7 @@
 import { useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { BookOpen, Bot, CalendarClock, Check, Clock, Pencil, SlidersHorizontal } from "lucide-react";
-import { localStamp, plainEstimateWords, stepLeavesMachine } from "@crossline/core";
+import { localStamp, plainEstimateWords, workLeavesMachine } from "@crossline/core";
 import type { TaskDetail } from "../../lib/task-detail";
 import type { Locale, Translate } from "../../lib/i18n";
 import { weekdayShort } from "../../lib/i18n";
@@ -125,7 +125,7 @@ function StepsPanel({ detail, editing, onEditing }: { detail: TaskDetail; editin
               {kind === "agent" && <Tag>{t("助手准备 · {{state}}", { state: t(agentState(detail, step)) })}</Tag>}
               {kind === "done" && <Tag tone="ok">{t(step.status === "done" ? "已完成" : "已跳过")}</Tag>}
               {kind !== "done" && kind !== "agent" && <span className="step-owner">{t(waits ? "等待" : step.executor === "human" ? "本人" : "本人 · 可交给助手")}</span>}
-              {kind !== "done" && step.executor !== "agent" && stepLeavesMachine(step.title) && <span className="step-owner" data-tone="external">{t("对外 · 本人操作")}</span>}
+              {kind !== "done" && step.executor !== "agent" && workLeavesMachine(step.title, step.external) && <span className="step-owner" data-tone="external">{t("对外 · 本人操作")}</span>}
               {step.schedulable && kind !== "done" && <small className="mono">{minutesText(locale, step.estimate.p50Minutes)}</small>}
               {(step.notBefore || step.dueBy) && kind !== "done" && <small className="mono">{step.notBefore ? dayText(locale, step.notBefore) : "…"} → {step.dueBy ? dayText(locale, step.dueBy) : "…"}</small>}
             </span>

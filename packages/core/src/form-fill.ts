@@ -427,6 +427,11 @@ export type StoredFormRun = FormRun & {
   calendarSkipped?: string;
   /** When the person was asked about a confirmation mail that had not come within 48 hours. */
   receiptAskedAt?: string;
+  /**
+   * When the person was pushed, once, to wake their computer or submit it themselves: the run was still queued for a computer that was
+   * not connected with a deadline within 48 hours (docs/plans/harness-1125.md §9.4, `computerAskDue`).
+   */
+  computerAskedAt?: string;
   /** The browser closed while the run waited (a restart, the person closing it): 「继续」 starts again from the opportunity's page. */
   sessionLost?: boolean;
   /** Approved drafts for long answers, by id, and the file each upload may use. */
@@ -436,6 +441,21 @@ export type StoredFormRun = FormRun & {
 };
 
 export const FORM_RUNS_SETTING = "opportunity.formRuns";
+
+/** How long before a deadline a run still queued for a sleeping computer is worth one push (the owner's decision of 2026-11-25). */
+export const COMPUTER_ASK_BEFORE_MS = 48 * 3_600_000;
+/**
+ * Whether a run waiting for the person's computer should push once now (docs/plans/harness-1125.md §9.4): still queued, not asked yet,
+ * and the earliest deadline still ahead starts within 48 hours. A deadline is a day; its start (00:00 UTC) is taken, so the push comes
+ * early rather than late. No deadline, or only past ones, never pushes.
+ */
+export function computerAskDue(run: Pick<StoredFormRun, "state" | "computerAskedAt" | "opportunity">, now: Date): boolean {
+  if (run.state !== "queued" || run.computerAskedAt) return false;
+  const today = now.toISOString().slice(0, 10);
+  const deadline = run.opportunity.deadlines.map((item) => item.day).filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(day) && day >= today).sort()[0];
+  if (!deadline) return false;
+  return Date.parse(`${deadline}T00:00:00Z`) - now.getTime() <= COMPUTER_ASK_BEFORE_MS;
+}
 /** Each profile item's name as the person reads it (translated where shown). */
 export const SLOT_LABEL: Record<ApplicationSlot, string> = {
   full_name: "姓名", preferred_name: "常用名", email: "邮箱", school: "学校", major: "专业", degree_stage: "在读阶段", graduation_year: "毕业年份",

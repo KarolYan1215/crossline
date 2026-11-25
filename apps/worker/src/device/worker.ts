@@ -25,6 +25,8 @@ import { DEVICE_PASSES } from "./mode";
 import { createOutbox, type OutboxItem, type SendResult } from "./outbox";
 import { activityItem, commitItems, readDeviceState, recordingItems, reviveDocuments, sourceItems, tooLargeForSite, writeDeviceState, type QueuedItem } from "./payloads";
 import { startDeviceServer } from "./server";
+/** The secret store's folder for what the node keeps for the hosted account (the vault of sensitive profile items). */
+const NODE_VAULT_SCOPE = "node-vault";
 
 /**
  * The worker of a linked device (docs/device-mode.md). It reads this machine — screen activity, idle stretches, input rhythm, authorized
@@ -188,7 +190,10 @@ export async function runDeviceWorker(options: DeviceWorkerOptions): Promise<voi
   // sends it the account's model runs; it starts none of its own.
   const node = nodeEnabled(dataDir) && link.token && !options.runOnce
     ? startNodeAgent({ url: link.url, token: link.token, dir: path.join(deviceDir, "node"), host: label, log, spawn: localAppServer, role: "device",
-      level: nodeLevel(dataDir), remoteDir: deviceDir, remoteHooks, browsers: createNodeBrowsers({ profilesDir: path.join(deviceDir, "node", "browser-profiles") }),
+      level: nodeLevel(dataDir), remoteDir: deviceDir, remoteHooks, browsers: createNodeBrowsers({ profilesDir: path.join(deviceDir, "node", "browser-profiles"),
+        // The account's sensitive profile items live in this computer's own secret store only (docs/plans/harness-1125.md §9.3).
+        vault: { read: (name) => options.secrets.read(NODE_VAULT_SCOPE, name), write: (name, value) => options.secrets.write(NODE_VAULT_SCOPE, name, value),
+          remove: (name) => options.secrets.remove(NODE_VAULT_SCOPE, name) } }),
       protect: [deviceDir] }) : undefined;
   if (node) process.on("exit", () => node.stop());
   // Who this computer's Codex is signed in as, for the device page (read once; an API-key sign-in there updates it).

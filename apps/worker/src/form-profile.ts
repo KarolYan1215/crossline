@@ -1,11 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { APPLICATION_SLOTS, LOGIN_VAULT_SETTING, isSensitiveSlot, loginFor, loginHostOf, loginProblem, loginSecretName, normalForCompare, readLoginVault, secretNameOf,
+import { APPLICATION_SLOTS, LOGIN_VAULT_SETTING, isSensitiveSlot, loginFor, loginHostOf, loginProblem, loginSecretName, normalForCompare, profilePlaceholder, readLoginVault, secretNameOf,
   type ApplicationSlot, type LoginSecret, type LoginVaultEntry } from "@crossline/core";
 import type { SecretStore } from "@crossline/connectors";
 import { applicationProfile, recordSensitiveSlot, saveProfileFact, removeProfileFact, type CrosslineStore } from "@crossline/db";
 import type { ProfileValues } from "./form-engine";
+import { vaultHash } from "./node/browser";
+import type { NodeBrowserLink } from "./node/hub";
 
 /**
  * The application profile's worker side (docs/opportunity-agent.md §12): a sensitive slot's value is written to and read from the
@@ -47,14 +49,20 @@ export function removeSlot(store: CrosslineStore, secrets: SecretStore, workspac
   return removeProfileFact(store, workspaceId, slot);
 }
 
-/** The values one run may use, read once: the ledger's confirmed facts and the secret store's sensitive slots. */
-export function profileValues(store: CrosslineStore, secrets: SecretStore, workspaceId: string): ProfileValues {
+/**
+ * The values one run may use, read once: the ledger's confirmed facts and the sensitive slots. Where the sensitive ones are (§9.3 of
+ * docs/plans/harness-1125.md): `here`, this worker's secret store (the machine owner's own computer with a screen); `computer`, the
+ * person's computer the form opens on — the engine gets the placeholder, which that computer types as the value it holds and returns
+ * in everything it reads back (node/browser.ts), so a value never reaches this worker; `nowhere`, a computer too old to hold them.
+ */
+export function profileValues(store: CrosslineStore, secrets: SecretStore, workspaceId: string, sensitiveAt: "here" | "computer" | "nowhere" = "here"): ProfileValues {
   const items = applicationProfile(store, workspaceId);
   const present = new Set(items.filter((item) => item.present).map((item) => item.slot));
   const cache = new Map<ApplicationSlot, Promise<string | undefined>>();
+  const sensitive = (slot: ApplicationSlot): Promise<string | undefined> => !present.has(slot) || sensitiveAt === "nowhere" ? Promise.resolve(undefined)
+    : sensitiveAt === "computer" ? Promise.resolve(profilePlaceholder(slot)) : secrets.read(workspaceId, secretNameOf(slot)).catch(() => undefined);
   const get = (slot: ApplicationSlot) => {
-    if (!cache.has(slot)) cache.set(slot, isSensitiveSlot(slot)
-      ? (present.has(slot) ? secrets.read(workspaceId, secretNameOf(slot)).catch(() => undefined) : Promise.resolve(undefined))
+    if (!cache.has(slot)) cache.set(slot, isSensitiveSlot(slot) ? sensitive(slot)
       : Promise.resolve(items.find((item) => item.slot === slot)?.value));
     return cache.get(slot)!;
   };
@@ -74,6 +82,77 @@ export function profileValues(store: CrosslineStore, secrets: SecretStore, works
       return existsSync(file) ? file : undefined;
     }
   };
+}
+
+// ———————————————————————————————————————— sensitive items on the person's computer (docs/plans/harness-1125.md §9.3)
+
+/** The computer that holds an account's sensitive items: a connected node whose `hello` said `vault`. */
+export type VaultLink = Pick<NodeBrowserLink, "host" | "call" | "vault">;
+/** The sensitive slots the ledger says are held (wherever they are). */
+export const heldSensitiveSlots = (store: CrosslineStore, workspaceId: string): ApplicationSlot[] =>
+  applicationProfile(store, workspaceId).filter((item) => item.present && isSensitiveSlot(item.slot)).map((item) => item.slot);
+
+/** Saves a value in the computer's secret store and checks the hash of what reads back there; true only when it matches. */
+async function putOnComputer(link: VaultLink, slot: ApplicationSlot, value: string): Promise<boolean> {
+  if (!link.vault) return false;
+  const answer = await link.call({ op: "vaultPut", slot, value }, 60_000).catch(() => undefined) as { sha256?: unknown } | null | undefined;
+  return typeof answer?.sha256 === "string" && answer.sha256 === vaultHash(value);
+}
+
+/**
+ * The person saved an item for an account whose forms open on their computer: a sensitive one goes to that computer's secret store
+ * only, through the node's connection (in this worker's memory for the call, never written, logged or answered back), and is recorded
+ * here as held only once the computer's hash of it matches. Any older copy in this worker's store goes then. No computer connected, or
+ * one that cannot hold it: refused, nothing changed.
+ */
+export async function saveSlotOnComputer(store: CrosslineStore, secrets: SecretStore, workspaceId: string, slot: ApplicationSlot, value: string, sourceRef: string,
+  link: VaultLink | undefined): Promise<{ ok: true } | { ok: false; code: string }> {
+  if (!(slot in APPLICATION_SLOTS)) return { ok: false, code: "PROFILE_SLOT_UNKNOWN" };
+  if (!isSensitiveSlot(slot)) return saveSlot(store, secrets, workspaceId, slot, value, sourceRef);
+  const problem = slotValueProblem(slot, value);
+  if (problem) return { ok: false, code: problem };
+  if (!link?.vault) return { ok: false, code: "SENSITIVE_NEEDS_COMPUTER" };
+  if (!await putOnComputer(link, slot, value.trim())) return { ok: false, code: "SENSITIVE_VERIFY_FAILED" };
+  secrets.remove(workspaceId, secretNameOf(slot));
+  recordSensitiveSlot(store, workspaceId, slot, true);
+  return { ok: true };
+}
+
+/** Removing a sensitive item held on the computer: there first (it must be connected), then any older copy here, then the record. */
+export async function removeSlotOnComputer(store: CrosslineStore, secrets: SecretStore, workspaceId: string, slot: ApplicationSlot,
+  link: VaultLink | undefined): Promise<{ ok: boolean; code?: string }> {
+  if (!(slot in APPLICATION_SLOTS)) return { ok: false };
+  if (!isSensitiveSlot(slot)) return { ok: removeProfileFact(store, workspaceId, slot) };
+  if (!link?.vault) return { ok: false, code: "SENSITIVE_NEEDS_COMPUTER" };
+  const removed = await link.call({ op: "vaultRemove", slot }, 60_000).then(() => true, () => false);
+  if (!removed) return { ok: false, code: "SENSITIVE_NEEDS_COMPUTER" };
+  secrets.remove(workspaceId, secretNameOf(slot));
+  recordSensitiveSlot(store, workspaceId, slot, false);
+  return { ok: true };
+}
+
+/**
+ * Moving the copies this worker still holds to the computer (the owner's decision of 2026-11-25): each held item found in this
+ * worker's store is saved on the computer, and only when the computer's hash of what it reads back matches is this copy deleted — a
+ * deletion that cannot be undone, so a mismatch, an error or a missing answer keeps it for the next try. The ledger's record (held)
+ * does not change; the move is one `apply.profile.saved` event with `movedToComputer`. Nothing here logs or records a value.
+ */
+export async function moveSensitiveToComputer(store: CrosslineStore, secrets: SecretStore, workspaceId: string, link: VaultLink,
+  log: (event: Record<string, unknown>) => void = () => undefined): Promise<{ moved: ApplicationSlot[]; kept: ApplicationSlot[] }> {
+  const moved: ApplicationSlot[] = [];
+  const kept: ApplicationSlot[] = [];
+  if (!link.vault) return { moved, kept };
+  for (const slot of heldSensitiveSlots(store, workspaceId)) {
+    const value = await secrets.read(workspaceId, secretNameOf(slot)).catch(() => undefined);
+    if (!value) continue;
+    if (!await putOnComputer(link, slot, value)) { kept.push(slot); log({ event: "apply.sensitive.move_failed", workspaceId, slot, node: link.host }); continue; }
+    secrets.remove(workspaceId, secretNameOf(slot));
+    moved.push(slot);
+    store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "system", workspaceId, type: "apply.profile.saved", entityId: slot,
+      idempotencyKey: `apply.profile.moved:${slot}:${Date.now()}:${randomUUID().slice(0, 8)}`, payload: { slot, sensitive: true, movedToComputer: link.host } });
+    log({ event: "apply.sensitive.moved", workspaceId, slot, node: link.host });
+  }
+  return { moved, kept };
 }
 
 // ———————————————————————————————————————— saved website logins (docs/plans/harness-1125.md §5)

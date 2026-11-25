@@ -20,7 +20,10 @@ const INTERRUPT: ReadonlySet<string> = new Set([
   // The person's own running timer.
   "timer_overrun",
   // Reminders the person set themselves: an errand's departure, a timed reminder, an automation that only reminds.
-  "reminder", "departure", "automation_remind"
+  "reminder", "departure", "automation_remind",
+  // A registration queued for the person's computer, still asleep with the deadline within 48 hours: only they can wake it or submit
+  // themselves (docs/plans/harness-1125.md §9.4). Once per run; its home is the 小帮手 line the push opens, nothing on Today or the brief.
+  "form_computer"
 ]);
 const ALWAYS: ReadonlySet<string> = new Set(["mail_check"]);
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { classifyAgentRun, codeUsesNetwork, decideCommand, decideFileChange, decideMcpTool, isSecretPath, networkUse, type GuardContext } from "./agent-guard";
+import { classifyAgentRun, codeUsesNetwork, decideCommand, decideShellIsolation, shellSandboxFrom, decideFileChange, decideMcpTool, isSecretPath, networkUse, type GuardContext } from "./agent-guard";
 
 const context: GuardContext = { taskDir: "C:\\Users\\karol\\Crossline\\ai\\t1", writableRoots: ["C:\\Users\\karol\\Crossline\\ai\\t1\\repo"], homeDir: "C:\\Users\\karol" };
 const decide = (command: string) => decideCommand(command, context);
@@ -170,5 +170,25 @@ describe("classifying the owner's shell runs", () => {
     expect(classifyAgentRun({ inputs: ["C:\\Users\\karol\\Downloads\\syllabus.pdf"], homeDir: "C:\\Users\\karol" }).untrusted).toEqual(["download"]);
     expect(classifyAgentRun({ inputs: ["C:\\work\\offer.eml", "C:\\work\\page.html"], homeDir: "C:\\Users\\karol" }).untrusted).toEqual(["mail", "page"]);
     expect(classifyAgentRun({ inputs: ["/home/ana/Downloads/a.csv"], homeDir: "/home/ana" }).profile).toBe("untrusted-input");
+  });
+});
+
+describe("which sandbox holds the owner's shell (docs/plans/harness-1125.md §9.1)", () => {
+  test("readiness from a runtime launched with prefer_mxc: ready with no legacy backend is MXC; unelevated or not ready is none", () => {
+    expect(shellSandboxFrom("ready", undefined)).toBe("mxc");
+    expect(shellSandboxFrom("ready", "mxc")).toBe("mxc");
+    expect(shellSandboxFrom("ready", "elevated")).toBe("elevated");
+    expect(shellSandboxFrom("ready", "unelevated")).toBeUndefined();
+    expect(shellSandboxFrom("notConfigured", undefined)).toBeUndefined();
+    expect(shellSandboxFrom("updateRequired", "elevated")).toBeUndefined();
+    expect(shellSandboxFrom(undefined, undefined)).toBeUndefined();
+  });
+  test("with a sandbox the profile stands; without one an untrusted run is refused and a research run loses the network", () => {
+    const research = classifyAgentRun({ inputs: [], homeDir: "C:\\Users\\karol" });
+    const mail = classifyAgentRun({ inputs: [], homeDir: "C:\\Users\\karol", untrusted: ["mail"] });
+    expect(decideShellIsolation(research, "mxc")).toEqual({ ok: true, isolation: research, sandbox: "mxc" });
+    expect(decideShellIsolation(mail, "elevated")).toEqual({ ok: true, isolation: mail, sandbox: "elevated" });
+    expect(decideShellIsolation(mail, undefined)).toEqual({ ok: false });
+    expect(decideShellIsolation(research, undefined)).toEqual({ ok: true, isolation: { ...research, egress: "none" }, sandbox: "guard-only" });
   });
 });

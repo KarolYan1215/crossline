@@ -205,7 +205,7 @@ export function startNodeAgent(options: NodeAgentOptions) {
           runtime?.write(JSON.stringify({ method: "initialized" }));
           const offered = remote?.status();
           send({ t: "hello", protocol: NODE_PROTOCOL, codex: agent, platform: process.platform, host,
-            role: options.role, capacity: options.capacity ?? nodeCapacity(), ...(options.browsers?.available ? { browser: true } : {}),
+            role: options.role, capacity: options.capacity ?? nodeCapacity(), ...(options.browsers?.available ? { browser: true, ...(options.browsers.vault ? { vault: true } : {}) } : {}),
             ...(shell ? { shell: true, tasks: tasksRoot, home: homedir(), ffmpeg: hasFfmpeg(), ...shellEnvironment() } : {}),
             ...(offered && level !== "off" ? { remote: { level, phones: offered.phones, folders: offered.authorised, transcribe: offered.transcribe, forms: offered.forms } } : {}) });
         });

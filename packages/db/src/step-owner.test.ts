@@ -36,6 +36,16 @@ test("a step handed to the assistant is remembered for that kind on the line; ac
   expect(ownerPreferencesFor(store, ws, "research").size).toBe(0);
 });
 
+test("whether a step leaves the machine is the model's reading, kept with the step; the words decide only for a step without it", () => {
+  const saved = seed(plan([step("a", "summarize", "把 L5 总结整理成发给导师的版本", { product: "material", external: false }),
+    step("b", "summarize", "整理 L6 摘要", { product: "material", external: true }), step("c", "summarize", "把摘要发给导师", { product: "material" })]));
+  const [kept, says, words] = saved.steps;
+  expect(store.getStepPlan(ws, "t")!.steps.map((item) => item.external)).toEqual([false, true, undefined]);
+  expect(chooseStepOwner(store, ws, "t", kept!.id, "assistant", "o")).toMatchObject({ ok: true });
+  expect(chooseStepOwner(store, ws, "t", says!.id, "assistant", "o")).toEqual({ ok: false, reason: "对外的动作由本人做" });
+  expect(chooseStepOwner(store, ws, "t", words!.id, "assistant", "o")).toEqual({ ok: false, reason: "对外的动作由本人做" });
+});
+
 test("a need for a link the task's own mail carries is met by it, without asking (W-158)", () => {
   const raw = plan([step("a", "practice", "完成 GLACIER 身份验证", { product: "action", uses: ["n1", "n2"] })]);
   raw.needs = [{ id: "n1", what: "GLACIER 身份验证链接", why: "打开验证页", basis: "邮件提到链接", kind: "personal" },

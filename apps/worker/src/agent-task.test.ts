@@ -28,10 +28,12 @@ const summary = (over: object = {}) => JSON.stringify({
 /** Files this workspace owns, as an upload or a folder's copy is stored. */
 const own = (file: string, id = path.basename(file)) => store.saveSourceDocument({ id, ownerId: "user-1", workspaceId, kind: "text", fileName: path.basename(file),
   mediaType: "text/plain", sha256: id, uri: pathToFileURL(file).href, extractedText: "", extractionStatus: "done", createdAt: "2026-11-03T00:00:00.000Z" });
-const fake = (answers: string[], options: { script?: AgentScript } = {}) => sharedRuntime(answers, AGENT_SKILL, options);
+const fake = (answers: string[], options: { script?: AgentScript; windowsSandbox?: { status: string; configured?: string }; threadResponse?: Record<string, unknown> } = {}) =>
+  sharedRuntime(answers, AGENT_SKILL, options);
 const input = { title: "整理 ECE 555 的 Cadence 材料", what: "读课程文件，整理成练习清单和笔记", category: "read_research_organize" as const, humanPart: "做作业和提交" };
-const runner = (rpc: ReturnType<typeof fake>["rpc"], extra: { ask?: (r: { kind: string; subject: string; rule: string; reason: string }) => Promise<boolean> } = {}) =>
-  createAgentRunner(store, workspaceId, "C:\\repo", () => rpc, { outputRoot: path.join(root, "ai"), homeDir: "C:\\Users\\karol", ...extra });
+/** Off Windows unless a test says otherwise: only there is the owner's shell put in Codex's sandbox (docs/plans/harness-1125.md §9). */
+const runner = (rpc: ReturnType<typeof fake>["rpc"], extra: { ask?: (r: { kind: string; subject: string; rule: string; reason: string }) => Promise<boolean>; platform?: string } = {}) =>
+  createAgentRunner(store, workspaceId, "C:\\repo", () => rpc, { outputRoot: path.join(root, "ai"), homeDir: "C:\\Users\\karol", platform: "linux", ...extra });
 
 test("a kind of work that has not been approved does not start, and no thread is opened for it", async () => {
   // The person already chose, and chose nothing (a workspace that never chose has three kinds on by default).
@@ -188,6 +190,72 @@ test("the owner's shell runs under a profile chosen from what it is handed, held
   const audit = JSON.parse(readFileSync(path.join(root, "ai", "t-mail", "audit.json"), "utf8"));
   expect(audit).toMatchObject({ profile: "untrusted-input", isolation: "guard-only", untrusted: ["mail"], egress: "none" });
   expect(store.listEvents(workspaceId, { type: "agent.task.requested", entityId: "t-mail" })[0]!.payload).toMatchObject({ profile: "untrusted-input", isolation: "guard-only" });
+});
+
+test("on Windows with MXC the owner's shell runs in Codex's sandbox: task directory writable, secrets denied, packages only from PyPI and npm", async () => {
+  approveCategory(store, workspaceId, "read_research_organize");
+  const started = { activePermissionProfile: { id: "crossline-shell" }, sandbox: { type: "workspaceWrite", networkAccess: false } };
+  const research = fake([summary()], { windowsSandbox: { status: "ready" }, threadResponse: { ...started, sandbox: { type: "workspaceWrite", networkAccess: true } },
+    script: async () => { writeFileSync(path.join(root, "ai", "t-mxc", "notes.md"), "笔记"); } });
+  const outcome = await runner(research.rpc, { platform: "win32" })({ ...input, taskId: "t-mxc" });
+  expect(outcome).toMatchObject({ state: "done", sandbox: "mxc", isolation: { profile: "research", egress: "packages" } });
+  const params = research.threadStarts()[0]!;
+  expect(params).not.toHaveProperty("sandbox");
+  const config = params.config as Record<string, unknown>;
+  expect(config).toMatchObject({ default_permissions: "crossline-shell", "features.prefer_mxc": true, "features.network_proxy": true, web_search: "cached" });
+  const profile = (config.permissions as Record<string, { filesystem: Record<string, string>; network: Record<string, unknown> }>)["crossline-shell"]!;
+  expect(profile.network).toEqual({ enabled: true, domains: { "pypi.org": "allow", "files.pythonhosted.org": "allow", "registry.npmjs.org": "allow" } });
+  expect(profile.filesystem).toMatchObject({ ":root": "read", [path.join(root, "ai", "t-mxc")]: "write", "C:\\Users\\karol\\.ssh": "deny" });
+  expect((config.shell_environment_policy as { set: Record<string, string> }).set.TEMP).toBe(path.join(root, "ai", "t-mxc", ".tmp"));
+  expect(JSON.parse(readFileSync(path.join(root, "ai", "t-mxc", "audit.json"), "utf8"))).toMatchObject({ profile: "research", isolation: "mxc", egress: "packages" });
+  expect(store.listEvents(workspaceId, { type: "agent.task.requested", entityId: "t-mxc" })[0]!.payload).toMatchObject({ isolation: "mxc" });
+  // Handed a mail: the same sandbox with no network and no proxy.
+  const mail = fake([summary()], { windowsSandbox: { status: "ready" }, threadResponse: started, script: async () => { writeFileSync(path.join(root, "ai", "t-mxc-mail", "notes.md"), "笔记"); } });
+  expect(await runner(mail.rpc, { platform: "win32" })({ ...input, taskId: "t-mxc-mail", untrusted: ["mail"] })).toMatchObject({ state: "done", sandbox: "mxc" });
+  const mailConfig = mail.threadStarts()[0]!.config as Record<string, unknown>;
+  expect((mailConfig.permissions as Record<string, { network: unknown }>)["crossline-shell"]!.network).toEqual({ enabled: false });
+  expect(mailConfig).not.toHaveProperty("features.network_proxy");
+  // A runtime that started the thread without the profile (or with the network on for a run that has none) runs nothing.
+  const wrong = fake([summary()], { windowsSandbox: { status: "ready" }, threadResponse: { ...started, sandbox: { type: "workspaceWrite", networkAccess: true } } });
+  expect(await runner(wrong.rpc, { platform: "win32" })({ ...input, taskId: "t-mxc-wrong", untrusted: ["mail"] })).toMatchObject({ state: "blocked", code: "SKILL_SANDBOX_UNSUPPORTED" });
+});
+
+test("on Windows without MXC: an elevated sandbox already set up is used; with none, untrusted runs are refused and research runs lose the network", async () => {
+  approveCategory(store, workspaceId, "read_research_organize");
+  const started = { activePermissionProfile: { id: "crossline-shell" }, sandbox: { type: "workspaceWrite", networkAccess: false } };
+  const elevated = fake([summary()], { windowsSandbox: { status: "ready", configured: "elevated" }, threadResponse: started,
+    script: async () => { writeFileSync(path.join(root, "ai", "t-elev", "notes.md"), "笔记"); } });
+  expect(await runner(elevated.rpc, { platform: "win32" })({ ...input, taskId: "t-elev", untrusted: ["mail"] })).toMatchObject({ state: "done", sandbox: "elevated" });
+  const elevatedConfig = elevated.threadStarts()[0]!.config as Record<string, unknown>;
+  expect(elevatedConfig).toMatchObject({ default_permissions: "crossline-shell" });
+  expect(elevatedConfig).not.toHaveProperty("features.prefer_mxc");
+  // Nothing set up (and an unelevated backend counts as nothing): a mail is not read at all.
+  for (const windowsSandbox of [{ status: "notConfigured" }, { status: "ready", configured: "unelevated" }]) {
+    const none = fake([summary()], { windowsSandbox });
+    expect(await runner(none.rpc, { platform: "win32" })({ ...input, taskId: "t-none", untrusted: ["mail"] })).toMatchObject({ state: "blocked", code: "AGENT_SANDBOX_UNAVAILABLE" });
+    expect(none.threadStarts()).toHaveLength(0);
+  }
+  expect(store.listEvents(workspaceId, { type: "agent.task.requested", entityId: "t-none" })).toHaveLength(0);
+  // A research run still runs, behind the guard alone and with no network from its shell.
+  const decisions: string[] = [];
+  const research = fake([summary()], { windowsSandbox: { status: "updateRequired", configured: "elevated" }, script: async ({ ask }) => {
+    writeFileSync(path.join(root, "ai", "t-bare", "notes.md"), "笔记");
+    decisions.push(String((await ask("item/commandExecution/requestApproval", { command: "pip install matplotlib" })).decision));
+  } });
+  expect(await runner(research.rpc, { platform: "win32" })({ ...input, taskId: "t-bare" })).toMatchObject({ state: "done", sandbox: "guard-only", isolation: { egress: "none" } });
+  expect(research.threadStarts()[0]).toMatchObject({ sandbox: "danger-full-access" });
+  expect(decisions).toEqual(["decline"]);
+  expect(JSON.parse(readFileSync(path.join(root, "ai", "t-bare", "audit.json"), "utf8"))).toMatchObject({ isolation: "guard-only", egress: "none" });
+});
+
+test("a host the sandbox's network proxy blocked is never let through, whatever the command", async () => {
+  const audit: AuditRecord = { commands: [], filesChanged: [], mcpCalls: [], searches: [], decisions: [], requests: { total: 0, allowed: 0 } };
+  const answer = createAgentAnswerer({ taskDir: "C:\\ai\\t", homeDir: "C:\\Users\\karol", egress: "packages" }, audit, new Map(), async () => true);
+  expect(await answer("item/commandExecution/requestApproval", { command: "pip install requests", networkApprovalContext: { host: "evil.example", protocol: "https" } }))
+    .toEqual({ decision: "decline" });
+  expect(await answer("item/commandExecution/requestApproval", { command: "pip install requests", proposedNetworkPolicyAmendments: [{ host: "evil.example", action: "allow" }] }))
+    .toEqual({ decision: "decline" });
+  expect(audit.decisions.map((d) => d.rule)).toEqual(["permissions.extra", "permissions.extra"]);
 });
 
 test("a delivered data file counts only when the run's script makes it again; otherwise the result is held for the person", async () => {

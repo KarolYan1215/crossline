@@ -11,7 +11,7 @@ import { markClientBusy, priorityForSkill, withModelSlot, type ModelPriority } f
 import { bindForRun } from "./runtime-pool";
 import { accountModels, fitRoute, routeForChoice } from "./model-catalog";
 
-import { registerAgentThread, SANDBOX_PROFILE, sandboxProfile, type AgentMode } from "./agent-mode";
+import { registerAgentThread, SANDBOX_PROFILE, sandboxProfile, WINDOWS_SHELL_PROFILE, windowsShellConfig, type AgentMode } from "./agent-mode";
 
 export type AnalysisAudit = { threadId?: string; turnId?: string;
   /** How many times a turn went silent for so long it was interrupted and sent again. Absent means none did. */
@@ -905,7 +905,7 @@ async function openThread(scope: Scope, threadParams: Record<string, unknown>, c
       const field = /unknown configuration field `([^`]+)`/.exec(message)?.[1];
       const dropped = field ? Object.keys(config).filter((key) => key === field || key.startsWith(`${field}.`)) : [];
       // The sandbox is never dropped to get a thread started: a runtime that cannot take the profile does not run the shell at all.
-      if (dropped.some((key) => ["default_permissions", "permissions", "shell_environment_policy"].includes(key))) throw withDetail(new Error("SKILL_SANDBOX_UNSUPPORTED"), message.slice(0, 400));
+      if (dropped.some((key) => ["default_permissions", "permissions", "shell_environment_policy", "features.prefer_mxc", "features.network_proxy"].includes(key))) throw withDetail(new Error("SKILL_SANDBOX_UNSUPPORTED"), message.slice(0, 400));
       if (!dropped.length) {
         if (!isThreadLost(error) && /configuration|unknown variant/i.test(message)) throw withDetail(new Error("SKILL_CONFIG_REJECTED"), message.slice(0, 400));
         throw error;
@@ -942,10 +942,12 @@ async function startAgentThread<T>(scope: Scope, options: SkillRunOptions<T>, co
     // In the sandbox: a named permission profile (writes in the task directory, reads only what it is given, no network) and a
     // command environment that carries none of the worker's own variables.
     ...(agent.sandbox ? { default_permissions: SANDBOX_PROFILE, permissions: sandboxProfile(agent.sandbox),
-      shell_environment_policy: { inherit: "core", set: { HOME: agent.sandbox.writable, TMPDIR: `${agent.sandbox.writable}/.tmp`, ...(agent.sandbox.env ?? {}) } } } : {})
+      shell_environment_policy: { inherit: "core", set: { HOME: agent.sandbox.writable, TMPDIR: `${agent.sandbox.writable}/.tmp`, ...(agent.sandbox.env ?? {}) } } } : {}),
+    // The owner's shell on Windows under MXC (or a legacy elevated sandbox already set up): docs/plans/harness-1125.md §9.
+    ...(agent.windowsSandbox ? windowsShellConfig(agent.windowsSandbox) : {})
   };
   const threadParams = {
-    cwd: agent.cwd, ...(agent.sandbox ? {} : { sandbox: "danger-full-access" }), approvalPolicy: "untrusted", approvalsReviewer: "user",
+    cwd: agent.cwd, ...(agent.sandbox || agent.windowsSandbox ? {} : { sandbox: "danger-full-access" }), approvalPolicy: "untrusted", approvalsReviewer: "user",
     // Tools Crossline answers itself (reading a site behind the person's login, so the assistant never holds the browser profile).
     dynamicTools: (options.tools?.specs ?? []).map((spec) => ({ type: "function", name: spec.name, description: spec.description, inputSchema: spec.inputSchema })),
     ephemeral: false, experimentalRawEvents: false,
@@ -960,6 +962,9 @@ async function startAgentThread<T>(scope: Scope, options: SkillRunOptions<T>, co
   if (started?.approvalPolicy !== "untrusted") fail("SKILL_PERMISSION_DENIED");
   // And, sandboxed, under the profile it was given: anything else (full access, the runtime's default) is refused before a turn.
   if (agent.sandbox && (record(started?.activePermissionProfile)?.id !== SANDBOX_PROFILE || record(started?.sandbox)?.type === "dangerFullAccess")) fail("SKILL_SANDBOX_UNSUPPORTED");
+  // The same for the owner's Windows shell, and a run with no network must not have been given any.
+  if (agent.windowsSandbox && (record(started?.activePermissionProfile)?.id !== WINDOWS_SHELL_PROFILE || record(started?.sandbox)?.type === "dangerFullAccess"
+    || (agent.windowsSandbox.egress === "none" && record(started?.sandbox)?.networkAccess === true))) fail("SKILL_SANDBOX_UNSUPPORTED");
   return threadId;
 }
 
@@ -1617,7 +1622,10 @@ async function openRunThread<T>(client: CodexRpcBoundary, scope: Scope, options:
     audit.resumed = true;
     return threadId;
   } catch (error) {
-    if (!isThreadLost(error)) throw error;
+    // A conversation begun before the owner's shell had a Windows sandbox may come back with the permissions it started with: it is
+    // left, and the run starts a new one under the sandbox (which is checked again).
+    const outgrown = options.agent?.windowsSandbox !== undefined && error instanceof Error && error.message === "SKILL_SANDBOX_UNSUPPORTED";
+    if (!isThreadLost(error) && !outgrown) throw error;
     console.info(JSON.stringify({ type: "skill.resume_lost", skill: options.skillName, threadId: resumeId }));
     if (options.resumeOnly) fail("SKILL_THREAD_LOST");
     audit.resumed = false;
