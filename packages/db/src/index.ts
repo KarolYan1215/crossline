@@ -815,6 +815,7 @@ export class CrosslineStore {
         app TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', category TEXT NOT NULL, idle INTEGER NOT NULL DEFAULT 0
       );
       CREATE INDEX IF NOT EXISTS activity_segments_by_time ON activity_segments (workspace_id, end_at);
+      CREATE INDEX IF NOT EXISTS activity_segments_by_start ON activity_segments (workspace_id, start_at, app);
       CREATE TABLE IF NOT EXISTS model_usage (
         id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id TEXT NOT NULL, skill TEXT NOT NULL, tier TEXT NOT NULL DEFAULT '',
         model TEXT NOT NULL DEFAULT '', effort TEXT NOT NULL DEFAULT '', spend_mode TEXT NOT NULL DEFAULT 'normal',
@@ -2782,6 +2783,29 @@ export class CrosslineStore {
       const insert = this.#prepare("INSERT INTO activity_segments (workspace_id, start_at, end_at, app, title, category, idle) VALUES (?, ?, ?, ?, '', ?, ?)");
       let written = 0;
       for (const segment of segments) if (segment.start >= sinceIso) { insert.run(workspaceId, segment.start, segment.end, segment.app, segment.category, segment.idle ? 1 : 0); written += 1; }
+      return written;
+    }).immediate();
+  }
+
+  /**
+   * A linked device's segments with their titles (2026-11-24, masked on the device): one row per workspace, start and app — a segment
+   * sent again (it grew, or the send was retried) updates that row instead of adding one. A segment whose end is before `titlesBefore`
+   * keeps no title, so a late resend cannot bring back what retention blanked.
+   */
+  upsertDeviceActivitySegments(workspaceId: string, segments: Array<{ start: string; end: string; app: string; category: string; idle: boolean; title?: string }>,
+    titlesBefore: string): number {
+    return this.#db.transaction(() => {
+      const find = this.#prepare("SELECT id FROM activity_segments WHERE workspace_id = ? AND start_at = ? AND app = ? ORDER BY id LIMIT 1");
+      const update = this.#prepare("UPDATE activity_segments SET end_at = ?, title = ?, category = ?, idle = ? WHERE id = ?");
+      const insert = this.#prepare("INSERT INTO activity_segments (workspace_id, start_at, end_at, app, title, category, idle) VALUES (?, ?, ?, ?, ?, ?, ?)");
+      let written = 0;
+      for (const segment of segments) {
+        const title = segment.idle || segment.end < titlesBefore ? "" : segment.title ?? "";
+        const row = find.get(workspaceId, segment.start, segment.app) as { id: number } | undefined;
+        if (row) update.run(segment.end, title, segment.category, segment.idle ? 1 : 0, row.id);
+        else insert.run(workspaceId, segment.start, segment.end, segment.app, title, segment.category, segment.idle ? 1 : 0);
+        written += 1;
+      }
       return written;
     }).immediate();
   }

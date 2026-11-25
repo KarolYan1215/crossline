@@ -98,20 +98,29 @@ test("the node switch is kept beside the link, needs a link first, restarts the 
   expect(nodeEnabled(dir)).toBe(false);
 });
 
-test("the activity snapshot carries no window title and no app name, only a salted token; nothing changes, nothing is queued", () => {
+test("the activity snapshot carries no app name, only a salted token, and titles only masked; nothing changes, nothing is queued", () => {
   store.setSetting(ws, LOCAL_ACTIVITY_CONSENT, "granted");
   store.setSetting(ws, ACTIVITY_DETAIL_CONSENT, "granted");
   store.setSetting(ws, SLEEP_TRACKING_CONSENT, "granted");
+  store.setSetting(ws, SOURCE_FOLDERS_SETTING, JSON.stringify([{ id: "f1", path: "D:\\research\\tapeout-data", label: "tapeout-data", addedAt: "", lines: [], linesBy: "", localOnly: true }]));
   const at = new Date();
   at.setUTCMinutes(0, 0, 0);
-  store.recordActivityReading({ workspaceId: ws, at: at.toISOString(), intervalSeconds: 60, app: "WINWORD.EXE", title: "离婚协议.docx", category: "writing", idle: false });
+  const minute = (n: number) => new Date(at.getTime() + n * 60_000).toISOString();
+  store.recordActivityReading({ workspaceId: ws, at: minute(0), intervalSeconds: 60, app: "WINWORD.EXE", title: "Cover letter.docx - Word", category: "writing", idle: false });
+  store.recordActivityReading({ workspaceId: ws, at: minute(5), intervalSeconds: 60, app: "Code.exe", title: "tapeout-data - Visual Studio Code", category: "coding", idle: false });
+  store.recordActivityReading({ workspaceId: ws, at: minute(10), intervalSeconds: 60, app: "virtuoso", title: "gf180mcu PDK cells.lib", category: "coding", idle: false });
   const state = readDeviceState(dir);
   const payload = buildActivityPayload(store, ws, state);
   const text = JSON.stringify(payload);
-  expect(text).not.toContain("离婚协议");
   expect(text).not.toContain("WINWORD");
+  expect(text).not.toMatch(/tapeout|gf180|cells\.lib/);
+  expect(payload.segments.map((segment) => segment.title)).toEqual(["Cover letter.docx - Word", "[仅本地]", "[仅本地]"]);
   expect(payload.segments[0]).toMatchObject({ category: "writing", app: appToken(state.salt, "WINWORD.EXE") });
   expect(payload.segments[0]!.app).toMatch(/^[a-f0-9]{8}$/);
+  // Without the detail consent, no segment and no title leaves.
+  store.setSetting(ws, ACTIVITY_DETAIL_CONSENT, "denied");
+  expect(buildActivityPayload(store, ws, readDeviceState(dir)).segments).toEqual([]);
+  store.setSetting(ws, ACTIVITY_DETAIL_CONSENT, "granted");
   expect(payload.consents).toMatchObject({ activity: true, detail: true, sleep: true, rhythm: false });
   // The first send carries the last weeks; the next the last two days; after that, the same snapshot is not queued again.
   expect(activityItem(store, ws, state)).toMatchObject({ route: "/api/device/activity", supersedes: "activity" });

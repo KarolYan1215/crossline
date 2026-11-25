@@ -9,6 +9,7 @@ import {
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { SecretStore } from "@crossline/connectors";
 import { formRunOf, queueFormRun, readFormRuns, saveFormRun, type CrosslineStore } from "@crossline/db";
+import { nightHoldForForm } from "./gates/night";
 import { fillForm, watchForPersonSubmit, type FormDriver, type FormFallback } from "./form-engine";
 import { createBrowserUseTool } from "./browser-use";
 import { browserUseFallback, stagehandFallback } from "./form-fallbacks";
@@ -40,6 +41,8 @@ const RECEIPT_WAIT_MS = 48 * 3_600_000;
 
 export type FormServiceDeps = {
   store: CrosslineStore;
+  /** The person's time zone, for the night gate (J6): wired, every submission it may let go is judged (an unknown zone counts as night). */
+  timeZone?: (workspaceId: string) => string | undefined;
   secrets: SecretStore;
   cwd: string;
   dataDir: string;
@@ -243,7 +246,9 @@ export function createFormService(deps: FormServiceDeps) {
         holdSite: (detail) => holdSite(store, workspaceId, start.host, { at: new Date().toISOString(), where: start.opportunity.title, why: detail.slice(0, 120) }),
         shotFile: (_run, pageNo, label) => path.join(shots, `${String(pageNo).padStart(2, "0")}-${label}-${Date.now()}.png`),
         hash: hashForm, fallbacks: fallbacksFor(workspaceId), ...(workspaceId === deps.owner() ? {} : { personSubmits: true }),
-        ...(session.profileDir && loginsHere(workspaceId) ? { logins: savedLogins(store, secrets, workspaceId, runHosts) } : {})
+        ...(session.profileDir && loginsHere(workspaceId) ? { logins: savedLogins(store, secrets, workspaceId, runHosts) } : {}),
+        ...(deps.timeZone ? { night: (next: StoredFormRun) => { const timeZone = deps.timeZone?.(workspaceId);
+          return nightHoldForForm({ store, workspaceId, client: deps.client(workspaceId), cwd: deps.cwd, ...(timeZone ? { timeZone } : {}) }, next); } } : {})
       }, { resume });
     } finally { session.busy = false; }
     if (run.state === "submitted") { run = afterSubmit(workspaceId, run); await closeSession(start.id); }

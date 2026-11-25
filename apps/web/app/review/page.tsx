@@ -32,6 +32,10 @@ import { OutOfView } from "./out-of-view";
 import type { DiligenceReport } from "../onboarding/onboarding-types";
 import { DiligenceReview } from "./diligence-review";
 import { localeFor, tOf } from "../../lib/locale";
+import { loadGateReview } from "../../lib/gates";
+import { loadDrill } from "../../lib/drill";
+import { GatesBlock } from "./gates-block";
+import { DrillBlock } from "./drill-block";
 import { monthDay } from "../../lib/i18n";
 
 export const dynamic = "force-dynamic";
@@ -205,6 +209,8 @@ export default async function ReviewPage() {
     <h2 className="rv-part ds-serif">{t("回看")}</h2>
     {/* Sections fill the width: the wide ones run across it, the rest pair up in two columns on a large screen (2026-10-21). */}
     <div className="review-grid">
+    <GatesBlock review={loadGateReview(ctx, new Date(since).toISOString(), new Date().toISOString())} t={t} />
+    <DrillBlock initial={loadDrill(ctx)} />
     {week.hasData && <section className="rd-card review-block review-wide" aria-labelledby="rv-week">
       <header className="rd-card-head"><h2 id="rv-week" className="ds-serif">{t("本周各线投入")}</h2>
         <small>{t("{{start}}–{{end}}，单位小时。计划按日程记下的 {{count}} 天累计，实际为计时。", { start: week.start.slice(5).replace("-", "/"), end: week.end.slice(5).replace("-", "/"), count: week.recordedDays })}</small></header>

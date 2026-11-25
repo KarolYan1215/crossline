@@ -1,0 +1,14 @@
+# Execution gates (J1–J7, 2026-11-24)
+
+Full design, decisions and implementation record: `docs/plans/execution-gates-1124.md`.
+
+- A gate is one Skill run (`crossline-gate-*`) over evidence the code gathered; code records the answer (`gate.judged`), never judges it. The schema is the only check on the content (owner, round 4: no hard-coded business rules; thresholds are goal descriptions in the Skills).
+- `apps/worker/src/gates/run.ts` runs a subject once, or twice with the evidence reversed (`dual`, for P1 and outward tasks). Disagreement, or a wrong answer that goes outside / costs a deadline and cannot be fixed before the step, marks it `asked`; the web turns it into a `gate_check` ask.
+- The model never sees a task's state or whether the person pressed 完成 (J1). The weekly review compares the two (`claimedNoEvidence`).
+- Only two gates change anything: J2a parks a milestone (draft + `milestone.parked`, undoable, `op.applied` bySystem) and J6 holds a registration form at the submit button between 01:00 and 06:00. J1 is record-only until the evaluation (`scripts/gate-eval.ts`) meets its bar.
+- Privacy: 「仅本地」 folders and PDK terms (`privacy.pdkTerms`) are masked on the device before anything is stored or sent (`maskPrivate`); such files are never opened. Sent mail keeps no body; the 500-character excerpt lives in memory for one judgement.
+- One table says what each gate is: `GATE_SPEC` in `packages/core/src/gates.ts` (code, label, verdicts, which subjects run twice — `dual` `all` / `flagged` / `none` — whether it may be put to the person and on which verdicts). `GATE_IDS`, `GATE_VERDICTS`, the schema, `gateNeedsPerson` and the web's `gate_check` all read it; nothing else names a gate's verdicts.
+- What every pass shares lives in `apps/worker/src/gates/context.ts`: `GATE_LIMITS` (resource bounds only: batch sizes, characters, timeouts; none decides a verdict), the person's zone (`localDay` / `localWeek`, UTC when none is known — never a guessed zone), the goal (`gateGoal`) and what is still to judge (`pendingFor`, from the ledger's `gate.judged` / `gate.attempted`, not from "last run" settings).
+- A call that gives no answer throws `GateRunFailed` and leaves a `gate.attempted`; three failed attempts on a subject stop it for that day (`gateExhausted`), so a broken Skill does not run on every tick.
+- A new gate: Skill under `skills/marketplace/plugins/crossline/skills/` (and `SKILL_NEEDS` / `SKILL_TIERS` / `REQUIRED_SKILLS`), a row in `GATE_SPEC` and `GATE_VERDICT_LABEL`, a pass in `gates/` that supplies only candidates, evidence and a `detail` schema to `runGate`, and a step in `gatesPass` (`apps/worker/src/index.ts`).
+- Every gate run carries the person's latest overrides of that gate as `corrections` (`gateCorrections` in `apps/worker/src/gates/run.ts`): calibration, never evidence. J1 evaluation: `scripts/gate-eval.ts backfill` (on a ledger copy) → `export` (writes a self-contained `label.html`) → `score`.

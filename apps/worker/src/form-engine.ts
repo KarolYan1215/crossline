@@ -94,6 +94,11 @@ export type EngineDeps = {
    * address has one (https, the exact host or a known alias — `loginFor`), `get` reads it from the secret store for this run only.
    */
   logins?: { has: (url: string) => boolean; get: (url: string) => Promise<(LoginSecret & { host: string }) | undefined> };
+  /**
+   * J6 (docs/plans/execution-gates-1124.md §四 J6): asked only when the form would otherwise submit by itself; a returned reason holds it
+   * at the submit button with the others. In the person's night (`NIGHT_HOURS`) it is the night gate's judgement; otherwise it lets the form go.
+   */
+  night?: (run: StoredFormRun) => Promise<string | undefined>;
 };
 
 const MAX_STEPS = 24;
@@ -411,6 +416,7 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
       ? { ...node, value: await driver.inputValue({ role: node.role, name: node.name, ...(node.ref ? { ref: node.ref } : {}) }, 0) ?? "" } : node));
     const required = (await driver.signals()).required ?? [];
     const problems = [...autoSubmitProblems(run, { nodes, submit, required }), ...(deps.personSubmits ? ["最后一步由本人点击"] : [])]; // i18n-ignore: a reason kept on the run, translated where shown
+    if (!problems.length && deps.night) { const held = await deps.night({ ...run, checklist }); if (held) problems.push(held); }
     await shoot("before-submit");
     if (problems.length) {
       run = deps.save({ ...run, state: "ready_to_submit", heldBecause: problems }, { type: "opportunity.form.ready_to_submit", payload: { heldBecause: problems } });

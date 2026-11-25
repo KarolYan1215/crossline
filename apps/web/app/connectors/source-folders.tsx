@@ -35,6 +35,8 @@ export function SourceFolders({ onChanged }: { onChanged?: () => void }) {
   const [lines, setLines] = useState<Array<{ id: string; label: string }>>([]);
   const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([]);
   const [results, setResults] = useState<Record<string, string>>({});
+  const [pdkTerms, setPdkTerms] = useState("");
+  const [pdkDefaults, setPdkDefaults] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
   const [preview, setPreview] = useState<Preview | undefined>();
   const [offGroups, setOffGroups] = useState<Set<string>>(new Set());
@@ -56,12 +58,14 @@ export function SourceFolders({ onChanged }: { onChanged?: () => void }) {
   const load = useCallback(async () => {
     const response = await fetch("/api/sources/folders", { cache: "no-store" }).catch(() => undefined);
     const body = await response?.json().catch(() => undefined) as { folders?: SourceFolder[]; lines?: Array<{ id: string; label: string }>; available?: boolean;
-      projects?: Array<{ id: string; name: string }>; results?: Record<string, string> } | undefined;
+      projects?: Array<{ id: string; name: string }>; results?: Record<string, string>; pdkTerms?: string[]; pdkDefaults?: string[] } | undefined;
     setAvailable(body?.available !== false);
     setFolders(body?.folders ?? []);
     setLines(body?.lines ?? []);
     setProjects(body?.projects ?? []);
     setResults(body?.results ?? {});
+    setPdkTerms((body?.pdkTerms ?? []).join(", "));
+    setPdkDefaults(body?.pdkDefaults ?? []);
   }, []);
   useEffect(() => { void load(); }, [load]);
   // A folder authorized elsewhere on the page (the interview's 「选择文件夹」 in the window).
@@ -135,6 +139,22 @@ export function SourceFolders({ onChanged }: { onChanged?: () => void }) {
     setResults((all) => { const next = { ...all }; if (projectId) next[folder.id] = projectId; else delete next[folder.id]; return next; });
     await post({ action: "results", id: folder.id, projectId });
   };
+  // 「仅本地」 (docs/plans/execution-gates-1124.md 四.0): the worker's next walk stops reading it and takes back what was read.
+  const setLocalOnly = async (folder: SourceFolder, on: boolean) => {
+    setFolders((all) => all?.map((item) => {
+      if (item.id !== folder.id) return item;
+      const { localOnly: _was, ...rest } = item;
+      return on ? { ...rest, localOnly: true as const } : rest;
+    }));
+    const answer = await post({ action: "localOnly", id: folder.id, localOnly: on });
+    setMessage(answer?.state === "saved" ? (on ? t("已设为仅本地：内容不再读取，已读入的会在下次读取时移除。") : t("已取消仅本地，下次读取时照常读。")) : t("没能保存，稍后再试。"));
+    await load();
+  };
+  const savePdkTerms = async () => {
+    const answer = await post({ action: "pdkTerms", terms: pdkTerms });
+    setMessage(answer?.state === "saved" ? t("已保存 PDK 关键词。") : t("没能保存，稍后再试。"));
+    await load();
+  };
   const revoke = async (id: string, purge: boolean) => {
     setBusy(true);
     const response = await fetch(`/api/sources/folders?id=${encodeURIComponent(id)}${purge ? "&purge=1" : ""}`, { method: "DELETE" }).catch(() => undefined);
@@ -185,8 +205,18 @@ export function SourceFolders({ onChanged }: { onChanged?: () => void }) {
         </select>
         <small className="muted">{results[folder.id] ? t("新文件只对照这个项目的任务检查") : t("新文件会对照所有未完成任务检查，符合完成标准就记为完成，可撤销")}</small>
       </label>}
+      <label className="sf-check source-folder-local-only">
+        <input type="checkbox" checked={Boolean(folder.localOnly)} disabled={busy} onChange={(event) => void setLocalOnly(folder, event.target.checked)} />
+        <span>{t("仅本地（内容不上传，只记文件名打码、时间、大小）")}</span>
+      </label>
       <FolderRules folder={folder} busy={busy} onSave={(exclude, include) => void saveRules(folder, exclude, include)} />
     </div>)}
+    {folders && folders.length > 0 && <form className="source-folders-form source-folders-pdk" onSubmit={(event) => { event.preventDefault(); void savePdkTerms(); }}>
+      <input value={pdkTerms} onChange={(event) => setPdkTerms(event.target.value)} placeholder={t("另加的 PDK 关键词，用逗号分隔，如 gf180, sky130")}
+        aria-label={t("PDK 关键词")} disabled={busy} spellCheck={false} />
+      <button type="submit" className="ob-btn secondary-button" disabled={busy}>{t("保存")}</button>
+      <small className="muted">{t("路径或文件名含这些词的文件按仅本地处理，窗口标题和提交里出现会打码。默认已含：{{terms}}", { terms: pdkDefaults.join(" ") })}</small>
+    </form>}
     <form className="source-folders-form" onSubmit={(event) => { event.preventDefault(); if (draft.trim()) void look(); }}>
       <input value={draft} onChange={(event) => { setDraft(withoutQuotes(event.target.value)); setPreview(undefined); }} placeholder={t("文件夹完整路径，如 D:\\资料")}
         aria-label={t("文件夹路径")} disabled={busy} spellCheck={false} />

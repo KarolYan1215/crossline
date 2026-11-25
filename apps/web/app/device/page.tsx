@@ -11,6 +11,7 @@ import { RecordingCard } from "../settings/recording-card";
 import { SubpageShell } from "../subpage-shell";
 import { DeviceLinkCard, DeviceSignals } from "./device-link-card";
 import { RemoteControlCard } from "./remote-control-card";
+import { GitReposCard } from "./git-repos-card";
 import { localeFor } from "../../lib/locale";
 import { tFor } from "../../lib/i18n";
 
@@ -60,6 +61,7 @@ export default async function DevicePage() {
         <AgentHistoryCard on={setting(AGENT_HISTORY_CONSENT) === "on"} summary={summary} />
         <RecordingCard overview={recordingOverview(store, ctx.workspaceId, dataDirectory(), zone)} />
         <SourceFolders />
+        <GitReposCard />
       </> : <p className="muted">{t("本机的读取只对这台电脑的主人开放。")}</p>}
     </div>
   </SubpageShell>;

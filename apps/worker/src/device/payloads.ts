@@ -3,20 +3,22 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   ACTIVITY_HOURLY, ACTIVITY_LAST_ACTIVE, ACTIVITY_LONG_GAPS, AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, DEVICE_LIMITS, INPUT_RHYTHM_BUCKETS, INPUT_RHYTHM_CONSENT,
-  RECORDING_SILENT_EVENT, RECORDING_TRANSCRIBED_EVENT, SLEEP_TRACKING_CONSENT, SOURCE_FOLDERS_SETTING, readSourceFolders,
-  type ActivityHour, type AgentHistorySummary, type DeviceActivityPayload, type DeviceDocument, type DeviceFolder, type DeviceSilent, type DeviceTranscript,
+  RECORDING_SILENT_EVENT, RECORDING_TRANSCRIBED_EVENT, SLEEP_TRACKING_CONSENT, SOURCE_FOLDERS_SETTING, DEVICE_TITLE_DAYS, maskPrivate, readSourceFolders,
+  type ActivityHour, type AgentHistorySummary, type DeviceActivityPayload, type DeviceCommit, type DeviceDocument, type DeviceFolder, type DeviceSilent, type DeviceTranscript,
   type InputRhythmBucket
 } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 import { ACTIVITY_DETAIL_CONSENT, LOCAL_ACTIVITY_CONSENT } from "../activity-recorder";
-import { folderDocuments } from "../source-folders";
+import { privacyOf } from "../git-commits";
+import { folderDocuments, pdkTermsOf, shownFolderLabel } from "../source-folders";
 import type { MirrorState } from "./mirror";
 
 /**
  * What a linked computer sends (docs/device-mode.md), built from its own staging ledger — the local install's ledger and workspace, where
- * the activity reader, the folder reader and the transcriber keep writing as they always did. Nothing here reads a window title: the
- * segments come from `listActivitySegments`, which has none, and the app in each is replaced by a salted hash only this machine can
- * reverse, used on the other side only to count switches.
+ * the activity reader, the folder reader and the transcriber keep writing as they always did. The app in each segment is replaced by a
+ * salted hash only this machine can reverse, used on the other side only to count switches. Window titles leave since 2026-11-24 (the
+ * owner's decision, docs/plans/execution-gates-1124.md round 3–4), only under the detail consent and only through `maskPrivate` here:
+ * a title naming a 「仅本地」 folder or hitting a PDK term leaves as `[仅本地]`.
  */
 export type DeviceState = {
   /** Never leaves the machine: what turns an app name into an opaque token. */
@@ -29,6 +31,8 @@ export type DeviceState = {
   foldersHash?: string;
   /** Whether the first activity send (with the last weeks' history) was queued. */
   backfilled?: boolean;
+  /** Whether the last `DEVICE_TITLE_DAYS` of segments were sent with their titles once (2026-11-24); after that, the last day. */
+  titlesBackfilled?: boolean;
   /** Recordings waiting for the speech model, as the transcriber last said. */
   modelNeeded?: number;
   lastPassAt?: string;
@@ -81,13 +85,23 @@ export function buildActivityPayload(store: CrosslineStore, workspaceId: string,
   const lastActive = consents.sleep ? store.getSetting(workspaceId, ACTIVITY_LAST_ACTIVE) : undefined;
   const rhythm = consents.rhythm ? read<InputRhythmBucket[]>(store.getSetting(workspaceId, INPUT_RHYTHM_BUCKETS), [])
     .filter((bucket) => bucket.start >= days(first ? 14 : 2)).slice(-DEVICE_LIMITS.rhythm) : [];
-  const since = new Date(`${days(first ? 3 : 1).slice(0, 10)}T00:00:00.000Z`).toISOString();
-  // Built field by field: a segment's title is not even in the type `listActivitySegments` returns, and its app goes through `appToken`.
-  const segments = consents.detail ? store.listActivitySegments(workspaceId, since).filter((segment) => segment.start >= since)
-    .map((segment) => ({ start: segment.start, end: segment.end, category: segment.category, idle: segment.idle, app: appToken(state.salt, segment.app) }))
-    .slice(-DEVICE_LIMITS.segments) : [];
+  const since = new Date(`${days(state.titlesBackfilled ? 1 : DEVICE_TITLE_DAYS).slice(0, 10)}T00:00:00.000Z`).toISOString();
+  // Built field by field: the app goes through `appToken`, the title through `maskPrivate` (cut to the site's length) and nothing else
+  // of the record is read.
+  const privacy = consents.detail ? privacyOf(store, workspaceId) : undefined;
+  const segments = privacy ? fitSegments(store.activityEntriesSince(workspaceId, since).filter((segment) => segment.start >= since)
+    .map((segment) => ({ start: segment.start, end: segment.end, category: segment.category, idle: segment.idle, app: appToken(state.salt, segment.app),
+      ...(segment.title && !segment.idle ? { title: maskPrivate(segment.title, privacy.terms, privacy.localOnlyPaths).slice(0, DEVICE_LIMITS.titleChars) } : {}) }))
+    .slice(-DEVICE_LIMITS.segments)) : [];
   const agentHistory = consents.agentHistory ? read<AgentHistorySummary | null>(store.getSetting(workspaceId, AGENT_HISTORY_SUMMARY), null) : null;
   return { consents, daily, hourly, gaps, ...(lastActive ? { lastActive } : {}), rhythm, ...(consents.detail ? { segmentsSince: since } : {}), segments, agentHistory };
+}
+
+/** Segments that fit one send with the rest of the snapshot (titles make them larger): the oldest go first. */
+function fitSegments<T>(segments: T[]): T[] {
+  let fitted = segments;
+  while (fitted.length && Buffer.byteLength(JSON.stringify(fitted)) > BATCH_BYTES) fitted = fitted.slice(Math.ceil(fitted.length / 10));
+  return fitted;
 }
 
 /** The activity snapshot as an outbox item, or nothing when it is the same as the last one queued. */
@@ -97,6 +111,7 @@ export function activityItem(store: CrosslineStore, workspaceId: string, state: 
   if (hash === state.activityHash) return undefined;
   state.activityHash = hash;
   state.backfilled = true;
+  if (payload.consents.detail) state.titlesBackfilled = true;
   return { id: `activity:${hash}`, route: "/api/device/activity", body: payload, supersedes: "activity" };
 }
 
@@ -114,7 +129,8 @@ function transcriptDocuments(store: CrosslineStore, workspaceId: string): Set<st
 export function sourceItems(store: CrosslineStore, workspaceId: string, state: DeviceState): QueuedItem[] {
   const items: QueuedItem[] = [];
   const folders = readSourceFolders(store.getSetting(workspaceId, SOURCE_FOLDERS_SETTING));
-  const meta: DeviceFolder[] = folders.map((folder) => ({ id: folder.id, label: folder.label, lines: folder.lines ?? [],
+  const terms = pdkTermsOf(store, workspaceId);
+  const meta: DeviceFolder[] = folders.map((folder) => ({ id: folder.id, label: shownFolderLabel(folder, terms), lines: folder.lines ?? [],
     ...(folder.linesBy === "person" || folder.linesBy === "model" ? { linesBy: folder.linesBy } : {}), files: folder.files ?? 0,
     ...(folder.lastScanAt ? { lastScanAt: folder.lastScanAt } : {}) }));
   const metaHash = hashOf(meta.map(({ lastScanAt: _skip, ...rest }) => rest));
@@ -172,6 +188,16 @@ export function reviveDocuments(state: DeviceState, items: Array<{ body: unknown
   let revived = 0;
   for (const [id, sha] of Object.entries(state.documents)) if (shas.has(sha)) { delete state.documents[id]; revived += 1; }
   return revived;
+}
+
+/** Commits read from the authorized repositories (`git-commits.ts`, already masked), as outbox items for `POST /api/device/commits`. */
+export function commitItems(commits: readonly DeviceCommit[]): QueuedItem[] {
+  const items: QueuedItem[] = [];
+  for (let start = 0; start < commits.length; start += DEVICE_LIMITS.commits) {
+    const batch = commits.slice(start, start + DEVICE_LIMITS.commits);
+    items.push({ id: `commits:${hashOf(batch.map((commit) => `${commit.repo}:${commit.sha}`))}`, route: "/api/device/commits", body: { commits: batch } });
+  }
+  return items;
 }
 
 /** Transcripts and silent recordings not yet queued, a few to an item. Marks what it queued in `state`. */

@@ -25,6 +25,11 @@ export type AgentHistorySummary = {
    * §1), joined in time with the timer and the screen. Absent on a summary written before 2026-10-30.
    */
   spans?: Array<{ start: string; end: string }>;
+  /**
+   * The last eight days' stretches with their folder (its last path segment only) and tool, for the weekly attention audit
+   * (docs/plans/execution-gates-1124.md J3). Absent on a summary written before 2026-11-24.
+   */
+  folderSpans?: Array<{ folder: string; tool: ActivitySpan["tool"]; start: string; end: string }>;
 };
 
 /** Joins timestamps (ms, any order) into spans: consecutive events at most `GAP_MS` apart are one stretch of work. */
@@ -84,7 +89,9 @@ export function summarizeAgentHistory(spans: ActivitySpan[], now: Date, timeZone
   }
   return { updatedAt: now.toISOString(), days, timeZone, totalMinutes: all.size, folders, byHour, byWeekday,
     daily: [...daily].sort((a, b) => a[0].localeCompare(b[0])).map(([day, minutes]) => ({ day, minutes })),
-    spans: merged.map((span) => ({ start: new Date(span.start).toISOString(), end: new Date(span.end).toISOString() })) };
+    spans: merged.map((span) => ({ start: new Date(span.start).toISOString(), end: new Date(span.end).toISOString() })),
+    folderSpans: spans.filter((item) => item.end >= now.getTime() - 8 * 86_400_000).sort((a, b) => a.start - b.start).slice(-2000)
+      .map((item) => ({ folder: item.folder, tool: item.tool, start: new Date(item.start).toISOString(), end: new Date(item.end).toISOString() })) };
 }
 
 /* i18n-ignore-start: these lines are context for a model, not interface text */

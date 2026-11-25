@@ -8,6 +8,7 @@ import { currentWorkState, loadTimeline } from "../lib/timeline";
 import { loadCurrentPlan } from "../lib/crossline";
 import { cardView, loadTaskDetailsBatch, loadMilestoneDetailsBatch } from "../lib/task-detail";
 import { loadAsks } from "../lib/asks";
+import { frontForToday } from "../lib/gates";
 import { loadReminders } from "../lib/reminders";
 import { loadAskPreviews } from "./asks/previews";
 import { nextSlots } from "../lib/steps";
@@ -58,6 +59,7 @@ export default async function HomePage() {
     scheduleChanges: timedSync("today.changes", () => readChangeSummary(ctx)),
     finerSplits: readFinerSplits(ctx),
     flywheelGraph: timedSync("today.flywheel", () => loadFlywheelGraph(ctx)),
+    front: timedSync("today.front", () => { try { return frontForToday(ctx); } catch { return null; } }),
     ...(workState ? { workState } : {})
   }} />;
 }

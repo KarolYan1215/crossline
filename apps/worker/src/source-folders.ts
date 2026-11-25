@@ -5,11 +5,12 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   DEVICE_FOLDER_SCREEN_LIMIT, FOLDER_MAX_ENTRIES, chatHistoryName, FOLDER_MAX_FILES, RECORDING_SETTLE_MS, SOURCE_FOLDERS_SETTING, cleanFolderNames, cleanFolderRules, credentialName, credentialText, excludedByRules, folderFileAction, folderGroup, folderLabel,
-  folderPathProblem, readSourceFolders, redactSecrets, sensitiveName, sensitiveText, skipFolderDirectory, sourceFolderIndexSetting, sourceKindFor,
-  type FolderIndexEntry, type SourceFolder, type SourceKind, tFor, type Locale
+  folderPathProblem, LOCAL_ONLY_MASK, PDK_TERMS_SETTING, pdkHit, readPdkTerms, readSourceFolders, redactSecrets, sensitiveName, sensitiveText, skipFolderDirectory,
+  sourceFolderIndexSetting, sourceKindFor, type FolderIndexEntry, type SourceFolder, type SourceKind, tFor, type Locale
 } from "@crossline/core";
 import type { CrosslineStore, StoredSourceDocument } from "@crossline/db";
 import { ownerOf } from "./owner";
+import { privacyOf } from "./git-commits";
 import { localeOf } from "./locale";
 
 /** 「内容含身份证号」: what a file's opening was found to hold, said in the workspace's language (the label is core's). */
@@ -51,6 +52,18 @@ const slash = (relative: string) => relative.replace(/\\/g, "/");
 const included = (relative: string, rules: Rules) => (rules.include ?? []).some((item) => item.toLowerCase() === slash(relative).toLowerCase());
 /** Read in full (`read`) or recorded by name (`name_only`), as opposed to left out. */
 const kept = (file: ScannedFile) => !file.sensitive && !file.capped;
+
+/**
+ * 「仅本地」 (docs/plans/execution-gates-1124.md 四.0 「隐私」, 2026-11-24, the owner's safety boundary): a folder the person marked local
+ * only, or a file whose path hits a PDK term (`privacy.pdkTerms`), is never opened — not read, not extracted, not listed to a model, not
+ * transcribed. Only a masked entry is kept (`[仅本地]` and the extension, the modified time and the size), as evidence that it changed.
+ */
+export const pdkTermsOf = (store: CrosslineStore, workspaceId: string) => privacyOf(store, workspaceId).terms;
+export const localOnlyFile = (folder: SourceFolder, relative: string, terms: readonly string[]) => Boolean(folder.localOnly) || pdkHit(path.join(folder.path, relative), terms);
+/** A folder's name as it may be shown to a model or sent: masked when the folder is local only or its path hits a PDK term. */
+export const shownFolderLabel = (folder: SourceFolder, terms: readonly string[]) => folder.localOnly || pdkHit(folder.path, terms) ? LOCAL_ONLY_MASK : folder.label;
+/** A masked entry's document: its name is `[仅本地]` and the extension. */
+const maskedDocument = (fileName: string) => (fileName.split("/").pop() ?? "").startsWith(LOCAL_ONLY_MASK);
 
 /**
  * Walks a folder without following links (a junction can loop or lead anywhere), skipping what `skipFolderDirectory` names and what the
@@ -284,13 +297,19 @@ export async function syncFolder(store: CrosslineStore, workspaceId: string, fol
   const scan = await scanFolder(folder.path, rules, { audio: Boolean(deps.audio), locale });
   const index = readIndex(store, workspaceId, folder.id);
   const present = new Map(scan.files.map((file) => [file.relative, file]));
+  const terms = pdkTermsOf(store, workspaceId);
+  const privateFile = (relative: string) => localOnlyFile(saved, relative, terms);
+  let masked: Set<string> | undefined;
+  const isMasked = (documentId: string) => Boolean(documentId) && (masked ??= new Set(store.listSourceDocuments(workspaceId)
+    .filter((doc) => maskedDocument(doc.fileName)).map((doc) => doc.id))).has(documentId);
   // Left out now (excluded, a credential, or a private paper not ticked back): what was read from it goes. Gone from disk: the entry goes,
-  // the document stays.
+  // the document stays. An entry that does not match the file's 「仅本地」 state goes too — content read before the folder was marked, a
+  // queued recording, or a masked entry after the mark was taken off — so the file is handled again the way it now should be.
   const dropped: FolderIndexEntry[] = [];
   for (const [relative, entry] of Object.entries(index)) {
     const file = present.get(relative);
     const leftOut = excludedByRules(relative, rules.exclude) || Boolean(file?.sensitive) || Boolean(credentialName(relative))
-      || Boolean(!included(relative, rules) && (sensitiveName(relative, rules.names) || entry.flagged));
+      || Boolean(!included(relative, rules) && (sensitiveName(relative, rules.names) || entry.flagged)) || privateFile(relative) !== isMasked(entry.documentId);
     if (leftOut) { if (entry.documentId) dropped.push(entry); delete index[relative]; }
     // A recording's entry outlives 录音自动转写 being off (the scan then does not list recordings), so what was done is not redone.
     else if (!file && !(entry.audio && !deps.audio)) delete index[relative];
@@ -300,7 +319,7 @@ export async function syncFolder(store: CrosslineStore, workspaceId: string, fol
   // New or changed recordings join the queue once they have settled (a file still being written or synced is left for the next pass).
   const now = deps.now?.() ?? Date.now();
   for (const file of scan.files) {
-    if (file.action.action !== "audio" || file.sensitive) continue;
+    if (file.action.action !== "audio" || file.sensitive || privateFile(file.relative)) continue;
     const known = index[file.relative];
     if (known?.audio && known.size === file.size && known.mtimeMs === file.mtimeMs) continue;
     if (now - file.mtimeMs < RECORDING_SETTLE_MS) continue;
@@ -308,7 +327,8 @@ export async function syncFolder(store: CrosslineStore, workspaceId: string, fol
   }
 
   const changed = scan.files.filter((file) => {
-    if (!kept(file) || file.action.action === "audio") return false;
+    // A recording in a 「仅本地」 place is recorded like any of its files: masked, never transcribed.
+    if (!kept(file) || (file.action.action === "audio" && !privateFile(file.relative))) return false;
     const known = index[file.relative];
     return !known || known.size !== file.size || known.mtimeMs !== file.mtimeMs || Boolean(known.sensitive && !known.hard && included(file.relative, rules));
   });
@@ -318,14 +338,15 @@ export async function syncFolder(store: CrosslineStore, workspaceId: string, fol
   const authorizedAt = Date.parse(saved.addedAt);
   // AI conversations (D14) are the exception: a folder of Codex, Claude Code or ChatGPT exports is given to be read and digested segment
   // by segment (chat-digest.ts), which only works on what was read; listing them would leave the history unused (docs/plans/desktop-local-1122.md).
-  const listOnly = (file: ScannedFile) => Boolean(deps.onDemand) && !chatHistoryName(file.relative) && !index[file.relative]?.documentId
+  const listOnly = (file: ScannedFile) => Boolean(deps.onDemand) && !privateFile(file.relative) && !chatHistoryName(file.relative) && !index[file.relative]?.documentId
     && !(Number.isFinite(authorizedAt) && file.mtimeMs >= authorizedAt);
   for (const file of changed.filter(listOnly)) index[file.relative] = { size: file.size, mtimeMs: file.mtimeMs, documentId: "", listed: true };
   const toRead = changed.filter((file) => !listOnly(file));
   const reading = readingContext(store, workspaceId, index);
   let done = 0;
   for (const file of toRead.slice(0, READ_PER_PASS)) {
-    const entry = await importFolderFile(store, workspaceId, folder, file, rules, deps, reading);
+    const entry = privateFile(file.relative) ? localOnlyEntry(store, workspaceId, saved, file, terms, reading)
+      : await importFolderFile(store, workspaceId, folder, file, rules, deps, reading);
     if (!entry) continue;
     index[file.relative] = entry;
     done += 1;
@@ -351,6 +372,26 @@ type ReadingContext = { owner: string; bySha: Map<string, StoredSourceDocument>;
 const readingContext = (store: CrosslineStore, workspaceId: string, index: Record<string, FolderIndexEntry>): ReadingContext => ({
   owner: ownerOf(store, workspaceId), bySha: new Map(store.listSourceDocuments(workspaceId).map((doc) => [doc.sha256, doc])),
   createdHere: new Set(Object.values(index).filter((entry) => entry.created).map((entry) => entry.documentId)) });
+
+/**
+ * A 「仅本地」 file's entry: the file is never opened. Its document holds no text, a masked name (`[仅本地]` and the extension, under the
+ * folder's masked name), and the modified time and size in its note; its address is not the file's, so nothing can open it through
+ * the document either. Keyed by path, size and time, so the same file unchanged is the same row and a change is a new one.
+ */
+function localOnlyEntry(store: CrosslineStore, workspaceId: string, folder: SourceFolder, file: Pick<ScannedFile, "relative" | "size" | "mtimeMs">,
+  terms: readonly string[], reading: ReadingContext): FolderIndexEntry {
+  const t = tFor(localeOf(store, workspaceId));
+  const sha256 = createHash("sha256").update(`local-only:${path.join(folder.path, file.relative)}:${file.size}:${file.mtimeMs}`).digest("hex");
+  const id = randomUUID();
+  const doc = store.saveSourceDocument({ id, ownerId: reading.owner, workspaceId, kind: "text",
+    fileName: `${shownFolderLabel(folder, terms)}/${LOCAL_ONLY_MASK}${path.extname(file.relative).toLowerCase().slice(0, 12)}`,
+    mediaType: "application/octet-stream", sha256, uri: `crossline-local-only:${sha256}`, extractedText: "", extractionStatus: "unsupported",
+    extractionNote: t("仅本地：内容不读，只记修改时间 {{at}}、大小 {{size}} 字节", { at: new Date(file.mtimeMs).toISOString(), size: file.size }),
+    createdAt: new Date().toISOString() });
+  const created = doc.id === id;
+  if (created) reading.createdHere.add(doc.id);
+  return { size: file.size, mtimeMs: file.mtimeMs, documentId: doc.id, ...(created ? { created: true } : {}) };
+}
 
 /**
  * Reads one file of a folder into `sources` and answers its new index entry (undefined when it could not be read from disk). The checks run
@@ -453,8 +494,9 @@ async function inside(folder: SourceFolder, relative: string): Promise<string | 
 }
 
 /** Why a file of a folder is not shown to a model, or undefined: the same rules the walk obeys (D15: a folder's private papers are skipped). */
-function leftOutOf(folder: SourceFolder, relative: string, names: string[], locale: Locale | undefined): string | undefined {
+function leftOutOf(folder: SourceFolder, relative: string, names: string[], locale: Locale | undefined, terms: readonly string[]): string | undefined {
   const t = tFor(locale);
+  if (localOnlyFile(folder, relative, terms)) return t("这是仅本地的文件夹或文件，内容不读。");
   if (relative.split("/").slice(0, -1).some(skipFolderDirectory) || excludedByRules(relative, folder.exclude)) return t("这个位置已被排除。");
   if (credentialName(relative)) return t("这是密钥或密码类文件，不读。");
   if (!included(relative, folder) && sensitiveName(relative, names)) return t("像是私人证件或单据，授权文件夹里的这类文件不读。");
@@ -471,9 +513,10 @@ export async function listFolderEntries(store: CrosslineStore, workspaceId: stri
   const locale = localeOf(store, workspaceId);
   const t = tFor(locale);
   const folders = list(store, workspaceId);
+  const terms = pdkTermsOf(store, workspaceId);
   if (!folderId) {
     return { ok: true, text: folders.length ? folders.map((folder) => t("{{id}} · {{label}} · {{files}} 个可读文件，已读入 {{imported}} 个",
-      { id: folder.id, label: folder.label, files: folder.files ?? 0, imported: folder.imported ?? 0 })).join("\n") : t("还没有授权的文件夹。") };
+      { id: folder.id, label: shownFolderLabel(folder, terms), files: folder.files ?? 0, imported: folder.imported ?? 0 })).join("\n") : t("还没有授权的文件夹。") };
   }
   const folder = folders.find((item) => item.id === folderId);
   if (!folder) return { ok: false, message: t("没有 id 为「{{id}}」的授权文件夹。", { id: folderId }) };
@@ -489,7 +532,7 @@ export async function listFolderEntries(store: CrosslineStore, workspaceId: stri
   const lines: string[] = [];
   for (const entry of listing.sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))) {
     const relative = dir ? `${dir}/${entry.name}` : entry.name;
-    if (entry.isSymbolicLink() || leftOutOf(folder, entry.isDirectory() ? `${relative}/x` : relative, names, locale)) continue;
+    if (entry.isSymbolicLink() || leftOutOf(folder, entry.isDirectory() ? `${relative}/x` : relative, names, locale, terms)) continue;
     if (entry.isDirectory()) { if (!skipFolderDirectory(entry.name)) lines.push(`${relative}/`); continue; }
     if (!entry.isFile() || folderFileAction(relative, 0).action === "skip") continue;
     const info = await stat(path.join(real, entry.name)).catch(() => undefined);
@@ -500,8 +543,8 @@ export async function listFolderEntries(store: CrosslineStore, workspaceId: stri
   const pages = Math.max(1, Math.ceil(lines.length / LISTED_PER_PAGE));
   const at = Math.min(Math.max(0, page), pages - 1);
   const shown = lines.slice(at * LISTED_PER_PAGE, (at + 1) * LISTED_PER_PAGE);
-  return { ok: true, text: shown.length ? `${t("《{{folder}}》/{{dir}}，第 {{page}}/{{pages}} 页：", { folder: folder.label, dir, page: at + 1, pages })}\n${shown.join("\n")}`
-    : t("《{{folder}}》/{{dir}} 里没有可读的文件。", { folder: folder.label, dir }) };
+  return { ok: true, text: shown.length ? `${t("《{{folder}}》/{{dir}}，第 {{page}}/{{pages}} 页：", { folder: shownFolderLabel(folder, terms), dir, page: at + 1, pages })}\n${shown.join("\n")}`
+    : t("《{{folder}}》/{{dir}} 里没有可读的文件。", { folder: shownFolderLabel(folder, terms), dir }) };
 }
 /** Entries one listing call answers. */
 const LISTED_PER_PAGE = 200;
@@ -521,7 +564,7 @@ export async function readFolderFile(store: CrosslineStore, workspaceId: string,
   const real = relative ? await inside(folder, relative) : undefined;
   if (!relative || !real) return { ok: false, message: t("只能读授权文件夹以内的文件。") };
   const names = personNames(store, workspaceId, folder.names);
-  const refused = leftOutOf(folder, relative, names, locale);
+  const refused = leftOutOf(folder, relative, names, locale, pdkTermsOf(store, workspaceId));
   if (refused) return { ok: false, message: refused };
   const info = await stat(real).catch(() => undefined);
   if (!info?.isFile()) return { ok: false, message: t("找不到这个文件。") };
@@ -558,7 +601,7 @@ export async function folderFileBytes(store: CrosslineStore, workspaceId: string
   const relative = cleanRelative(rawRelative);
   const real = relative ? await inside(folder, relative) : undefined;
   if (!relative || !real) return { ok: false, message: t("只能读授权文件夹以内的文件。") };
-  const refused = leftOutOf(folder, relative, personNames(store, workspaceId, folder.names), locale);
+  const refused = leftOutOf(folder, relative, personNames(store, workspaceId, folder.names), locale, pdkTermsOf(store, workspaceId));
   if (refused) return { ok: false, message: refused };
   const info = await stat(real).catch(() => undefined);
   if (!info?.isFile()) return { ok: false, message: t("找不到这个文件。") };
@@ -586,8 +629,11 @@ export type ScreenListed = (folder: string, files: ListedFile[]) => Promise<stri
  */
 export async function importScreenedFiles(store: CrosslineStore, workspaceId: string, deps: FolderDeps, screen: ScreenListed): Promise<number> {
   let read = 0;
+  const terms = pdkTermsOf(store, workspaceId);
   for (const folder of list(store, workspaceId)) {
-    const files = Object.entries(readIndex(store, workspaceId, folder.id)).filter(([, entry]) => entry.listed && !entry.screened && !entry.documentId)
+    // 「仅本地」 names never go to the site's model, not even as a list.
+    const files = Object.entries(readIndex(store, workspaceId, folder.id))
+      .filter(([relative, entry]) => entry.listed && !entry.screened && !entry.documentId && !localOnlyFile(folder, relative, terms))
       .map(([relative, entry]) => ({ path: slash(relative), size: entry.size, modified: entry.mtimeMs })).sort((a, b) => b.modified - a.modified);
     if (!files.length) continue;
     const answer = await screen(folder.label, files).catch(() => undefined);

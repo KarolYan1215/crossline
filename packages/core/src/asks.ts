@@ -66,7 +66,12 @@ export type AskKind =
    * Two items overlap on the person's calendar and look like the same thing (`event-merge.ts`): 合并 / 两个都留 / 不是同一件事, kept by
    * series so a weekly class is asked once.
    */
-  | "event_merge";
+  | "event_merge"
+  /**
+   * A model-judged execution gate the person is asked about (docs/plans/execution-gates-1124.md): the two runs disagreed, or being wrong
+   * costs a deadline or goes outside. Options are the verdicts in question plus 「都不对」; the answer is a `gate.overridden` or a confirmation.
+   */
+  | "gate_check";
 
 export type AskField = { id: string; label: string; kind: "text" | "longtext" | "date" | "choice"; required: boolean;
   initial?: string; placeholder?: string;

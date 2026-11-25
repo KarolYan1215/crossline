@@ -18,6 +18,7 @@ import { DayHead } from "./today/day-head";
 import { NeedsCard } from "./today/needs-card";
 import type { CapacityLine } from "../lib/measured-capacity";
 import { OverviewCard } from "./today/overview-card";
+import { FrontCard, type FrontPick } from "./today/front-card";
 import { weekLoad } from "./today/week-load";
 import type { Suggestion } from "./timeline/quick-actions";
 import "./today/today.css";
@@ -36,6 +37,8 @@ export type DashboardAction = {
 };
 
 export type DashboardData = {
+  /** J4's pick for today (docs/plans/execution-gates-1124.md §四 J4), shown first; absent when the model picked none. */
+  front?: FrontPick | null;
   /** The page's language (docs/i18n.md); Chinese when absent. */
   locale?: Locale;
   principalId: string;
@@ -178,6 +181,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
 
       <div className="td-grid">
         <div className="td-main">
+          {data.front && <FrontCard pick={data.front} />}
           {data.calendar && <section className="td-card td-cal today-timeline" id="today-timeline" aria-label={t("今天的时间轴")}>
             <header className="td-card-head"><h2 className="ds-serif">{t("日历")}</h2><a href="/plan">{t("打开计划 →")}</a></header>
             <ScheduleSummary changes={data.scheduleChanges ?? []} splits={data.finerSplits ?? []} />

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>J1 标注</title>
+<style>
+  :root { --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6b6860; --line: #e2ded5; --accent: #2f5d8a; --card: #fff; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #171614; --fg: #ecebe6; --muted: #a29e95; --line: #34322e; --accent: #8db4dc; --card: #201f1c; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.6 system-ui, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 16px; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin: 12px 0; }
+  .muted { color: var(--muted); }
+  ul.evidence { padding-left: 18px; }
+  ul.evidence li { margin: 6px 0; overflow-wrap: anywhere; }
+  pre { white-space: pre-wrap; margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+  .choices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .choices button { padding: 8px 12px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--fg); cursor: pointer; }
+  .choices button[aria-pressed="true"] { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  nav { display: flex; gap: 8px; align-items: center; }
+  textarea { width: 100%; margin-top: 8px; background: transparent; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>J1 完成判定 · 盲标</h1>
+    <div><input type="file" id="load" accept="application/json"> <button id="save" disabled>保存 labels.json</button></div>
+  </header>
+  <p class="muted">每件点一个按钮就跳到下一件；进度存在这个浏览器里，关掉再打开会接着标。标完点右上角「保存 labels.json」，存到「下载」文件夹即可。按你知道的实际情况标每一件：已完成、已提交（交出去了，在等对方）、在等别人、还没做；证据不够你也判断不了时选「判断不了」。这里看不到模型的判定。</p>
+  <section id="view"></section>
+</main>
+<script>
+const CLASSES = [["done", "已完成"], ["submitted", "已提交"], ["waiting", "在等别人"], ["planned", "还没做"], ["cannot_judge", "判断不了"]];
+let data = null, labels = {}, at = 0;
+const store = { get(key) { try { return localStorage.getItem(key); } catch { return null; } }, set(key, value) { try { localStorage.setItem(key, value); } catch {} } };
+const el = (tag, attrs = {}, ...children) => { const node = document.createElement(tag); Object.assign(node, attrs); node.append(...children.filter((c) => c !== null && c !== undefined)); return node; };
+
+function start(payload) {
+  data = payload;
+  labels = JSON.parse(store.get(`j1-labels:${data.exportedAt}`) || "{}");
+  at = Math.max(0, data.cases.findIndex((item) => !labels[item.caseId]));
+  document.getElementById("save").disabled = false;
+  render();
+}
+document.getElementById("load").addEventListener("change", async (event) => {
+  const file = event.target.files[0]; if (!file) return;
+  start(JSON.parse(await file.text()));
+});
+// `gate-eval.ts export` writes a copy of this page with the cases inside: then there is nothing to load.
+if (window.GATE_EVAL_CASES) { document.getElementById("load").hidden = true; start(window.GATE_EVAL_CASES); }
+document.getElementById("save").addEventListener("click", () => {
+  const body = JSON.stringify({ workspaceId: data.workspaceId, exportedAt: data.exportedAt, labelledAt: new Date().toISOString(),
+    labels: Object.entries(labels).map(([caseId, value]) => ({ caseId, label: value.label, ...(value.note ? { note: value.note } : {}) })) }, null, 2);
+  const link = el("a", { href: URL.createObjectURL(new Blob([body], { type: "application/json" })), download: "labels.json" });
+  link.click();
+});
+
+function render() {
+  const view = document.getElementById("view"); view.replaceChildren();
+  if (!data) return;
+  const item = data.cases[at];
+  const done = Object.keys(labels).length;
+  view.append(el("nav", {}, el("button", { textContent: "← 上一件", disabled: at === 0, onclick: () => { at -= 1; render(); } }),
+    el("span", { textContent: `${at + 1} / ${data.cases.length}（已标 ${done}）` }),
+    el("button", { textContent: "下一件 →", disabled: at === data.cases.length - 1, onclick: () => { at += 1; render(); } })));
+  const task = item.task;
+  const card = el("div", { className: "card" },
+    el("h2", { textContent: task.title }),
+    el("p", { className: "muted", textContent: [task.project, task.due && `截止 ${task.due}`, task.milestone && `里程碑：${task.milestone.title}`, `判定于 ${item.judgedAt.slice(0, 16).replace("T", " ")}`].filter(Boolean).join(" · ") }),
+    task.doneCriteria.length ? el("p", {}, "完成标准：", task.doneCriteria.join("；")) : null,
+    task.mustDeliver.length ? el("p", {}, "要交付：", task.mustDeliver.join("；")) : null,
+    el("h3", { textContent: `当时可见的证据（${item.evidence.length}）` }),
+    el("ul", { className: "evidence" }, ...item.evidence.map((ev) => el("li", {}, el("b", { textContent: `[${ev.kind}] ` }), `${ev.at.slice(0, 16).replace("T", " ")} ${ev.ref}`,
+      ev.text ? el("pre", { textContent: ev.text.slice(0, 600) }) : null))));
+  const current = labels[item.caseId] || {};
+  const note = el("textarea", { rows: 2, placeholder: "备注（可不填）", value: current.note || "" });
+  note.addEventListener("input", () => { if (labels[item.caseId]) { labels[item.caseId].note = note.value; persist(); } });
+  card.append(el("div", { className: "choices" }, ...CLASSES.map(([id, label]) => el("button", { textContent: label, ariaPressed: String(current.label === id),
+    onclick: () => { labels[item.caseId] = { label: id, note: note.value }; persist(); if (at < data.cases.length - 1) at += 1; render(); } }))), note);
+  view.append(card);
+}
+function persist() { store.set(`j1-labels:${data.exportedAt}`, JSON.stringify(labels)); }
+</script>
+</body>
+</html>

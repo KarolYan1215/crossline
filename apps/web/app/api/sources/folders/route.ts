@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { tOf } from "../../../../lib/locale";
 import type { Translate } from "../../../../lib/i18n";
-import { RESULT_FOLDERS_SETTING, SOURCE_FOLDERS_SETTING, cleanFolderNames, cleanFolderRules, readSourceFolders } from "@crossline/core";
+import { DEFAULT_PDK_TERMS, PDK_TERMS_SETTING, RESULT_FOLDERS_SETTING, SOURCE_FOLDERS_SETTING, cleanFolderNames, cleanFolderRules, readSourceFolders } from "@crossline/core";
 import { assistantAvailable } from "@crossline/db";
 import { getStore } from "../../../../lib/crossline";
 import { identityLines } from "../../../../lib/lines";
@@ -30,8 +30,17 @@ export async function GET(request: Request) {
     available: assistantAvailable(getStore(), access.ctx.workspaceId),
     lines: identityLines(access.ctx).map((line) => ({ id: line.id, label: line.label })),
     projects: getStore().listProjects(access.ctx.workspaceId).map((project) => ({ id: project.id, name: project.name })),
-    results: readResultFolders(access.ctx.workspaceId)
+    results: readResultFolders(access.ctx.workspaceId),
+    pdkTerms: extraPdkTerms(access.ctx.workspaceId), pdkDefaults: DEFAULT_PDK_TERMS
   }, { headers: { "cache-control": "no-store" } });
+}
+
+/** The person's own PDK terms, on top of `DEFAULT_PDK_TERMS`. */
+function extraPdkTerms(workspaceId: string): string[] {
+  try {
+    const raw = JSON.parse(getStore().getSetting(workspaceId, PDK_TERMS_SETTING) ?? "[]") as unknown;
+    return Array.isArray(raw) ? raw.filter((term): term is string => typeof term === "string") : [];
+  } catch { return []; }
 }
 
 const unavailable = (error: unknown, t: Translate) => NextResponse.json({ state: "blocked", code: error instanceof CodexSupervisorRequestError ? error.blocker.code : "FOLDER_FAILED",
@@ -47,7 +56,30 @@ export async function POST(request: Request) {
   if (isCrossSiteWrite(request)) return NextResponse.json({ state: "blocked", code: "REQUEST_FORBIDDEN" }, { status: 403 });
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
-  const body = await request.json().catch(() => null) as { action?: unknown; path?: unknown; id?: unknown; lines?: unknown; exclude?: unknown; include?: unknown; projectId?: unknown } | null;
+  const body = await request.json().catch(() => null) as { action?: unknown; path?: unknown; id?: unknown; lines?: unknown; exclude?: unknown; include?: unknown; projectId?: unknown;
+    localOnly?: unknown; terms?: unknown } | null;
+  // 「仅本地」 and the PDK terms (docs/plans/execution-gates-1124.md 四.0): kept here in the ledger, obeyed by the worker's next walk, which
+  // also takes back what was read before. Only on the computer the folders are on (its owner's account).
+  if (body?.action === "localOnly" || body?.action === "pdkTerms") {
+    const store = getStore();
+    if (!assistantAvailable(store, access.ctx.workspaceId)) return NextResponse.json({ state: "blocked", code: "FOLDER_OWNER_ONLY" }, { status: 403 });
+    if (body.action === "pdkTerms") {
+      const terms = typeof body.terms === "string" ? [...new Set(body.terms.split(/[,，、\n]/).map((term) => term.trim().toLowerCase()).filter((term) => term && term.length <= 60))].slice(0, 100) : undefined;
+      if (!terms) return NextResponse.json({ state: "blocked", code: "PDK_TERMS_INVALID" }, { status: 400 });
+      store.setSetting(access.ctx.workspaceId, PDK_TERMS_SETTING, JSON.stringify(terms));
+      return NextResponse.json({ state: "saved", pdkTerms: extraPdkTerms(access.ctx.workspaceId) });
+    }
+    const folders = readSourceFolders(store.getSetting(access.ctx.workspaceId, SOURCE_FOLDERS_SETTING));
+    if (typeof body.id !== "string" || typeof body.localOnly !== "boolean" || !folders.some((folder) => folder.id === body.id))
+      return NextResponse.json({ state: "blocked", code: "FOLDER_ID_INVALID" }, { status: 400 });
+    const on = body.localOnly;
+    store.setSetting(access.ctx.workspaceId, SOURCE_FOLDERS_SETTING, JSON.stringify(folders.map((folder) => {
+      if (folder.id !== body.id) return folder;
+      const { localOnly: _was, ...rest } = folder;
+      return on ? { ...rest, localOnly: true as const } : rest;
+    })));
+    return NextResponse.json({ state: "saved", localOnly: on });
+  }
   if (body?.action === "results" && typeof body.id === "string" && typeof body.projectId === "string") {
     const store = getStore();
     const folderId = body.id, projectId = body.projectId;

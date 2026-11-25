@@ -17,7 +17,7 @@ const send = (body: Record<string, unknown>) => fetch("/api/settings/local-activ
 const PRIVACY: Record<Privacy, { body: Record<string, unknown>; label: string; title: string }> = {
   off: { body: { consent: "denied" }, label: "关闭", title: "不读取屏幕活动" },
   minutes: { body: { consent: "granted", detail: "denied" }, label: "只记分钟", title: "只记每天的活跃分钟数，不记应用与窗口" },
-  detail: { body: { detail: "granted" }, label: "应用与窗口", title: "记录应用与窗口标题；标题只存本机，14 天后抹除" }
+  detail: { body: { detail: "granted" }, label: "应用与窗口", title: "记录应用与窗口标题；连接网页版时标题会上传，含仅本地或 PDK 的先打码；14 天后抹除" }
 };
 
 /**
@@ -79,7 +79,7 @@ export function LocalActivityToggle({ consent, detail, pausedUntil, blacklist, h
       {categories.length > 0 && <BarChart label={t("今日按类别")} unit={t(" 分")} data={categories.map((item) => ({ label: item.label, value: Math.round(item.minutes) }))} />}
     </section>}
     {level === "detail" && <section className="st-card" aria-label={t("已存记录")}>
-      <header><h3>{t("已存记录")}</h3><small>{t("窗口标题仅存本机")}</small></header>
+      <header><h3>{t("已存记录")}</h3><small>{t("连接网页版时窗口标题会上传，仅本地与 PDK 相关的先打码")}</small></header>
       <div className="st-row">
         <button type="button" onClick={async () => {
           const response = await fetch("/api/settings/local-activity").catch(() => undefined);

@@ -334,7 +334,8 @@ export function ownedInputs(store: CrosslineStore, workspaceId: string, inputs: 
     dirs.push(...store.listWorkOrders(workspaceId).map((order) => order.id).filter(plainId).map((id) => path.join(data, "materials", id)));
     if (plainId(workspaceId)) dirs.push(path.join(data, "workflow-improve", workspaceId));
   }
-  const folders = readSourceFolders(store.getSetting(workspaceId, SOURCE_FOLDERS_SETTING)).map((folder) => realOf(folder.path));
+  // A 「仅本地」 folder's files are never opened by anything that reaches a model (docs/plans/execution-gates-1124.md 四.0).
+  const folders = readSourceFolders(store.getSetting(workspaceId, SOURCE_FOLDERS_SETTING)).filter((folder) => !folder.localOnly).map((folder) => realOf(folder.path));
   const closed = [roots.dataDir, roots.stateDir].filter((dir): dir is string => !!dir).map(realOf);
   const kept: string[] = [];
   const refused: string[] = [];

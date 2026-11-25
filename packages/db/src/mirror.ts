@@ -7,14 +7,16 @@ import type { CrosslineStore } from "./index";
 export const MACHINE_SETTINGS = ["deployment.runtimeOwner", "calendar.graph.owner", "calendar.write.account", "calendar.sources", "calendar.sources.seeded",
   "calendar.subscriptions", "calendar.sync_zone:", "calendar.published", "calendar.autopublish.hash", "calendar.fixed.hash", "calendar.publish.failure",
   "calendar.sync.failure", "push.subscriptions", "sources.folders", "sources.folder.index:", "localActivity.", "activity.", "energy.camera",
-  "health.token.sha256", "model.provider", "model.provider.conformance", "model.sponsor", "model.chatgptExhausted", "model.budget.monthly", "mail.", "agent.sandbox", "background.blocker"];
+  "health.token.sha256", "model.provider", "model.provider.conformance", "model.sponsor", "model.chatgptExhausted", "model.budget.monthly", "mail.", "agent.sandbox", "background.blocker",
+  // Authorized git repositories are paths on this machine, and what was seen of them (docs/plans/execution-gates-1124.md J1).
+  "git."];
 
 /**
  * The device mirror's line (docs/device-mode.md): the machine's settings above, the hosted side's own device and node bookkeeping, every
- * token hash, and the consents and records of what this computer reads itself (coding-agent time, local transcription). The hosted site
- * never sends these; the device keeps its own.
+ * token hash, and the consents and records of what this computer reads itself (coding-agent time, local transcription), and the PDK terms
+ * this computer masks with before anything leaves it. The hosted site never sends these; the device keeps its own.
  */
-const MIRROR_LOCAL = [...MACHINE_SETTINGS, "device.", "node.", "history.agentLogs", "recordings.autoTranscribe", "recordings.modelNoticeAt"];
+const MIRROR_LOCAL = [...MACHINE_SETTINGS, "device.", "node.", "history.agentLogs", "recordings.autoTranscribe", "recordings.modelNoticeAt", "privacy.pdkTerms"];
 export const mirrorLocalSetting = (key: string) => key.endsWith(".token.sha256") || MIRROR_LOCAL.some((prefix) => key.startsWith(prefix));
 
 /** Never mirrored: who the account is, its members and sessions belong to each ledger. */

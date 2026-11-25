@@ -1,0 +1,21 @@
+{
+  "每一行都要填行号和一句描述。": "Each row needs a line number and one sentence.",
+  "答案没有交上去，可以再试一次。": "The answers were not submitted; try again.",
+  "找错练习": "Bug-finding drill",
+  "本周的题还没出。出题前每道题都在仿真器里验证过，服务器上没有仿真器时不出题。": "This week's exercise is not out yet. Every exercise is checked in a simulator before it is issued; without a simulator on the server none is issued.",
+  "{{title}}（{{week}} 这一周）：共 {{count}} 处错误。在本机用 iverilog 做，不开 AI；交行号和一句描述，可以附上改好的 dut.sv。": "{{title}} (week of {{week}}): {{count}} bugs. Solve it on your own computer with iverilog, without AI; submit line numbers with one sentence each, and optionally the fixed dut.sv.",
+  "下载 {{name}}": "Download {{name}}",
+  "找到 {{found}}/{{total}}（{{rate}}%），误报 {{falsePositives}} 条。": "Found {{found}}/{{total}} ({{rate}}%), {{falsePositives}} false positives.",
+  "第 {{line}} 行 · {{verdict}}": "Line {{line}} · {{verdict}}",
+  "找到": "found",
+  "没找到": "missed",
+  "已交 {{count}} 条答案，正在判分。": "{{count}} answers submitted; grading.",
+  "行号": "Line",
+  "错在哪里": "What is wrong",
+  "一句话：错在哪里": "One sentence: what is wrong",
+  "删去": "Remove",
+  "再加一条": "Add another",
+  "改好的文件（可选）": "Fixed file (optional)",
+  "交答案": "Submit answers",
+  "检出率": "Detection rate"
+}
