@@ -1,4 +1,4 @@
-import { mentionsExternalAction } from "./external-action";
+import { externalOf, readExternal } from "./external-action";
 import { AGENT_MAX_RUNS, classifyAgentFailure } from "./agent-failure";
 import { tFor, type Locale } from "./i18n";
 import { workOwner } from "./work-owner";
@@ -113,11 +113,13 @@ const GRADED_NOTE = "这是带评分的课程工作：只做学习辅助（讲�
 /**
  * An errand small and internal enough to hand over whole (see the file comment), for an order with no automatable parts named: who does
  * it is the owner on record (`workOwner`, docs/work-split.md) — an order written before owners is the person's, and a choice or a
- * judgement is the person's by the Skill that wrote it. Sending, submitting, publishing and paying stay theirs whatever the record says.
+ * judgement is the person's by the Skill that wrote it. Sending, submitting, publishing and paying (the model's `external`) stay theirs
+ * whatever the owner on record says.
  */
 function delegateWhole(order: DispatchableOrder, human: Part[], context: AssistantContext): AssistantPlan {
   const t = tFor(context.locale);
-  if (mentionsExternalAction(order.intent, ...human.map((part) => part.intent))) return { fit: false, reason: t("这件事要对外（发送、提交、发布等），不整件交给助手。") };
+  // The model's `external` (payload.external) when the order carries one; the word list only for orders written before it.
+  if (readExternal(externalOf(order), order.intent, ...human.map((part) => part.intent)).external) return { fit: false, reason: t("这件事要对外（发送、提交、发布等），不整件交给助手。") };
   const verdict = workOwner(order, context.locale);
   if (verdict.owner !== "assistant") return { fit: false, reason: verdict.owner === "ask" ? t("这件事需要本人先提供信息。") : t("{{reason}}，不整件交给助手。", { reason: verdict.reason }) };
   return wholePlan(order, context, t("这是一件从已有信息就能做出的准备工作，整件交给助手做，做完的文件直接作为证据交验收。"));

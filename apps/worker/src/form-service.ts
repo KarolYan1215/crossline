@@ -14,7 +14,7 @@ import { createBrowserUseTool } from "./browser-use";
 import { browserUseFallback, stagehandFallback } from "./form-fallbacks";
 import { openFormBrowser, openNodeFormBrowser, runHosts, type FormBrowserOptions } from "./form-browser";
 import type { NodeBrowserLink } from "./node/hub";
-import { hashForm, profileValues, removeSlot, saveSlot } from "./form-profile";
+import { hashForm, loginVault, profileValues, removeLogin, removeSlot, saveLogin, savedLogins, saveSlot } from "./form-profile";
 import { tOfWorkspace } from "./locale";
 import { findBrowser } from "./node/browser";
 import { holdProfile, releaseProfile } from "./profile-locks";
@@ -92,6 +92,12 @@ export function createFormService(deps: FormServiceDeps) {
     const link = deps.nodeBrowser?.(workspaceId);
     return link ? { kind: "node", link } : undefined;
   };
+  /**
+   * Saved website logins live only where the browser that types them runs (docs/plans/harness-1125.md §5–§6): this computer's own
+   * worker, for its machine owner, with a screen. A hosted server never holds one — not for its owner, not for an account whose forms
+   * open on its own compute node (the node's methods have no `login`, so a password never crosses a node's connection either).
+   */
+  const loginsHere = (workspaceId: string) => deps.screen && workspaceId === deps.owner();
   const profileDirOf = (workspaceId: string, host: string) => path.join(profilesRoot(workspaceId), "forms", host.replace(/[^a-z0-9.-]/gi, "_"));
 
   const propose = (workspaceId: string) => async (context: FormFillContext): Promise<FormFillAnswer | undefined> => {
@@ -236,7 +242,8 @@ export function createFormService(deps: FormServiceDeps) {
         save: (next, event) => saveFormRun(store, workspaceId, next, event), notify: (next) => notify(workspaceId, next),
         holdSite: (detail) => holdSite(store, workspaceId, start.host, { at: new Date().toISOString(), where: start.opportunity.title, why: detail.slice(0, 120) }),
         shotFile: (_run, pageNo, label) => path.join(shots, `${String(pageNo).padStart(2, "0")}-${label}-${Date.now()}.png`),
-        hash: hashForm, fallbacks: fallbacksFor(workspaceId), ...(workspaceId === deps.owner() ? {} : { personSubmits: true })
+        hash: hashForm, fallbacks: fallbacksFor(workspaceId), ...(workspaceId === deps.owner() ? {} : { personSubmits: true }),
+        ...(session.profileDir && loginsHere(workspaceId) ? { logins: savedLogins(store, secrets, workspaceId, runHosts) } : {})
       }, { resume });
     } finally { session.busy = false; }
     if (run.state === "submitted") { run = afterSubmit(workspaceId, run); await closeSession(start.id); }
@@ -318,6 +325,17 @@ export function createFormService(deps: FormServiceDeps) {
   type Reply = { status: number; body: unknown };
   const handle = async (method: string, pathname: string, workspaceId: string, body: unknown): Promise<Reply | undefined> => {
     const input = (body ?? {}) as Record<string, unknown>;
+    if (pathname === "/v1/apply-logins" || pathname.startsWith("/v1/apply-logins/")) {
+      if (!allowed(workspaceId)) return { status: 403, body: { code: "FORMS_OWNER_ONLY" } };
+      if (!loginsHere(workspaceId)) return { status: 409, body: { code: "LOGIN_VAULT_LOCAL_ONLY" } };
+      if (method === "GET" && pathname === "/v1/apply-logins") return { status: 200, body: { logins: loginVault(store, workspaceId) } };
+      if (method === "POST" && pathname === "/v1/apply-logins") {
+        const saved = await saveLogin(store, secrets, workspaceId, { host: String(input.host ?? ""), username: String(input.username ?? ""), password: String(input.password ?? "") });
+        return saved.ok ? { status: 200, body: { ok: true, host: saved.host } } : { status: 400, body: saved };
+      }
+      if (method === "DELETE") return { status: 200, body: { ok: removeLogin(store, secrets, workspaceId, decodeURIComponent(pathname.slice("/v1/apply-logins/".length))) } };
+      return undefined;
+    }
     if (pathname.startsWith("/v1/apply-profile")) {
       if (!allowed(workspaceId)) return { status: 403, body: { code: "FORMS_OWNER_ONLY" } };
       const slot = decodeURIComponent(pathname.slice("/v1/apply-profile/".length)) as ApplicationSlot;

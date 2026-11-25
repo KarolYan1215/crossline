@@ -118,6 +118,11 @@ export type AnalysisProposal = Omit<WorkOrder, "id" | "ownerId" | "workspaceId" 
   category?: AgentCategory | "";
   /** Whether it is graded coursework, so the assistant only explains (`agent-dispatch.ts`). Absent on older answers: the project decides. */
   graded?: boolean;
+  /**
+   * Whether the work leaves the machine or commits the person (`external-action.ts`, 2026-11-25): never handed to the assistant whole.
+   * Stored as `payload.external`. Absent on older answers: the word list reads them.
+   */
+  external?: boolean;
 };
 
 type Schema = { type: string; properties?: Record<string, Schema>; required?: string[]; additionalProperties?: false;
@@ -178,7 +183,9 @@ export const ANALYSIS_OUTPUT_SCHEMA = object({
   // Approving it is the person's call: a decision only they make, or an access only they hold, quoting the work's words.
   needsPerson: object({ kind: choice("none", "decision", "access"), quote: optionalText }),
   category: choice("", ...Object.keys(AGENT_CATEGORIES)),
-  graded: bool
+  graded: bool,
+  // It leaves the machine or commits the person to someone: sending, submitting, publishing, contacting, attending, paying, signing, trading.
+  external: bool
 });
 
 // Only the JSON Schema subset used above is accepted; unknown keys fail closed.
@@ -270,6 +277,8 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext,
     ...(!("needsPerson" in withBreakdown) ? { needsPerson: { kind: "none", quote: "" } } : {}),
     ...(!("category" in withBreakdown) ? { category: "" } : {}),
     ...(!("graded" in withBreakdown) ? { graded: false } : {}),
+    // Answers recorded before `external` (2026-11-25): removed again below, so readers fall back to the word list.
+    ...(!("external" in withBreakdown) ? { external: false } : {}),
     ...(!("title" in withBreakdown) ? { title: cleanTaskTitle(String((withBreakdown as { intent?: unknown }).intent ?? "")) || t("未命名任务") } : {})
   } : {};
   const candidate = Object.keys(legacyExtras).length ? { ...(withBreakdown as object), ...legacyExtras } : withBreakdown;

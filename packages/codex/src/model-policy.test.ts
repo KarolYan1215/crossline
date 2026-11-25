@@ -7,10 +7,10 @@ test("each Skill routes to its tier, with or without the plugin prefix", () => {
   expect(routeForSkill("crossline:crossline-background-facts", {})).toEqual(DEFAULT_TIERS.low);
 });
 
-test("the three tiers are one model at three efforts", () => {
-  expect(DEFAULT_TIERS.top).toEqual({ model: "gpt-5.6-terra", effort: "high" });
-  expect(DEFAULT_TIERS.mid).toEqual({ model: "gpt-5.6-terra", effort: "medium" });
-  expect(DEFAULT_TIERS.low).toEqual({ model: "gpt-5.6-terra", effort: "low" });
+test("the three tiers are three models by credit price", () => {
+  expect(DEFAULT_TIERS.top).toEqual({ model: "gpt-6.2-sol", effort: "medium" });
+  expect(DEFAULT_TIERS.mid).toEqual({ model: "gpt-6.1-terra", effort: "medium" });
+  expect(DEFAULT_TIERS.low).toEqual({ model: "gpt-6-luna", effort: "high" });
 });
 
 test("an unlisted Skill gets no route instead of a guessed one", () => {

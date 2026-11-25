@@ -87,6 +87,34 @@ describe("form service", () => {
     expect(secrets.has(`${ws}/apply-phone`)).toBe(false);
   });
 
+  it("keeps a website login in the secret store only: the ledger and its export hold the host alone", async () => {
+    const forms = service();
+    expect(await forms.handle("POST", "/v1/apply-logins", ws, { host: "https://www.Example.com/login", username: "kai.login@example.edu", password: "correct-horse-42" }))
+      .toMatchObject({ status: 200, body: { ok: true, host: "example.com" } });
+    expect(await forms.handle("POST", "/v1/apply-logins", ws, { host: "not a host", username: "kai", password: "x" })).toMatchObject({ status: 400, body: { code: "LOGIN_HOST_INVALID" } });
+    expect(JSON.parse(secrets.get(`${ws}/login-example.com`) ?? "{}")).toEqual({ username: "kai.login@example.edu", password: "correct-horse-42" });
+    expect(await forms.handle("GET", "/v1/apply-logins", ws, undefined)).toMatchObject({ status: 200, body: { logins: [{ host: "example.com" }] } });
+    const ledger = JSON.stringify(store.exportSnapshot(ws));
+    expect(ledger).not.toContain("correct-horse-42");
+    expect(ledger).not.toContain("kai.login");
+    expect(ledger).toContain("example.com");
+    expect(await forms.handle("DELETE", "/v1/apply-logins/example.com", ws, undefined)).toMatchObject({ status: 200, body: { ok: true } });
+    expect(secrets.has(`${ws}/login-example.com`)).toBe(false);
+    expect(await forms.handle("GET", "/v1/apply-logins", ws, undefined)).toMatchObject({ body: { logins: [] } });
+  });
+
+  it("never keeps a website login on a server without a screen, nor for an account whose forms open on its own node", async () => {
+    const other = store.createPrincipalWithWorkspace("u2", "w2").workspace.id;
+    const body = { host: "example.com", username: "kai", password: "pw-123" };
+    const hosted = createFormService({ store, secrets: secretStore, cwd: dir, dataDir: dir, client: () => undefined, owner: () => ws, screen: false, nodeAccount: (id) => id === other, nodeBrowser: () => undefined });
+    expect(await hosted.handle("POST", "/v1/apply-logins", ws, body)).toMatchObject({ status: 409, body: { code: "LOGIN_VAULT_LOCAL_ONLY" } });
+    expect(await hosted.handle("POST", "/v1/apply-logins", other, body)).toMatchObject({ status: 409, body: { code: "LOGIN_VAULT_LOCAL_ONLY" } });
+    const local = createFormService({ store, secrets: secretStore, cwd: dir, dataDir: dir, client: () => undefined, owner: () => ws, screen: true, nodeAccount: (id) => id === other, nodeBrowser: () => undefined });
+    expect(await local.handle("POST", "/v1/apply-logins", other, body)).toMatchObject({ status: 409, body: { code: "LOGIN_VAULT_LOCAL_ONLY" } });
+    expect(await local.handle("POST", "/v1/apply-logins", "stranger", body)).toMatchObject({ status: 403 });
+    expect([...secrets.keys()].some((key) => key.includes("login-"))).toBe(false);
+  });
+
   it.skipIf(!chrome)("fills a queued free event, and without a mailbox the confirmation page confirms it onto the calendar", async () => {
     const forms = service();
     await forms.handle("POST", "/v1/apply-profile/email", ws, { value: "kai@example.edu" });

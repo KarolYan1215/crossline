@@ -2,6 +2,8 @@ import { describe, expect, test } from "vitest";
 import { answeredGapFacts, isCourse, profileGaps, undatedKey, type ProfileGapInput } from "./profile-gaps";
 
 const identities = [{ id: "research", label: "科研" }, { id: "startup", label: "创业" }];
+/** A course on record: its grading breakdown, as the extraction writes it from a syllabus (IR-028: no longer the name's shape). */
+const grading = (projectId: string) => ({ identityId: "research", projectId, slot: "grading", value: "作业 30%、期末 70%", status: "confirmed" });
 const base: ProfileGapInput = {
   identities, projects: [{ id: "ece555", identityId: "research", name: "ECE 555" }], meetings: ["ECE 555"], dated: ["ECE 555", "ece548"],
   facts: [
@@ -74,7 +76,7 @@ test("a course is recognised by its grade breakdown, or by quizzes and homework 
 });
 
 test("a course nobody said the class times of, a file only the person can file and an unconfirmed portrait are asked, and their answers act", () => {
-  const input: ProfileGapInput = { ...base, projects: [...base.projects, { id: "ece548", identityId: "research", name: "ECE 548" }],
+  const input: ProfileGapInput = { ...base, projects: [...base.projects, { id: "ece548", identityId: "research", name: "ECE 548" }], facts: [...base.facts, grading("ece548")],
     unfiled: [{ id: "doc-1", fileName: "Lecture Plan.pdf", lean: { id: "ece548" } }], portrait: { written: true, confirmed: false } };
   const gaps = profileGaps(input);
   expect(gaps.filter((gap) => gap.code !== "LINE_UNCONFIRMED").map((gap) => gap.question.text)).toEqual([
@@ -127,14 +129,16 @@ test("一个非默认项目没有截止时，问「有截止日期吗」，答�
 });
 
 // Found walking the app as an invitee (2026-10-15): the interview asked when 「RBT 610 期末项目」 meets, and for 「大致日期」 of a weekly
-// homework deadline the model had filed as undated.
-test("a course's parts and weekly deadlines are not asked as meetings or undated dates", () => {
+// homework deadline the model had filed as undated. Since 2026-11-25 (IR-028) a course is one with a grading breakdown on record; a name
+// shaped like a course code (「RBT 611」) or like a course's part (「期末项目」) decides nothing, the interview asks.
+test("only a course on record is asked when it meets; a part of it and a weekly deadline are not asked as meetings or undated dates", () => {
   const input: ProfileGapInput = { ...base, meetings: ["rbt610"], dated: ["rbt610", "rbt610-final", "dsc520"],
+    facts: [...base.facts, grading("rbt610"), grading("dsc520")],
     projects: [{ id: "rbt610", identityId: "research", name: "RBT 610 Robot Perception" }, { id: "rbt610-final", identityId: "research", name: "RBT 610 期末项目" },
       { id: "dsc520", identityId: "research", name: "DSC 520" }, { id: "rbt611", identityId: "research", name: "RBT 611" }],
     undated: [{ project: "dsc520", title: "DSC 520 每周作业截止", kind: "homework" }] } as ProfileGapInput;
   const gaps = profileGaps(input);
-  expect(gaps.filter((gap) => gap.code === "COURSE_MEETINGS").map((gap) => gap.projectId).sort()).toEqual(["dsc520", "rbt611"]);
+  expect(gaps.filter((gap) => gap.code === "COURSE_MEETINGS").map((gap) => gap.projectId).sort()).toEqual(["dsc520"]);
   expect(gaps.some((gap) => gap.code === "DATE_UNDATED")).toBe(false);
 });
 
@@ -164,13 +168,14 @@ test("an undated item is asked once whatever its wording, and not again once ans
 });
 
 test("a course whose class times the person said are not fixed is not asked when it meets again (W-268)", () => {
-  const input: ProfileGapInput = { ...base, projects: [...base.projects, { id: "ece548", identityId: "research", name: "ECE 548" }] };
+  const input: ProfileGapInput = { ...base, projects: [...base.projects, { id: "ece548", identityId: "research", name: "ECE 548" }], facts: [...base.facts, grading("ece548")] };
+  expect(profileGaps(input).some((gap) => gap.code === "COURSE_MEETINGS" && gap.projectId === "ece548")).toBe(true);
   const said = { identityId: "research", projectId: "ece548", slot: "class_note", value: "8–21 点之间不固定", status: "confirmed" };
   expect(profileGaps({ ...input, facts: [...input.facts, said] }).some((gap) => gap.code === "COURSE_MEETINGS" && gap.projectId === "ece548")).toBe(false);
 });
 
 test("a course the calendar repeats every week is not asked when it meets, and the question never asks where", () => {
-  const input: ProfileGapInput = { ...base, projects: [...base.projects, { id: "ece548", identityId: "research", name: "ECE 548" }] };
+  const input: ProfileGapInput = { ...base, projects: [...base.projects, { id: "ece548", identityId: "research", name: "ECE 548" }], facts: [...base.facts, grading("ece548")] };
   expect(profileGaps(input).find((gap) => gap.code === "COURSE_MEETINGS")!.question.text).toBe("「ECE 548」每周什么时候上课？");
   expect(profileGaps({ ...input, calendarRecurring: ["ECE548 Lecture"] }).some((gap) => gap.code === "COURSE_MEETINGS")).toBe(false);
 });

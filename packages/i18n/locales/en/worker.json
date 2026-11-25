@@ -907,5 +907,12 @@
   "「{{task}}」{{question}} → {{answer}}": "“{{task}}” {{question}} → {{answer}}",
   "打开任务": "Open task",
   "新机会与动态 {{count}} 条，见周复盘_one": "{{count}} new opportunity or news item, in the weekly review",
-  "新机会与动态 {{count}} 条，见周复盘_other": "{{count}} new opportunities and news items, in the weekly review"
+  "新机会与动态 {{count}} 条，见周复盘_other": "{{count}} new opportunities and news items, in the weekly review",
+  "护栏没能及时判断这一步，按拒绝处理": "The guard could not judge this step in time, so it was refused",
+  "护栏判断这一步时出错，按拒绝处理": "The guard failed while judging this step, so it was refused",
+  "交付的报告、图表或数据没有附上能重新生成它们的 run 脚本": "The delivered report, chart or data came without a run script that makes them again",
+  "重新生成交付物的 run 脚本要联网，没有重跑": "The run script that makes the deliverables again needs the network, so it was not re-run",
+  "重新生成交付物的 run 脚本 2 分钟内没有跑完": "The run script that makes the deliverables again did not finish within 2 minutes",
+  "重新生成交付物的 run 脚本运行出错": "The run script that makes the deliverables again failed",
+  "重新运行 run 脚本生成的 {{files}} 与交付的不一致": "Running the run script again made {{files}} differently from what was delivered"
 }

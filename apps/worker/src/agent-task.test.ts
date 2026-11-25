@@ -156,6 +156,56 @@ test("a command the guard asks about goes to the person when there is a way to r
   await expect(nobody("item/permissions/requestApproval", {})).rejects.toThrow("not handled");
 });
 
+test("a guard that throws or takes too long refuses the step (fail-closed)", async () => {
+  const audit: AuditRecord = { commands: [], filesChanged: [], mcpCalls: [], searches: [], decisions: [], requests: { total: 0, allowed: 0 } };
+  const context = { taskDir: "C:\\ai\\t", homeDir: "C:\\Users\\karol" };
+  const broken = createAgentAnswerer(context, audit, new Map(), undefined, { command: () => { throw new Error("regex blew up"); } });
+  expect(await broken("item/commandExecution/requestApproval", { command: "ls" })).toEqual({ decision: "decline" });
+  const slow = createAgentAnswerer(context, audit, new Map(), undefined, { timeoutMs: 5, command: () => {
+    const until = Date.now() + 30; while (Date.now() < until) { /* stuck */ } return { decision: "allow", rule: "default", reason: "" };
+  } });
+  expect(await slow("item/commandExecution/requestApproval", { command: "ls" })).toEqual({ decision: "decline" });
+  expect(audit.decisions.map((d) => `${d.rule}:${d.outcome}`)).toEqual(["guard.error:declined", "guard.timeout:declined"]);
+});
+
+test("the owner's shell runs under a profile chosen from what it is handed, held by the guard alone and said in its audit", async () => {
+  approveCategory(store, workspaceId, "read_research_organize");
+  const decisions: string[] = [];
+  const script = (id: string) => async ({ ask }: Parameters<NonNullable<AgentScript>>[0]) => {
+    writeFileSync(path.join(root, "ai", id, "notes.md"), "笔记");
+    for (const command of ["curl https://example.com -o page.html", "pip install matplotlib"]) decisions.push(`${id}:${command.split(" ")[0]}:${(await ask("item/commandExecution/requestApproval", { command })).decision}`);
+  };
+  // A research run: cached search, package installs only.
+  const research = fake([summary()], { script: script("t-research") });
+  await runner(research.rpc)({ ...input, taskId: "t-research" });
+  const config = research.threadStarts()[0]!.config as Record<string, unknown>;
+  expect(config).toMatchObject({ web_search: "cached", "features.web_search": true });
+  // A run handed a mail's text: no search, no network at all.
+  const mail = fake([summary()], { script: script("t-mail") });
+  await runner(mail.rpc)({ ...input, taskId: "t-mail", untrusted: ["mail"] });
+  expect(mail.threadStarts()[0]!.config).toMatchObject({ web_search: "disabled", "features.web_search": false });
+  expect(decisions).toEqual(["t-research:curl:decline", "t-research:pip:accept", "t-mail:curl:decline", "t-mail:pip:decline"]);
+  const audit = JSON.parse(readFileSync(path.join(root, "ai", "t-mail", "audit.json"), "utf8"));
+  expect(audit).toMatchObject({ profile: "untrusted-input", isolation: "guard-only", untrusted: ["mail"], egress: "none" });
+  expect(store.listEvents(workspaceId, { type: "agent.task.requested", entityId: "t-mail" })[0]!.payload).toMatchObject({ profile: "untrusted-input", isolation: "guard-only" });
+});
+
+test("a delivered data file counts only when the run's script makes it again; otherwise the result is held for the person", async () => {
+  approveCategory(store, workspaceId, "data_code_sim");
+  for (let i = 0; i < CLEAN_RUNS_TO_TRUST; i += 1) recordReview(store, workspaceId, "data_code_sim", true);
+  const table = summary({ artifacts: [{ path: "table.csv", purpose: "数据表" }] });
+  const write = (id: string, script: string) => async () => {
+    writeFileSync(path.join(root, "ai", id, "run.mjs"), script);
+    writeFileSync(path.join(root, "ai", id, "table.csv"), "a,b\n1,2\n");
+  };
+  const same = await runner(fake([table], { script: write("t-same", "import { writeFileSync } from 'node:fs';\nwriteFileSync('table.csv', 'a,b\\n1,2\\n');\n") }).rpc)({ ...input, category: "data_code_sim", taskId: "t-same" });
+  expect(same).toMatchObject({ state: "done", reviewRequired: false, reproduced: true });
+  const other = await runner(fake([table], { script: write("t-other", "import { writeFileSync } from 'node:fs';\nwriteFileSync('table.csv', 'a,b\\n3,4\\n');\n") }).rpc)({ ...input, category: "data_code_sim", taskId: "t-other" });
+  expect(other).toMatchObject({ state: "done", reviewRequired: true, reproduced: false, reviewReasons: ["重新运行 run 脚本生成的 table.csv 与交付的不一致"] });
+  expect(JSON.parse(readFileSync(path.join(root, "ai", "t-other", "audit.json"), "utf8"))).toMatchObject({ reproduced: false, reproduction: { problem: "mismatch" } });
+  expect(store.listEvents(workspaceId, { type: "agent.task.completed", entityId: "t-other" })[0]!.payload).toMatchObject({ reproduced: false, reviewRequired: true });
+}, 30_000);
+
 test("on the account's node, the shell runs in the node's task directory, its inputs are copies and its results come back to the server", async () => {
   approveCategory(store, workspaceId, "read_research_organize");
   const tasksRoot = path.join(root, "node-tasks");

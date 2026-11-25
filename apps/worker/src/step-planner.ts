@@ -12,6 +12,7 @@ import { aiToolsFor, createRefBook, familiarityBook, familiarityFor, lessonsFor,
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { learnedArchetypes } from "./archetype-curator";
 import { ownerOf } from "./owner";
+import { recordOwnerDisputes } from "./owner-disputes";
 import { localeOf, tOfWorkspace } from "./locale";
 import { ORDER_STARTS_SETTING, startingWithin } from "./schedule-window";
 import { sayToPerson } from "./workflow-smith";
@@ -454,6 +455,9 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
       { assistant: true, ownerPreferences: ownerPreferencesFor(store, workspaceId, order.identityId), locale: localeOf(store, workspaceId),
         drillBacking: drill.backing, methodKnown: drill.methodKnown });
     const normalized = result.output.importance ? { ...shapedPlan, importance: result.output.importance } : shapedPlan;
+    // A step the model marked not external that the word list reads as external: the model stands, the disagreement is logged.
+    recordOwnerDisputes(workspaceId, PLANNER, normalized.steps.map((step) => ({ id: `${workOrderId}:${step.id}`, title: step.title,
+      ...(typeof step.external === "boolean" ? { external: step.external } : {}) })));
     // Steps must not start before the window or end after it: clamp, the reviewer sees the warning.
     // What normalization already fixed (rescaled shares, a missing estimate filled in, an unknown dependency dropped) needs no judgement;
     // only the rest goes to the reviewer.

@@ -49,6 +49,19 @@ describe("what the assistant is handed", () => {
     expect(plan(step("整理 ECE 548 期中考试复习提纲", { owner: "assistant", graded: true }))).toMatchObject({ fit: true, graded: true, notes: expect.stringContaining("学习辅助") });
     expect(plan(order({ ai: ["整理文献"] }))).toMatchObject({ fit: true, delegated: false });
   });
+  // 2026-11-25 (docs/plans/harness-1125.md §1): whether it leaves the machine is the model's `external`; the words read only older orders.
+  test("the model's external decides what is never handed over; the word list only reads orders written before it", () => {
+    const step = (intent: string, extra: Record<string, unknown> = {}) => ({ ...order({ ai: [], human: [intent], intent }),
+      payload: { automationParts: [], humanCore: [{ id: "h", intent }], evidenceContract: [{ description: "摘录" }], ...extra } });
+    // No act in the words, but the model said external: the assistant's own item is still not handed over.
+    expect(plan(step("整理门店名单", { owner: "assistant", external: true }))).toMatchObject({ fit: false });
+    // The words say send, the model said not external: the model stands.
+    expect(plan(step("把仿真结果发送给师兄", { owner: "assistant", external: false }))).toMatchObject({ fit: true, delegated: true });
+    // An order with no owner and no split: external is said as such, whatever its words.
+    expect(plan(step("整理门店名单", { external: true }))).toMatchObject({ fit: false, reason: expect.stringContaining("对外") });
+    expect(plan(step("把仿真结果发送给师兄", { external: false }))).toMatchObject({ fit: false, reason: expect.not.stringContaining("对外") });
+    expect(plan(step("把仿真结果发送给师兄"))).toMatchObject({ fit: false, reason: expect.stringContaining("对外") });
+  });
   test("owned work: the assistant's item goes whole, a question waits, the person's core task is never handed over whole", () => {
     const owned = (intent: string, owner: string, extra: Record<string, unknown> = {}) => ({ id: "x", intent, state: "approved", projectId: "p",
       payload: { owner, automationParts: [{ id: "a", intent }], humanCore: [], ...extra } });

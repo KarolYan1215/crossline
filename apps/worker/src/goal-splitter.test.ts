@@ -103,10 +103,11 @@ test("a line with only the interview's old whole-sentence candidates gets them s
   expect(linesAwaitingCandidateSplit(store, workspaceId)).toEqual([]);
 });
 
-test("an old suggestion's parts that are actions or achievements are not offered as chips, unless nothing else is left", async () => {
-  store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ "line-empty": { description: "", goalCandidates: ["成为有耐心的、外推人类知识边界的投资者"] } }));
-  const empty = { lineId: "line-empty", goals: [{ goal: "成为有耐心的、外推人类知识边界的投资者",
-    parts: [{ text: "有耐心", kind: "state" }, { text: "外推人类知识边界", kind: "state" }] }] };
+// Since 2026-11-25 (IR-025 retired) only the shape is checked here: a sentence-length part goes, action-like wording is the Skill's.
+test("an old suggestion's sentence-length parts are not offered as chips, unless nothing else is left", async () => {
+  store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ "line-empty": { description: "", goalCandidates: ["成为有耐心的、在人工智能教育与科学传播交叉领域被同行持续认可的投资者"] } }));
+  const empty = { lineId: "line-empty", goals: [{ goal: "成为有耐心的、在人工智能教育与科学传播交叉领域被同行持续认可的投资者",
+    parts: [{ text: "有耐心", kind: "state" }, { text: "在人工智能教育与科学传播交叉领域被同行持续认可", kind: "state" }] }] };
   const runtime = fakeRuntime([JSON.stringify({ lines: [researchSplit, mediaGood, empty] })], GOAL_SPLITTER);
   await createGoalSplitter(store, workspaceId, "C:\\repo", () => runtime.rpc)();
   const profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles")!) as Record<string, { attributes: Array<{ text: string }> }>;

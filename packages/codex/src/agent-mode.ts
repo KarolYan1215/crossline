@@ -27,6 +27,11 @@ export type AgentMode = {
      */
     runtimeTmp?: string };
   /**
+   * The runtime's own web search for this thread (docs/plans/harness-1125.md §3): `cached` for a research run, `disabled` for one handed
+   * untrusted content. Absent: `live`, as before.
+   */
+  webSearch?: "live" | "cached" | "disabled";
+  /**
    * Run before each answer is validated: a run on a compute node copies the files it wrote back to the server here, so the validator's
    * artifact check reads them (docs/compute-node.md P3).
    */

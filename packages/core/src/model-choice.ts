@@ -25,6 +25,10 @@ export const MODEL_CHOICE_SLOTS = [
   { key: "crossline-onboarding", label: "访谈" },
   { key: "crossline-onboarding-extract", label: "整理层" },
   { key: "crossline-onboarding-research", label: "调研层" },
+  // The main input box (2026-11-25, the owner: the model is switched where the person talks, not only in Settings).
+  { key: "crossline-concierge", label: "对话" },
+  // What the box hands to the assistant; the tools-mode assistant shares the slot (`modelChoiceFor`).
+  { key: "crossline-agent", label: "助手任务" },
   { key: OTHER_SKILLS, label: "其他 Skill" }
 ] as const;
 export type ModelChoiceSlot = (typeof MODEL_CHOICE_SLOTS)[number]["key"];
@@ -64,7 +68,7 @@ export function modelChoicesOf(raw: string | null | undefined): ModelChoices {
 /** The choice a Skill runs on: its own slot's, else the one for every other Skill, else none (the route table decides). */
 export function modelChoiceFor(choices: ModelChoices, skillName: string): ModelChoice | undefined {
   const key = skillName.replace(/^crossline:/, "");
-  return choices[key] ?? choices[OTHER_SKILLS];
+  return choices[key === "crossline-agent-tools" ? "crossline-agent" : key] ?? choices[OTHER_SKILLS];
 }
 
 /** The choices with one slot set, or cleared with `null` (back to the route table). */

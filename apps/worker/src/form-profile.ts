@@ -1,7 +1,8 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { APPLICATION_SLOTS, isSensitiveSlot, normalForCompare, secretNameOf, type ApplicationSlot } from "@crossline/core";
+import { APPLICATION_SLOTS, LOGIN_VAULT_SETTING, isSensitiveSlot, loginFor, loginHostOf, loginProblem, loginSecretName, normalForCompare, readLoginVault, secretNameOf,
+  type ApplicationSlot, type LoginSecret, type LoginVaultEntry } from "@crossline/core";
 import type { SecretStore } from "@crossline/connectors";
 import { applicationProfile, recordSensitiveSlot, saveProfileFact, removeProfileFact, type CrosslineStore } from "@crossline/db";
 import type { ProfileValues } from "./form-engine";
@@ -71,6 +72,57 @@ export function profileValues(store: CrosslineStore, secrets: SecretStore, works
       const doc = store.listSourceDocuments(workspaceId).find((item) => item.id === value);
       const file = doc ? (doc.uri.startsWith("file:") ? fileURLToPath(doc.uri) : doc.uri) : value;
       return existsSync(file) ? file : undefined;
+    }
+  };
+}
+
+// ———————————————————————————————————————— saved website logins (docs/plans/harness-1125.md §5)
+
+/** The ledger's record: which hosts hold a login in the secret store, and since when. Never a username or password. */
+export const loginVault = (store: CrosslineStore, workspaceId: string): LoginVaultEntry[] => readLoginVault(store.getSetting(workspaceId, LOGIN_VAULT_SETTING));
+const writeVault = (store: CrosslineStore, workspaceId: string, entries: LoginVaultEntry[], host: string, saved: boolean) => {
+  store.setSetting(workspaceId, LOGIN_VAULT_SETTING, JSON.stringify(entries));
+  // The profile's own events, with the host as the only detail.
+  store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "system", workspaceId, type: saved ? "apply.profile.saved" : "apply.profile.removed",
+    entityId: `login:${host}`, idempotencyKey: `apply.login:${host}:${Date.now()}:${randomUUID().slice(0, 8)}`, payload: { login: host, sensitive: true } });
+};
+
+/** The person saved a login: username and password together in the secret store (`login-<host>`), the host alone in the ledger. */
+export async function saveLogin(store: CrosslineStore, secrets: SecretStore, workspaceId: string, input: { host: string; username: string; password: string }): Promise<{ ok: true; host: string } | { ok: false; code: string }> {
+  const problem = loginProblem(input);
+  const host = loginHostOf(input.host);
+  if (problem || !host) return { ok: false, code: problem ?? "LOGIN_HOST_INVALID" };
+  const secret: LoginSecret = { username: input.username.trim(), password: input.password };
+  try { await secrets.write(workspaceId, loginSecretName(host), JSON.stringify(secret)); } catch { return { ok: false, code: "SECRET_STORE_UNAVAILABLE" }; }
+  writeVault(store, workspaceId, [...loginVault(store, workspaceId).filter((entry) => entry.host !== host), { host, savedAt: new Date().toISOString() }], host, true);
+  return { ok: true, host };
+}
+export function removeLogin(store: CrosslineStore, secrets: SecretStore, workspaceId: string, hostInput: string): boolean {
+  const host = loginHostOf(hostInput);
+  if (!host) return false;
+  secrets.remove(workspaceId, loginSecretName(host));
+  const entries = loginVault(store, workspaceId);
+  if (!entries.some((entry) => entry.host === host)) return false;
+  writeVault(store, workspaceId, entries.filter((entry) => entry.host !== host), host, false);
+  return true;
+}
+
+/**
+ * The engine's view of the vault for one run: whether a page's address has a saved login (`loginFor`: https, the exact host or a
+ * known alias), and the login itself, read from the secret store only when the engine is about to type it.
+ */
+export function savedLogins(store: CrosslineStore, secrets: SecretStore, workspaceId: string, aliases: (host: string) => string[]) {
+  const entries = loginVault(store, workspaceId);
+  return {
+    has: (url: string) => Boolean(loginFor(entries, url, aliases)),
+    get: async (url: string): Promise<(LoginSecret & { host: string }) | undefined> => {
+      const entry = loginFor(entries, url, aliases);
+      if (!entry) return undefined;
+      const raw = await secrets.read(workspaceId, loginSecretName(entry.host)).catch(() => undefined);
+      try {
+        const parsed = JSON.parse(raw ?? "") as Partial<LoginSecret>;
+        return typeof parsed.username === "string" && typeof parsed.password === "string" && parsed.password ? { host: entry.host, username: parsed.username, password: parsed.password } : undefined;
+      } catch { return undefined; }
     }
   };
 }

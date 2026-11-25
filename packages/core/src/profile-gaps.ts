@@ -229,18 +229,18 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
     });
   }
 
-  const COURSE_PART = /项目|作业|考试|测验|报告|论文|展示|project|homework|assignment|exam|quiz|report|paper|presentation/i;
   // A course meets: when nobody has said when, ask, with the files as one answer (an interview had two courses and asked about one).
+  // A course here is one the record calls a course — its grading breakdown, written by the extraction from a syllabus. Whether a project
+  // with no such record is a course that meets is the interview's judgement (its Skill asks), no longer the name's shape: the course-code
+  // and 「项目/作业/考试」 name rules were retired on 2026-11-25 (IR-028). The code is still read to match the same course elsewhere.
   const meets = new Set(input.meetings ?? []);
   for (const project of input.projects) {
     const own = input.facts.filter((fact) => fact.projectId === project.id && confirmed(fact));
     const code = courseCodeOf(project.name) ?? courseCodeOf(project.id);
-    const course = Boolean(code) || own.some((fact) => fact.slot === "grading");
+    const course = own.some((fact) => fact.slot === "grading");
     // 「8–21 点之间不固定」 is when it meets, as far as anyone can say (W-268): the question is answered, not asked again.
     if (!course || meets.has(project.id) || meets.has(project.name) || own.some((fact) => MEETING_SLOT.test(fact.slot) || saysVaries(fact))) continue;
-    // A part of a course (its final project, an exam) does not meet on its own; nor does a course whose class times another project with
-    // the same code already holds. Asking when 「RBT 610 期末项目」 meets was found walking the app as an invitee (2026-10-15).
-    if (!own.some((fact) => fact.slot === "grading") && COURSE_PART.test(project.name)) continue;
+    // A course whose class times another project with the same code already holds does not meet on its own.
     if (code && input.projects.some((other) => other.id !== project.id && (meets.has(other.id) || meets.has(other.name))
       && (courseCodeOf(other.name) ?? courseCodeOf(other.id)) === code)) continue;
     // A course the connected calendar already repeats every week meets at those times: read, not asked.

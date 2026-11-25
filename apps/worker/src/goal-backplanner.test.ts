@@ -259,6 +259,20 @@ test("a step is high-risk for what it does, not for a publishing word in its rat
   store.close();
 });
 
+// 2026-11-25 (docs/plans/harness-1125.md §1): the model's `external` decides high-risk and is stored; the words read only answers without it.
+test("a step is high-risk when the model marks it external, and the model's not-external stands over the words", async () => {
+  const store = new CrosslineStore(":memory:");
+  store.saveMilestone({ id: "m", ownerId, workspaceId, identityId: "media", projectId: "p", title: "稳定推进实验", status: "approved", version: 1 });
+  const runtime = fakeRuntime([JSON.stringify({ steps: [
+    step({ id: "call", intent: "和三家门店店长逐一过一遍试用安排", external: true }),
+    step({ id: "post", intent: "发布第一条视频的剪辑稿到本地预览", dependsOn: ["call"], external: false })], dateCandidates: [], blockers: [] })],
+  "crossline:crossline-goal-backplanner");
+  expect((await createGoalBackplanner(store, workspaceId, "C:\repo", () => runtime.rpc)("m")).state).toBe("proposed");
+  const orders = Object.fromEntries(store.listWorkOrders(workspaceId).map((order) => [order.intent, [order.riskTier, (order.payload as { external?: boolean }).external]]));
+  expect(orders).toEqual({ "和三家门店店长逐一过一遍试用安排": ["high_risk", true], "发布第一条视频的剪辑稿到本地预览": ["routine", false] });
+  store.close();
+});
+
 // 「在等」 for something the person was already waiting for links that item instead of opening a `wait-bp-` copy, so the
 // re-split has to find it through the link, under the name the milestone asked for it by.
 test("an existing waiting item linked to a milestone's missing input is passed on as on its way", async () => {

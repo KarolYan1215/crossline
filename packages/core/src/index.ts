@@ -608,6 +608,7 @@ export * from "./feasibility";
 export * from "./person-places";
 export * from "./visa";
 export * from "./form-fill";
+export * from "./login-vault";
 export * from "./form-observe";
 export * from "./form-browser-use";
 export * from "./personal-design";

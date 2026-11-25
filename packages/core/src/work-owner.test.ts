@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isPreparationOnlyCriterion, isPreparationOnlyMilestone, onPersonsBoard, workOwner, type WorkOwner } from "./work-owner";
+import { mentionsExternalAction, readExternal } from "./external-action";
 import { assignBackplanOwners, rollingBackplan, validateBackplan } from "./backplan-schema";
 
 describe("workOwner", () => {
@@ -34,6 +35,33 @@ describe("workOwner", () => {
     expect(workOwner({ title: "确认期中复习范围", owner: "ask", question: "期中考到第几讲？" }).question).toBe("期中考到第几讲？");
     expect(workOwner({ title: "整理本学期已出成绩", owner: "ask" }).question).toContain("整理本学期已出成绩");
     expect(workOwner({ title: "汇集规则", owner: "assistant" }).question).toBeUndefined();
+  });
+
+  // 2026-11-25 (docs/plans/harness-1125.md §1): the model's `external` decides; the word list reads only work written before it and
+  // otherwise flags a disagreement, which the worker logs.
+  it("takes the model's external: true makes it the person's with no act in the words", () => {
+    expect(workOwner({ title: "整理三家门店的营业数据", owner: "assistant", external: true })).toMatchObject({ owner: "person", code: "external" });
+    expect(workOwner({ title: "整理三家门店的营业数据", owner: "ask", external: true }).owner).toBe("person");
+    expect(workOwner({ intent: "整理三家门店的营业数据", payload: { title: "整理营业数据", owner: "assistant", external: true } })).toMatchObject({ owner: "person", code: "external" });
+  });
+  it("lets the model's external: false stand over the words, and marks the disagreement", () => {
+    const verdict = workOwner({ title: "发送周报给导师", owner: "assistant", external: false });
+    expect(verdict).toMatchObject({ owner: "assistant", code: "model", disputed: true });
+    expect(workOwner({ intent: "提交报名表", payload: { title: "提交报名表", owner: "assistant", external: false } })).toMatchObject({ owner: "assistant", disputed: true });
+    expect(workOwner({ title: "整理复习提纲", owner: "assistant", external: false }).disputed).toBeUndefined();
+  });
+  it("reads work without the field by the word list, never as disputed", () => {
+    expect(workOwner({ title: "发送周报给导师", owner: "assistant" })).toMatchObject({ owner: "person", code: "external" });
+    expect(workOwner({ title: "发送周报给导师", owner: "assistant" }).disputed).toBeUndefined();
+    expect(readExternal(undefined, "发送周报给导师")).toEqual({ external: true, by: "words", disputed: false });
+    expect(readExternal(false, "发送周报给导师")).toEqual({ external: false, by: "model", disputed: true });
+    expect(readExternal(true, "整理提纲")).toEqual({ external: true, by: "model", disputed: false });
+  });
+  it("the one word list carries both old lists: upload and pay, mail and legal objects, and the cleaning of nouns and drafts", () => {
+    for (const text of ["上传成片到小红书", "支付报名费", "Upload the deck", "Pay the invoice", "出售旧设备", "处理产权过户", "Email the advisor the draft", "约见 3 家门店店长"])
+      expect(mentionsExternalAction(text), text).toBe(true);
+    for (const text of ["起草给店长的邀请邮件", "整理投稿要求", "整理本月交易记录", "整理对比表，供本人决定后发送给导师", "Summarize the notes"])
+      expect(mentionsExternalAction(text), text).toBe(false);
   });
 
   it("reads a step's executor as the model's owner", () => {
@@ -86,6 +114,13 @@ describe("backplan owners", () => {
       item("p", "发布第一条视频", { dependsOn: ["c", "q"], owner: "assistant" })]);
     expect(steps.map((step) => [step.id, step.owner, step.prepares])).toEqual([["a", "assistant", "c"], ["c", "person", ""], ["q", "ask", "p"], ["p", "person", ""]]);
     expect(steps.find((step) => step.id === "q")!.question).toContain("整理近 30 天的后台播放数据");
+  });
+  it("keeps the model's external on an item, and an item recorded before it has none (the word list reads it)", () => {
+    const answer = () => ({ steps: [item("a", "汇总门店名单", { sourceQuote: "门店", owner: "assistant", external: true }),
+      item("b", "整理店长回访记录", { sourceQuote: "门店", owner: "assistant", external: "yes" }), item("c", "写访谈提纲", { sourceQuote: "门店" })], dateCandidates: [], blockers: [] });
+    const steps = validateBackplan(answer(), ["门店"]).steps;
+    expect(steps.map((step) => step.external)).toEqual([true, undefined, undefined]);
+    expect(assignBackplanOwners(steps).steps.map((step) => [step.id, step.owner, step.ownerCode])).toEqual([["a", "person", "external"], ["b", "assistant", "model"], ["c", "person", "model"]]);
   });
   it("an assistant item holding a request for a fact becomes a question", () => {
     const { steps } = assignBackplanOwners([item("a", "汇集门店营业数据", { owner: "assistant", infoRequests: [{ kind: "ask_person", what: "门店上月营业额", who: "店长" }] }),

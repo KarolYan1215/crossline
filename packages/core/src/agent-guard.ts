@@ -24,6 +24,12 @@ export type GuardContext = {
   homeDir: string;
   /** The language of the reasons, which the person reads when a step is refused or asked about (default Chinese). */
   locale?: Locale | undefined;
+  /**
+   * What the run may reach over the network from its shell (Rule of Two, docs/plans/harness-1125.md §3): `none` for a run that reads
+   * untrusted content (every network command refused), `packages` for a research run (only package installs and git clone/fetch/pull).
+   * Absent: the old tripwire, no network check.
+   */
+  egress?: "none" | "packages" | undefined;
 };
 
 /** Lower-cased, backslashes, and `.`/`..` resolved by hand: this file ships to the browser too, so it cannot borrow node's path. */
@@ -106,6 +112,16 @@ export function decideCommand(command: string, context: GuardContext): GuardDeci
       }
     }
   }
+  // A run with an egress limit: every network command is refused, but package installs and git clone/fetch/pull in a research run.
+  // An upload or a push keeps its own rule, so the failure card still says it was an outward act.
+  if (context.egress) {
+    const use = networkUse(text);
+    if (use === "other" || (use === "package" && context.egress === "none")) {
+      const outward = ASK.find((entry) => (entry.rule === "git.remote" || entry.rule === "net.upload") && entry.pattern.test(text));
+      return { decision: "deny", rule: outward?.rule ?? "net.egress", reason: t(context.egress === "none"
+        ? "这次运行拿到的是别人写的内容，命令一律不联网" : "调研运行只放行安装软件包和 git 拉取，其他联网命令不放行") };
+    }
+  }
   for (const entry of ASK) {
     if (!entry.pattern.test(text)) continue;
     // Deleting or moving inside the task's own directory is the task's business.
@@ -121,6 +137,93 @@ export function decideCommand(command: string, context: GuardContext): GuardDeci
 /** The runtime spells out the shell it runs a command in (`C:\Windows\…\powershell.exe -Command …`); that path is not a target. */
 const withoutShell = (command: string) => command.replace(/^\s*[a-z]:[\\/][^\s]*?[\\/](powershell|pwsh|cmd)(\.exe)?\s+((-|\/)\w+\s+)*/i, "");
 
+/** Commands that reach the network whatever their arguments. */
+const NET_COMMANDS = new Set(["curl", "wget", "invoke-webrequest", "iwr", "invoke-restmethod", "irm", "start-bitstransfer", "bitsadmin", "ssh", "scp", "sftp",
+  "ftp", "tftp", "nc", "ncat", "netcat", "telnet", "socat", "rsync", "test-netconnection", "tnc", "resolve-dnsname", "nslookup", "ping", "aria2c", "http",
+  "https", "xh", "gh", "az", "aws", "gcloud", "gsutil", "rclone", "azcopy", "npx", "pnpx", "bunx", "uvx", "pipx", "install-module", "install-package",
+  "save-module", "find-module", "install-psresource", "winget", "choco", "scoop"]);
+const URL_OPENERS = new Set(["start", "start-process", "saps", "explorer", "xdg-open", "open", "rundll32", "msedge", "chrome", "firefox", "certutil"]);
+const INTERPRETERS = new Set(["python", "python3", "py", "pythonw", "node", "deno", "bun", "ruby", "perl", "php"]);
+/** Code that opens a connection, in a one-liner or a here-string handed to an interpreter (quotes already removed). */
+const NET_CODE = /\b(urllib[23]?|requests|httpx|aiohttp|http\.client|httplib|socket|websockets?|ftplib|smtplib|paramiko|pycurl|urlopen|selenium|playwright|puppeteer|axios|node-fetch|undici)\b|\bfetch\s*\(|\brequire\s*\(\s*(node:)?(https?|net|dgram|tls|dns|http2)\s*\)|\b(from|import)\s*\(?\s*(node:)?(https?|net|dgram|tls|dns|http2)\b|\bhttps?\.(get|request)\s*\(|\bnet\.(connect|createconnection)\b|net::http|lwp::|open-uri|file_get_contents\s*\(\s*https?:/i;
+/** .NET's own network classes, reachable from any PowerShell line. */
+const NET_DOTNET = /\bnet\.webclient\b|system\.net\.(webclient|http|sockets|webrequest|httpwebrequest)|\[net\.(webclient|http|sockets|webrequest)|\bhttpclient\b|\b(download|upload)(string|file|data)(async)?\b|webrequest\]::create/i;
+/** A command whose text cannot be read is not one the guard can say stays offline. */
+const ENCODED = /\s-(e|ec|enc|encodedcommand)\s+[a-z0-9+/=]{16,}/i;
+
+/** Each command in a line (split at separators, blocks and subexpressions) as its program name and the rest. */
+function commandsIn(command: string): Array<{ word: string; args: string[]; raw: string }> {
+  return withoutShell(command.replace(/["'`]/g, "")).split(/\r?\n|[;|&{}()]|\$\(/).map((segment) => {
+    const cleaned = segment.trim().replace(/^(\$[\w:]+\s*=\s*)+/, "").replace(/^[&.]\s+/, "")
+      .replace(/^(cmd(\.exe)?\s+\/[ck]\s+|(powershell|pwsh)(\.exe)?\s+(-\w+\s+)*)/i, "");
+    const [first = "", ...args] = cleaned.split(/\s+/).filter(Boolean);
+    const word = first.split(/[\\/]/).pop()!.toLowerCase().replace(/\.(exe|cmd|bat|ps1)$/, "");
+    return { word, args, raw: segment };
+  }).filter((entry) => entry.word);
+}
+
+/** The subcommand of a package manager or git: its first argument that is not a flag (git's `-C dir`/`-c key=value` skipped). */
+const subcommand = (args: string[]): string[] => {
+  const rest: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    if (/^-[cC]$/.test(args[i]!)) { i += 1; continue; }
+    if (!args[i]!.startsWith("-")) rest.push(args[i]!.toLowerCase());
+  }
+  return rest;
+};
+
+/**
+ * Whether a command reaches the network, and how (docs/plans/harness-1125.md §3): `package` for installing packages or pulling with git
+ * (what a research run may do), `other` for anything else that connects, undefined when nothing in it is known to. A script run by name
+ * (`python plot.py`) is not read: that is the sandbox's part, and without one the run's audit says the guard is all there is.
+ */
+export function networkUse(command: string): "package" | "other" | undefined {
+  const text = command.replace(/["'`]/g, "");
+  if (NET_DOTNET.test(text) || ENCODED.test(text)) return "other";
+  const commands = commandsIn(command);
+  let use: "package" | undefined;
+  // The code an interpreter may run: every line but the package and git commands (`pip install requests` names a package, not a connection).
+  let code = withoutShell(text);
+  for (const { word, args, raw } of commands) {
+    const sub = subcommand(args);
+    const module = INTERPRETERS.has(word) ? args.indexOf("-m") : -1;
+    if (["pip", "pip3", "uv", "npm", "pnpm", "yarn", "git", "conda", "mamba", "micromamba", "gem", "cargo", "go"].includes(word)
+      || (module >= 0 && /^pip3?$/i.test(args[module + 1] ?? ""))) code = code.replace(raw, " ");
+    if (NET_COMMANDS.has(word)) return "other";
+    if (URL_OPENERS.has(word) && args.some((arg) => /^(https?|ftp):\/\//i.test(arg) || /-urlcache/i.test(arg))) return "other";
+    const pip = word === "pip" || word === "pip3" ? sub
+      : module >= 0 && /^pip3?$/i.test(args[module + 1] ?? "") ? subcommand(args.slice(module + 2))
+      : word === "uv" && sub[0] === "pip" ? sub.slice(1) : undefined;
+    if (pip) {
+      if (pip[0] === "install") use = "package";
+      else if (["download", "wheel", "index", "search"].includes(pip[0] ?? "")) return "other";
+      continue;
+    }
+    if (word === "uv") {
+      if (["add", "sync"].includes(sub[0] ?? "")) use = "package";
+      else if (["lock", "tool", "publish", "python"].includes(sub[0] ?? "")) return "other";
+      continue;
+    }
+    if (word === "npm" || word === "pnpm" || word === "yarn") {
+      if (!sub.length && word === "yarn") use = "package";
+      else if (["install", "i", "add", "ci"].includes(sub[0] ?? "")) use = "package";
+      else if (["update", "up", "upgrade", "dlx", "exec", "x", "create", "init", "view", "info", "show", "search", "login", "adduser", "whoami", "outdated", "audit", "fetch", "dedupe"].includes(sub[0] ?? "")) return "other";
+      continue;
+    }
+    if (word === "git") {
+      if (["clone", "fetch", "pull"].includes(sub[0] ?? "")) use = "package";
+      else if (["push", "ls-remote", "send-email", "request-pull"].includes(sub[0] ?? "") || (sub[0] === "remote" && sub[1] === "update")
+        || (sub[0] === "submodule" && sub[1] === "update") || (sub[0] === "archive" && args.some((arg) => /^--remote/.test(arg)))) return "other";
+      continue;
+    }
+    if (["conda", "mamba", "micromamba", "gem", "cargo", "go"].includes(word)
+      && ["install", "create", "update", "add", "fetch", "search", "get", "download", "publish"].includes(sub[0] ?? "")) return "other";
+    if (word === "go" && sub[0] === "mod" && sub[1] === "download") return "other";
+  }
+  if (commands.some(({ word }) => INTERPRETERS.has(word)) && NET_CODE.test(code)) return "other";
+  return use;
+}
+
 /** No path in the command can leave the working directory: no drive, root, UNC, home, environment variable, parent or wildcard-only target. */
 function onlyRelative(command: string): boolean {
   return !/[a-z]:[\\/]|(^|[\s='"(])[\\/]|~|\$env:|\$home|%[a-z_]+%|\.\.|(^|[\s;|&])(cd|set-location|push-location|sl|pushd)\b/i.test(command)
@@ -131,6 +234,35 @@ function onlyRelative(command: string): boolean {
 function mentionsOnly(command: string, roots: string[]): boolean {
   const paths = command.match(/[a-z]:\\[^\s;|&"']+/gi) ?? [];
   return paths.length > 0 && paths.every((path) => roots.some((root) => inside(path, root)));
+}
+
+/** Whether a script's own text opens a connection (a `run.*` the worker is about to re-run without the network). */
+export function codeUsesNetwork(source: string): boolean {
+  const text = source.replace(/["'`]/g, "");
+  return NET_CODE.test(text) || NET_DOTNET.test(text) || /\b(invoke-webrequest|invoke-restmethod|iwr|irm|start-bitstransfer|curl|wget)\b/i.test(text);
+}
+
+/**
+ * The machine owner's shell runs, classified at dispatch by what they are handed (Rule of Two, docs/plans/harness-1125.md §3). Every such
+ * run holds the person's private data, so it may have at most one of untrusted content and the network:
+ * - `untrusted-input` — handed a mail's text, a watched page, a site read behind the person's login, or a downloaded or saved web file:
+ *   no egress at all, web search off;
+ * - `research` — everything else: web search from the cache, network commands only to install packages or pull with git.
+ */
+export type AgentRunProfile = "untrusted-input" | "research";
+export type RunIsolation = { profile: AgentRunProfile; egress: "none" | "packages"; webSearch: "disabled" | "cached"; untrusted: string[] };
+/** Files that are someone else's words: mail and saved web pages. */
+const UNTRUSTED_FILE = /\.(eml|msg|mbox|html?|mhtml?|webarchive|url)$/i;
+export function classifyAgentRun(run: { inputs: string[]; homeDir: string; untrusted?: string[] }): RunIsolation {
+  const downloads = `${normalise(run.homeDir)}\\downloads`;
+  const untrusted = new Set(run.untrusted ?? []);
+  for (const input of run.inputs) {
+    if (inside(input, downloads)) untrusted.add("download");
+    else if (UNTRUSTED_FILE.test(input)) untrusted.add(/\.(eml|msg|mbox)$/i.test(input) ? "mail" : "page");
+  }
+  return untrusted.size
+    ? { profile: "untrusted-input", egress: "none", webSearch: "disabled", untrusted: [...untrusted] }
+    : { profile: "research", egress: "packages", webSearch: "cached", untrusted: [] };
 }
 
 /** A change the agent wants to make to files: confined to the task's own directories. */

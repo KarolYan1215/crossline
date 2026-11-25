@@ -21,6 +21,8 @@ function setup(nextAction: "ask" | "ready_for_milestones" = "ask", projects = tr
   for (const [id, name] of projects ? [["ece555", "ECE 555"], ["ece548", "ECE 548"]] as const : []) {
     store.saveProject({ id, ownerId: "o", workspaceId: ws, identityId: "research", name, summary: "", status: "active", createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z" });
     store.upsertProfileFact({ workspaceId: ws, identityId: "research", projectId: id, slot: "deadline", value: "2026-12-15", status: "confirmed", sourceRef: "reply-1", sourceQuote: "2026-12-15", updatedAt: "2026-10-01T00:00:00Z" });
+    // A course on record (its grading breakdown): only such a project gets the app's class-times question (IR-028, 2026-11-25).
+    store.upsertProfileFact({ workspaceId: ws, identityId: "research", projectId: id, slot: "grading", value: "作业 30%、期末 70%", status: "confirmed", sourceRef: "src-1", sourceQuote: "作业 30%", updatedAt: "2026-10-01T00:00:00Z" });
   }
   for (const [id, fileName, text] of [["a", "Course Overview.docx", "Fermi-Dirac Statistics"], ["b", "TENTATIVE_Lecture Plan for Fall 2026.docx", "Week-1"]] as const)
     store.saveSourceDocument({ id, ownerId: "o", workspaceId: ws, kind: "text", fileName, mediaType: "text/plain", sha256: id, uri: `file://${id}`,

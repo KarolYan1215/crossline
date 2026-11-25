@@ -7,7 +7,7 @@ import { DIMENSION_FIELD, DIMENSION_IDS, DIMENSION_NOTE_FIELD, HYPOTHESIS_ITEM_F
   type CareerOption, type DimensionId, type DimensionNote, type Hypothesis } from "./profile-hypotheses";
 import { POINT_CHANGE_FIELD, POINT_OPS, POINT_SECTIONS, POINT_TEXT_MAX, type PointChange, type ProfilePoint } from "./profile-points";
 import {
-  ATTRIBUTE_CANDIDATES_MAX, ATTRIBUTE_CANDIDATES_MIN, ATTRIBUTE_KIND_FIELD, ATTRIBUTE_KINDS, ATTRIBUTE_MAX_LENGTH, attributeProblem, cleanAttribute, duplicateAttributes,
+  ATTRIBUTE_CANDIDATES_MAX, ATTRIBUTE_CANDIDATES_MIN, ATTRIBUTE_KIND_FIELD, ATTRIBUTE_KINDS, ATTRIBUTE_MAX_LENGTH, attributeShapeProblem, cleanAttribute, duplicateAttributes,
   guessKind, notAtomic, type AttributeCandidate, type AttributeKind
 } from "./line-attributes";
 
@@ -455,7 +455,7 @@ export type KnownSources = {
    * that had nothing and never shrinks one that had more (`keepCandidates`).
    */
   attributesOnRecord?: Record<string, number>;
-  /** Each line's name, so a candidate that only repeats it is refused (`attributeProblem`). */
+  /** Each line's name, so a candidate that only repeats it is refused (`attributeShapeProblem`). */
   lineLabels?: Record<string, string>;
   /** The hypothesis ids on record: a career changed this run may rest on hypotheses the run did not rewrite. */
   hypothesesOnRecord?: string[];
@@ -905,8 +905,8 @@ const ATTRIBUTE_HOW = "定语说的是本人想在这条线上成为什么样的
 /**
  * What is wrong with one line's attribute candidates, if anything: an empty list is allowed (it keeps the ones on record); otherwise
  * 3–12, or fewer when the line has no more than that on record (`onRecord`: a thin line gets its one or two real attributes, never
- * padding; the repair used to ask for three and invited made-up ones, docs/onboarding-agent-session.md C6), each cited to a reply or file, each one thing, each describing the person rather than an action or an achievement
- * (`attributeProblem`), and no two saying the same (after removing 「的」 and punctuation, one contains the other). The detail names
+ * padding; the repair used to ask for three and invited made-up ones, docs/onboarding-agent-session.md C6), each cited to a reply or file, each one thing, none sentence-length or repeating the line's name (`attributeShapeProblem`;
+ * whether it describes the person rather than an action is the Skill's, IR-187), and no two saying the same (after removing 「的」 and punctuation, one contains the other). The detail names
  * the offending attributes, all of them at once for wording, so one repair can fix them together.
  */
 /* i18n-ignore-start: repair messages to the model */
@@ -917,7 +917,7 @@ function candidatesProblem(list: AttributeCandidate[], citable: (ref: string) =>
     if (!cleanAttribute(item.text)) return { code: "ONBOARDING_ATTRIBUTE_EMPTY", detail: "有一个定语是空的。" };
     if (notAtomic(item.text)) return { code: "ONBOARDING_ATTRIBUTE_NOT_ATOMIC", detail: `「${item.text}」含有并列，一个定语只写一件事，拆成两个。` };
   }
-  const wording = list.map((item) => attributeProblem(item.text, label)).filter((problem): problem is string => Boolean(problem));
+  const wording = list.map((item) => attributeShapeProblem(item.text, label)).filter((problem): problem is string => Boolean(problem));
   if (wording.length) return { code: "ONBOARDING_ATTRIBUTE_NOT_DESCRIPTIVE", detail: `${wording.slice(0, 3).join("；")}。${ATTRIBUTE_HOW}` };
   const duplicate = duplicateAttributes(list.map((item) => cleanAttribute(item.text)))[0];
   if (duplicate) return { code: "ONBOARDING_ATTRIBUTE_DUPLICATE", detail: `「${duplicate[0]}」与「${duplicate[1]}」重复：去掉「的」和标点后一个包含另一个，只保留一个或改成互不重叠的两个。` };
@@ -940,7 +940,7 @@ function keepCandidates(list: AttributeCandidate[], citable: (ref: string) => bo
   const kept: AttributeCandidate[] = [];
   for (const item of list) {
     const text = cleanAttribute(item.text);
-    if (!text || !citable(item.sourceRef) || notAtomic(text) || attributeProblem(text, label) || duplicateAttributes([...kept.map((other) => other.text), text]).length) continue;
+    if (!text || !citable(item.sourceRef) || notAtomic(text) || attributeShapeProblem(text, label) || duplicateAttributes([...kept.map((other) => other.text), text]).length) continue;
     kept.push({ text, kind: kindOf(item), sourceRef: item.sourceRef });
   }
   return kept.length >= ATTRIBUTE_CANDIDATES_MIN || (kept.length > 0 && kept.length >= onRecord) ? kept.slice(0, ATTRIBUTE_CANDIDATES_MAX) : [];

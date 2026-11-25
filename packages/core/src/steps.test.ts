@@ -128,6 +128,15 @@ describe("grounded, non-trivial plans", () => {
     expect(normalized.questions.map((question) => question.text)).toEqual(["「整理本学期已出成绩」需本人提供哪些信息？"]);
     expect(warnings.map((warning) => warning.code)).toEqual(expect.arrayContaining(["STEP_TRIVIAL_TO_AGENT", "STEP_OWNER_ASK", "STEP_OWNER_PERSON"]));
   });
+  // 2026-11-25: whether a step leaves the machine is the model's `external`; the title is read only for plans stored before it.
+  it("takes the model's external over the title: true keeps it the person's, false lets the assistant's material stand", () => {
+    const { plan: normalized } = normalizeStepPlan(plan([
+      step("a", "gather", { title: "汇总门店联系方式", executor: "agent", owner: "assistant", external: true }),
+      step("b", "gather", { title: "整理发送给店长的资料", executor: "agent", owner: "assistant", product: "material", external: false }),
+      step("c", "gather", { title: "整理发送给店长的资料", executor: "agent", owner: "assistant", product: "material" })]));
+    expect(normalized.steps.map((item) => [item.owner, item.executor, item.external])).toEqual([
+      ["person", "human", true], ["assistant", "agent", false], ["person", "human", undefined]]);
+  });
   it("a step that only reviews the assistant's output is folded into the first core step's first move, at most ten minutes", () => {
     const { plan: normalized, warnings } = normalizeStepPlan(plan([
       step("g", "gather", { title: "汇集 5 份门店访谈记录", executor: "agent", schedulable: false }),

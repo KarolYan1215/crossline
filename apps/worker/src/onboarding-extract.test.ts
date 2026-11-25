@@ -53,13 +53,14 @@ test("a failed extraction backs off, says so, and is taken up again once its wai
   expect(store.listProfileFacts(workspaceId).map((fact) => fact.slot)).toEqual(["deadline"]);
 });
 
-test("goal attributes that are actions or achievements are dropped: a line with none on record keeps the real ones, a fuller one keeps its own", async () => {
+// Since 2026-11-25 (IR-025 retired) code drops only a candidate's shape (a sentence, the line's own name); action-like wording is the Skill's.
+test("sentence-length goal attributes are dropped: a line with none on record keeps the real ones, a fuller one keeps its own", async () => {
   const onRecord = ["科普", "有趣", "稳定更新", "值得信赖"].map((text) => ({ text, kind: "state", sourceRef: "reply-0" }));
   store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ media: { description: "小红书科普", attributes: onRecord } }));
   const attribute = (text: string) => ({ text, kind: "ability", refs: [1] });
   const answer = facts({ lineProfiles: [
-    { lineId: "research", description: "做忆阻器研究", attributeCandidates: [attribute("严谨"), attribute("能独立立项"), attribute("发表三篇顶会论文"), attribute("独立")] },
-    { lineId: "media", description: "", attributeCandidates: [attribute("有影响力"), attribute("写公众号长文")] }] });
+    { lineId: "research", description: "做忆阻器研究", attributeCandidates: [attribute("严谨"), attribute("在人工智能教育与科学传播交叉领域被同行持续认可"), attribute("把脑机制转化为可以落地的新型硬件结构"), attribute("独立")] },
+    { lineId: "media", description: "", attributeCandidates: [attribute("有影响力"), attribute("在每一条笔记里把难懂的科学讲得好笑又准确")] }] });
   const { rpc, prompts } = runtime([round], [answer]);
   await createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "await" })({ sessionId: "s", text: "希望自己严谨、独立，三年内发三篇顶会。" });
   // The model was told what was wrong and how to write an attribute before its answer was kept.

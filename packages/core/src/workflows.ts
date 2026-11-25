@@ -71,8 +71,8 @@ export function stepLeavesMachine(title: string): boolean {
     // The same exemptions in English: the thing to publish (a package, a checklist, a time), and a sentence about *not* sending.
     .replace(/\b(publish|post|send|upload|submi(t|ssion))(ing)? ?(package|draft|checklist|plan|time|date|channel|format|requirements|instructions|materials|prep)\b/gi, "")
     .replace(/\b(do not|don't|does not|doesn't|not|never|no need to|without|ready to|stop before|until you) (publish|post|send|upload|submit)\w*\b/gi, "");
-  // The shared pattern has no 「上传」 or 「付款」, and a workflow's step says 「上传到小红书」 as often as 「发布」.
-  return mentionsExternalAction(cleaned) || /上传|付款|支付|\b(upload|pay)\b/i.test(cleaned);
+  // The one word list (`external-action.ts`) carries 「上传」「付款」 and "upload"/"pay" since 2026-11-25.
+  return mentionsExternalAction(cleaned);
 }
 const READS = /只读|读取|采集|浏览|核验|调研|搜索|检索|查找|下载公开|read|fetch|scrape|search|verify|browse|collect|look up|check|download public/i;
 const short = (value: unknown, max: number) => typeof value === "string" && value.trim().length > 0 && value.length <= max;
@@ -119,6 +119,10 @@ export function validateWorkflowManifest(value: unknown, lineIds: string[]): Wor
   /* i18n-ignore-end */
   // Anything that sends, uploads, publishes, submits or pays is the person's, whatever the manifest says: such a step is handed to the
   // person rather than the workflow refused, since refusing for a sentence about *not* publishing threw good workflows away.
+  // Unlike the work-writing Skills (`external-action.ts`, 2026-11-25), here the words still override the manifest's `external`: the
+  // manifest is written by the assistant that will run the workflow, so its `external` is the runner marking its own permission, and its
+  // grown workflows already read it as "touches the network" (the reading steps below). Revisit once the shell's egress is closed
+  // (docs/plans/harness-1125.md §3).
   return { ...manifest, schedule: manifest.trigger === "schedule" ? manifest.schedule : null,
     access: access.map((item) => ({ service: item.service.trim(), site: item.site.trim(), login: item.login, how: item.how.trim() })), risks: risks.slice(0, 8),
     steps: manifest.steps.map((step) => {

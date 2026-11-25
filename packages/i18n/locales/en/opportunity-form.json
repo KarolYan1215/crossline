@@ -100,5 +100,10 @@
   "没有开始下载，请重试": "The download did not start; try again",
   "下载 browser-use": "Download browser-use",
   "报名_form": "registration",
-  "申请_form": "application"
+  "申请_form": "application",
+  "网站登录": "Website logins",
+  "代填遇到这个网站自己的登录页时，由程序填入并登录；密码只存在本机密钥库，不进账本、模型、截图和备份。不用于付款；验证码和二次验证仍交本人。": "When filling meets this site's own login page, the program types the login and signs in; the password stays in this computer's secret store, never in the ledger, a model, a screenshot or a backup. Never used for payment; captchas and two-factor checks are still yours.",
+  "网站登录只能存在本人电脑上的 Crossline 里": "Website logins can only be kept in Crossline on your own computer",
+  "用户名": "Username",
+  "添加网站登录": "Add a website login"
 }

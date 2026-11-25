@@ -150,6 +150,7 @@ Only the steps that need the answer depend on the send step; everything else pro
 - `tickOutcome` — for the two to five steps whose result is a real capability or artefact, the result as it would be ticked on the milestone axis (「能在 20 分钟内独立解出 BJT 小信号题」); "" otherwise.
 - `covers`, `why`, `aiAssist` (section 8).
 - `attends` — `true` when the step is going to something at its own set time (attending a talk, a rehearsal, an interview, sitting an exam or a quiz): it is never placed in free hours. Preparing for it is a separate step and `false`. No verb list in the app decides this any more.
+- `external` — `true` when the step leaves the machine or commits the person to someone (sending, submitting, publishing, contacting, attending, paying, signing, trading): it is then the person's whatever its `owner`; drafting the message or packing the files is `false`. The app takes your answer and no longer reads the title for it.
 - `workout` — `true` when the step is physical exercise (a run, a gym session, swimming, yoga, a hike): confirming it done on the health line records a workout. Planning a training schedule or booking a class is `false`.
 - `firstAction` — for every `human` or `mixed` step, the first move that starts it, five minutes or less, naming the actual thing to open or write, at most 80 characters: 「打开 L5 讲义，读到第一个例题」, 「新建 hw3.md，抄下第 1 题题干」, 「把去年期中卷第一页打印出来」. Never a restatement of the title, 「开始复习」 or 「做好准备」. "" for `agent` steps and waits.
 

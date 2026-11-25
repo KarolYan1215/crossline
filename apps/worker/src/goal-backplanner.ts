@@ -1,12 +1,13 @@
 import { personProfileFor } from "./planning-profile";
 import { drillBackingFor } from "./drill-backing";
 import { randomUUID } from "node:crypto";
-import { assignBackplanOwners, BACKPLAN_SCHEMA, screenBackplanDrills, foldInfoRequests, goalSettingKey, isWorkOwner, mentionsExternalAction, producedArtifacts, rollingBackplan, usedArtifacts,
+import { assignBackplanOwners, BACKPLAN_SCHEMA, screenBackplanDrills, foldInfoRequests, goalSettingKey, isWorkOwner, producedArtifacts, readExternal, rollingBackplan, usedArtifacts,
   validateBackplan, workOwner, type BackplanAnswer as Answer, type MissingInput } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { handOffArtifacts, linkArtifactWork, readStoredArtifactPlan, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
 
 import { ownerOf } from "./owner";
+import { recordOwnerDisputes } from "./owner-disputes";
 import { localToday } from "./analysis";
 import { autoApproveEligible } from "./auto-approval";
 import { identityLines } from "./lines";
@@ -209,6 +210,8 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
     const { steps: shaped } = foldInfoRequests(drill.items);
     // Who does each item (docs/work-split.md): the person's core tasks, the assistant's preparation for them, questions to the person.
     const { steps: owned } = assignBackplanOwners(shaped, localeOf(store, workspaceId));
+    // Where the model said an item is not external and the word list says it is, the model stands; the disagreement is logged.
+    recordOwnerDisputes(workspaceId, SKILL, owned);
     const noCore = owned.length > 0 && !owned.some((step) => step.owner === "person");
     // Rolling keeps the person's next core task with what it waits on and its preparation; with no core task, the first items.
     const planned = options.rolling ? rollingBackplan(owned, ROLLING_STEPS) : owned;
@@ -232,8 +235,9 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
     const ids = new Map([...steps.map((step) => [step.id, `backplan-${randomUUID()}`] as const), ...[...folds].map(([stepId, fold]) => [stepId, fold.keep] as const)]);
     const drafts: StoredWorkOrder[] = steps.map((step) => {
       const id = ids.get(step.id)!;
-      // What the step *is*, not why or what it leaves behind: 「首轮发布清单草稿」 as evidence made picking topics high-risk.
-      const external = mentionsExternalAction(step.intent);
+      // The model's `external` (2026-11-25); an answer recorded before it is read by the word list against what the step *is*, not why
+      // or what it leaves behind (「首轮发布清单草稿」 as evidence made picking topics high-risk).
+      const external = readExternal(step.external, step.intent).external;
       const riskTier = external ? "high_risk" : step.riskTier;
       const person = step.owner === "person";
       const part = { id: `${id}-${person ? "core" : "ai"}`, intent: step.intent, quote: step.sourceQuote, rationale: step.rationale };
@@ -258,6 +262,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
           // assistant's work and whether it is graded (`agent-dispatch.ts`), and whether it is only a request for a fact (`info-request.ts`).
           ...(step.needsPerson ? { needsPerson: step.needsPerson } : {}), ...(step.category ? { category: step.category } : {}),
           ...(typeof step.graded === "boolean" ? { graded: step.graded } : {}), ...(step.request && step.request.kind !== "none" ? { request: step.request } : {}),
+          ...(typeof step.external === "boolean" ? { external: step.external } : {}),
           automationParts: person ? [] : [part],
           humanCore: person ? [{ ...part, energy: step.energy, interruptible: step.interruptible }] : [],
           materialContract: [], evidenceContract: [{ kind: "record", description: step.evidence,

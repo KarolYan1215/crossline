@@ -404,6 +404,8 @@ export type FormPageRecord = {
   /** Every action proposed and what the rules made of it. A value is written as its source, never as the value itself. */
   actions: Array<{ op: FormAction["op"]; target: string; source: string; verdict: Verdict["verdict"]; reason?: string; verified?: boolean }>;
   errors: string[]; injections: string[];
+  /** The host whose saved login the engine itself filled on this page (docs/plans/harness-1125.md §5); never the username or password. */
+  loggedIn?: string;
 };
 /** One line of what is about to be submitted (§10.6 总核): a sensitive value is masked. */
 export type FormChecklistItem = { pageNo: number; field: string; source: "profile" | "text" | "draft" | "check" | "select"; slot?: ApplicationSlot; shown: string };
@@ -578,6 +580,8 @@ export type FormFillContext = {
   errors: string[];
   /** What the rules refused last time on this page, so the next answer does not repeat it. */
   refused: string[];
+  /** The site has a saved login the engine fills by itself on its login page; the model only learns that it exists. */
+  savedLogin?: boolean;
 };
 export type FormCheckContext = {
   version: "crossline.form-check.v1";

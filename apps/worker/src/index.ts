@@ -2023,6 +2023,7 @@ if (!capabilitySecret) {
       { prefix: "/v1/selfcheck", handle: async (method, pathname, workspaceId) => method === "POST" && pathname === "/v1/selfcheck/run"
         ? { status: 200, body: { results: await runSelfCheck(workspaceId, true) } } : undefined }, { prefix: "/v1/import", handle: importService.handle }, { prefix: "/v1/voice", handle: dictationService.handle }, { prefix: "/v1/automations", handle: automationService.handle }, { prefix: "/v1/workflow-threads", handle: workflowThreadService.handle },
       { prefix: "/v1/forms", handle: formService.handle }, { prefix: "/v1/remote/", handle: remoteService.handle }, { prefix: "/v1/apply-profile", handle: formService.handle },
+      { prefix: "/v1/apply-logins", handle: formService.handle },
       { prefix: "/v1/skills/public", handle: publicSkillInstaller.handle },
       { prefix: "/v1/workflows/favourites-topics", handle: createFavouritesTopicsService(analysisStore).handle },
       // The login browser on the server, shown in a dialog on the page (remote-browser.ts); only where there is no screen of our own.

@@ -5,6 +5,7 @@ import { normalizeAiAssist } from "./ai-tools";
 import { INFO_REQUEST_PERSON_MINUTES } from "./info-request";
 import { COMPLETION_FIELD, type ModelCompletion } from "./completion";
 import { WORK_OWNERS, workOwner, type WorkOwner } from "./work-owner";
+import { EXTERNAL_FIELD } from "./external-action";
 import { METHOD_QUESTION_ID, backedDrillForms, drillFormsIn, methodQuestion, screenDrillItems, stripDrillSentences } from "./drill-forms";
 import { FAMILIARITY_FIELD, readModelFamiliarity, type ModelFamiliarity } from "./familiarity";
 
@@ -73,6 +74,12 @@ export type PlannedStep = {
    * health line records a workout. Optional for plans stored before it; the schema requires it.
    */
   workout?: boolean;
+  /**
+   * The model's reading (2026-11-25, `external-action.ts`): the step leaves the machine or commits the person (sending, submitting,
+   * contacting, attending, paying). It is then the person's. Optional for plans stored before it (the word list reads those); the schema
+   * requires it.
+   */
+  external?: boolean;
 };
 /**
  * Material the task needs that the files and folders on record do not cover and that the person is known to have (their lecture notes,
@@ -215,7 +222,8 @@ export const stepPlanSchema = (extraIds: readonly string[] = []) => object({
     product: { type: "string", enum: Object.keys(STEP_PRODUCTS) },
     uses: { type: "array", items: str },
     attends: { type: "boolean" },
-    workout: { type: "boolean" }
+    workout: { type: "boolean" },
+    external: EXTERNAL_FIELD
   }) },
   usedRefs: { type: "array", items: str }
 });
@@ -350,7 +358,8 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
       owner: (step.owner === "assistant" || step.owner === "ask" || step.owner === "person" ? step.owner : step.executor === "agent" ? "assistant" : "person") as WorkOwner,
       // No product named: what the model said about the doer picks among the role's products (the assistant's work is material).
       product: productOf(step.role, step.product ?? (step.executor === "agent" ? "material" : undefined)), uses: list(step.uses),
-      ...(step.attends === true ? { attends: true } : {}), ...(step.workout === true ? { workout: true } : {}) };
+      ...(step.attends === true ? { attends: true } : {}), ...(step.workout === true ? { workout: true } : {}),
+      ...(typeof step.external === "boolean" ? { external: step.external } : {}) };
   });
   // The person's own material first: each need becomes a provide step at the front (an upload box and 「没有」, no calendar time).
   // Only material something on record says the person has: a need without that is guessed, and asking for it wastes their time.
@@ -457,6 +466,9 @@ function screenStepDrills(plan: StepPlan, backing: readonly string[], warnings: 
  * Shared by `normalizeStepPlan` and the one-time reorganisation of plans already stored (`apps/worker/src/work-split-repair.ts`).
  */
 
+/** The model's `external` on a step, when it gave one (a plan stored before the field has none: the word list reads its title). */
+const externalOfStep = (step: { external?: boolean }) => typeof step.external === "boolean" ? { external: step.external } : {};
+
 export function assignStepOwners(steps: PlannedStep[], questions: StepQuestion[], warnings: StepWarning[],
   options: { assistant?: boolean;
     /** Steps (of a stored plan being judged again) that come right after, or wait on, the assistant's already-finished work. */
@@ -494,7 +506,7 @@ export function assignStepOwners(steps: PlannedStep[], questions: StepQuestion[]
       step.product = product;
       // The model names the step's product (and with it the owner, `PRODUCT_OWNER`) and may turn the assistant's material into a
       // question (`owner: ask`). Code keeps one floor: an act that leaves the machine is the person's (`workOwner`, 2026-11-22).
-      const verdict = workOwner({ title: step.title, owner: "assistant" }, options.locale);
+      const verdict = workOwner({ title: step.title, owner: "assistant", ...externalOfStep(step) }, options.locale);
       const forced = verdict.code === "external";
       // A check (the model's role) right after the assistant's work only looks it over: folded into the next core step. Since 2026-11-22 by
       // the role the plan gave it, no longer by the title's verb (验收, 批准, 核验 …) and a list of words that meant a judgement.
@@ -515,7 +527,8 @@ export function assignStepOwners(steps: PlannedStep[], questions: StepQuestion[]
       step.owner = owner;
     } else if (step.role !== "wait") {
       // `executor: "agent"` is the model's word that the assistant does it, whatever `owner` it also wrote; `ask` stays a question.
-      const verdict = workOwner({ title: step.title, owner: step.executor === "agent" && step.owner !== "ask" ? "assistant" : step.owner ?? "person" }, options.locale);
+      const verdict = workOwner({ title: step.title, owner: step.executor === "agent" && step.owner !== "ask" ? "assistant" : step.owner ?? "person",
+        ...externalOfStep(step) }, options.locale);
       // Approving what the assistant just made (「验收定义稿」「批准可交付版本」「核验版本基线包」): the step before it, or one it waits on,
       // is the assistant's, and the step only checks that output. The real account kept a dozen of these after the first rule, which
       // asked for 「助手」 in the title; a judgement (结论, 边界, 权限), a decision or graded work is not folded.

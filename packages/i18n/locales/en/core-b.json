@@ -720,5 +720,7 @@
   "另有 {{count}} 条在转写里找不到原话（或日期格式不对），没有记下。_other": "{{count}} more items had no matching words in the transcript (or a malformed date) and were not recorded.",
   "「{{line}}」近两周要做完的事已说明": "Near-term work for “{{line}}” stated",
   "这周到下周已经定了要做完的事（没有也可以说）": "What is set to be finished this week or next (or that there is none)",
-  "「{{line}}」这周到下周有哪几件已经定了要做完的事？没有也可以直接说。": "What in “{{line}}” is set to be finished this week or next? If nothing, just say so."
+  "「{{line}}」这周到下周有哪几件已经定了要做完的事？没有也可以直接说。": "What in “{{line}}” is set to be finished this week or next? If nothing, just say so.",
+  "这次运行拿到的是别人写的内容，命令一律不联网": "This run was handed content someone else wrote, so no command may reach the network",
+  "调研运行只放行安装软件包和 git 拉取，其他联网命令不放行": "A research run may reach the network only to install packages or pull with git; other network commands are refused"
 }

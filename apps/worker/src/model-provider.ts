@@ -38,8 +38,8 @@ export const PROVIDER_PRESETS: Array<{ id: string; label: string; kind: Provider
   { id: "glm", label: "智谱 GLM", kind: "chat", baseUrl: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4.6", responseFormat: "json_object" },
   { id: "claude", label: "Claude", kind: "chat", baseUrl: "https://api.anthropic.com/v1", model: "claude-sonnet-5-5", responseFormat: "json_object" },
   { id: "gemini", label: "Gemini", kind: "chat", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.5-flash" },
-  { id: "openai", label: "OpenAI API", kind: "responses", baseUrl: "https://api.openai.com/v1", model: "gpt-5.6-terra" },
-  { id: "openrouter", label: "OpenRouter", kind: "responses", baseUrl: "https://openrouter.ai/api/v1", model: "openai/gpt-5.6-terra" },
+  { id: "openai", label: "OpenAI API", kind: "responses", baseUrl: "https://api.openai.com/v1", model: "gpt-6.1-terra" },
+  { id: "openrouter", label: "OpenRouter", kind: "responses", baseUrl: "https://openrouter.ai/api/v1", model: "openai/gpt-6.1-terra" },
   { id: "ollama", label: "本机 Ollama", kind: "responses", baseUrl: "http://127.0.0.1:11434/v1", model: "qwen3:8b" }
 ];
 

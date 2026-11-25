@@ -57,7 +57,7 @@ Judge by what the item produces, never by the line or the kind of goal (a course
 - `assistant` — a static artefact made from existing information: collecting, compiling, sorting, summarising, excerpting, checking against a list, an inventory, a ledger, a template, a calculation or simulation run on a plan the person already gave. `prepares` is the id of the person's item that uses it, and that item depends on it.
 - `ask` — the same, but it needs something only the person holds (data behind their login, a screenshot or an export, one sentence of scope). `question` is the one question (at most two facts, ten minutes of their time); the assistant does the rest after the answer. `prepares` as above.
 
-Only `ask` items carry a `question`; `person` items have `prepares` "". Never give the assistant sending, submitting, publishing, logging in, paying, graded answers or a consequential choice. The app takes your `owner` as it stands; the only thing it overrules is an act that leaves the machine (sending, submitting, contacting, attending, paying), which is always the person's. So judge it here:
+Only `ask` items carry a `question`; `person` items have `prepares` "". Never give the assistant sending, submitting, publishing, logging in, paying, graded answers or a consequential choice. The app takes your `owner` as it stands; the only thing it overrules is an item you mark `external`, which is always the person's. So judge it here:
 
 - Records of money (statements, transactions, holdings, bills) are never `ask`: the assistant works from what is recorded automatically and the connected mailboxes, and marks what is missing. `assistant`.
 - Designing, judging, deciding and explaining are the person's even when the item reads like gathering (「判断要补哪些实验」 is `person`; 「汇集已有实验数据」 is `assistant`).
@@ -66,7 +66,7 @@ Only `ask` items carry a `question`; `person` items have `prepares` "". Never gi
 
 ## Each item
 
-`{id, title, intent, sourceQuote, rationale, dependsOn, estimate, energy, interruptible, family, riskTier, evidence, acquires, produces, uses, completion, extendsTaskId, owner, prepares, question, request, needsPerson, category, graded}`:
+`{id, title, intent, sourceQuote, rationale, dependsOn, estimate, energy, interruptible, family, riskTier, evidence, acquires, produces, uses, completion, extendsTaskId, owner, prepares, question, request, needsPerson, category, graded, external}`:
 
 - `id` — unique in this answer (letters, digits, `-`, `_`). `dependsOn` names ids of **earlier** items only, so the list is in an order the work can be done.
 - `title` — the task's name: a short action starting with its verb, at most 24 characters, carrying the course or project name when the milestone has one (「复习 ECE 548 第 3 章」, not 「复习第 3 章」).
@@ -81,6 +81,7 @@ Only `ask` items carry a `question`; `person` items have `prepares` "". Never gi
 - `needsPerson` — `{kind, quote}`: whether approving this item is the person's call. `decision` when it carries a choice only they make (which offer, which topic, how much to spend), `access` when it needs something only they hold (a login, an account, a password, their own records); `none` otherwise, with `quote` "". `quote` is the exact words of this item's `title`, `intent`, `sourceQuote`, `evidence` or `rationale` that show it; the app checks it word for word.
 - `category` — for an `assistant` or `ask` item, the kind of preparation: `data_code_sim` (data, code, simulation), `read_research_organize` (reading, research, summarising, sorting), `draft_text` (drafting text, never sent), `files_calendar_prep` (files and calendar preparation), `media_edit` (editing audio, video or images, never published); "" for a `person` item.
 - `graded` — true when the item is coursework or anything else marked for a grade: the assistant then only explains and checks and never makes anything that could be handed in.
+- `external` — true when the item leaves the machine or commits the person to someone (sending, submitting, publishing, contacting, attending, paying, signing, trading): it is then the person's and high-risk whatever its `owner`; drafting the message or preparing the package is `false`. The app takes your answer and no longer reads the wording for it.
 
 ## Missing inputs
 

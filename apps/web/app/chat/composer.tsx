@@ -8,6 +8,7 @@ import { useT } from "../locale-context";
 import { ArrowUp, AtSign, Plus } from "lucide-react";
 import { ICON, IconButton } from "../ui/icon-button";
 import { VoiceButton } from "../ui/voice/voice-input";
+import { ModelPicker } from "../onboarding/model-picker";
 
 export type Mention = { kind: "material" | "task" | "milestone" | "goal"; id: string; title: string };
 export type ComposerInput = { text: string; files: File[]; mentions: Mention[]; batch: boolean };
@@ -181,6 +182,8 @@ export function Composer({ mode, placeholder, shortPlaceholder, onSubmit, busy =
           onInput={(event) => fitTextarea(event.currentTarget)} />
       </div>
       <span className="composer-end">
+        {/* The model this box talks to, switched here (2026-11-25); nothing shows when the account lists none. */}
+        <ModelPicker slot="crossline-concierge" compact />
         <VoiceButton target={() => textRef.current} kind="conversation" />
         <button type="submit" className="composer-send" disabled={busy || (!text.trim() && !fileNames.length)} aria-label={t("发送")}>{busy ? "…" : <ArrowUp {...ICON} />}</button>
       </span>

@@ -20,6 +20,7 @@
     "build": "pnpm --filter @crossline/web build",
     "build:prod": "tsx scripts/build-prod.ts",
     "doctor:ledger": "tsx scripts/doctor.ts",
+    "review:ledger": "tsx scripts/ledger-review.ts",
     "test:codex-corpus": "tsx scripts/codex-workflow-corpus.ts --live",
     "verify": "pnpm typecheck && pnpm test && pnpm build && pnpm test:e2e"
   },

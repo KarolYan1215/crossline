@@ -1,4 +1,3 @@
-import { courseCodeOf } from "./task-title";
 import { METHOD_SLOT } from "./drill-forms";
 import type { ProfileModel } from "./onboarding-turn-schema";
 import { joinList, tFor, type Locale } from "./i18n";
@@ -135,8 +134,6 @@ const statesSchedule = (fact: { slot: string; value?: string; identityId?: strin
 };
 /** What a line is about, said by the person: enough to stand for its description while the extraction has not written one. */
 const DESCRIBES_LINE = /^(description|what)$/;
-/** A part of a course (its project, an exam): graded and timed through the course itself, not on its own. */
-const COURSE_PART = /项目|作业|考试|测验|报告|论文|展示|project|homework|assignment|exam|quiz|report|paper|presentation/i;
 
 export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
   const t = tFor(input.locale);
@@ -249,12 +246,13 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
   for (const project of input.projects.filter((item) => !isDefaultProject(item.id))) {
     const own = input.facts.filter((fact) => fact.projectId === project.id && settledFact(fact));
     const dated = input.dates.some((entry) => entry.project === project.id || entry.project === project.name);
-    const course = (Boolean(courseCodeOf(project.name) ?? courseCodeOf(project.id)) && !COURSE_PART.test(project.name)) || own.some((fact) => fact.slot === "grading");
+    // A graded project is one the record calls so (its grading breakdown); a name shaped like a course code no longer makes one (IR-028,
+    // 2026-11-25): whether a project is judged and meets at fixed times is the interview's to ask (its Skill).
+    const course = own.some((fact) => fact.slot === "grading");
     const missing = PROJECT_SLOTS.filter(([slot, label]) => !(own.some((fact) => slot.test(fact.slot)) || (label === "截止日期" && dated))).map(([, label]) => label);
     // How a graded project is judged and when it meets: deferred, asked when its task is planned. The words are the same for a course, a
     // certification or a client's review (2026-11-22: the person is not assumed to be a student).
     const courseMissing: string[] = [];
-    if (course && !own.some((fact) => fact.slot === "grading")) courseMissing.push("怎么评定");
     // A project that meets: its weekly times are the frame of the person's week (one whose meetings nobody asked about left a hole).
     const meets = input.dates.some((entry) => entry.recurring && (entry.project === project.id || entry.project === project.name))
       || own.some((fact) => MEETING_SLOTS.test(fact.slot) || (VAGUE_SCHEDULE.test(fact.value ?? "") && statesSchedule(fact)));
@@ -266,9 +264,7 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
     if (course) items.push({ id: `project_course:${project.id}`, group: "项目", label: t("「{{project}}」怎么评定与固定时间", { project: project.name }),
       done: !courseMissing.length, detail: courseMissing.length ? t("缺：{{items}}", { items: list(courseMissing) }) : "", owner: "interview",
       deferred: true as const,
-      // One question asks one thing: how it is judged first, the fixed times once that is known.
-      ...(courseMissing.length ? { ask: courseMissing[0] === "怎么评定" ? t("「{{project}}」最后由谁、按什么来评定？", { project: project.name })
-        : t("「{{project}}」每周有哪些固定要到场的时间？", { project: project.name }) } : {}) });
+      ...(courseMissing.length ? { ask: t("「{{project}}」每周有哪些固定要到场的时间？", { project: project.name }) } : {}) });
   }
 
   if (input.unfiledFiles !== null) items.push({ id: "files_filed", group: "文件", label: t("上传的文件都已归属项目"), done: input.unfiledFiles === 0,

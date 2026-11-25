@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { BROWSER_USE_DOWNLOAD_MB, BROWSER_USE_VERSION, FORM_STATE_LABEL, SLOT_LABEL, STOP_LABEL, type ApplicationSlot, type FormRunState, type FormStop } from "@crossline/core";
 import { useT } from "../locale-context";
 import { ApplyKitSection } from "./apply-kit-card";
-import type { ApplyKit } from "@crossline/core";
+import type { ApplyKit, LoginVaultEntry } from "@crossline/core";
 
 export type ApplyItem = { slot: ApplicationSlot; sensitive: boolean; present: boolean; value?: string; usedBy: Array<{ title: string; at: string }> };
 export type ApplyRun = {
@@ -18,7 +18,7 @@ export type ApplyRun = {
  * edited and deleted here; a sensitive item is shown only as held, never its value. Below it, every registration being filled or filled,
  * with why it stopped, what is about to be submitted and the screenshots.
  */
-export function ApplyCard({ items, runs, screen, kit }: { items: ApplyItem[]; runs: ApplyRun[]; screen: boolean; kit?: ApplyKit | undefined }) {
+export function ApplyCard({ items, runs, screen, kit, logins = [] }: { items: ApplyItem[]; runs: ApplyRun[]; screen: boolean; kit?: ApplyKit | undefined; logins?: LoginVaultEntry[] }) {
   const t = useT();
   const [editing, setEditing] = useState<ApplicationSlot | undefined>();
   const [draft, setDraft] = useState("");
@@ -54,6 +54,8 @@ export function ApplyCard({ items, runs, screen, kit }: { items: ApplyItem[]; ru
           </span>}
     </div>)}
 
+    {screen && <LoginVault logins={logins} />}
+
     {kit && <ApplyKitSection kit={kit} />}
 
     {screen && <BrowserUseTool />}
@@ -83,6 +85,45 @@ export function ApplyCard({ items, runs, screen, kit }: { items: ApplyItem[]; ru
     </article>)}
     {note && <p role="status" className="st-note">{note}</p>}
   </section>;
+}
+
+/**
+ * 网站登录 (docs/plans/harness-1125.md §5, the owner's decision of 2026-11-25): a host, a username and a password the form filler may
+ * type on that site's own login page, nothing else. Both go to this computer's secret store; the page lists hosts only and never shows
+ * a password again. Payment, captchas and one-time codes stay the person's.
+ */
+function LoginVault({ logins }: { logins: LoginVaultEntry[] }) {
+  const t = useT();
+  const [adding, setAdding] = useState(false);
+  const [host, setHost] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [note, setNote] = useState("");
+  const send = async (url: string, method: "POST" | "DELETE", body?: unknown) => {
+    const response = await fetch(url, { method, headers: { "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) }).catch(() => undefined);
+    if (!response?.ok) {
+      setNote(response?.status === 409 ? t("网站登录只能存在本人电脑上的 Crossline 里") : response?.status === 400 ? t("格式不对，没有保存") : t("没有完成，请重试"));
+      return;
+    }
+    setPassword("");
+    window.location.reload();
+  };
+  return <div className="st-row">
+    <span className="st-row-label">{t("网站登录")}
+      <small>{t("代填遇到这个网站自己的登录页时，由程序填入并登录；密码只存在本机密钥库，不进账本、模型、截图和备份。不用于付款；验证码和二次验证仍交本人。")}</small>
+      {logins.length > 0 && <ul className="st-checklist">{logins.map((entry) => <li key={entry.host}>{entry.host}
+        <button type="button" className="text-button" onClick={() => void send(`/api/apply-logins/${encodeURIComponent(entry.host)}`, "DELETE")}>{t("删除")}</button></li>)}</ul>}
+      {note && <small role="status">{note}</small>}</span>
+    {adding
+      ? <span className="st-inline-form">
+          <input aria-label={t("网站")} placeholder="example.com" autoComplete="off" value={host} onChange={(event) => setHost(event.target.value)} />
+          <input aria-label={t("用户名")} autoComplete="off" value={username} onChange={(event) => setUsername(event.target.value)} />
+          <input aria-label={t("密码")} type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} />
+          <button type="button" className="secondary-button" onClick={() => void send("/api/apply-logins", "POST", { host, username, password })}>{t("保存")}</button>
+          <button type="button" className="text-button" onClick={() => { setAdding(false); setPassword(""); }}>{t("取消")}</button>
+        </span>
+      : <span className="st-inline-form"><button type="button" className="secondary-button" onClick={() => setAdding(true)}>{t("添加网站登录")}</button></span>}
+  </div>;
 }
 
 type ToolStatus = { state: "absent" | "installing" | "installed" | "failed"; error?: string };

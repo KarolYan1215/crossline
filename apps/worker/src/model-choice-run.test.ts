@@ -42,7 +42,7 @@ test("without a choice the table still decides, economy and all", async () => {
   setSpendModeProvider(async () => "economy");
   const { rpc } = fakeRuntime(["{}"], SKILL);
   await runCodexSkill(rpc, {}, options(SKILL));
-  expect(usage[0]).toMatchObject({ spendMode: "economy", model: "gpt-5.6-terra", effort: "medium" });
+  expect(usage[0]).toMatchObject({ spendMode: "economy", model: "gpt-6.1-terra", effort: "medium" });
 });
 
 const sponsorRouting = (extra: Record<string, unknown>) => ({ provider: { id: "sponsor", kind: "responses", label: "开发者提供的模型",

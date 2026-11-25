@@ -7,7 +7,7 @@ description: Turn one line the person captured into a task proposal — its name
 
 The person typed one line into the input box (or shared it from the phone, or accepted a research suggestion). This Skill reads it and writes the **task proposal**. In most cases it takes effect at once and appears as a task card on Today and the 任务 page: the title on the card and the calendar, the contract lines as its checklist, the person's part and the assistant's part. The step planner splits it into steps afterwards, and the assistant may take the automatable part. Nothing is performed here and nothing is sent.
 
-Return raw JSON only: `{identityId, projectId, milestoneId, title, intent, family, automationParts[], humanCore[], materialContract[], evidenceContract[], estimate, estimateBreakdown[], riskTier, dates[], waitingOn, byproducts[], completion, extendsTaskId, request, needsPerson, category, graded, blockers[]}`.
+Return raw JSON only: `{identityId, projectId, milestoneId, title, intent, family, automationParts[], humanCore[], materialContract[], evidenceContract[], estimate, estimateBreakdown[], riskTier, dates[], waitingOn, byproducts[], completion, extendsTaskId, request, needsPerson, category, graded, external, blockers[]}`.
 
 ## Input `crossline.analysis.v2`
 
@@ -74,6 +74,7 @@ A description that restates policy, explains reasoning, contains `{}[]` or runs 
 - `needsPerson` — `{kind, quote}`: whether approving this task is the person's own call. `decision` when it carries a choice only they make (which offer to take, which topic, how much to spend), `access` when it needs something only they hold (a login, an account, a password, their own records); `none` otherwise, with `quote` "". `quote` is the exact words of the capture, `title`, `intent`, a part's `intent` or a contract `description` that show it; the app checks it word for word. Ordinary work with `none` may be approved by the app on its own.
 - `category` — the kind of work in `automationParts`: `data_code_sim` (data, code, simulation), `read_research_organize` (reading, research, summarising, sorting), `draft_text` (drafting text, never sent), `files_calendar_prep` (files and calendar preparation), `media_edit` (editing audio, video or images, never published); "" when there are no automation parts or none fits.
 - `graded` — true when the task is coursework or anything else marked for a grade: the assistant then only explains and checks and never makes anything that could be handed in.
+- `external` — true when the task leaves the machine or commits the person to someone (sending, submitting, publishing, contacting, attending, paying, signing, trading): it is then never handed to the assistant whole; drafting or preparing for such an act is `false`. The app takes your answer and no longer reads the wording for it.
 
 ## Getting a fact from someone
 

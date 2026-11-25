@@ -1,16 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { LINE_PROFILES_SETTING, attributeKey, attributeProblem, type StoredLineProfile } from "@crossline/core";
+import { LINE_PROFILES_SETTING, attributeKey, attributeShapeProblem, type StoredLineProfile } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 import { tOfWorkspace } from "./locale";
 
 /**
  * One-time repair of the long-term goal chips a model proposed before the adjective rule (2026-10-19, the owner's 「长期目标是形容词，不要把
- * 动词之类的强行组合成形容词」; `attributeProblem`). Since then the interview's extraction and the goal splitter drop such candidates as
+ * 动词之类的强行组合成形容词」; `attributeShapeProblem`). Since then the interview's extraction and the goal splitter drop such candidates as
  * they are written, but `lines.profiles` kept the ones written earlier, and every 主线 card still offered 「把科研稀缺技术转化为现实影响」,
  * 「以真实技术链条和可复现证据工作」, 「外推知识边界」 as chips (the real account, 2026-10-21).
  *
  * Removed: a candidate the model proposed — read from a reply or a file (`reply-N`, `src-N`), or one of the old whole-sentence
- * suggestions cut into parts (`goal`, named by a `line.candidates_split` event) — that `attributeProblem` refuses. Kept: anything the
+ * suggestions cut into parts (`goal`, named by a `line.candidates_split` event) — that `attributeShapeProblem` refuses (since 2026-11-25 only
+ * a sentence-length one or the line's own name: the wording rules moved to the extraction's Skill, IR-187). Kept: anything the
  * person chose or wrote (a part of the line's adopted goal, a split of their own adopted goal), and a line's list is never emptied.
  * Runs once per workspace (`repair.line-attributes.v1`), leaves a `repair.line_attributes` event naming what went, and records an undo
  * that puts the profiles back as they were.
@@ -38,7 +39,7 @@ export function repairLineAttributes(store: CrosslineStore, workspaceId: string,
     const fromModel = (item: { text: string; sourceRef?: string }) => /^(reply|src)-\d+$/.test(item.sourceRef ?? "")
       || (item.sourceRef === "goal" && Boolean(suggested.get(lineId)?.has(attributeKey(item.text))));
     const drop = list.filter((item) => item && typeof item.text === "string" && fromModel(item) && !chosen.get(lineId)?.has(attributeKey(item.text))
-      && Boolean(attributeProblem(item.text)));
+      && Boolean(attributeShapeProblem(item.text)));
     if (!drop.length || drop.length === list.length) continue;
     profiles[lineId] = { ...profile, attributes: list.filter((item) => !drop.includes(item)) };
     removed[lineId] = drop.map((item) => item.text);

@@ -14,7 +14,8 @@ export { onHosts, runHosts } from "./node/browser";
  * owner's form is filled the same way in their own computer's browser (`openNodeFormBrowser`). No script of ours runs in the page.
  *
  * The network guard is ours, not the model's: a top-level navigation may go only to the run's own hosts; requests to private
- * addresses, popups and downloads are refused. Every refusal is reported to `onBlocked`. A fallback engine (§10.7) only proposes
+ * addresses, popups and downloads are refused; while the engine fills, nothing but GET/HEAD leaves for another host (`egress`).
+ * Every refusal is reported to `onBlocked`. A saved login (`login`) is typed only by this computer's own driver, never a node's. A fallback engine (§10.7) only proposes
  * actions, which the engine judges and does through this same driver.
  */
 export type FormBrowserOptions = {
@@ -87,6 +88,7 @@ export async function openNodeFormBrowser(link: NodeBrowserLink, options: { host
       writeFileSync(file, media.bytes);
     },
     front: async () => { await call("front"); },
+    egress: async (on) => { await call("egress", [on]); },
     closed: () => closed,
     close: async () => { closed = true; await link.call({ op: "formClose" }, 60_000).catch(() => undefined); }
   };

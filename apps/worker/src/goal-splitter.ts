@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  GOAL_SPLIT_SCHEMA, attributeProblem, duplicateAttributes, keepGoalSplit, lineAttributes, recomposes, validateGoalSplit,
+  GOAL_SPLIT_SCHEMA, attributeShapeProblem, duplicateAttributes, keepGoalSplit, lineAttributes, recomposes, validateGoalSplit,
   type AttributeCandidate, type GoalSplit, type GoalSplitContext, type StoredLineProfile
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
@@ -80,9 +80,9 @@ export function createGoalSplitter(store: CrosslineStore, workspaceId: string, c
           if (!part.text.trim() || duplicateAttributes([...split.map((item) => item.text), part.text]).some((pair) => pair.includes(part.text))) continue;
           split.push({ text: part.text.trim(), kind: part.kind, sourceRef: "goal" });
         }
-        // These were the old interview's suggestions, never the person's words: a part that is an action or an achievement (「外推人类知识
-        // 边界」) is not offered as a chip. When nothing else is left the parts stay as they are, so the line is not left with nothing.
-        const descriptive = split.filter((item) => !attributeProblem(item.text));
+        // These were the old interview's suggestions, never the person's words: a part of sentence length is not offered as a chip (its
+        // wording is otherwise the Skill's, IR-187). When nothing else is left the parts stay as they are, so the line is not left with nothing.
+        const descriptive = split.filter((item) => !attributeShapeProblem(item.text));
         const added = descriptive.length ? descriptive : split;
         if (!added.length || profiles[candidateLine.id]?.attributes?.length) continue;
         profiles[candidateLine.id] = { ...profiles[candidateLine.id], description: profiles[candidateLine.id]?.description ?? "", attributes: added };

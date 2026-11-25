@@ -253,7 +253,7 @@ export default async function SettingsPage({ searchParams }: { searchParams?: Pr
         </section>
 
         {apply && <section id="apply" className="st-section" aria-labelledby="st-apply"><h2 id="st-apply" className="ds-serif">{t("报名资料卡")}</h2>
-          <div className="st-modules"><ApplyCard items={apply.items} runs={apply.runs} screen={apply.screen} kit={apply.kit} /></div>
+          <div className="st-modules"><ApplyCard items={apply.items} runs={apply.runs} screen={apply.screen} kit={apply.kit} logins={apply.logins} /></div>
         </section>}
 
         <section id="personal" className="st-section" aria-labelledby="st-personal"><h2 id="st-personal" className="ds-serif">{t("个性化")}</h2>

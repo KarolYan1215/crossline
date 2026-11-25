@@ -1,6 +1,7 @@
 import { personProfileFor } from "./planning-profile";
 import { autoApproveEligible } from "./auto-approval";
 import { ownerOf } from "./owner";
+import { recordOwnerDisputes } from "./owner-disputes";
 import type { AnalysisDate, AnalysisWaitingOn } from "@crossline/core";
 import { runCodexAnalysis, type CodexRpcBoundary } from "@crossline/codex";
 import { ANALYSIS_CONTEXT_VERSION, APPROVED_MILESTONES_LIMIT, TASK_INDEX_SEPARATOR, validateAnalysisContext, type AnalysisContext } from "@crossline/core";
@@ -206,6 +207,9 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
         const promoted = usedRefKeys.length ? store.listWorkOrders(workspaceId).find((item) => item.id === id) : undefined;
         if (promoted) store.saveWorkOrder({ ...promoted, payload: { ...(promoted.payload as object), usedRefKeys } });
         recordWaitingAndDates(store, workspaceId, id);
+        // The model said the task is not external and the word list says it is: the model stands, the disagreement is logged.
+        recordOwnerDisputes(workspaceId, "crossline:crossline-automation-stripper", [{ id, title: result.proposal.title, intent: result.proposal.intent,
+          ...(typeof result.proposal.external === "boolean" ? { external: result.proposal.external } : {}) }]);
         // Work the board already has is folded into that task instead of standing beside it (after the dates, so the earlier due day carries).
         if (!foldNewTask(store, workspaceId, id, result.proposal.extendsTaskId ?? "")) { absorbParts(store, workspaceId, id); autoApproveEligible(store, workspaceId, [id]); }
         // A quality problem the repairs did not fix was corrected in the smallest way and kept; the reviewer looks at it next.

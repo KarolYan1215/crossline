@@ -25,3 +25,11 @@ test("a slot is set or cleared back to the route table", () => {
   expect(set).toEqual({ "crossline-onboarding": { model: "gpt-5.6-sol", effort: "xhigh" } });
   expect(withModelChoice(set, "crossline-onboarding", null)).toEqual({});
 });
+
+test("the input box and the assistant each have a slot; the tools-mode assistant shares the assistant's", () => {
+  const choices = modelChoicesOf(JSON.stringify({ "crossline-concierge": { model: "gpt-6-luna" }, "crossline-agent": { model: "gpt-6.2-sol", effort: "high" } }));
+  expect(modelChoiceFor(choices, "crossline:crossline-concierge")).toEqual({ model: "gpt-6-luna" });
+  expect(modelChoiceFor(choices, "crossline:crossline-agent")).toEqual({ model: "gpt-6.2-sol", effort: "high" });
+  expect(modelChoiceFor(choices, "crossline:crossline-agent-tools")).toEqual({ model: "gpt-6.2-sol", effort: "high" });
+  expect(modelChoiceFor(choices, "crossline:crossline-step-planner")).toBeUndefined();
+});

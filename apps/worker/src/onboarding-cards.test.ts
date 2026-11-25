@@ -68,7 +68,9 @@ test("structure and size come back as problems: a repeated option, a used id, th
 test("the app's own waiting questions go out by id as the app wrote them; one asked in the model's words comes back", () => {
   store = new CrosslineStore(":memory:");
   const gaps = profileGaps({ identities: [{ id: "research", label: "研究者" }], projects: [{ id: "ece548", identityId: "research", name: "ECE 548" }],
-    facts: [], dated: ["ece548"], unfiled: [], portrait: { written: false, confirmed: false } });
+    // A course on record (its grading breakdown): only such a project gets the app's class-times question (IR-028, 2026-11-25).
+    facts: [{ identityId: "research", projectId: "ece548", slot: "grading", value: "作业 30%、期末 70%", status: "confirmed" }],
+    dated: ["ece548"], unfiled: [], portrait: { written: false, confirmed: false } });
   const meetings = gaps.find((gap) => gap.code === "COURSE_MEETINGS")!;
   const items = checkOpenItems([meetings.question.id, "gap-made-up"], gaps);
   expect(items.accepted).toEqual([meetings.question]);

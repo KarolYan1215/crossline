@@ -1,7 +1,7 @@
 import {
   APPLICATION_SLOTS, autoSubmitProblems, buttonAmong, confirmationOf, findTarget, injectionSigns, isField, isSensitiveSlot, judgeAction, looksLikeSubmit, maskedValue, namePart,
-  pageErrors, pageStop, pageText, parseAriaSnapshot, redactSensitive, sourceOf, splitName, valueMatches,
-  type ApplicationSlot, type FormChecklistItem, type FormAction, type FormCheckAnswer, type FormCheckContext, type FormFillAnswer, type FormFillContext,
+  pageErrors, pageStop, pageText, parseAriaSnapshot, redactLogin, redactSensitive, SECOND_FACTOR, sourceOf, splitName, valueMatches,
+  type ApplicationSlot, type LoginSecret, type FormChecklistItem, type FormAction, type FormCheckAnswer, type FormCheckContext, type FormFillAnswer, type FormFillContext,
   type FormPageRecord, type FormStop, type JudgeContext, type PageSignals, type SnapshotNode, type StoredFormRun
 } from "@crossline/core";
 
@@ -11,7 +11,8 @@ import {
  * stop. It is written against `FormDriver` so the same loop runs on Playwright, on a test page, or later on a compute node's browser.
  *
  * What it never does: run a script in the page, open a page the run did not start on (the driver's network guard refuses it), press a
- * submit button the rules did not clear, or put a sensitive value anywhere but the field it belongs to.
+ * submit button the rules did not clear, or put a sensitive value anywhere but the field it belongs to. While it fills, the driver's
+ * egress guard is on; whenever the window becomes the person's (a stop, a form held for their submission) it is lifted.
  */
 
 /** A target as the driver acts on it: the snapshot's ref first, role + name as the second way to find it (§10.6: 换定位重试). */
@@ -39,6 +40,10 @@ export type FormDriver = {
   close: () => Promise<void>;
   /** The page's DOM as HTML (this computer's browser only), for the browser-use fallback's static copy. */
   html?: () => Promise<string>;
+  /** Non-GET requests off the run's hosts aborted while on (node/browser.ts `FormPage.egress`). */
+  egress?: (on: boolean) => Promise<void>;
+  /** A saved login typed by the driver itself on the top-level page (this computer's browser only). */
+  login?: (secret: LoginSecret) => Promise<{ ok: true; filled: Array<"username" | "password">; mask: DriverTarget[] } | { ok: false; why: string }>;
 };
 /**
  * A fallback engine (§10.7) only proposes field actions for the current page, from the same redacted snapshot the filler saw; the engine
@@ -84,6 +89,11 @@ export type EngineDeps = {
    * of 2026-11-03, 「执行外部任务（不包括发送，报名和支付的最后一步）」). The form is filled and checked, then held for them.
    */
   personSubmits?: boolean;
+  /**
+   * Saved website logins (docs/plans/harness-1125.md §5), only where the window is this computer's own: `has` says whether the page's
+   * address has one (https, the exact host or a known alias — `loginFor`), `get` reads it from the secret store for this run only.
+   */
+  logins?: { has: (url: string) => boolean; get: (url: string) => Promise<(LoginSecret & { host: string }) | undefined> };
 };
 
 const MAX_STEPS = 24;
@@ -97,9 +107,16 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
   const { stoppedFor: _stop, stopDetail: _detail, missingSlot: _slot, ...rest } = start;
   let run = deps.save({ ...rest, state: "filling", sessionLost: false, pageNo: Math.max(1, start.pageNo) },
     { type: options.resume ? "opportunity.form.continued" : "opportunity.form.started" });
+  const egress = async (on: boolean) => { try { await driver.egress?.(on); } catch { /* an older node without the guard */ } };
+  await egress(true);
   const sensitive = await deps.values.sensitive();
-  // Page text the engine keeps or hands on (errors, injected lines) may quote what was typed: sensitive values are replaced first.
-  const clean = (texts: string[]) => texts.map((text) => redactSensitive(text, sensitive));
+  /** The saved login once the engine typed it, kept for redaction in this run only. */
+  let login: LoginSecret | undefined;
+  let loginTries = 0;
+  // Page text the engine keeps or hands on (errors, injected lines, the snapshot) may quote what was typed: sensitive values and a
+  // saved login are replaced first.
+  const scrub = (text: string) => redactLogin(redactSensitive(text, sensitive), login);
+  const clean = (texts: string[]) => texts.map(scrub);
   const sensitiveTargets: DriverTarget[] = [];
   const present = deps.values.present;
   const drafts = Object.fromEntries(Object.entries(run.drafts ?? {}).map(([id, draft]) => [id, draft.text]));
@@ -125,8 +142,10 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
   const hold = async (stop: FormStop, detail: string, slot?: ApplicationSlot) => {
     await shoot("stop");
     if (stop === "captcha") deps.holdSite?.(detail);
-    run = deps.save({ ...run, state: "waiting_person", stoppedFor: stop, stopDetail: detail.slice(0, 300), ...(slot ? { missingSlot: slot } : {}) },
-      { type: "opportunity.form.stopped", payload: { stop, detail: detail.slice(0, 300), ...(slot ? { slot } : {}) } });
+    run = deps.save({ ...run, state: "waiting_person", stoppedFor: stop, stopDetail: scrub(detail).slice(0, 300), ...(slot ? { missingSlot: slot } : {}) },
+      { type: "opportunity.form.stopped", payload: { stop, detail: scrub(detail).slice(0, 300), ...(slot ? { slot } : {}) } });
+    // The window is the person's now: whatever they send from it is theirs to send.
+    await egress(false);
     try { await driver.front(); } catch { /* the window may already be gone */ }
     deps.notify(run);
     return run;
@@ -201,10 +220,33 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
     intent: { title: run.opportunity.title, organizer: run.opportunity.organizer, kind: run.opportunity.kind, host: run.host },
     profile: (Object.keys(APPLICATION_SLOTS) as ApplicationSlot[]).map((slot) => ({ slot, present: present.has(slot), sensitive: isSensitiveSlot(slot) })),
     consents: run.opportunity.consents, drafts: Object.entries(run.drafts ?? {}).map(([id, draft]) => ({ id, title: `${id} (${draft.version})` })),
-    pageNo: run.pageNo, snapshot: redactSensitive(yaml, sensitive).slice(0, 60_000),
+    pageNo: run.pageNo, snapshot: scrub(yaml).slice(0, 60_000),
     filledHere: page().actions.filter((item) => item.verdict === "allow").map((item) => `${item.op} ${item.target} ← ${item.source}`),
-    errors, refused: refusedHere.slice(-12)
+    errors, refused: refusedHere.slice(-12), ...(deps.logins?.has(driver.url()) ? { savedLogin: true } : {})
   });
+  /**
+   * A login page with a saved login for its own host: the driver types it and presses sign-in, never a model. At most two pages (a
+   * username step, then the password), the password once per run — a wrong one is not tried again. A second factor or a code is the
+   * person's, and so is everything that does not go through cleanly.
+   */
+  const tryLogin = async (nodes: SnapshotNode[]): Promise<boolean> => {
+    if (!deps.logins || !driver.login || loginTries >= 2) return false;
+    if (nodes.some((node) => isField(node) && SECOND_FACTOR.test(node.name)) || SECOND_FACTOR.test(pageText(nodes))) return false;
+    const saved = await deps.logins.get(driver.url()).catch(() => undefined);
+    if (!saved) return false;
+    loginTries += 1;
+    login = { username: saved.username, password: saved.password };
+    const done = await driver.login(login).catch(() => ({ ok: false as const, why: "login failed" })); // i18n-ignore: a code
+    if (!done.ok) return false;
+    sensitiveTargets.push(...done.mask);
+    if (done.filled.includes("password")) loginTries = 2;
+    updatePage((item) => ({ ...item, loggedIn: saved.host }));
+    run = deps.save({ ...run, pageNo: run.pageNo + 1 }, { type: "opportunity.form.page", payload: { pageNo: run.pageNo + 1, login: saved.host } });
+    await driver.settle();
+    retries = 0;
+    refusedHere.length = 0;
+    return true;
+  };
   const judgeContext = async (nodes: SnapshotNode[]): Promise<JudgeContext> => {
     const slotValues = new Map<ApplicationSlot, string | undefined>();
     for (const slot of present) if (!isSensitiveSlot(slot)) slotValues.set(slot, await deps.values.get(slot));
@@ -223,14 +265,18 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
     if (confirmed && run.state === "filling" && step > 0 && run.pages.some((item) => item.actions.some((action) => action.verdict === "submit")))
       return submitted(confirmed, run.submittedBy === "system" ? "system" : "person");
     const stop = pageStop(nodes, { ...(await driver.signals()), url: driver.url() });
+    if (stop?.stop === "login" && await tryLogin(nodes)) continue;
     if (stop) return hold(stop.stop, stop.detail);
     const errorsBefore = clean(pageErrors(nodes));
     page();
     const injections = clean(injectionSigns(pageText(nodes)));
     if (injections.length) updatePage((item) => ({ ...item, injections: [...new Set([...item.injections, ...injections])].slice(0, 10) }));
-    const answer = await deps.propose(context(nodes, yaml, errorsBefore));
+    // A filler that fails or throws stops the run: nothing is done on a page no proposal was judged for.
+    const answer = await deps.propose(context(nodes, yaml, errorsBefore)).catch(() => undefined);
     if (!answer) return hold("engine_failed", "form filler did not answer"); // i18n-ignore: a code
-    // The model is trusted to stop, never to allow: a page it calls a login, a check or a payment is the person's.
+    // The model is trusted to stop, never to allow: a page it calls a login, a check or a payment is the person's — except a login the
+    // engine itself can do with the saved one (a username step with no password box yet).
+    if (answer.pageKind === "login" && await tryLogin(nodes)) continue;
     if (answer.pageKind === "login" || answer.pageKind === "captcha" || answer.pageKind === "payment") return hold(answer.pageKind, answer.note || answer.pageKind);
     if (answer.pageKind === "closed") return deps.save({ ...run, state: "stopped", stoppedFor: "not_allowed", stopDetail: answer.note.slice(0, 300) }, { type: "opportunity.form.stopped", payload: { stop: "closed" } });
     const actions = answer.actions.map((action) => ({ ...action, value: action.value ?? undefined })) as FormAction[];
@@ -324,7 +370,7 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
     for (const fallback of deps.fallbacks ?? []) {
       // Once per page each: a fallback run is slow (browser-use takes a minute), and a second run on the same page proposes the same fields.
       if (run.engines.some((item) => item.pageNo === run.pageNo && item.engine === fallback.name)) continue;
-      const redact = (text: string) => redactSensitive(text, sensitive);
+      const redact = scrub;
       const html = driver.html;
       const proposed = await fallback.propose({ nodes, context: context(nodes, yaml, errors), url: driver.url(), redact,
         ...(html ? { html: async () => redact(await html()) } : {}) }).catch(() => undefined) ?? [];
@@ -350,8 +396,9 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
 
   async function gate(nodes: SnapshotNode[], submit: SnapshotNode): Promise<StoredFormRun | "clicked" | "changed"> {
     const checklist = await checklistOf();
+    // A check that fails or throws counts as not run: the form is held for the person (fail closed).
     const answer = await deps.check({ version: "crossline.form-check.v1", intent: { title: run.opportunity.title, organizer: run.opportunity.organizer,
-      kind: run.opportunity.kind, consents: run.opportunity.consents }, items: checklist });
+      kind: run.opportunity.kind, consents: run.opportunity.consents }, items: checklist }).catch(() => undefined);
     run = { ...run, checklist, check: answer ? { ...answer, by: "model" } : { ok: false, problems: [{ field: "", problem: "check did not run" }], by: "rules" } }; // i18n-ignore: a reason in the record
     // The check takes seconds, and a page may open a dialog meanwhile (Luma's sign-up form): what is clicked must be what was checked.
     const now = parseAriaSnapshot(await driver.snapshot());
@@ -367,6 +414,7 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
     await shoot("before-submit");
     if (problems.length) {
       run = deps.save({ ...run, state: "ready_to_submit", heldBecause: problems }, { type: "opportunity.form.ready_to_submit", payload: { heldBecause: problems } });
+      await egress(false);
       try { await driver.front(); } catch { /* gone */ }
       deps.notify(run);
       return run;

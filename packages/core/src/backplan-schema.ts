@@ -18,6 +18,7 @@ import { tFor, type Locale } from "./i18n";
 import { textWidth } from "./text-width";
 import { isWorkOwner, workOwner, WORK_OWNERS, type WorkOwner, type WorkOwnerCode } from "./work-owner";
 import { NO_REQUEST, REQUEST_FIELD, type ModelInfoRequest } from "./info-request";
+import { EXTERNAL_FIELD } from "./external-action";
 import { NEEDS_PERSON_FIELD, NO_NEEDS_PERSON, needsPersonProblem, readNeedsPerson, type NeedsPerson } from "./auto-approval";
 import { CATEGORY_FIELD, isAgentCategory, type AgentCategory } from "./agent-dispatch";
 import { backedDrillForms, screenDrillItems, stripDrillForms, stripDrillSentences } from "./drill-forms";
@@ -55,7 +56,12 @@ export type BackplanStep = { id: string; title: string; intent: string; sourceQu
   /** For the assistant's items: the kind of work (`AGENT_CATEGORIES`), "" for the person's. Optional for recorded answers. */
   category?: AgentCategory | "";
   /** Graded work handed in for a mark: the assistant gives learning aid only. Optional for recorded answers. */
-  graded?: boolean };
+  graded?: boolean;
+  /**
+   * The item leaves the machine or commits the person to someone (`external-action.ts`, 2026-11-25): it is the person's and high-risk.
+   * Absent on answers recorded before it (the word list reads those); the schema requires it.
+   */
+  external?: boolean };
 /** The cross-line artifacts a milestone's tasks produce and use: from its anchor's `outputs`/`inputs`, less what existing work covers. */
 export type BackplanArtifacts = { produce: string[]; use: string[] };
 export type BackplanBlocker = { code: string; message: string; what: string; whoHas: string };
@@ -87,7 +93,7 @@ export const BACKPLAN_SCHEMA = object({ steps: { type: "array", items: object({
   riskTier: { type: "string", enum: ["routine", "milestone", "high_risk"] }, evidence: str, acquires: str,
   produces: str, uses: { type: "array", items: str }, completion: COMPLETION_FIELD, extendsTaskId: str,
   owner: { type: "string", enum: [...WORK_OWNERS] }, prepares: str, question: str,
-  request: REQUEST_FIELD, needsPerson: NEEDS_PERSON_FIELD, category: CATEGORY_FIELD, graded: { type: "boolean" }
+  request: REQUEST_FIELD, needsPerson: NEEDS_PERSON_FIELD, category: CATEGORY_FIELD, graded: { type: "boolean" }, external: EXTERNAL_FIELD
 }) }, dateCandidates: { type: "array", items: object({ date: str, quote: str }) },
   blockers: { type: "array", items: object({ code: str, message: str, what: str, whoHas: str }) } });
 
@@ -164,6 +170,8 @@ export function validateBackplan(value: unknown, sources: string[], dateSources 
     step.needsPerson = readNeedsPerson(step.needsPerson)!;
     step.category = isAgentCategory(step.category) ? step.category : "";
     step.graded = step.graded === true;
+    // Kept only as the model gave it: an answer recorded before the field has none, and the word list reads it (`readExternal`).
+    if (typeof step.external !== "boolean") delete step.external;
     seen.add(step.id);
   }
   // The person's core work comes first (docs/work-split.md §3): an answer that is all preparation is sent back to name it.

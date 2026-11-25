@@ -75,8 +75,6 @@ export function createVersionJudge(store: CrosslineStore, workspaceId: string, c
     }
     now.checked = [...new Set([...now.checked, ...asked.map((pair) => versionPairKey(pair.a, pair.b))])].slice(-2000);
     store.setSetting(workspaceId, SOURCE_VERSIONS_SETTING, JSON.stringify(now));
-    if (superseded) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `sources.versions:${at}`, type: "sources.versions_found",
-      entityId: workspaceId, payload: { superseded, asked: asked.length } });
     return { asked: asked.length, superseded };
   };
 }

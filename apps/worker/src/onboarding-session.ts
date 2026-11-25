@@ -152,11 +152,12 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
   // Start items first, then what the interview itself still owes; a project's details are deferred (asked when its task is planned).
   // An item's suggested question (`ask`) is offered to the dialogue until the person answered it; then the item waits for the extraction.
   const openChecklist = (limit = 8, skip: (item: { id: string; group: string; start?: boolean }) => boolean = () => false, sessionId?: string) => {
-    const answered = sessionId ? checklistAnswered(store, workspaceId, sessionId) : () => false;
-    // A line answered about in a reply the extraction has not read yet: its items' questions wait (`linesAnsweredUnread`).
+    // Answers in replies the extraction has not read yet (`since`): a line answered about waits (`linesAnsweredUnread`), and so does a
+    // checklist question answered there (`checklistAnswered`); once read, an item still open is asked again.
     const upTo = sessionId ? readExtractState(store, workspaceId, sessionId).upTo : 0;
-    const unread = sessionId ? linesAnsweredUnread(store, workspaceId, sessionId, store.listOnboardingMessages(workspaceId, sessionId)
-      .find((message) => message.role === "user" && message.seq > upTo)?.createdAt) : new Set<string>();
+    const since = sessionId ? store.listOnboardingMessages(workspaceId, sessionId).find((message) => message.role === "user" && message.seq > upTo)?.createdAt : undefined;
+    const answered = sessionId ? checklistAnswered(store, workspaceId, sessionId, since) : () => false;
+    const unread = sessionId ? linesAnsweredUnread(store, workspaceId, sessionId, since) : new Set<string>();
     const waits = (id: string) => unread.has(/^line_[a-z_]+:(.+)$/u.exec(id)?.[1] ?? "");
     return checklistNow()
       .filter((item) => !item.done && !item.deferred && !skip(item)).sort((a, b) => Number(Boolean(b.start)) - Number(Boolean(a.start)))

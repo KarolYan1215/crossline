@@ -1,4 +1,4 @@
-import { DISCLOSURE_PLACEHOLDER, answersInReply, freeTextAnswers, ledgerLines, sensitiveReplies, unsureAnswer, type LedgerQuestion, type ProfileGap, type TurnQuestion } from "@crossline/core";
+import { DISCLOSURE_PLACEHOLDER, answersInReply, freeTextAnswers, ledgerLines, sensitiveReplies, type LedgerQuestion, type ProfileGap, type TurnQuestion } from "@crossline/core";
 import type { CrosslineStore, StoredSentence } from "@crossline/db";
 
 /**
@@ -83,13 +83,15 @@ export function ledgerForModel(store: CrosslineStore, workspaceId: string, sessi
 }
 
 /**
- * Whether one of the app's checklist questions has an answer on record that settles it: the item is then only waiting for the extraction
- * to write it down, and the dialogue is told so (2026-11-01 run 10: 「铲屎官这条线眼下在做的一件事」 answered at round 11 was asked again
- * by the model in its own words at round 15, the item still open).
+ * Whether one of the app's checklist questions has an answer the extraction has not read yet (`since`: when the first unread reply came):
+ * the item is then only waiting to be written down, and the dialogue is told so (2026-11-01 run 10: 「铲屎官这条线眼下在做的一件事」
+ * answered at round 11 was asked again by the model in its own words at round 15, the item still open). Once the extraction has read the
+ * answer and the item is still open, the answer settled nothing (「不确定」, a skip) and the question is offered again. Whether an answer
+ * settles the item is the extraction's judgement; the word list that guessed it from the answer (`unsureAnswer`, IR-022) is gone.
  */
-export function checklistAnswered(store: CrosslineStore, workspaceId: string, sessionId: string): (text: string) => boolean {
+export function checklistAnswered(store: CrosslineStore, workspaceId: string, sessionId: string, since: string | undefined): (text: string) => boolean {
   const answered = interviewQuestions(store, workspaceId, sessionId)
-    .filter((question) => (question.status === "answered" && !unsureAnswer(question.answer)) || question.status === "assumed");
+    .filter((question) => (question.status === "answered" && since !== undefined && (question.answeredAt ?? "") >= since) || question.status === "assumed");
   return (text) => answered.some((question) => question.text === text || question.text.startsWith(text));
 }
 

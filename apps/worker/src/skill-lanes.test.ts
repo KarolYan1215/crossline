@@ -52,7 +52,7 @@ test("a run reports the model it ran on, its tokens, its turns and how long it t
   const result = await runCodexSkill(rpc, {}, options(MID));
   expect(result.ok).toBe(true);
   expect(usage).toHaveLength(1);
-  expect(usage[0]).toMatchObject({ workspaceId: "ws-1", skillName: MID, tier: "mid", model: "gpt-5.6-terra", effort: "medium", spendMode: "normal",
+  expect(usage[0]).toMatchObject({ workspaceId: "ws-1", skillName: MID, tier: "mid", model: "gpt-6.1-terra", effort: "medium", spendMode: "normal",
     ok: true, turns: 1, inputTokens: 1200, cachedInputTokens: 200, outputTokens: 300, reasoningOutputTokens: 100, totalTokens: 1500 });
   expect(usage[0]!.durationMs).toBeGreaterThanOrEqual(0);
 });
@@ -68,14 +68,14 @@ test("when the budget is tight the run steps down a tier, and the report says wh
   setSpendModeProvider(async () => "economy");
   const { rpc } = fakeRuntime(["{}"], TOP_STEPS, { usage: { input: 10, output: 5 } });
   await runCodexSkill(rpc, {}, options(TOP_STEPS));
-  expect(usage[0]).toMatchObject({ spendMode: "economy", tier: "top", model: "gpt-5.6-terra", effort: "medium" });
+  expect(usage[0]).toMatchObject({ spendMode: "economy", tier: "top", model: "gpt-6.1-terra", effort: "medium" });
 });
 
 test("the person's 模型强度 moves the effort on their own Codex, and 更强 is not taken while the budget is tight", async () => {
   setEffortPreferenceProvider(() => "lower");
   const first = fakeRuntime(["{}"], TOP_STEPS);
   await runCodexSkill(first.rpc, {}, options(TOP_STEPS));
-  expect(usage[0]).toMatchObject({ tier: "top", effort: "medium" });
+  expect(usage[0]).toMatchObject({ tier: "top", model: "gpt-6.2-sol", effort: "low" });
   setEffortPreferenceProvider(() => "higher");
   setSpendModeProvider(async () => "economy");
   const second = fakeRuntime(["{}"], TOP_STEPS);
@@ -88,7 +88,7 @@ test("the milestone gate never steps down, however tight the budget", async () =
   const gate = "crossline:crossline-milestone-gate";
   const { rpc } = fakeRuntime(["{}"], gate);
   await runCodexSkill(rpc, {}, options(gate));
-  expect(usage[0]).toMatchObject({ spendMode: "economy", model: "gpt-5.6-terra" });
+  expect(usage[0]).toMatchObject({ spendMode: "economy", model: "gpt-6.1-terra" });
 });
 
 test("the time limit restarts for each turn, so a repair is not starved by how long the first turn took", async () => {

@@ -21,11 +21,16 @@ export type RouteTier = "top" | "mid" | "low";
 /** What the account's remaining quota allows, as `budgetPolicy` reads it. */
 export type SpendMode = "normal" | "economy" | "manual_core_only";
 
-// One model, three efforts (2026-10-20, the owner: the sol/terra/luna table spent the quota too fast in testing).
+// Three models by Codex credit price (2026-11-25, docs/plans/harness-1125.md §8). Credits per 1M tokens, input/output, from
+// learn.chatgpt.com/docs/pricing: gpt-5.6-terra 50/300 (the old single model, two generations behind), gpt-6.2-sol 50/250,
+// gpt-6.1-terra 25/125, gpt-6-luna 2.5/12.5. Top costs what every run used to, mid half, low about a twentieth. The 2026-10-20 single-model
+// table existed because the old sol cost several times terra; that is no longer so. A model the account does not list falls down the
+// ladder (`fitRoute`), so naming a newer one than an old runtime knows costs nothing.
 export const DEFAULT_TIERS: Record<RouteTier, ModelRoute> = {
-  top: { model: "gpt-5.6-terra", effort: "high" },
-  mid: { model: "gpt-5.6-terra", effort: "medium" },
-  low: { model: "gpt-5.6-terra", effort: "low" }
+  top: { model: "gpt-6.2-sol", effort: "medium" },
+  mid: { model: "gpt-6.1-terra", effort: "medium" },
+  // Luna's own recommended starting effort is high (learn.chatgpt.com/docs/models).
+  low: { model: "gpt-6-luna", effort: "high" }
 };
 
 /** Keyed by the Skill's own name, without the `crossline:` plugin prefix. */

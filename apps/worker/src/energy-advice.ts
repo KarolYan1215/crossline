@@ -7,7 +7,6 @@ import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@cross
 import type { CrosslineStore } from "@crossline/db";
 import { claimedTitleMatches } from "./diligence";
 import { localeOf, tOfWorkspace } from "./locale";
-import { ownerOf } from "./owner";
 import { defaultSafeGetDeps, htmlToText, safeGet, type SafeGetDeps } from "./safe-fetch";
 
 export const ENERGY_ADVISOR = "crossline:crossline-energy-advisor";
@@ -126,8 +125,6 @@ export async function computeEnergyAdvice(store: CrosslineStore, workspaceId: st
   const advice: EnergyAdvice = { computedAt, evidence: rule.evidence, id: adviceId(levels), levels, ruleLevels: rule.levels,
     summary: review.state === "agreed" || review.state === "adjusted" ? review.summary : rule.summary, basis: rule.basis, review, sources };
   store.setSetting(workspaceId, ENERGY_ADVICE_SETTING, JSON.stringify(advice));
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `energy.advice:${computedAt}`, type: "energy.advice.computed",
-    entityId: workspaceId, payload: { id: advice.id, review: review.state, sources: sources.length, droppedSources: review.droppedSources } });
   return advice;
 }
 

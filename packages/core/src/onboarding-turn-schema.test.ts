@@ -172,7 +172,7 @@ test("a goal edit must cite the reply that asked for it, and is never a free-sta
 
 test("when repairs run out, bad attributes are dropped one by one; fewer than three left replace only a list no longer than them", () => {
   const kept = keepOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "d",
-    attributeCandidates: [...SIX, attribute("神经形态计算的"), attribute("编造", "domain", "reply-7"), attribute("发表三篇顶会论文")] }],
+    attributeCandidates: [...SIX, attribute("神经形态计算的"), attribute("编造", "domain", "reply-7"), attribute("在人工智能教育与科学传播交叉领域里被同行持续认可")] }],
     goalEdits: [{ lineId: "research", parts: [{ text: "器件物理", kind: "domain" }], sourceRef: "inference" }] }), known);
   expect(kept?.lineProfiles?.[0]?.attributeCandidates.map((item) => item.text)).toEqual(SIX.map((item) => item.text));
   expect(kept?.goalEdits).toEqual([]);
@@ -183,19 +183,23 @@ test("when repairs run out, bad attributes are dropped one by one; fewer than th
   expect(keepOnboardingTurn(thin, { ...known, attributesOnRecord: { research: 6 } })?.lineProfiles?.[0]?.attributeCandidates).toEqual([]);
 });
 
-test("a candidate that is an action, a count or an achievement is sent back naming every one, with how to write an attribute", () => {
+// 2026-11-25 (IR-025 retired): code sends back only a candidate's shape — a sentence, or the line's own name; whether one reads like an
+// action, a count or an achievement is the extraction's judgement (its Skill), and such wording passes here.
+test("a sentence-length candidate is sent back naming every one, with how to write an attribute; action-like wording is the Skill's", () => {
   try {
     validateOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: [...SIX.slice(0, 3),
-      attribute("能独立立项", "ability"), attribute("发表三篇顶会论文", "state"), attribute("写公众号长文")] }] }), known);
+      attribute("在人工智能教育与科学传播交叉领域里被同行持续认可", "state"), attribute("把脑机制转化为可以落地的新型硬件结构")] }] }), known);
     throw new Error("expected a refusal");
   } catch (error) {
     expect((error as Error).message).toBe("ONBOARDING_ATTRIBUTE_NOT_DESCRIPTIVE");
     const detail = (error as Error & { detail?: string }).detail ?? "";
-    for (const text of ["能独立立项", "发表三篇顶会论文", "写公众号长文", "形容词", "少给几个也可以"]) expect(detail).toContain(text);
+    for (const text of ["在人工智能教育与科学传播交叉领域里被同行持续认可", "把脑机制转化为可以落地的新型硬件结构", "是一句话", "形容词", "少给几个也可以"]) expect(detail).toContain(text);
   }
-  // Dropped when kept: the rest of the line stands, and a line left with only actions keeps nothing new (its record stays).
+  expect(validateOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: [...SIX.slice(0, 3),
+    attribute("能独立立项", "ability"), attribute("发表三篇顶会论文", "state")] }] }), known).lineProfiles?.[0]?.attributeCandidates).toHaveLength(5);
+  // Dropped when kept: the rest of the line stands, and a line left with only sentences keeps nothing new (its record stays).
   const pruned = keepOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "d", attributeCandidates: [attribute("严谨", "ability"),
-    attribute("能写基金申请", "ability"), attribute("拿到教职")] }, { lineId: "media", description: "m", attributeCandidates: [attribute("写公众号长文"), attribute("10w+ 粉丝")] }] }), known);
+    attribute("把脑机制转化为可以落地的新型硬件结构", "ability")] }, { lineId: "media", description: "m", attributeCandidates: [attribute("在人工智能教育与科学传播交叉领域里被同行持续认可")] }] }), known);
   expect(pruned?.lineProfiles?.map((line) => line.attributeCandidates.map((item) => item.text))).toEqual([["严谨"], []]);
   // What the person asked for in so many words is theirs: a goal edit keeps its wording even when it reads like an action.
   const edit = { lineId: "research", parts: [{ text: "器件物理", kind: "domain" as const }, { text: "能独立立项", kind: "ability" as const }], sourceRef: "reply-1" };

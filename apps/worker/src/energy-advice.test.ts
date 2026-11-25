@@ -55,7 +55,8 @@ test("the review moves a band only on a source that opened; a claim on a dead pa
   expect(advice.levels[3]![26]).toBe(Math.max(1, advice.ruleLevels[3]![26]! - 1));
   expect(advice.levels[3]![33]).toBe(3);
   expect(readEnergyAdvice(store.getSetting(workspaceId, ENERGY_ADVICE_SETTING))).toMatchObject({ id: advice.id });
-  expect(store.listEvents(workspaceId, { type: "energy.advice.computed" })).toHaveLength(1);
+  // The advice is its setting; no ledger event (telemetry is not the ledger, CLAUDE.md 2026-11-25).
+  expect(store.listEvents(workspaceId, { type: "energy.advice.computed" })).toHaveLength(0);
 });
 
 test("the pass does nothing while paused or the person is away, and skips only the review when the quota is tight", async () => {

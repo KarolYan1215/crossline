@@ -4,7 +4,7 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   test: {
-    include: ["packages/**/*.test.ts", "apps/**/*.test.ts", "apps/**/*.test.tsx"],
+    include: ["packages/**/*.test.ts", "apps/**/*.test.ts", "apps/**/*.test.tsx", "scripts/**/*.test.ts"],
     environment: "node",
     // A test's first dynamic import transforms a whole page's module graph inside the test's own time; under a busy machine
     // (the pre-commit hook beside other sessions' suites) that alone passed the 5 s default and failed commits for unrelated

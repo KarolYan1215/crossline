@@ -117,8 +117,20 @@ export type FormPage = {
   upload: (target: FormTarget, file: string, attempt: number) => Promise<void>;
   click: (target: FormTarget) => Promise<void>;
   settle: () => Promise<void>;
-  /** A full-page picture with the named fields masked. */
+  /** A full-page picture with the named fields, and every password box, masked. */
   picture: (mask: FormTarget[]) => Promise<Buffer>;
+  /**
+   * The engine's egress guard (docs/plans/harness-1125.md §3): while on, any request but GET/HEAD to a host off the run's hosts is
+   * aborted (a third-party tracker cannot carry off what was just typed), each host reported once as `egress`. On from the window's
+   * opening; the engine lifts it when the window is the person's (a stop, a form waiting for their submission) and sets it again on 继续.
+   */
+  egress: (on: boolean) => Promise<void>;
+  /**
+   * A saved login typed by the driver itself into the top-level page's login form, then that form's button pressed (§5). Only on this
+   * computer's own worker: it is not one of the node's methods, so a login never travels over a node's connection. Refused unless the
+   * form holds nothing but the username and password boxes (a sign-up form is not a login) and its button reads as signing in.
+   */
+  login?: (secret: { username: string; password: string }) => Promise<{ ok: true; filled: Array<"username" | "password">; mask: FormTarget[] } | { ok: false; why: string }>;
   front: () => Promise<void>;
   closed: () => boolean;
   close: () => Promise<void>;
@@ -131,6 +143,14 @@ export type FormPage = {
 
 /** The name of the first node in an element's own accessibility snapshot (`- textbox "Name"`). */
 const snapshotName = (yaml: string) => /^- [\w-]+ "((?:[^"\\]|\\.)*)"/m.exec(yaml)?.[1]?.replace(/\\(.)/g, "$1");
+/** A login form's username box, on the top-level page. */
+const LOGIN_USER = ["autocomplete=username", "type=email", "name*=user i", "name*=email i", "name*=login i", "id*=user i", "id*=email i", "id*=login i"]
+  .map((attr) => `input[${attr}]:visible`).join(", ");
+/** A box a person types into or picks in; a login form has only its username and password among them. */
+const TYPED_BOX = "input:visible:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]):not([type=image]):not([type=reset]), textarea:visible, select:visible";
+/** A login form's own button: signing in or going on to the password step, never signing up. */
+// i18n-ignore: matched against what a site shows
+const LOGIN_BUTTON = /^(log ?in|sign ?in|continue|next|submit|go|登录|登入|继续|下一步|确定|提交)(\b|$)/i;
 /** Luma moved from lu.ma to luma.com; an event link on one redirects to the other. */
 const HOST_ALIASES: Record<string, string[]> = { "lu.ma": ["luma.com"], "luma.com": ["lu.ma"] };
 /** The hosts one run may navigate to: the registration host and its known aliases, nothing else (§10.2). */
@@ -154,12 +174,20 @@ export async function driveFormContext(context: Context, options: { hosts: strin
   const current: Page = context.pages()[0] ?? await context.newPage();
   // No second tab: a page that opens one gets it closed at once (§10.2: 不跨标签页).
   context.on("page", (page) => { if (page !== current) { options.onBlocked(page.url(), "popup"); void page.close().catch(() => undefined); } });
+  let egress = true;
+  const egressSeen = new Set<string>();
   await context.route("**/*", async (route) => {
     const request = route.request();
     const url = request.url();
     const top = request.isNavigationRequest() && request.frame() === current.mainFrame();
     if (!(await options.allow(url))) { options.onBlocked(url, "address"); return route.abort("blockedbyclient"); }
     if (top && !onHosts(url, options.hosts)) { options.onBlocked(url, "host"); return route.abort("blockedbyclient"); }
+    if (egress && !/^(GET|HEAD)$/i.test(request.method()) && !onHosts(url, options.hosts)) {
+      let host = "";
+      try { host = new URL(url).hostname; } catch { /* not a URL */ }
+      if (!egressSeen.has(host)) { egressSeen.add(host); options.onBlocked(url, "egress"); }
+      return route.abort("blockedbyclient");
+    }
     return route.continue();
   });
   // An element's own ariaSnapshot replaces the snapshot `aria-ref=` resolves against: after reading one, take the page's again, or a ref
@@ -223,7 +251,41 @@ export async function driveFormContext(context: Context, options: { hosts: strin
       await current.waitForTimeout(800);
     },
     picture: (mask) => current.screenshot({ fullPage: true, timeout: 15_000,
-      mask: mask.map((target) => current.getByRole(target.role as Parameters<Page["getByRole"]>[0], { name: target.name, exact: true })) }),
+      mask: [...mask.map((target) => current.getByRole(target.role as Parameters<Page["getByRole"]>[0], { name: target.name, exact: true })), current.locator("input[type=password]")] }),
+    egress: async (on) => { egress = on; },
+    login: async (secret) => {
+      // The top-level page only: `current.locator` never looks into a frame, so a login box another origin's frame shows is never filled.
+      const passwords = await current.locator("input[type=password]:visible").all();
+      if (passwords.length > 1) return { ok: false, why: "several password boxes" }; // i18n-ignore: a code kept on the run
+      const password = passwords[0];
+      // The username box of the password's own form when there is one; a page's other e-mail box (a newsletter) is not it.
+      const passwordForm = password?.locator("xpath=ancestor::form[1]");
+      const scope = passwordForm && await passwordForm.count() ? passwordForm : current.locator(":root");
+      const user = (await scope.locator(LOGIN_USER).all())[0];
+      const last = password ?? user;
+      if (!last) return { ok: false, why: "no login box" }; // i18n-ignore: a code kept on the run
+      const form = last.locator("xpath=ancestor::form[1]");
+      const inForm = (await form.count()) ? form : undefined;
+      // Every box a person would type into, in the login's form: more than the username and password means it is not a login.
+      const boxes = inForm ? await inForm.locator(TYPED_BOX).count() : (user ? 1 : 0) + (password ? 1 : 0);
+      if (boxes > (user ? 1 : 0) + (password ? 1 : 0)) return { ok: false, why: "not only a login form" }; // i18n-ignore: a code kept on the run
+      const button = inForm?.locator("button[type=submit]:visible, input[type=submit]:visible, button:not([type]):visible").first();
+      const buttonName = button && await button.count() ? snapshotName(await button.ariaSnapshot().catch(() => "")) ?? "" : undefined;
+      if (buttonName !== undefined && !LOGIN_BUTTON.test(buttonName.trim())) return { ok: false, why: "button is not a sign-in" }; // i18n-ignore: a code kept on the run
+      const filled: Array<"username" | "password"> = [];
+      const mask: FormTarget[] = [];
+      for (const [box, value, kind] of [[user, secret.username, "username"], [password, secret.password, "password"]] as const) {
+        if (!box) continue;
+        await box.fill(value, { timeout: 8_000 });
+        if ((await box.inputValue({ timeout: 3_000 })) !== value) return { ok: false, why: `${kind} not read back` }; // i18n-ignore: a code kept on the run
+        const name = snapshotName(await box.ariaSnapshot().catch(() => ""));
+        if (name) mask.push({ role: "textbox", name });
+        filled.push(kind);
+      }
+      if (button && buttonName !== undefined) await button.click({ timeout: 8_000 }); else await last.press("Enter", { timeout: 8_000 });
+      await keepRefs();
+      return { ok: true, filled, mask };
+    },
     front: async () => { await current.bringToFront(); },
     closed: () => current.isClosed(),
     close: async () => { await context.close().catch(() => undefined); },
@@ -269,8 +331,8 @@ export type BrowserOp =
   // The registration-form driver (docs/opportunity-agent.md §10.1): a page of its own beside the reader's, answered with what it blocked.
   | { op: "formOpen"; host: string; hosts: string[] } | { op: "form"; method: FormMethod; args: unknown[] } | { op: "formPicture"; mask: FormTarget[] }
   | { op: "formClose" };
-/** The form driver's methods a server may call on a node; `picture` and `close` go through their own ops; `html` does not go at all. */
-export const FORM_METHODS = ["open", "snapshot", "signals", "multiline", "inputValue", "fill", "select", "check", "upload", "click", "settle", "front"] as const;
+/** The form driver's methods a server may call on a node; `picture` and `close` go through their own ops; `html` and `login` do not go at all. */
+export const FORM_METHODS = ["open", "snapshot", "signals", "multiline", "inputValue", "fill", "select", "check", "upload", "click", "settle", "front", "egress"] as const;
 export type FormMethod = typeof FORM_METHODS[number];
 /** What every form answer from a node carries besides the method's value: the page's address, whether it was closed, what was refused. */
 export type FormAnswer = { value: unknown; url: string; closed: boolean; blocked: Array<{ url: string; why: string }>; error?: string };

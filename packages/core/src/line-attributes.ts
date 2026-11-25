@@ -4,7 +4,7 @@
  * The interview used to propose whole sentences 「成为 ___ 的 <身份>」, at most six of up to 120 characters, and the model filled them
  * by permuting the same few attributes: the candidates repeated each other and their combinations were often odd. It now proposes 3–12
  * mutually independent attributes per line, each cited to the reply or file it came from and labelled with its kind, each an adjective or
- * a short field qualifier from the person's own words, never an action or an achievement (`attributeProblem`); the person picks
+ * a short field qualifier from the person's own words, never an action or an achievement (its Skill; code checks only the shape, `attributeShapeProblem`); the person picks
  * any number of them, the system orders them as Chinese attributives are ordered (领域 → 能力 → 状态), the person may drag them into
  * another order or reword one, and 「采用」 writes the chosen parts (`goalParts`) plus the sentence composed from them (`goals[0]`), so
  * every reader of `goals` keeps working.
@@ -32,7 +32,7 @@ export const ATTRIBUTE_MAX_LENGTH = 40;
 // Three, not six (2026-10-19, live walkthrough on the developer's model): asked for six and told to leave the list empty when it could not,
 // the extraction gave three, was sent back, and then left every line empty — the start standard needs candidates, so the interview never
 // reached 「开始使用」. Three is enough to compose a goal from, and the person can add their own. A model's answer is asked for three; a
-// list pruned below it (an action or an achievement dropped, `attributeProblem`) is still kept for a line that has no more on record.
+// list pruned below it (one refused by `attributeShapeProblem`) is still kept for a line that has no more on record.
 export const ATTRIBUTE_CANDIDATES_MIN = 3;
 export const ATTRIBUTE_CANDIDATES_MAX = 12;
 
@@ -109,68 +109,28 @@ export const notAtomic = (text: string) => /[、，,；;／/]|以及|并且|\b(a
 
 /**
  * How long an attribute reads: a CJK character counts one, a run of Latin letters or digits counts one (「AI 教育方向」 is 5). The interview
- * aims at `ATTRIBUTE_SHORT`; past `ATTRIBUTE_LONGEST` a candidate is a sentence and is refused (`attributeProblem`).
+ * aims at `ATTRIBUTE_SHORT`; past `ATTRIBUTE_LONGEST` a candidate is a sentence and is refused (`attributeShapeProblem`).
  */
 export const attributeLength = (text: string) => (text.match(/[A-Za-z0-9]+|[^\s\p{P}\p{S}A-Za-z0-9]/gu) ?? []).length;
 export const ATTRIBUTE_SHORT = 8;
 export const ATTRIBUTE_LONGEST = 12;
 
-// 「能/会/可以/善于/擅长/懂得…」 followed by a verb: an action. Not the nouns and idioms that start with the same characters (能源, 能量, 能力,
-// 能动性, 会计, 会员, 能言善辩 …).
-const ABILITY_VERB = /^(能够|能|会|可以|善于|擅长|懂得|学会)(?!源|量|力|效|耗|级|动|言善辩|说会道|屈能伸|文能武|计|展|员|议|所|话)(?=\S)/u;
-// A count: 三篇, 10 万, 两个, Top 3, 5 年, 10w+. Not the idioms and names that contain a numeral (十项全能, 百家号 …).
-const COUNT = /(\d+(\.\d+)?|[一二两三四五六七八九十百千万亿几]+)\s*(篇|个|本|次|场|位|名|家|门|项|款|份|条|部|套|期|届|年|月|天|周|小时|万|千|百|亿|倍|[kw]|%|＋|\+)|top\s*\d/iu;
-const COUNT_IDIOM = /十项全能|三位一体|一家之言|一门心思|一本正经|独一份|百家号|百家讲坛/u;
-// A leading action verb, a preposition that starts a how-or-why phrase, or a habit: an activity or an achievement, never a quality.
-// Not the nouns made of the same characters (写作, 写手, 完成度, 获得感, 开发者, 出版业 …).
-/* i18n-ignore-start: patterns read against what a model wrote */
-const ACTION_LEAD = new RegExp("^(发表|做出|做成|做到|完成(?!度)|写出|写(?!作|手|实|意)|推出|发布|拿到|拿下|获得(?!感)|取得|赢得|赚(?!头)|开发(?!者|能力)|建立|打造|搭建"
-  + "|出版(?!业|界|行业|方向|领域)|上线|达到|实现|外推|创办|创立|攻克|融到|卖出|带出|带领|培养|推动|帮助|坚持|每天|每周|每月|每年|把(?!握|关)|以(?!人为本|身作则)|通过|借助|为了)(?=\\S)", "u");
-/* i18n-ignore-end */
 /**
- * The same two rules in English, where they are cheap and certain: "able to …" / "good at …" is an ability with its verb (「能/会/善于」),
- * and a phrase that leads with an achieving verb ("publish …", "launch …", "win …") is an activity or an achievement. An English
- * attribute is an adjective ("rigorous", "independent") or a field ("signal processing"), so neither can be one.
- */
-const ABILITY_VERB_EN = /^(able to|can|capable of|good at|skilled at)\s+(\S+)/i;
-const ACTION_LEAD_EN = /^(publish|publishing|launch|launching|win|winning|earn|earning|get|getting|land|landing|ship|shipping|found|founding|reach|reaching|achieve|achieving|complete|completing)\s+\S/i;
-// A quality named as a noun (好奇心, 责任心, 创新精神), and the leads that make it an attributive (有好奇心, 富有创新精神, 不忘初心).
-const QUALITY_NOUN = /(心|精神|意识|勇气|毅力|热情|情怀)$/u;
-const HAS_LEAD = /^(有|富有|富于|具有|充满|满怀|不)/u;
-// Ends in an achievement: 毕业, 上市, 获奖, 立项 … — a milestone, not who the person becomes.
-const ACHIEVEMENT_END = /(毕业|上市|获奖|发表|出版|上线|中稿|夺冠|晋升|升职|立项|拿奖|变现|转正|录用|入选|过审)$/u;
-
-/**
- * Why a proposed attribute is not one, or undefined (2026-10-19, the owner's rule: 「长期目标是形容词，不要把动词之类的强行组合成形容词」).
- * An attribute completes 「成为 ___ 的<身份>」: an adjective or a short adjectival phrase in the person's own words (严谨, 高产, 独立,
- * 有影响力, 值得信赖, 受学生欢迎) or a short field qualifier (器件物理方向). Only the clear cases are caught, each with how to write it
- * instead: 「能/会/善于…」 plus a verb, a count, a leading action verb or an achievement at the end, and a sentence-length phrase. Applied to
- * the candidates a model proposes, never to what the person wrote or chose themselves (a goal edit, a split of an adopted goal, a part
- * typed in the picker): their wording is theirs.
+ * What code still refuses in a proposed attribute (2026-11-25, IR-025 retired → IR-187/IR-188): only its shape — the line's own name read
+ * back (「贝斯」 for 「弹贝斯的」, which composes 「成为贝斯的弹贝斯的」, 2026-11-01) and a sentence-length phrase. Whether it is an action,
+ * a count or an achievement rather than a quality, or a quality named as a noun (好奇心), is the extraction's judgement: its Skill lists the
+ * cases (crossline-onboarding-extract 「定语的措辞由你把关」); the word lists that caught them here are gone. Applied to the candidates a
+ * model proposes, never to what the person wrote or chose themselves.
  */
 // Repair messages to the model that proposed the candidates, not interface text.
 /* i18n-ignore-start */
-export function attributeProblem(raw: string, lineLabel?: string): string | undefined {
+export function attributeShapeProblem(raw: string, lineLabel?: string): string | undefined {
   const text = cleanAttribute(raw);
   if (!text) return undefined;
-  // 「贝斯」 for 「弹贝斯的」, 「社会学研究」 for 「社会学研究者」: the line's own name read back, which composes 「成为贝斯的弹贝斯的」 (2026-11-01).
   const bare = (value: string) => value.replace(/[的\s\p{P}]/gu, "").toLowerCase();
   const field = bare(text).replace(/(方向|领域)$/u, "");
   if (lineLabel && field.length >= 2 && bare(lineLabel).includes(field))
     return `「${text}」重复了主线名「${lineLabel}」：写本人想在这条线上成为什么样，不是这条线是什么`;
-  const abilityEn = text.match(ABILITY_VERB_EN);
-  if (abilityEn) return `"${text}" is "${abilityEn[1]}" plus an action: write the quality it shows ("able to lead projects" → "independent")`;
-  const leadEn = text.match(ACTION_LEAD_EN);
-  if (leadEn) return `"${text}" starts with "${leadEn[1]}": an activity or an achievement, which belongs in a milestone`;
-  const ability = text.match(ABILITY_VERB);
-  if (ability) return `「${text}」是「${ability[1]}」加动作：写成它体现的品质（「能独立立项」→「独立」）`;
-  if (COUNT.test(text) && !COUNT_IDIOM.test(text)) return `「${text}」带数量，是成就，属于里程碑`;
-  const lead = text.match(ACTION_LEAD);
-  if (lead) return `「${text}」以「${lead[1]}」开头，是活动或成就`;
-  const end = text.match(ACHIEVEMENT_END);
-  if (end) return `「${text}」以「${end[1]}」结尾，是成就，属于里程碑`;
-  // 「好奇心」, 「责任心」, 「创新精神」: a quality named as a noun, which composes 「成为好奇心的学生」 (2026-11-06 walkthrough, W-238).
-  if (QUALITY_NOUN.test(text) && !HAS_LEAD.test(text) && attributeLength(text) >= 3) return `「${text}」是名词，接不上「的」：写成「有${text}」`;
   const length = attributeLength(text);
   if (length > ATTRIBUTE_LONGEST) return `「${text}」有 ${length} 个字，是一句话：缩到 ${ATTRIBUTE_SHORT} 个字以内`;
   return undefined;

@@ -26,11 +26,12 @@ function seed() {
   return store;
 }
 
-test("model-proposed chips that are actions go, the person's adopted parts and a line's last chips stay, and it can be undone", () => {
+// Since 2026-11-25 (IR-025 retired) only the shape is refused: a sentence-length chip goes; action-like wording is the Skill's to judge.
+test("model-proposed sentence-length chips go, the person's adopted parts and a line's last chips stay, and it can be undone", () => {
   const store = seed();
-  expect(repairLineAttributes(store, ws, owner)).toEqual({ research: ["外推知识边界", "以真实技术链条和可复现证据工作"] });
+  expect(repairLineAttributes(store, ws, owner)).toEqual({ research: ["以真实技术链条和可复现证据工作"] });
   const after = JSON.parse(store.getSetting(ws, "lines.profiles")!);
-  expect(after.research.attributes.map((item: { text: string }) => item.text)).toEqual(["神经形态计算", "把脑机制转化为计算机制与硬件结构", "可复现成果"]);
+  expect(after.research.attributes.map((item: { text: string }) => item.text)).toEqual(["神经形态计算", "外推知识边界", "把脑机制转化为计算机制与硬件结构", "可复现成果"]);
   expect(after.media.attributes).toHaveLength(1);
   const op = store.listEvents(ws, { type: "op.applied" }).at(-1)!.payload as { inverse: { kind: string; entries: Array<{ key: string; value: string }> } };
   expect(op.inverse).toEqual({ kind: "settings.restore", entries: [{ key: "lines.profiles", value: JSON.stringify(profiles) }] });

@@ -294,7 +294,9 @@ export function fire(deps: AutomationDeps, workspaceId: string, automation: Auto
     what: automationRunPrompt(action, why, note),
     humanPart: automation.steps.filter((step) => step.by === "person").map((step) => step.title).join(locale === "en" ? "; " : "；") || t("查看结果"),
     notes: `这是本人设的自动化，第 ${automation.runs + 1} 次运行。每次只做这一轮的事，结果写进任务目录。`, // i18n-ignore: model-facing
-    ...(inputs.length ? { inputs } : {}), ...(automation.threadId ? { resumeThreadId: automation.threadId } : {})
+    ...(inputs.length ? { inputs } : {}), ...(automation.threadId ? { resumeThreadId: automation.threadId } : {}),
+    // A mail's text or a watched page's new lines are someone else's words: on the owner's shell that run gets no network (Rule of Two).
+    ...(automation.trigger.type === "mail" ? { untrusted: ["mail"] } : automation.trigger.type === "watch" ? { untrusted: ["page"] } : {})
   };
   const started = deps.runFree(workspaceId, input, (outcome) => {
     const at = deps.now?.() ?? new Date();

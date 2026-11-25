@@ -926,11 +926,13 @@ async function startAgentThread<T>(scope: Scope, options: SkillRunOptions<T>, co
   // On a provider (only ever measured by the evaluation matrix; routing never sends the assistant there) the hosted search does not
   // exist: it is off, and `withWebTools` has given the thread Crossline's own search functions instead.
   const hosted = !context.provider;
+  // The run's profile may narrow the hosted search to the cache or turn it off (Rule of Two, docs/plans/harness-1125.md §3).
+  const search = hosted ? agent.webSearch ?? "live" : "disabled";
   const config: Record<string, unknown> = {
-    web_search: hosted ? "live" : "disabled", include_environment_context: true,
+    web_search: search, include_environment_context: true,
     // No Codex memory for the assistant either (2026-10-21, docs/token-economy.md §2): what it needs from earlier runs is given to it.
     "memories.use_memories": false, "memories.generate_memories": false, "features.memories": false,
-    "features.shell_tool": true, "features.web_search": hosted, "features.standalone_web_search": hosted, "features.plugins": true,
+    "features.shell_tool": true, "features.web_search": search !== "disabled", "features.standalone_web_search": search !== "disabled", "features.plugins": true,
     "features.view_image": true,
     // The runtime's plan tool (each update reaches `onPlan`, shown while the run works) and the person's ChatGPT connectors, read-only.
     ...(options.onPlan ? { "tools.update_plan.enabled": true } : {}),

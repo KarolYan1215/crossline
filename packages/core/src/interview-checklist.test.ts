@@ -43,9 +43,12 @@ test("what only the person can settle is theirs, and does not count as the inter
   expect(interviewOwnedOpen(items)).toEqual([]);
 });
 
-test("a graded project needs how it is judged and its fixed times, a hard line its fixed schedule; a confirmation lasts only while the portrait is the same", () => {
-  const items = interviewChecklist({ ...full, facts: full.facts.filter((fact) => fact.slot !== "grading"), dates: full.dates.filter((entry) => !entry.recurring) });
-  expect(items.find((item) => item.id === "project_course:ece555")?.detail).toBe("缺：怎么评定、固定时间");
+// 2026-11-25 (IR-028): a graded project is one with its grading on record; a name shaped like a course code («ECE 555») no longer makes one,
+// so whether it is judged and meets at fixed times is the interview's to ask.
+test("a graded project needs its fixed times, a hard line its fixed schedule; a confirmation lasts only while the portrait is the same", () => {
+  const items = interviewChecklist({ ...full, dates: full.dates.filter((entry) => !entry.recurring) });
+  expect(items.find((item) => item.id === "project_course:ece555")?.detail).toBe("缺：固定时间");
+  expect(interviewChecklist({ ...full, facts: full.facts.filter((fact) => fact.slot !== "grading") }).some((item) => item.id === "project_course:ece555")).toBe(false);
   expect(items.find((item) => item.id === "hard_schedule:research")?.done).toBe(false);
   expect(portraitFingerprint({ portrait: "a b", coreConflict: "c" })).toBe(portraitFingerprint({ portrait: "ab", coreConflict: "c" }));
   expect(portraitFingerprint({ portrait: "a" })).not.toBe(portraitFingerprint({ portrait: "b" }));
@@ -179,7 +182,7 @@ test("project items read slots by meaning, and a course's part needs no grading 
 
 // 2026-11-12: the tiers are gone; a project's details wait for its planning.
 test("a project's details wait for planning", () => {
-  const sparse = { ...full, facts: full.facts.filter((fact) => fact.projectId !== "ece555"), dates: [] };
+  const sparse = { ...full, facts: full.facts.filter((fact) => fact.projectId !== "ece555" || fact.slot === "grading"), dates: [] };
   expect(Object.fromEntries(interviewChecklist(sparse)
     .filter((item) => item.id.endsWith(":ece555") && item.id.startsWith("project")).map((item) => [item.id, Boolean(item.deferred)])))
     .toEqual({ "project:ece555": true, "project_course:ece555": true });
