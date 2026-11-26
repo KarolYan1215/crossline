@@ -151,7 +151,7 @@ export type SkillRunOptions<T> = {
   keepEarly?: (rejection: Error, output: unknown, prepared: unknown) => T | undefined;
   /**
    * `true`: the runtime's hosted live search on this thread itself — only for a run whose input carries no private context worth the
-   * name (docs/plans/harness-1125.md §10: the visa finder, the energy review, the opportunity reader, the need check and the scout);
+   * name (docs/plans/harness-1125.md §10: the visa finder, the energy review, the need check and the scout);
    * its queries are checked against the person's private strings as they appear (`privateLeak`) and a leaking one ends the run.
    * `false`: no web at all. Unset: the web only through `web_research` (`webResearch`), where the route can search and call functions.
    */
@@ -237,6 +237,11 @@ export type SkillRunOptions<T> = {
   connectorAllowed?: (call: { server: string; tool: string }) => boolean;
   /** The runtime's own plan tool: each update of the model's step list is handed here as it is made (`turn/plan/updated`). */
   onPlan?: (plan: { explanation: string; steps: Array<{ step: string; status: string }> }) => void;
+  /**
+   * Called each time `web_research` hands pages back: the run now holds someone else's words (the tools assistant marks its captures
+   * with it, docs/plans/harness-1125.md §10).
+   */
+  onWebResearch?: () => void;
   /** Run on this tier instead of the Skill's own (the input box's second, stronger look). Ignored when the budget is tight. */
   tier?: RouteTier;
   /**
@@ -553,7 +558,7 @@ export const WEB_RESEARCH_CALLS_PER_RUN = 30;
 const WEB_SCOUT_INSTRUCTIONS = "Search the public web for each query and report what you found, for a caller that will read it later. "
   + "You know nothing about who asked and need nothing more: never guess at a person behind the queries. Return only the requested JSON.";
 type ScoutInput = { version: string; today: string; purpose: string; queries: string[] };
-type ScoutParent = { cwd: string; locale?: Locale | undefined; signal?: AbortSignal | undefined };
+type ScoutParent = { cwd: string; locale?: Locale | undefined; signal?: AbortSignal | undefined; onWebResearch?: (() => void) | undefined };
 
 /**
  * `web_research(queries, purpose)` for one run: each call is a separate run of `crossline-web-scout` — under this run's model slot, on the
@@ -598,6 +603,7 @@ export function webResearchTool(client: CodexRpcBoundary, egress: Egress, parent
       if (!result.ok) throw new Error(`这次检索没有完成（${result.blocker.code}）。用已有材料作答，或稍后换个查询再试。`);
       const output = validateWebScout(result.output);
       egress.found.push(...output.results.flatMap((item) => [item.url, ...urlsIn(`${item.title}\n${item.excerpt}`)]), ...urlsIn(output.notes));
+      parent.onWebResearch?.();
       return untrustedWebBlock({ readAt, results: output.results, notes: output.notes }, randomUUID().replace(/-/g, "").slice(0, 12));
     }
     // i18n-ignore-end
@@ -1214,7 +1220,7 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
  * time is a schema problem, not a cost of doing business.
  */
 /** Whether a hosted `webSearch` item's query, queries or page carries a private string; the kind, never the string. */
-function hostedSearchLeak(item: Record<string, unknown>, guard: PrivateGuard): "identifier" | "passage" | undefined {
+function hostedSearchLeak(item: Record<string, unknown>, guard: PrivateGuard): "identifier" | "passage" | "details" | undefined {
   const action = record(item.action);
   const texts = [item.query, action?.query, ...(Array.isArray(action?.queries) ? action.queries : []), action?.url, action?.pattern]
     .filter((text): text is string => typeof text === "string" && text.length > 0);

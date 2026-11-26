@@ -4,7 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameS
 import path from "node:path";
 import type { SkillTools } from "@crossline/codex";
 import { dueDateReader, type CrosslineStore, type StoredSourceDocument } from "@crossline/db";
-import { tFor, untrustedFile, type CaptureProvenance, type TaintSource } from "@crossline/core";
+import { readProvenance, tFor, untrustedFile, type CaptureProvenance, type TaintSource } from "@crossline/core";
 import { localeOf } from "./locale";
 import { extractText } from "./extract";
 
@@ -28,7 +28,9 @@ export type ToolboxAction = { kind: "inbox"; text: string } | { kind: "tell"; te
  * its inbox lines carry that on their captures, and the run keeps no outbound function for the rest of its work (`agent-task.ts`).
  */
 export type RunTaint = { tainted: boolean; sources: TaintSource[] };
-export type AgentToolbox = SkillTools & { calls: ToolCall[]; actions: ToolboxAction[]; written: () => string[]; taint: () => RunTaint };
+export type AgentToolbox = SkillTools & { calls: ToolCall[]; actions: ToolboxAction[]; written: () => string[]; taint: () => RunTaint;
+  /** Someone else's words that reached the run outside these functions (`web_research`'s pages): marked, never refused — already read. */
+  noteTaint: (source: TaintSource) => void };
 
 /** Thrown instead of an answer when untrusted text would reach a run that can still reach the network: the run goes on without it first. */
 export const TAINT_HELD = "TAINT_HELD";
@@ -275,7 +277,10 @@ export function createAgentToolbox(deps: {
       }
       case "read_task": {
         const order = deps.store.getWorkOrder(deps.workspaceId, s("id")) ?? fail(`没有 id 为「${s("id")}」的任务。`);
-        const payload = order.payload as { title?: string; humanCore?: string; automationParts?: string[] };
+        const payload = order.payload as { title?: string; humanCore?: string; automationParts?: string[]; provenance?: unknown };
+        // A task a model wrote from someone else's words carries those words (review of 2026-11-25): reading it reads them.
+        const from = readProvenance(payload.provenance);
+        if (from?.tainted) taintWith(from.sources[0] ?? "mail");
         const plan = deps.store.getStepPlan(deps.workspaceId, order.id);
         const due = dueDateReader(deps.store, deps.workspaceId)(order);
         return JSON.stringify({ id: order.id, title: payload.title ?? "", intent: order.intent, line: order.identityId, state: order.state,
@@ -330,6 +335,7 @@ export function createAgentToolbox(deps: {
 
   return {
     specs, calls, actions, written: () => [...written, ...copied], taint: () => ({ tainted: sources.size > 0, sources: [...sources] }),
+    noteTaint: (source) => { sources.add(source); },
     async call(name, args) {
       // What a call is about, offset included: reading one long file page by page is not going round in circles. Nor is reading a file
       // again after writing it: the write count is part of the subject (2026-10-28: two runs that wrote, re-read and revised their own

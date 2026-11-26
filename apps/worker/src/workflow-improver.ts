@@ -236,10 +236,20 @@ export function revisionTaint(store: CrosslineStore, workspaceId: string, direct
       if (/^collect-/i.test(top) || input.split(/[\\/]/).some((part) => /^collect-/i.test(part))) found.add("site");
       else if (input.split(/[\\/]/).some((part) => /^flow-/i.test(part))) found.add("workflow-output");
     }
-    const completed = store.listEvents(workspaceId, { type: "agent.task.completed", entityId: run.taskId }).at(-1)?.payload as { searches?: number } | undefined;
-    if (Number(completed?.searches ?? 0) > 0) found.add("web");
+    for (const label of completedTaint(store, workspaceId, run.taskId)) found.add(label);
   }
   return [...found];
+}
+
+/**
+ * What a finished run read of someone else's words, from its `agent.task.completed`: the tools mode's own taint record (`tainted`: mail,
+ * page, document…) and a hosted search (`searches`). Review of 2026-11-25: the tools mode never counts `searches`, so `tainted` is read too.
+ */
+export function completedTaint(store: CrosslineStore, workspaceId: string, taskId: string): string[] {
+  const completed = store.listEvents(workspaceId, { type: "agent.task.completed", entityId: taskId }).at(-1)?.payload as { searches?: number; tainted?: unknown } | undefined;
+  const found = Array.isArray(completed?.tainted) ? completed.tainted.map(String) : [];
+  if (Number(completed?.searches ?? 0) > 0) found.push("web");
+  return [...new Set(found)];
 }
 
 const revisionDigest = (files: Array<{ path: string; text: string }>) => {
@@ -376,7 +386,9 @@ export function workflowImprovePass(store: CrosslineStore, workspaceId: string, 
       entityId: record.id, payload: { id: record.id, taskId, signals: signals.map((signal) => signal.kind), ...(untrusted.length ? { untrusted } : {}) } });
     improving.add(workspaceId);
     const started = runFree(improveTask(record, current, signals, results, taskId, localeOf(store, workspaceId)), (outcome) => {
-      void installRevision(store, workspaceId, record, outcome, { client: deps.client(), cwd: deps.cwd, untrusted })
+      // What the improving run itself read counts too: a revision written after it read mail or a page is held like one from such folders.
+      const read = [...new Set([...untrusted, ...completedTaint(store, workspaceId, taskId)])];
+      void installRevision(store, workspaceId, record, outcome, { client: deps.client(), cwd: deps.cwd, untrusted: read })
         .then((result) => console.info(JSON.stringify({ type: `skill.grown.improve_${result.state}`, workspaceId, id: record.id, ...result })))
         .catch(() => undefined).finally(() => improving.delete(workspaceId));
     });

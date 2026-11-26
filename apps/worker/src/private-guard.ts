@@ -39,7 +39,11 @@ export async function privateGuardFor(store: CrosslineStore, secrets: SecretStor
     const local = email.trim().split("@")[0]!;
     if (local.length >= 6) terms.push(local);
   }
+  // Short confirmed values that are not identifiers (a school, an employer, a city, a year): two of them together narrow a search to the
+  // person (`details`). Assumptions and the long answers kept under a question are not details.
+  const details = facts.filter((fact) => !IDENTIFYING_FACTS.test(fact.slot) && !fact.slot.startsWith("person_answer_") && !fact.value.startsWith("假设")) // i18n-ignore
+    .map((fact) => fact.value.trim()).filter((value) => value.length >= 2 && value.length <= 24 && !/[,，；;。]/.test(value));
   const passages = [...facts.map((fact) => fact.value), ...stringLeaves(settingJson(store, workspaceId, "portrait.report")),
     ...stringLeaves(settingJson(store, workspaceId, "profile.model"))];
-  return { terms: [...new Set(terms.map((term) => term.trim()).filter(Boolean))], passages };
+  return { terms: [...new Set(terms.map((term) => term.trim()).filter(Boolean))], passages, details: [...new Set(details)] };
 }

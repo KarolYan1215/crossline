@@ -139,12 +139,14 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
       + "assistant's items and questions it needs (prepares = its id); the rest is proposed after it is done." : "";
     // ask_person (ask-tool.ts), one tool for both modes so the per-run cap covers the whole backplan. Approved insights are summaries of
     // pages read on the web: a run given them asks as one that read untrusted content.
+    // Pages `web_research` handed back are someone else's words too (review of 2026-11-25): the web is on by default for every run.
+    let browsed = false;
     const askTool = createAskTool({ store, workspaceId, skill: SKILL, ref: { kind: "milestone", id: milestone.id }, identityId: milestone.identityId,
-      projectId: milestone.projectId ?? "", dueBy: milestoneDeadline, title: milestone.title, untrusted: () => approvedInsights.length > 0 });
+      projectId: milestone.projectId ?? "", dueBy: milestoneDeadline, title: milestone.title, untrusted: () => approvedInsights.length > 0 || browsed });
     const run = (missingInputs: MissingInput[]) => {
       const input = { ...context, missingInputs };
       const runSources = [...sources, ...materials.map((item) => item.text), ...missingInputs.flatMap((item) => [item.message, item.what])];
-      return runCodexSkill<Answer>(client, input, { skillName: SKILL, cwd, redoOnRepair: true,
+      return runCodexSkill<Answer>(client, input, { skillName: SKILL, cwd, redoOnRepair: true, onWebResearch: () => { browsed = true; },
         optionalTools: { tools: askTool, withoutTools: (value) => value,
           instructions: ASK_PERSON_INSTRUCTIONS + " Here: an input only the person knows (their plan, preference, a fact about themselves) is "
             + "asked with ask_person and the milestone is split on the assumption; a blocker (what, whoHas) is for what someone else holds or "

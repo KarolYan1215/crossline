@@ -927,6 +927,7 @@
   "工作流「{{summary}}」的修订已按本人的采纳生效（第 {{version}} 版）；改后要读的内容或风险有变，请本人重新看过风险再启用。": "The revision of the workflow \"{{summary}}\" took effect on your accept (version {{version}}); what it reads or its risks changed, so look at the risks again before turning it back on.",
   "工作流「{{summary}}」的修订已按本人的采纳生效（第 {{version}} 版），下次运行就按新版做。": "The revision of the workflow \"{{summary}}\" took effect on your accept (version {{version}}); the next run follows the new version.",
   "skill 目录只由 Crossline 在扫描和审查之后写入，助手不能直接改": "Only Crossline writes skill folders, after scanning and review; the assistant cannot change them directly",
+  "写入时请用完整路径，不用 8.3 短名": "Name the full path when writing, not an 8.3 short name",
   "联网检索": "Web search",
   "「{{title}}」的网址不在检索结果里，没有打开。": "The address of “{{title}}” was not among the search results, so it was not opened."
 }

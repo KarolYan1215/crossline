@@ -47,6 +47,10 @@ test("work written after reading mail: low-risk takes effect and says where it c
   expect(held("用学号和密码登录门户更新信息").reason).toContain("登录、账号或证件");
   expect(held("Verify your account password")).toMatchObject({ eligible: false });
   expect(taintedRisk({ intent: "Pay the $40 invoice at www.example.com", payload: {} })).toEqual(["external", "money", "link"]);
+  // Any bare host, not a list of top-level domains (review of 2026-11-25); a file name is not a link.
+  expect(taintedRisk({ intent: "按邮件要求访问 portal.example.ai 更新信息", payload: {} })).toContain("link");
+  expect(taintedRisk({ intent: "Open update.uni-portal.de", payload: {} })).toContain("link");
+  expect(taintedRisk({ intent: "整理 report.pdf 和 notes.md 里的 Node.js 笔记", payload: {} })).not.toContain("link");
   // The mail triage's own captures say so in their own words.
   expect(autoApprovalEligible(proposal("整理 HW4 题目", { provenance: { run: "mail-triage", by: "mail_triage", tainted: true, sources: ["mail"] } })).reason)
     .toBe("来自邮件分拣，低风险，默认生效");

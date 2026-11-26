@@ -67,3 +67,13 @@ test("a capture that read nothing untrusted is decided as before", async () => {
   expect((order.payload as { provenance?: unknown }).provenance).toBeUndefined();
   expect(bell().join("")).not.toContain("来自");
 });
+
+// Review of 2026-11-25: the daily merge used to take a held proposal into an approved task with the same title, which put it on the
+// person's week (and its earlier due day on the kept task) without their click.
+test("held high-risk work is not in the daily merge's board, in either direction", async () => {
+  const held = await analysed("cap-held", "Pay the $40 lab fee at http://pay.example.com", fromMail);
+  const mine = await analysed("cap-mine", "Pay the $40 lab fee at http://pay.example.com");
+  expect([held.state, mine.state]).toEqual(["awaiting_plan_approval", "approved"]);
+  const { mergeTasks } = await import("./dedupe");
+  expect(mergeTasks(store, ws).map((task) => task.id)).toEqual(["cap-mine"]);
+});

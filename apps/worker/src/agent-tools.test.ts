@@ -6,6 +6,7 @@ import { CrosslineStore } from "@crossline/db";
 import { approveCategory, createAgentRunner, TOOLS_AGENT_SKILL, toolLoopReason } from "./agent-task";
 import { createAgentToolbox, inside, TAINT_HELD } from "./agent-tools";
 import { TOOL_SPEC } from "@crossline/core";
+import { setWebAvailableProvider, WEB_SCOUT_SKILL } from "@crossline/codex";
 import { fakeRuntime } from "./testing/fake-runtime";
 
 let store: CrosslineStore;
@@ -237,9 +238,10 @@ test("a run that reads mail mid-way goes on in its own conversation without the 
   const outcome = await run({ taskId: "t-mail", title: "看看 HW4 邮件", what: "读 HW4 邮件，记下要做的事", category: "read_research_organize", humanPart: "" });
   expect(outcome).toMatchObject({ state: "done", captured: ["整理 HW4 题目要点", "在 http://pay.example.com 缴纳 $40 实验费"] });
   // Turn 1 had the web: the mail was not handed to it. Turn 2 is the same conversation, resumed without the web and the connectors.
+  // Never the hosted search on this thread (review of 2026-11-25): its web is `web_research`, where the route has one.
   expect(answers[0]).not.toContain("HW4 is posted");
   expect(answers[1]).toContain("HW4 is posted");
-  expect((threadStarts()[0]!.config as Record<string, unknown>).web_search).toBe("live");
+  expect((threadStarts()[0]!.config as Record<string, unknown>).web_search).toBe("disabled");
   expect((threadStarts()[0]!.config as Record<string, unknown>)["features.apps"]).toBe(true);
   expect(resumes()).toEqual(["thread-1"]);
   const resumed = resumeParams()[0]!.config as Record<string, unknown>;
@@ -266,9 +268,51 @@ test("a run handed mail at the start starts without the web and the connectors; 
   const [handed, plain] = threadStarts().map((start) => start.config as Record<string, unknown>);
   expect(handed!.web_search).toBe("disabled");
   expect(handed!["features.apps"]).toBe(false);
-  expect(plain!.web_search).toBe("live");
+  expect(plain!.web_search).toBe("disabled");
   expect(plain!["features.apps"]).toBe(true);
   const [first, second] = store.listCaptures(workspaceId).map((capture) => store.captureProvenance(workspaceId, capture.id));
   expect(first).toEqual({ run: "t-handed", by: "assistant", tainted: true, sources: ["mail"] });
   expect(second).toBeUndefined();
+});
+
+// Review of 2026-11-25: the tools assistant's web is `web_research` (a separate scout run), and the pages it hands back are someone else's
+// words, so what the run puts in the inbox carries where it came from and high-risk work from it waits for the person.
+test("pages from web_research taint the run: its captures carry the page as their source", async () => {
+  approveCategory(store, workspaceId, "read_research_organize");
+  setWebAvailableProvider(() => true);
+  try {
+    const summary = JSON.stringify({ summary: "查了实验费。", artifacts: [{ path: "fee.md", purpose: "记录" }],
+      verification: [{ check: "读回", result: "pass", evidence: "读回 fee.md" }], needsHuman: [], notDone: [], assumptions: [] });
+    const scout = JSON.stringify({ results: [{ query: "lab fee", title: "Lab fee", url: "https://lab.example.edu/fee", excerpt: "Pay the fee online.", published: "" }], notes: "" });
+    const { rpc, threadStarts } = fakeRuntime([summary], [TOOLS_AGENT_SKILL, WEB_SCOUT_SKILL], { routes: [{ match: "crossline-web-scout", answers: [scout] }], script: async ({ ask }) => {
+      await ask("item/tool/call", { callId: "s", tool: "web_research", arguments: { queries: ["ECE lab fee policy"], purpose: "how course lab fees are paid" } });
+      await ask("item/tool/call", { callId: "w", tool: "write_file", arguments: { path: "fee.md", content: "实验费" } });
+      await ask("item/tool/call", { callId: "i", tool: "add_to_inbox", arguments: { text: "查看实验费缴纳方式" } });
+    } });
+    const run = createAgentRunner(store, workspaceId, "/repo", () => rpc, { outputRoot: path.join(root, "ai"), mode: "tools" });
+    await run({ taskId: "t-web", title: "查实验费", what: "查实验费怎么交", category: "read_research_organize", humanPart: "" });
+    expect((threadStarts()[0]!.config as Record<string, unknown>).web_search).toBe("disabled");
+    const [capture] = store.listCaptures(workspaceId);
+    expect(store.captureProvenance(workspaceId, capture!.id)).toEqual({ run: "t-web", by: "assistant", tainted: true, sources: ["page"] });
+  } finally { setWebAvailableProvider(() => false); }
+});
+
+// Review of 2026-11-25: a sandboxed shell run offered the mailbox keeps neither the hosted search nor the connectors (Rule of Two);
+// one without a mailbox keeps the web it had.
+test("a sandboxed shell run offered the mailbox has no web search and no connectors", async () => {
+  approveCategory(store, workspaceId, "read_research_organize");
+  const summary = JSON.stringify({ summary: "整理完成。", artifacts: [], verification: [], needsHuman: [], notDone: [], assumptions: [] });
+  const sandbox = { readable: ["/opt/codex"], deny: ["/data", "/state"] };
+  const started = { approvalPolicy: "untrusted", activePermissionProfile: { id: "crossline-task" }, sandbox: { type: "workspaceWrite" } };
+  const withMail = fakeRuntime([summary], "crossline:crossline-agent", { threadResponse: started });
+  await createAgentRunner(store, workspaceId, "/repo", () => withMail.rpc, { outputRoot: path.join(root, "ai"), mode: "sandbox", sandbox, mail: mailbox })(
+    { taskId: "t-sb-mail", title: "整理", what: "整理", category: "read_research_organize", humanPart: "看结果" });
+  const mailStart = withMail.threadStarts()[0]!;
+  expect(mailStart.config).toMatchObject({ web_search: "disabled" });
+  expect(mailStart.config).not.toHaveProperty("features.apps");
+  expect((mailStart.dynamicTools as Array<{ name: string }>).map((tool) => tool.name)).toContain("mail_read");
+  const plain = fakeRuntime([summary], "crossline:crossline-agent", { threadResponse: started });
+  await createAgentRunner(store, workspaceId, "/repo", () => plain.rpc, { outputRoot: path.join(root, "ai"), mode: "sandbox", sandbox })(
+    { taskId: "t-sb-plain", title: "整理", what: "整理", category: "read_research_organize", humanPart: "看结果" });
+  expect((plain.threadStarts()[0]!.config as Record<string, unknown>).web_search).not.toBe("disabled");
 });

@@ -214,12 +214,15 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
 
     // 1. the flow ------------------------------------------------------------------------------------------------
     progress("designing", 0, 1);
+    let designBrowsed = false;
     const designed = await runCodexSkill<ManualDesign>(client, context, {
       skillName: MANUAL_DESIGNER_SKILL, cwd, developerInstructions: DESIGN_INSTRUCTIONS, outputSchema: MANUAL_DESIGN_SCHEMA,
-      // ask_person (ask-tool.ts): the designer reads only the person's own files and facts, so its questions are not marked untrusted.
+      // ask_person (ask-tool.ts): the designer reads the person's own files and facts; once it has read pages through `web_research` (on by
+      // default), its questions are marked untrusted (review of 2026-11-25).
+      onWebResearch: () => { designBrowsed = true; },
       optionalTools: { tools: createAskTool({ store, workspaceId, skill: MANUAL_DESIGNER_SKILL, ref: { kind: mode === "tutorial" ? "tutorial" : "materials", id: workOrderId },
         identityId: order.identityId, projectId: order.projectId, title: taskTitleOf(order),
-        dueBy: (order.payload as { dueDate?: string } | undefined)?.dueDate || context.workOrder.milestone?.deadline || "" }), withoutTools: (value) => value,
+        dueBy: (order.payload as { dueDate?: string } | undefined)?.dueDate || context.workOrder.milestone?.deadline || "", untrusted: () => designBrowsed }), withoutTools: (value) => value,
         instructions: ASK_PERSON_INSTRUCTIONS + " Here: ask only what the person alone knows that changes which steps they learn or how (their "
           + "level, their setting, the method they must use), never what research questions can find." },
       // The prompt cache (docs/token-economy.md §2.5): the person's and the line's, then the project's, then this task and the date.

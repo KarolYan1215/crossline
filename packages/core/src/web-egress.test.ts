@@ -77,3 +77,13 @@ describe("what comes back", () => {
     expect(block.match(/END_UNTRUSTED_WEB_DATA/g)).toHaveLength(1);
   });
 });
+
+// Review of 2026-11-25: one short detail is a general topic; two together narrow the search to the person.
+test("two of the person's short details in one query are refused; one alone is not", () => {
+  const withDetails: PrivateGuard = { ...guard, details: ["华中科技大学", "大三", "Ann Arbor"] };
+  expect(privateLeak("华中科技大学 计算机 大三 实习", withDetails)).toBe("details");
+  expect(webQueryProblem("华中科技大学 计算机 大三 实习", { guard: withDetails, knownUrls: [] })).toMatch(/两条以上/);
+  expect(privateLeak("华中科技大学 计算机 暑期实习", withDetails)).toBeUndefined();
+  expect(privateLeak("summer internship Ann Arbor 大三", withDetails)).toBe("details");
+  expect(privateLeak("大三 暑期实习 计算机", withDetails)).toBeUndefined();
+});

@@ -512,7 +512,9 @@ async function searchWeb(store: CrosslineStore, workspaceId: string, watch: Stor
     watch: watchBrief(watch), person: personFor(store, workspaceId), lines: briefForModel(lineBriefs(store, workspaceId)), search: { query }, pages: [] as Page[] };
   const result = await runCodexSkill<ReadingAnswer>(client, input, {
     skillName: OPPORTUNITY_READER, cwd: deps.cwd, developerInstructions: SEARCH_INSTRUCTIONS, outputSchema: OPPORTUNITY_READING_SCHEMA, prepareInput: () => input,
-    allowWebSearch: true, validateOutput: (output) => output as ReadingAnswer, onAudit: () => {}, timeoutMs: 60 * 60_000
+    // The input carries the person's confirmed facts (`person`, for the fit), so the search is `web_research`'s separate scout run, never the
+    // hosted search on this thread (review of 2026-11-25; docs/plans/harness-1125.md §12).
+    webResearch: true, validateOutput: (output) => output as ReadingAnswer, onAudit: () => {}, timeoutMs: 60 * 60_000
   });
   if (!result.ok) return { blocked: result.blocker.code };
   const items: Array<{ item: ReadItem }> = [];

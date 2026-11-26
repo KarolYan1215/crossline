@@ -12,7 +12,12 @@ import { publicHttpsUrl } from "./diligence-schema";
  * `terms` are identifiers (name, email, phone, student id, address, id numbers, personal site), refused anywhere in a query; `passages`
  * are what the portrait, the profile model and the confirmed facts say, refused when a query copies a long enough run of one verbatim.
  */
-export type PrivateGuard = { terms: string[]; passages: string[] };
+export type PrivateGuard = { terms: string[]; passages: string[];
+  /**
+   * Short confirmed facts (a school, an employer, a city, a year of study), too short for `passages`. One alone is a general topic; two or
+   * more in one query narrow the search to the person (review of 2026-11-25: 「<school> <major> <year> 实习」 went out).
+   */
+  details?: string[] };
 
 /** How long a verbatim run of a passage must be before a query copying it is refused: CJK characters, or other letters and digits. */
 export const PASSAGE_RUN = { cjk: 12, other: 24 } as const;
@@ -63,11 +68,17 @@ function copiesPassage(text: string, passages: readonly string[]): boolean {
   return false;
 }
 
+/** How many of the person's short details `text` holds, each counted once (matched as terms are). */
+function detailsHeld(text: string, details: readonly string[]): number {
+  return new Set(details.filter((detail) => holdsTerm(text, [detail])).map(guardForm)).size;
+}
+
 /** Which kind of private string `text` carries, or undefined. Never says which string: the answer goes to a model and to logs. */
-export function privateLeak(text: string, guard: PrivateGuard | undefined): "identifier" | "passage" | undefined {
+export function privateLeak(text: string, guard: PrivateGuard | undefined): "identifier" | "passage" | "details" | undefined {
   if (!guard || !text.trim()) return undefined;
   if (holdsTerm(text, guard.terms)) return "identifier";
   if (copiesPassage(text, guard.passages)) return "passage";
+  if (detailsHeld(text, guard.details ?? []) >= 2) return "details";
   return undefined;
 }
 
@@ -114,6 +125,7 @@ export function webQueryProblem(text: string, options: { guard: PrivateGuard | u
   const leak = privateLeak(text, options.guard);
   if (leak === "identifier") return `${field} 含本人的身份信息（姓名、邮箱、电话、学号、地址或证件号之一）。去掉它，只写一般主题后再查。`;
   if (leak === "passage") return `${field} 逐字照抄了本人画像或事实里的一段话。改写成不含个人细节的一般主题后再查。`;
+  if (leak === "details") return `${field} 同时写了本人的两条以上具体信息（学校、单位、城市、年级等）。最多留一条，其余改成一般说法后再查。`;
   const known = [...options.knownUrls];
   const unknown = urlsIn(text).filter((url) => !urlKnown(url, known));
   if (unknown.length) return `${field} 含一个既不是本人给出、也不在检索结果里的网址。只能写本人给过或检索结果里原样出现过的网址；自己拼的网址（尤其带查询串的）不能发出。`;

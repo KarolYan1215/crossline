@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import {
-  AGENT_SKILL, approveCategory, changedFiles, CLEAN_RUNS_TO_TRUST, createAgentAnswerer, createAgentRunner, fingerprint, ownedInputs, readCategories, recordReview,
+  AGENT_SKILL, approveCategory, changedFiles, CLEAN_RUNS_TO_TRUST, createAgentAnswerer, createAgentRunner, fingerprint, ownedInputs, readCategories, realPathOf, recordReview,
   type AuditRecord
 } from "./agent-task";
 import { fakeRuntime as sharedRuntime, type AgentScript } from "./testing/fake-runtime";
@@ -331,4 +331,15 @@ test("outside the owner's own shell a run takes only inputs this workspace owns,
   await nodeRunner({ ...input, taskId: "t-node-confined", inputs: [db, mine] });
   expect(readFileSync(path.join(tasksRoot, "t-node-confined.inputs", "0", "syllabus.txt"), "utf8")).toBe("x");
   expect(existsSync(path.join(tasksRoot, "t-node-confined.inputs", "1"))).toBe(false);
+});
+
+// Review of 2026-11-25: a file change is judged on the path the file system has, through the nearest folder that exists.
+test("realPathOf resolves a new file's folder and keeps the parts that do not exist yet", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "real-"));
+  try {
+    mkdirSync(path.join(dir, "skill-library"));
+    const real = realPathOf(path.join(dir, "skill-library", ".", "ws", "..", "ws", "new.md"));
+    expect(real.toLowerCase()).toBe(path.join(realPathOf(dir), "skill-library", "ws", "new.md").toLowerCase());
+    expect(real.endsWith(path.join("skill-library", "ws", "new.md"))).toBe(true);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

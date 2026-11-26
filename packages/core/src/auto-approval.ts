@@ -142,7 +142,9 @@ export type TaintRisk = "external" | "money" | "link" | "login";
 // rule: taint.money-signal
 const MONEY = /[¥$€£]\s*\d|\d\s*(?:元|块钱|美元|美金|欧元|英镑|刀\b|usd|rmb|cny|eur|gbp)|付款|支付|缴费|缴纳|交费|汇款|转账|打款|退款|账单|发票|学费|罚款|押金|订金|定金|充值|\b(?:pay|payment|payments|paid|invoice|invoices|billing|bill|refund|wire|deposit|tuition|fee|fees|charge|charges)\b/i;
 // rule: taint.link-signal
-const LINK = /https?:\/\/|\bwww\.|\b[a-z0-9-]+\.(?:com|net|org|edu|gov|io|cn|ly|me|co|app|xyz|info|link|top|site|online)\b/i;
+// Any bare host (a dot and two or more letters), not a list of top-level domains: 「portal.example.ai」 must hold (review of 2026-11-25).
+// A file name (「report.pdf」, 「Node.js」) is not a link.
+const LINK = /https?:\/\/|\bwww\.|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?!(?:pdf|docx?|xlsx?|pptx?|txt|md|csv|json|png|jpe?g|gif|zip|rar|py|ts|tsx|js|ipynb|tex|mp[34]|mov)\b)[a-z]{2,}\b/i;
 // rule: taint.login-signal
 const LOGIN = /登录|登陆|登入|密码|口令|验证码|动态码|账号|帐号|账户|帐户|用户名|身份证|护照|证件|社保号|学号|银行卡|卡号|\b(?:log ?in|sign ?in|password|passcode|verification code|otp|2fa|credentials?|account|username|ssn|passport|social security|id card)\b/i;
 /* i18n-ignore-end */
@@ -157,6 +159,15 @@ export function taintedRisk(order: { intent: string; payload?: unknown }): Taint
   if (LINK.test(all)) risks.push("link");
   if (LOGIN.test(all)) risks.push("login");
   return risks;
+}
+
+/**
+ * High-risk work a model wrote from someone else's words, still waiting for the person (docs/plans/harness-1125.md §10). Nothing folds it
+ * into an approved task or lets it absorb one — not the new-task fold, not the daily merge — until the person decides on 待确认.
+ */
+export function taintHeld(order: { intent: string; state: string; payload?: unknown }): boolean {
+  if (order.state !== "awaiting_plan_approval") return false;
+  return Boolean(readProvenance((order.payload as { provenance?: unknown } | undefined)?.provenance)?.tainted) && taintedRisk(order).length > 0;
 }
 
 function riskSaid(risk: TaintRisk, locale?: Locale): string {

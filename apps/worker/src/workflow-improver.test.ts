@@ -229,6 +229,8 @@ test("what the folders a revision is handed hold decides its taint: a site's col
   expect(revisionTaint(store, ws, [ranRun("flow-a-2", path.join(root, "runs", "a2"), { inputs: [path.join(root, "out", "collect-flow-x")] })])).toEqual(["site"]);
   expect(revisionTaint(store, ws, [ranRun("flow-a-3", path.join(root, "runs", "a3"), { inputs: [path.join(root, "work", "flow-y-1", "out")] })])).toEqual(["workflow-output"]);
   expect(revisionTaint(store, ws, [ranRun("flow-a-4", path.join(root, "runs", "a4"), {}, { searches: 3 })])).toEqual(["web"]);
+  // The tools mode never counts searches; its own record of what it read is on the completed event (review of 2026-11-25).
+  expect(revisionTaint(store, ws, [ranRun("flow-a-7", path.join(root, "runs", "a7"), {}, { searches: 0, tainted: ["mail", "page"] })])).toEqual(["mail", "page"]);
   // The assistant's own taint tracking: labels on the request, or the untrusted-input profile.
   expect(revisionTaint(store, ws, [ranRun("flow-a-5", path.join(root, "runs", "a5"), { untrusted: ["mail"], profile: "untrusted-input" })]).sort()).toEqual(["mail", "untrusted-input"]);
   const marked = ranRun("flow-a-6", path.join(root, "runs", "a6"));

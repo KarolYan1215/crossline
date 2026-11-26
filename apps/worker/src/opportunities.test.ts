@@ -213,3 +213,14 @@ test("an arxiv target reads the newest papers through the public API, one readin
   expect(prompts).toContain("https://arxiv.org/abs/2611.00001v1");
   expect(prompts).not.toContain("Old paper");
 });
+
+// Review of 2026-11-25: the reader's input carries the person's confirmed facts (`person`) since the eligibility widening, so its web
+// search is `web_research`'s separate scout run, never the hosted search on the thread that holds them.
+test("a web search watch never opens the hosted search on the thread holding the person's facts", async () => {
+  store.setSetting(ws, RUNTIME_OWNER_SETTING, "1");
+  const runtime = fakeRuntime([JSON.stringify({ items: [] })], OPPORTUNITY_READER);
+  await runWatch(store, ws, watch({ tools: ["web_search"], targets: [{ tool: "web_search", query: "summer research internship" }] }),
+    { client: () => runtime.rpc, cwd: ".", http: routes({}), now: () => NOW, costSince: () => 0, webBlocker: () => undefined });
+  const config = runtime.threadStarts()[0]!.config as Record<string, unknown>;
+  expect(config).toMatchObject({ web_search: "disabled" });
+});

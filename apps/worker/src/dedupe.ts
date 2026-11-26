@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   TASK_MERGE_REVIEW_SCHEMA, infoRequestSteps, isWorkOwner, orderInfoRequest, planMerges, scopeRenames, spendAllows, taskTitleOf, textSimilarity, normalizeTaskTitle, validateTaskMergeReview, workOwner, tFor,
-  type WorkOwner, type BackgroundKind, type BackgroundSpend, type InfoRequest, type MergeGroup, type MergeTask, type TaskMergeReview
+  type WorkOwner, type BackgroundKind, type BackgroundSpend, type InfoRequest, type MergeGroup, type MergeTask, type TaskMergeReview, taintHeld
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore, StepPlanInput, StoredWorkOrder } from "@crossline/db";
@@ -47,7 +47,8 @@ export function mergeTasks(store: CrosslineStore, workspaceId: string): MergeTas
   const anchors = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
   const plans = new Map(store.listStepPlans(workspaceId).map((plan) => [plan.workOrderId, plan]));
   const started = new Set(store.listExecutions(workspaceId).map((execution) => execution.workOrderId));
-  return store.listWorkOrders(workspaceId).filter((order) => !(order.payload as { seeded?: boolean } | undefined)?.seeded).map((order) => {
+  // Held tainted work (`taintHeld`) is the person's to decide first; merging it either way would put it on their week unasked.
+  return store.listWorkOrders(workspaceId).filter((order) => !(order.payload as { seeded?: boolean } | undefined)?.seeded && !taintHeld(order)).map((order) => {
     const payload = (order.payload ?? {}) as { dueDate?: string; dependsOn?: string[] };
     const plan = plans.get(order.id);
     return { id: order.id, identityId: order.identityId, projectId: order.projectId, milestoneId: order.milestoneId, title: taskTitleOf(order),

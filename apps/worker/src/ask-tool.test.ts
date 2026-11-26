@@ -65,6 +65,18 @@ test("keeping the assumption settles the question without rerunning anything", a
   expect(store.questionByKey(ws, personQuestionKey(asked.id!))?.status).toBe("assumed");
 });
 
+// Review of 2026-11-25: an untrusted run's question kept on its own assumption is that run's wording, not a fact of the person's.
+test("an untrusted question kept on its assumption leaves no confirmed fact; the person's own answer to it does", async () => {
+  const tool = createAskTool(context({ untrusted: () => true }));
+  const assumed = await call(tool, ask("这周六下午有空参加线下活动吗？"));
+  settlePersonQuestion(store, ws, assumed.id!, "按照常规复习", "assumed", NOW.toISOString());
+  expect(store.listProfileFacts(ws).find((item) => item.sourceRef === personQuestionKey(assumed.id!))).toBeUndefined();
+  expect(store.questionByKey(ws, personQuestionKey(assumed.id!))?.status).toBe("assumed");
+  const answered = await call(tool, ask("你打算用 Python 还是 MATLAB 完成项目？"));
+  settlePersonQuestion(store, ws, answered.id!, "Python", "answered", NOW.toISOString());
+  expect(store.listProfileFacts(ws).find((item) => item.sourceRef === personQuestionKey(answered.id!))).toMatchObject({ status: "confirmed" });
+});
+
 test("a run that read untrusted content may not pass a link to the person, and its question is marked", async () => {
   const tool = createAskTool(context({ untrusted: () => true }));
   expect(() => tool.call("ask_person", ask("要不要在 https://example.com/form 报名？"))).toThrow(/不能带链接/);

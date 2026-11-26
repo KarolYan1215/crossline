@@ -206,6 +206,12 @@ describe("skill folders (docs/plans/harness-1125.md 「Skill 供应链」)", () 
       "python -c \"open(r'C:/Users/karol/AppData/Local/Crossline/codex-home/plugins/cache/crossline-library/x/SKILL.md','w').write('x')\"",
       "git -C C:\\proj apply patch.diff --directory=skills/marketplace"
     ]) expect(decide(command), command).toMatchObject({ decision: "deny", rule: "skill.write" });
+    // Review of 2026-11-25: a relative spelling is the same folder; an 8.3 short name in a write is refused outright.
+    for (const command of ["ni skill-library/ws/a", "cd C:\\Users\\karol\\AppData\\Local\\Crossline; Set-Content skill-library\\ws\\x.md y"])
+      expect(decide(command), command).toMatchObject({ decision: "deny", rule: "skill.write" });
+    for (const command of ["Set-Content C:\\Users\\karol\\AppData\\Local\\CROSSL~1\\SKILL-~1\\ws\\x.md y", "Copy-Item a.md C:\\proj\\skills\\MARKET~1\\x.md"])
+      expect(decide(command), command).toMatchObject({ decision: "deny", rule: "path.short" });
+    expect(decide("Get-Content C:\\PROGRA~1\\app\\readme.txt").decision).toBe("allow");
     expect(decide(`Get-Content ${library}`).decision).toBe("allow");
     expect(decide(`Get-ChildItem C:\\Users\\karol\\AppData\\Local\\Crossline\\skill-library\\ws1 | Select-Object Name`).decision).toBe("allow");
   });

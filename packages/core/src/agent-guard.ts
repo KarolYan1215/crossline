@@ -74,9 +74,16 @@ export const isSecretPath = (value: string): boolean => !EXAMPLE_ENV.test(value)
  * assistant's shell and file tools may read them but never write — the hole in Hermes was a generic file tool getting round the skill
  * install's approval.
  */
-const SKILL_STORE = [/[\\/]skill-(library|quarantine)(?![\w.-])/i, /(^|[\\/\s=:])skills[\\/]marketplace(?![\w.-])/i,
+const SKILL_STORE = [/(^|[\\/\s=:])skill-(library|quarantine)(?![\w.-])/i, /(^|[\\/\s=:])skills[\\/]marketplace(?![\w.-])/i,
   /[\\/]plugins[\\/]cache[\\/]crossline-(library|local)(?![\w.-])/i];
 export const isSkillStorePath = (value: string): boolean => SKILL_STORE.some((pattern) => pattern.test(value));
+/**
+ * An 8.3 short name (`CROSSL~1`, `SKILL-~1`): a spelling of a protected folder the text patterns cannot see (review of 2026-11-25).
+ * A command that writes is asked to name its paths in full; reading through one stays allowed. Text cannot follow a path built in a
+ * variable: that is what the sandbox's own deny on these folders (`protectSkillFolders`) and the file-change check on real paths are for.
+ */
+// not-nl: a path spelling, not natural language
+const SHORT_NAME = /(^|[\\/\s=:])[^\\/\s=:]{1,6}~\d(?!\d)/;
 /** Commands that only read or list: the one kind that may name a skill folder. Anything else, or any redirect, is a write. */
 const READ_ONLY_WORDS = new Set(["cat", "type", "gc", "get-content", "ls", "dir", "gci", "get-childitem", "head", "tail", "less", "more", "select-string", "sls",
   "findstr", "grep", "rg", "test-path", "get-item", "gi", "resolve-path", "get-filehash", "sha256sum", "shasum", "wc", "stat", "tree", "measure-object", "select-object",
@@ -120,6 +127,7 @@ export function decideCommand(command: string, context: GuardContext): GuardDeci
   }
   if (isSecretPath(unquoted)) return { decision: "deny", rule: "secret.path", reason: t("命令里涉及凭据、密钥或会话所在的位置，不读不写") };
   if (isSkillStorePath(unquoted) && !readsOnly(text)) return { decision: "deny", rule: "skill.write", reason: t("skill 目录只由 Crossline 在扫描和审查之后写入，助手不能直接改") };
+  if (SHORT_NAME.test(unquoted) && !readsOnly(text)) return { decision: "deny", rule: "path.short", reason: t("写入时请用完整路径，不用 8.3 短名") };
   for (const entry of NEVER) if (entry.pattern.test(text)) return { decision: "deny", rule: entry.rule, reason: t(entry.reason) };
   // Deleting from a root or from the home directory is never a task.
   if (/(remove-item|\brm\b|\bdel\b|\brmdir\b|\brd\b)[^|;&]*(-recurse|\s-r|\s\/s)/i.test(text)) {

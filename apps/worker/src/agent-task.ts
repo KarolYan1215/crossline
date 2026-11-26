@@ -256,7 +256,9 @@ export function createAgentAnswerer(context: GuardContext, audit: AuditRecord, p
         audit.decisions.push({ decision: "deny", rule: "write.unverifiable", reason: tFor(context.locale)("无法确认要改的文件都在任务目录里"), kind: "fileChange", subject: itemId, outcome: "declined" });
         return { decision: "decline" };
       }
-      return { decision: (await settle("fileChange", paths.join("; "), judged(() => (guard.fileChange ?? decideFileChange)(paths, context)))) ? "accept" : "decline" };
+      // Judged on real paths as well as the announced ones: an 8.3 name, a junction or a relative spelling of a skill folder is that folder.
+      const real = [...new Set([...paths, ...paths.map(realPathOf)])];
+      return { decision: (await settle("fileChange", paths.join("; "), judged(() => (guard.fileChange ?? decideFileChange)(real, context)))) ? "accept" : "decline" };
     }
     if (method === "mcpServer/elicitation/request") {
       // Account tools arrive in a later phase; until then nothing is configured, and any prompt is declined.
@@ -468,7 +470,10 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     // The owner's shell inside a Windows sandbox: it writes only in the task directory (and its worktree), so its temporary files and
     // package caches are pointed there too.
     const windowsSandbox = isolation && (shellSandbox === "mxc" || shellSandbox === "elevated") ? windowsShellSandbox(shellSandbox, isolation, workDir, worktree, homeDir) : undefined;
-    const board = sandboxed || link ? createAgentToolbox({ store, workspaceId, directory, inputs, ...(options.mail ? { mail: options.mail } : {}) }) : undefined;
+    // Mail in a run is someone else's words beside the person's data; with the hosted search and the connectors still open it would be
+    // all three legs of the Rule of Two (review of 2026-11-25). A run offered the mailbox has neither.
+    const mailOffered = Boolean(options.mail) && Boolean(sandboxed || link);
+    const board = sandboxed || link ? createAgentToolbox({ store, workspaceId, directory, inputs, ...(mailOffered ? { mail: options.mail! } : {}) }) : undefined;
     const boardSpecs = board?.specs.filter((spec) => !/_file$|^list_files$/.test(spec.name)) ?? [];
     const readerSpecs = input.reader?.tools.specs ?? [];
     const tools = boardSpecs.length || readerSpecs.length ? { specs: [...readerSpecs, ...boardSpecs],
@@ -478,13 +483,13 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
       // The library skills' note follows the line and the task: after the input, not in the instructions every run shares (the prompt cache).
       ...(extraSkills.length ? { extraSkills, runNote: libraryInstruction(extraSkills) } : {}),
       prepareInput: () => task, validateOutput: (output) => validateAgentSummary(output, probe), onAudit: () => {},
-      allowWebSearch: isolation?.webSearch !== "disabled", timeoutMs: 6 * 60 * 60_000, idleMs: 60 * 60_000, signal,
+      allowWebSearch: !mailOffered && isolation?.webSearch !== "disabled", timeoutMs: 6 * 60 * 60_000, idleMs: 60 * 60_000, signal,
       ...(tools ? { tools } : {}), ...(input.resumeThreadId ? { resumeThreadId: input.resumeThreadId } : {}),
       // The runtime's own plan tool and the person's ChatGPT connectors, read-only (2026-10-19).
-      connectors: true, onPlan: (plan) => { audit.plan = plan; writeProgress(directory, audit); },
+      connectors: !mailOffered, onPlan: (plan) => { audit.plan = plan; writeProgress(directory, audit); },
       ...askOption(personAsker(options.questionFor?.(taskId, input.title), audit, () => writeProgress(directory, audit))),
       agent: {
-        cwd: workDir, ...(pull ? { beforeValidate: pull } : {}), ...(isolation ? { webSearch: isolation.webSearch } : {}), ...(windowsSandbox ? { windowsSandbox } : {}),
+        cwd: workDir, ...(pull ? { beforeValidate: pull } : {}), ...(mailOffered ? { webSearch: "disabled" as const } : isolation ? { webSearch: isolation.webSearch } : {}), ...(windowsSandbox ? { windowsSandbox } : {}),
         ...(sandboxed ? { sandbox: { writable: directory, readable: [...inputs, ...(options.sandbox?.readable ?? [])], deny: options.sandbox?.deny ?? [], ...(options.sandbox?.runtimeTmp ? { runtimeTmp: options.sandbox.runtimeTmp } : {}) } } : {}),
         onItem: (item, phase) => {
           noteItem(audit, pendingChanges, item, phase);
@@ -568,6 +573,23 @@ function untrustedOf(input: AgentTaskInput, inputs: string[], outputRoot: string
 }
 
 const TAINT_SOURCES: readonly TaintSource[] = ["mail", "page", "site", "document", "download", "flow"];
+/**
+ * A path as the file system has it: short names expanded and junctions followed, through the nearest part that exists (a new file's
+ * folder). What does not resolve stays as given.
+ */
+export function realPathOf(given: string): string {
+  const full = path.resolve(given);
+  let head = full;
+  const rest: string[] = [];
+  while (!existsSync(head)) {
+    const parent = path.dirname(head);
+    if (parent === head) return full;
+    rest.unshift(path.basename(head));
+    head = parent;
+  }
+  try { return path.join(realpathSync.native(head), ...rest); } catch { return full; }
+}
+
 /** The same, with mail and web files and downloads among the inputs, as the tools mode's taint sources (an unknown word counts as a page). */
 export function untrustedSourcesOf(input: AgentTaskInput, inputs: string[], outputRoot: string): TaintSource[] {
   const named = untrustedOf(input, inputs, outputRoot).map((word) => TAINT_SOURCES.includes(word as TaintSource) ? word as TaintSource : "page");
@@ -775,7 +797,10 @@ async function runWithTools(store: CrosslineStore, workspaceId: string, cwd: str
         // i18n-ignore-end
         return validateAgentSummary(output, probe);
       },
-      allowWebSearch: !withheld.has("web_search"), timeoutMs: 2 * 60 * 60_000, signal, tools, ...(resumeThreadId ? { resumeThreadId } : {}),
+      // The web only through `web_research` (review of 2026-11-25): this thread holds the person's data, so never the hosted search on it;
+      // the pages it hands back are someone else's words, and the run's captures say so.
+      ...(withheld.has("web_search") ? { allowWebSearch: false } : { onWebResearch: () => toolbox.noteTaint("page") }),
+      timeoutMs: 2 * 60 * 60_000, signal, tools, ...(resumeThreadId ? { resumeThreadId } : {}),
       // The runtime's own features (2026-10-19): JavaScript in its V8 isolate to compute and to call these functions, the person's ChatGPT
       // connectors read-only, and its plan tool, whose steps are shown while the run works. Code mode runs in codex-code-mode-host beside
       // the runtime; without it every call through code mode fails, so it is switched on only when the host is there.

@@ -151,7 +151,7 @@
    | energy-advice | 每小时工作分钟数、规则档位、时区 | 保持 live | 只有数字，没有可识别的内容，拆分只是多一次调用 |
    | time-space（签证） | 国籍、目的国 | 保持 live | 同上 |
    | need-check | 任务名和缺的材料 | 保持 live | 搜的正是这个任务本身；输入里没有事实、画像、文件 |
-   | opportunities reader | 一个监视项的检索词和主线简介 | 保持 live | 跑得最频繁；它的检索词由 watches 运行写出，现在那一步已走 `web_research` |
+   | opportunities reader | 一个监视项的检索词、主线简介，以及（机会放宽后）本人确认过的事实 `person` | 改走 `web_research`（合并复审 2026-11-25） | 机会放宽给输入加了 `person`，再开 live 就是私人上下文配上托管搜索 |
    | public-skills scout | 每条主线最近 8 个任务名 | `web_research` | 任务名是私人文字，且一个月只跑几次 |
    | archetype-curator | 40 个任务、个人偏好 | `web_research` | 偏好是本人的纠正原话 |
    | flywheel | 未完成里程碑、已验收任务 | `web_research` | 里程碑是本人的计划 |
@@ -272,3 +272,19 @@
 **Skill。** 访谈 Skill 加「账本快照」一节（不加核心规则，仍是 15 条）：对着快照判清单（IR-197）、按意思对照已问题目并写 `gist`/`repeats`/`followUp`（IR-198）、一轮一个主问题最多五道、同一件事最多问两次再记成假设、回复里的日子只用快照/文件/调研里的（IR-199）；核心规则 6 的「在线程里找到那一问」改成在快照里找。
 
 **回放对比** 见 docs/claude/profile-first-loop.md 「访谈账本驱动的回放」：按意思重问 1→0，旧尺子清单 3/14→5/14，编造日期 0→0；第一次新回放 7/12 轮调完 `mark_round` 就收尾，`mark_round` 的回执改为提醒写正文后为 0；每轮约慢三分之一。没有规则需要恢复退回。
+
+## 17. 合并复审（2026-11-25，integrate-1125）
+
+六个分支合并后，一个独立的只读审查对着 `main...integrate-1125` 找安全回退。修了的：
+
+- **被扣的污点提案不进去重。** `taintHeld`（core/auto-approval.ts）：待确认、带污点、`taintedRisk` 非空的单不进 `mergeTasks`，两个方向都不并——之前同名任务能把它并进已批准任务，越过待确认进日历。
+- **机会阅读器的搜索改走 `web_research`。** 机会放宽给输入加了 `person`（确认过的事实），再开 hosted live 就是私人上下文配托管搜索；§12 表里那一行随之改了。
+- **工具模式不再在私人线程上开 hosted 搜索**，只给 `web_research`；它拿回的网页算 `page` 污点（`onWebResearch` → `toolbox.noteTaint`），这次运行放进收件箱的事带来源，高风险的照样扣住。带邮箱的 sandbox / 节点 shell 运行关掉 hosted 搜索和连接器（`mailOffered`）。
+- **工作流修订读 `completed.tainted`**（`completedTaint`），改进运行自己读过的也算。
+- **skill 目录守卫**：相对路径（`skill-library/…`）也算；写入命令里出现 8.3 短名一律拒（`path.short`）；文件改动按真实路径（`realPathOf`，展开短名和联接点）再判一次。用变量拼路径仍只靠沙箱的 deny 兜底。
+- **`taintedRisk` 的链接**：任何「点 + 两个以上字母」的裸域名都算，文件扩展名除外；不再列顶级域名。
+- **ask_person**：读过 `web_research` 网页的运行，问题标 `untrusted`（步骤规划、倒推、教程设计三处）；不可信问题按假设了结时不写成本人确认的事实。
+- **出站检索**：一条查询里同时有本人两条以上的短事实（学校、单位、城市、年级）就退回（`details`）。
+- `read_task` 读带污点来源的任务时，运行记一次污点。
+
+留下的（已知，未修）：姓名的拼音形式不在标识里（没有拼音库，加依赖要下载）；变形、同义词一点点编进检索词的低带宽外泄仍挡不住（§12 已写）；工具模式的连接器读到的邮件不经 Crossline，不计污点。

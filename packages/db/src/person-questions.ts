@@ -83,8 +83,11 @@ export function settlePersonQuestion(store: CrosslineStore, workspaceId: string,
   if (!text) return { ok: false, code: "PERSON_ANSWER_EMPTY" };
   const ledger = store.questionByKey(workspaceId, personQuestionKey(id));
   store.atomically(() => {
-    store.upsertProfileFact({ workspaceId, identityId: row.identityId || "person", projectId: row.projectId, slot: personAnswerSlot(row.question),
-      value: `【${row.question}】${text}`, status: "confirmed", sourceRef: personQuestionKey(id), sourceQuote: text, updatedAt: at });
+    // A question a run wrote after reading someone else's words, kept on its own assumption, is not the person's fact: the assumption is
+    // the run's wording, and a confirmed fact would reach every later model as the person's own (review of 2026-11-25). Their own answer is.
+    if (!(how === "assumed" && row.origin === "untrusted"))
+      store.upsertProfileFact({ workspaceId, identityId: row.identityId || "person", projectId: row.projectId, slot: personAnswerSlot(row.question),
+        value: `【${row.question}】${text}`, status: "confirmed", sourceRef: personQuestionKey(id), sourceQuote: text, updatedAt: at });
     const number = ledger?.id ?? store.recordQuestion(workspaceId, { kind: "ask", key: personQuestionKey(id), text: row.question, options: row.options,
       identityId: row.identityId, projectId: row.projectId, status: "open", at });
     store.answerQuestion(workspaceId, number, { text, status: how, at });

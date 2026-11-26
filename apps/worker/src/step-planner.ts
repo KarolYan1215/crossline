@@ -387,12 +387,14 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     // The line's own skill and the public skills that fit the task, read beside the planner's: how this work is done shapes the steps.
     const extraSkills = await librarySkillsFor(client, store, workspaceId, order.identityId, { cwd, task: order.intent, ...(options.libraryDir ? { dir: options.libraryDir } : {}) });
     let materialMode: "tools" | "fallback" = "fallback";
+    // Any run may reach the web through `web_research` (on by default): once it has, its questions are marked (review of 2026-11-25).
+    let browsed = false;
     const result = await runCodexSkill<StepPlan>(client, input, { skillName: PLANNER, cwd, ...(extraSkills.length ? { extraSkills } : {}), redoOnRepair: true,
       // ask_person (ask-tool.ts): what only the person knows and the plan cannot be right without; a run researching on the web has read
       // pages, so its questions are marked and may carry no link.
       optionalTools: { tools: withAskTool(mergeTools(grounding.material.tools, grounding.factIndex.tools), { store, workspaceId, skill: PLANNER,
           ref: { kind: "task", id: workOrderId }, identityId: order.identityId, projectId: order.projectId, dueBy: window.dueBy, title: taskTitleOf(order),
-          untrusted: () => research }), onMode: (mode) => { materialMode = mode; },
+          untrusted: () => research || browsed }), onMode: (mode) => { materialMode = mode; },
         instructions: "`materials.passages` are the passages that matched this task, in full; `materials.candidates` are more, by their opening line; "
           + "`materials.files` are the files they come from. Read the candidates you need with read_chunk(id), and find what is missing (a lecture "
           + "list, the problem set, the rubric) with search_material before you count units. A unit quotes a passage you read, under that passage's doc id. "
@@ -428,7 +430,7 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
       runNote: (libraryInstruction(extraSkills)
         + (feedback ? " Apply the feedback: it is what the reviewer or the person asked to change; earlierFeedback still holds unless it contradicts it." : "")
         + (research ? " research is true: search the web for this task's background and the best known way to do it before planning, as the Skill's research section says." : "")).trim(),
-      ...(research ? { webResearch: true } : {}),
+      ...(research ? { webResearch: true } : {}), onWebResearch: () => { browsed = true; },
       outputSchema: stepPlanSchema(learned.map((archetype) => archetype.id)), prepareInput: (value) => value,
       validateOutput: (output) => {
         const shaped = validateStepPlanShape(output, learned);
