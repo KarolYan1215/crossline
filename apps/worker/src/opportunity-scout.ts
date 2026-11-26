@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import {
-  CLASSIFICATION_INSTRUCTIONS, SCOUT_NEED_PREFIX, SCOUT_PURPOSE, SCOUT_STATS_SETTING, applicantFrom, checkReadItem, holdBack, judgeEligibility, opportunityFromRead, readScoutFile,
-  pushable, readScoutStats, tFor, watchFromProposal, type ReadItem, type ScoutFind
+  CLASSIFICATION_INSTRUCTIONS, SCOUT_NEED_PREFIX, SCOUT_PURPOSE, SCOUT_STATS_SETTING, checkReadItem, holdBack, offerPushable, opportunityFromRead, readScoutFile,
+  readScoutStats, verdictFromFit, tFor, watchFromProposal, type ReadItem, type ScoutFind
 } from "@crossline/core";
 import { withUsagePurpose } from "@crossline/codex";
 import { addScoutWatches, exploreThisWeek, readWatchList, readWatchTuning, recordOpportunityOutcome, startConfirmedFor, type CrosslineStore } from "@crossline/db";
@@ -101,7 +101,7 @@ const asReadItem = (find: ScoutFind): ReadItem => ({ pageId: "", url: find.url, 
   consents: find.consents ?? [], registrationUrl: find.registrationUrl || find.url });
 
 /**
- * What the scout handed back, checked like any find (§7, §17.5): each page opened, every quote found on it, eligibility judged by code,
+ * What the scout handed back, checked like any find (§7, §17.5): each page opened, every quote found on it, eligible unless a fit says otherwise (2026-11-25),
  * time–space by track ②. Finds are saved under `scout:<day>`; new watches are proposals for the weekly review's 视野外 section.
  */
 export async function afterScout(store: CrosslineStore, workspaceId: string, outcome: AgentOutcome | { state: "failed"; message: string }, startedAt: Date,
@@ -118,7 +118,6 @@ export async function afterScout(store: CrosslineStore, workspaceId: string, out
   const result = readScoutFile(raw, lineIds);
   const today = todayFor(store, workspaceId, now);
   const http = deps.http ?? defaultSafeGetDeps();
-  const applicant = applicantFrom(store.listProfileFacts(workspaceId));
   const locale = localeOf(store, workspaceId);
   const tuning = readWatchTuning(store, workspaceId);
   const briefs = lineBriefs(store, workspaceId);
@@ -135,11 +134,12 @@ export async function afterScout(store: CrosslineStore, workspaceId: string, out
       foundAt: now.toISOString(), idOf: (key) => `opp-${createHash("sha256").update(key).digest("hex").slice(0, 16)}` }),
       find.classification ?? { lines: [{ lineId: find.lineId, confidence: 0.5, reason: find.why ?? "", anchors: [] }] }, briefs, text.slice(0, 2000), null);
     if (opportunity.deadlines.length && opportunity.deadlines.every((item) => item.day < today)) continue;
-    const verdict = judgeEligibility(checked.item.eligibility, applicant, locale);
+    // The scout writes no fit: its finds are eligible (2026-11-25, rather more than fewer) and wait in 视野外 unless urgent.
+    const verdict = verdictFromFit(checked.item.fit, locale);
     const feasibility = await deps.feasibility?.(opportunity, { store, workspaceId, now }).catch(() => undefined);
     const saved = store.saveOpportunity(workspaceId, { opportunity, terms: checked.item.eligibility, verdict, ...(feasibility ? { feasibility } : {}) }, now.toISOString());
     kept += 1;
-    if (saved.inserted && !holdBack({ opportunity, verdict, feasibility, tuning }) && pushable(opportunity)) {
+    if (saved.inserted && !holdBack({ opportunity, verdict, feasibility, tuning }) && offerPushable({ ...opportunity, verdict })) {
       surfaced += 1;
       recordOpportunityOutcome(store, workspaceId, saved.row.id, "surfaced", now.toISOString());
     }

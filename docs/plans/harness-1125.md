@@ -88,3 +88,52 @@
 - shell 助手真实回合：今日输入框建任务（模型判 `external: false`），`/api/agent/dispatch` 交给助手；`agent.task.requested` 记 `isolation: "mxc"`、`profile: research`，`audit.json` 为 `egress: "packages"`、2 条命令、`reproduced: true`（worker 在沙箱里重跑 run.py，HTML 哈希一致），49 秒。测试任务已归档。
 - 本机是完整模式，敏感资料本来就在本机密钥库，服务器→电脑的迁移与 48 小时提醒在这台电脑上不适用（单元与真 Chrome 测试见 `form-vault.test.ts`）。
 - 打包时发现 `scripts/package-node.ts` 的白名单漏了 `apps/worker/src/browser-port.ts`（ffffbd2cbc 引入，只用 `node:net`），已补；独立节点安装包 1.2.2 能构建，但没发布。
+
+## 10. 机会放宽（2026-11-25）
+
+本人原话：
+
+> 机会资格尽可能宽松，按照模型来，并且要求只要有可能能够到的，或者符合部分要求的，哪怕只是方向相同，只要阶段和方向没问题都推给我（找实习的时候不要推正职，推的岗位只要有相关性，在尽可能节约用户注意力、agent 替用户完成大部分内容的情况下，这个收益非常高，消耗少量注意力博取大量可能的机会），不要只推严格满足的，严格满足的往往已经落后于发展进度。
+> 任务去重的硬预过滤交给模型。
+
+### 做了什么
+
+- **资格交给模型。** `crossline-opportunity-reader` 每条给 `fit`：`stageFit`（fits / stretch / wrong_stage）、`directionFit`（same / adjacent / unrelated）、`reachable`、`partialRequirements`、`agentCanPrepare`、`why`。判断标准写在 SKILL.md「How it fits the person」，是目标不是正则。输入 v4 带 `person`：确认过的资料事实（不含姓名、邮箱、电话、地址、证件号等标识，不含「假设」，≤30）和各条活跃监视项的「标题：判断」（`seeking`，≤12）。
+- **代码只验结构**（`fitOf`）并照判（`verdictFromFit`）：只有 `wrong_stage`、`unrelated`、`reachable: false` 不推；其余都是 eligible，fit 存在 verdict 上。没有 fit（列表里的 CFP、旧行）算 eligible，不再问。
+- **删掉的确定性规则**：`judgeEligibility`、`meets`、`applicantFrom`、`degreeStageOf`、`DEGREE_STAGES`、`FACT_HINTS`、欧盟/国家词表与 `countriesIn`/`countryMeets`、`STEM_FIELD`/`OPEN_TO_ALL`/`ANY_FIELD`/`broadMeets`、`eligibilityQuestion` 和维度标签、db 的 `rejudgeOpportunities` 与 worker 的 `rejudge`、条款里的 `accepts`。保留：`phishingSigns`（安全）、引文核验、`eligibilityAnswer`（只为旧卡片上的问题）。
+- **分歧只记不拦。** 代码看监视项全是找实习、模型却没判正职为 `wrong_stage`（`stageConflict`）时，照模型，写一行 `rule-fired`：`ruleFired(rule, detail, dataDir?, now?)` 在 `apps/worker/src/rule-fired.ts`，追加到 `<CROSSLINE_DATA_DIR>/telemetry/rule-fired.jsonl`（无数据目录时打到 stdout），不进账本。这是一致性评估那边规划中 `ruleFired` 的本地替身，接口相同，合并时只换 import。
+- **`reachable: false` 也不推**（国籍或绿卡、安全审查、年龄、别校成员）。按「有可能能够到」理解为够不到的不推；若本人要连这些也看，改 `verdictFromFit` 一行即可。**待本人确认。**
+- **任务去重**：`task-merge.ts` 删掉「截止日相差 7 天以上」和「服务的里程碑截止相差 21 天以上」两条硬「不同」。同标题的这两种情况现在是「不确定」（score 1），交给已有的模型复核；相似度只挑候选。`partOf` 的数字检查保留：它只管代码自己合并部分任务，那一对仍会交给模型。
+
+### 注意力
+
+- 不加推送，不加 ask 种类。没有新事件类型、设置键或环境变量；只有一份开发者读的 JSONL（`rule-fired`）。
+- 晨报只有一行计数（「新机会与动态 N 条，见周复盘」），放宽后条数变多，晨报仍是一行。
+- 待确认只放 7 天内要动的（`OFFER_LEAD_DAYS`），其余进周复盘；两处都按 `offerOrder` 排：先同方向再相邻，再按最近截止，再按相关度。
+- 相邻方向的机会，就算线只弱关联（相关度 0.25–0.6，`offerPushable`），也进待确认或周复盘，不进视野外；严格的监视项（strictness ≥ 1）仍挡相邻方向。
+- 卡片写「还差：…」和「可代为准备：…」，本人一眼看出要补什么、agent 能做什么。
+- **数量上限没改。** 理由：打扰的入口（晨报一行、待确认 7 天窗口、推送只给当天截止）都不随条数变；条数多了只是周复盘变长，而它按方向和截止排好。回放的每日打扰没有变化（见下）。
+
+### 去重的花费上限
+
+每次去重最多送模型复核 36 对（`REVIEW_PAIRS_PER_RUN` = 3 × `MAX_REVIEW_PAIRS`，即 3 次调用）。按相似度从高到低取，其余留到第二天。放开后最坏的情况是同标题的周期任务两两都进复核；36 对一天够用，花费封顶 3 次调用（没有实测本人账本上放开后的对数）。
+
+### 回放（opportunity-world，确定性部分）
+
+| | 放宽前（25 个场景） | 旧代码跑新场景（27 个） | 放宽后（27 个） |
+|---|---|---|---|
+| 场景判对 | 25/25 | 25/27 | 27/27 |
+| 精度（① 一周） | 100%（12/12） | 92.9%（13/14） | 100%（13/13） |
+| 召回（① 一周） | 100% | 100% | 100% |
+| 每日打扰（7 天均值 / 最多） | 1.43 / 2 | 1.43 / 2 | 1.43 / 2 |
+| 60 天长跑探索占比 | 14.7% | 13.1% | 13.1% |
+
+忠实模型和对抗模型结果一样；①+② 引擎精度、召回也都是 100%（14/14）。
+
+样例：
+
+- `fulltime-while-intern`：Synth Silicon「Hardware Engineer, New Grad (Full-time)」，要求毕业后 2 年以上全职经验，本人在找实习。旧代码条款里没有学历阶段，判 eligible，推送（错）。现在读取器判 `wrong_stage`，ineligible，不推，只在周复盘里计数。
+- `adjacent-direction`：「Lakeshore Robotics Founders Fellowship 2027」，创业线，置信度 0.35，相关度 0.55 < 0.6。旧代码判为纯推送，但按代码会进视野外。现在读取器判 `adjacent`，卡片写「还差：需有机器人方向的原型。可代为准备：申请陈述草稿、项目简介。」，进入待确认或周复盘（标为 `partial`）。
+- `travel-grant`：以前读取器给出自由文本条款时，卡片会问本人；现在不再问，卡片列出还差什么（`partial`）。
+
+真模型回放（`--live`）这次没有跑：需要 Codex 额度和独立的 Codex home。读取器的提示词与 schema 改了，下次真跑应先看 `fit` 的分布，特别是 `wrong_stage` 有没有判得过严。

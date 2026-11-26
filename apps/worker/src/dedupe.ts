@@ -29,6 +29,12 @@ export const DEDUPE_JUDGED_SETTING = "tasks.dedupe.judged";
 export const DEDUPE_REVIEW_DAY_SETTING = "tasks.dedupe.reviewDay";
 const REVIEWER = "crossline:crossline-validation-reviewer";
 const MAX_REVIEW_PAIRS = 12;
+/**
+ * Pairs put to the reviewer in one day's run: three low-tier calls at most. Since 2026-11-25 far-apart due days and milestones no longer
+ * keep pairs from the reviewer, so the likeliest pairs (by title similarity) go first and the rest wait for a later day; every answer is
+ * remembered, so a pair is asked once.
+ */
+export const REVIEW_PAIRS_PER_RUN = 3 * MAX_REVIEW_PAIRS;
 
 const localDay = (store: CrosslineStore, workspaceId: string, now: Date) => {
   let zone = process.env.CROSSLINE_TIME_ZONE?.trim() || "America/Chicago";
@@ -152,9 +158,10 @@ export function applyMerge(store: CrosslineStore, workspaceId: string, group: Me
 
 /** Asks the reviewer about the pairs the rules left open; remembers each answer so a pair is asked once. */
 export async function reviewPairs(store: CrosslineStore, workspaceId: string, client: CodexRpcBoundary, cwd: string,
-  pairs: Array<{ a: string; b: string; why: string }>): Promise<Set<string>> {
+  pairs: Array<{ a: string; b: string; why: string; score?: number }>): Promise<Set<string>> {
   const judged = readJudged(store, workspaceId);
-  const pending = pairs.filter((pair) => judged[`${pair.a}|${pair.b}`] === undefined && judged[`${pair.b}|${pair.a}`] === undefined);
+  const pending = pairs.filter((pair) => judged[`${pair.a}|${pair.b}`] === undefined && judged[`${pair.b}|${pair.a}`] === undefined)
+    .sort((x, y) => (y.score ?? 0) - (x.score ?? 0)).slice(0, REVIEW_PAIRS_PER_RUN);
   for (let at = 0; at < pending.length; at += MAX_REVIEW_PAIRS) {
     const open = pending.slice(at, at + MAX_REVIEW_PAIRS);
     const orders = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order]));

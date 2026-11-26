@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  OPPORTUNITY_READING_SCHEMA, aiDeadlines, applicantFrom, ccfddlDeadlines, checkReadItem, degreeStageOf, devpostHackathons,
-  eligibilityAnswer, judgeEligibility, mergeNeeds, needFromProposal, nextMonthDay, opportunityFromListed, opportunityFromRead, opportunityKey, placeFromLocation,
-  carriesPersonData, parsePostings, phishingSigns, prepStartFor, quoteYearAgrees, readItemUnusable, termSlot, validateOpportunityReading,
+  OPPORTUNITY_READING_SCHEMA, aiDeadlines, ccfddlDeadlines, checkReadItem, devpostHackathons, eligibilityAnswer, fitOf, mergeNeeds, needFromProposal,
+  nextMonthDay, offerOrder, offerPushable, opportunityFromListed, opportunityFromRead, opportunityKey, placeFromLocation, carriesPersonData, parsePostings,
+  phishingSigns, prepStartFor, quoteYearAgrees, readItemUnusable, readerPerson, stageConflict, termSlot, validateOpportunityReading, verdictFromFit,
   type EligibilityTerm, type ProposedNeed, type ReadItem, type StoredNeed
 } from "./opportunity-discovery";
+import type { OpportunityFit } from "./opportunity";
 import { structuredOutputProblems } from "./structured-output";
 
 const proposal = (over: Partial<ProposedNeed> = {}): ProposedNeed => ({
@@ -157,76 +158,62 @@ describe("where an opening is held (D11)", () => {
   });
 });
 
-describe("eligibility, judged by code", () => {
-  it("reads only confirmed facts, the person's own apply.* answer first", () => {
-    const applicant = applicantFrom([fact("degree", "本科"), fact("apply.degree_stage", "硕士在读"), fact("school", "UW", "inferred"), fact("major", "假设：EE")]);
-    expect(applicant.degree_stage).toMatchObject({ value: "硕士在读", slot: "apply.degree_stage" });
-    expect(applicant.school).toBeUndefined();
-    expect(applicant.field).toBeUndefined();
+const fit = (over: Partial<OpportunityFit> = {}): OpportunityFit => ({ stageFit: "fits", directionFit: "same", reachable: true, partialRequirements: [],
+  agentCanPrepare: [], why: "博士生的研究实习，方向一致", ...over });
+
+describe("eligibility, judged by the reader's fit (2026-11-25)", () => {
+  it("keeps away only the wrong stage, an unrelated direction or a bar the person cannot clear", () => {
+    expect(verdictFromFit(fit())).toMatchObject({ state: "eligible", fit: { stageFit: "fits" } });
+    // A partial match, a stretch and an adjacent direction all reach the person, with what is missing kept for the card.
+    const partial = verdictFromFit(fit({ stageFit: "stretch", directionFit: "adjacent", partialRequirements: ["无顶会论文"], agentCanPrepare: ["求职信草稿"] }));
+    expect(partial).toMatchObject({ state: "eligible", fit: { partialRequirements: ["无顶会论文"], agentCanPrepare: ["求职信草稿"] } });
+    expect(verdictFromFit(fit({ stageFit: "wrong_stage", why: "正职，本人在找实习" }))).toMatchObject({ state: "ineligible", failed: [{ dim: "degree_stage", why: "正职，本人在找实习" }] });
+    expect(verdictFromFit(fit({ directionFit: "unrelated" }))).toMatchObject({ state: "ineligible", failed: [{ dim: "field" }] });
+    expect(verdictFromFit(fit({ reachable: false }))).toMatchObject({ state: "ineligible", failed: [{ dim: "other" }] });
+    // No fit (a listed call for papers, a reading from before): eligible, never a question.
+    expect(verdictFromFit(undefined)).toEqual({ state: "eligible", basis: [] });
   });
 
-  it("does not read another line's slot of the same name as the person's", () => {
-    const facts = [{ identityId: "investment", projectId: "stocks", slot: "stage", value: "已有约 1 万美元的个人账户", status: "confirmed" as const },
-      { identityId: "research", projectId: "ece555", slot: "meeting_location", value: "Plant Sci 108", status: "confirmed" as const },
-      { identityId: "research", projectId: "", slot: "stage", value: "博士阶段刚开始", status: "confirmed" as const }];
-    const applicant = applicantFrom(facts);
-    expect(applicant.degree_stage).toMatchObject({ value: "博士阶段刚开始", factId: "research//stage" });
-    expect(applicant.region).toBeUndefined();
+  it("reads a fit only in the schema's shape; anything else is no fit", () => {
+    expect(fitOf({ stageFit: "fits", directionFit: "same" })).toEqual({ stageFit: "fits", directionFit: "same", reachable: true, partialRequirements: [], agentCanPrepare: [], why: "" });
+    expect(fitOf({ stageFit: "maybe", directionFit: "same" })).toBeUndefined();
+    expect(fitOf(undefined)).toBeUndefined();
+    expect(fitOf({ ...fit(), partialRequirements: ["a", "", "b", "c", "d", "e", "f"] })?.partialRequirements).toEqual(["a", "b", "c", "d", "e"]);
   });
 
-  it("is eligible, ineligible or a question, never a refusal for a spelling", () => {
-    const masters = applicantFrom([fact("apply.degree_stage", "硕士")]);
-    expect(judgeEligibility([term()], masters).state).toBe("eligible");
-    const undergrad = applicantFrom([fact("apply.degree_stage", "大三")]);
-    expect(judgeEligibility([term()], undergrad)).toMatchObject({ state: "ineligible", failed: [{ dim: "degree_stage" }] });
-    expect(judgeEligibility([term()], applicantFrom([])).state).toBe("unknown");
-    const country = term({ dim: "citizenship", rule: "美国公民", accepts: { kind: "one_of", values: ["United States"], min: -1, max: -1 } });
-    expect(judgeEligibility([country], applicantFrom([fact("apply.citizenship", "中国")])).state).toBe("ineligible");
-    expect(judgeEligibility([country], applicantFrom([fact("apply.citizenship", "Kazakhstan")])).state).toBe("unknown");
-    const age = term({ dim: "age", rule: "18–25 岁", accepts: { kind: "range", values: [], min: 18, max: 25 } });
-    expect(judgeEligibility([age], applicantFrom([fact("apply.age", "30")])).state).toBe("ineligible");
-    expect(judgeEligibility([age], applicantFrom([fact("apply.age", "24")])).state).toBe("eligible");
+  it("hands the reader the person's confirmed facts without identifiers, and what every active watch seeks", () => {
+    const person = readerPerson([fact("apply.degree_stage", "PhD student (second year)"), fact("apply.full_name", "Qiao Lin"), fact("apply.email", "q@x.example"),
+      fact("apply.major", "假设：EE"), fact("apply.school", "UW", "inferred"), { ...fact("stage", "博士"), identityId: "research" }, fact(termSlot("有作品"), "yes")],
+    [{ title: "暑期研究实习", judge: "博士可申请", state: "active" }, { title: "旧的", judge: "", state: "retired" }]);
+    expect(person).toEqual({ facts: [{ slot: "apply.degree_stage", value: "PhD student (second year)" }], seeking: ["暑期研究实习：博士可申请"] });
   });
 
-  it("compares citizenship and region by country, however each side spells it (D2)", () => {
-    const us = term({ dim: "citizenship", rule: "U.S. citizens only", accepts: { kind: "one_of", values: ["United States", "U.S. citizen", "US citizen"], min: -1, max: -1 } });
-    expect(judgeEligibility([us], applicantFrom([fact("apply.citizenship", "China")]))).toMatchObject({ state: "ineligible", failed: [{ dim: "citizenship" }] });
-    expect(judgeEligibility([us], applicantFrom([fact("apply.citizenship", "美国")])).state).toBe("eligible");
-    expect(judgeEligibility([us], applicantFrom([fact("apply.citizenship", "USA")])).state).toBe("eligible");
-    const orResident = term({ dim: "citizenship", rule: "U.S. citizens or permanent residents", accepts: { kind: "one_of", values: ["U.S. citizen", "U.S. permanent resident"], min: -1, max: -1 } });
-    expect(judgeEligibility([orResident], applicantFrom([fact("apply.citizenship", "China")])).state).toBe("unknown");
-    const eu = term({ dim: "region", rule: "Applicants must reside in an EU member state", accepts: { kind: "one_of", values: ["European Union", "EU member state"], min: -1, max: -1 } });
-    expect(judgeEligibility([eu], applicantFrom([fact("apply.country", "United States")])).state).toBe("ineligible");
-    expect(judgeEligibility([eu], applicantFrom([fact("apply.country", "Germany")])).state).toBe("eligible");
-    const euText = term({ dim: "region", rule: "居住于欧盟成员国", accepts: { kind: "text", values: [], min: -1, max: -1 } });
-    expect(judgeEligibility([euText], applicantFrom([fact("apply.country", "德国")])).state).toBe("eligible");
-    expect(judgeEligibility([euText], applicantFrom([fact("apply.country", "Madison, Wisconsin, United States")])).state).toBe("ineligible");
+  it("notes a full-time job while every watch seeks internships, without overruling the reader", () => {
+    expect(stageConflict("job", fit(), ["暑期研究实习 intern 博士"])).toBe(true);
+    expect(stageConflict("job", fit({ stageFit: "wrong_stage" }), ["暑期研究实习"])).toBe(false);
+    expect(stageConflict("job", fit(), ["暑期研究实习", "全职工作 full-time"])).toBe(false);
+    expect(stageConflict("internship", fit(), ["暑期研究实习"])).toBe(false);
+    expect(verdictFromFit(fit()).state).toBe("eligible");
   });
 
-  it("does not ask about a clause that restricts nothing, and reads any STEM field from the record (D9)", () => {
-    const open = term({ dim: "other", rule: "Open to the public", accepts: { kind: "text", values: [], min: -1, max: -1 } });
-    expect(judgeEligibility([open], applicantFrom([])).state).toBe("eligible");
-    const stem = term({ dim: "field", rule: "Students in any STEM discipline", accepts: { kind: "text", values: [], min: -1, max: -1 } });
-    expect(judgeEligibility([stem], applicantFrom([fact("apply.major", "Computer Engineering")])).state).toBe("eligible");
-    expect(judgeEligibility([stem], applicantFrom([fact("apply.major", "Art History")])).state).toBe("unknown");
-    expect(judgeEligibility([stem], applicantFrom([])).state).toBe("unknown");
+  it("pushes an opening in an adjacent direction a line still holds, and orders by direction, then deadline", () => {
+    const tag = (relevance: number) => [{ lineId: "research", confidence: relevance, relevance, reason: "", anchors: [] }];
+    const row = (id: string, relevance: number, over: Partial<OpportunityFit> | null, deadline = "2026-12-01") => ({ id, lineId: "research", type: "program" as const,
+      lines: tag(relevance), deadlines: [{ day: deadline, quote: "" }], verdict: over ? verdictFromFit(fit(over)) : verdictFromFit(undefined) });
+    expect(offerPushable(row("a", 0.4, { directionFit: "adjacent" }))).toBe(true);
+    expect(offerPushable(row("b", 0.4, null))).toBe(false);
+    expect(offerPushable(row("c", 0.2, { directionFit: "adjacent" }))).toBe(false);
+    expect(offerPushable({ ...row("d", 0.4, { directionFit: "same" }), type: "paper" as const })).toBe(false);
+    const sorted = [row("late-same", 0.7, {}, "2027-01-10"), row("adjacent", 0.9, { directionFit: "adjacent" }, "2026-11-30"), row("soon-same", 0.6, {}, "2026-12-01")]
+      .sort(offerOrder("2026-11-25")).map((item) => item.id);
+    expect(sorted).toEqual(["soon-same", "late-same", "adjacent"]);
   });
 
-  it("settles a free-text term by the person's own yes or no", () => {
+  it("still reads an answer to a question on a card from before", () => {
     const portfolio = term({ dim: "other", rule: "有可展示的作品", accepts: { kind: "text", values: [], min: -1, max: -1 } });
-    expect(judgeEligibility([portfolio], applicantFrom([])).state).toBe("unknown");
-    const answer = eligibilityAnswer(portfolio, "是的，有");
-    expect(answer).toEqual({ slot: termSlot("有可展示的作品"), value: "yes" });
-    expect(judgeEligibility([portfolio], applicantFrom([fact(answer!.slot, answer!.value)])).state).toBe("eligible");
-    expect(judgeEligibility([portfolio], applicantFrom([fact(answer!.slot, "no")])).state).toBe("ineligible");
+    expect(eligibilityAnswer(portfolio, "是的，有")).toEqual({ slot: termSlot("有可展示的作品"), value: "yes" });
+    expect(eligibilityAnswer(portfolio, "不满足")).toEqual({ slot: termSlot("有可展示的作品"), value: "no" });
     expect(eligibilityAnswer(term(), "博士二年级")).toEqual({ slot: "apply.degree_stage", value: "博士二年级" });
-  });
-
-  it("reads degree stages in either language", () => {
-    expect(degreeStageOf("PhD candidate")).toBe("phd");
-    expect(degreeStageOf("研二")).toBe("masters");
-    expect(degreeStageOf("postdoc")).toBe("postdoc");
-    expect(degreeStageOf("大四")).toBe("undergraduate");
   });
 });
 

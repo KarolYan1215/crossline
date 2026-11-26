@@ -85,10 +85,29 @@ export type Opportunity = {
   lowValue?: "social" | undefined;
 };
 
+/**
+ * How an opening fits the person, as the reader judged it against the person's stage and what they are looking for (the owner's decision
+ * of 2026-11-25: as wide as the model allows; only the wrong stage, an unrelated direction or a bar the person cannot clear keeps it away).
+ */
+export const STAGE_FITS = ["fits", "stretch", "wrong_stage"] as const;
+export const DIRECTION_FITS = ["same", "adjacent", "unrelated"] as const;
+export type OpportunityFit = {
+  stageFit: (typeof STAGE_FITS)[number];
+  directionFit: (typeof DIRECTION_FITS)[number];
+  /** False only for a bar the person cannot clear before the deadline (citizenship, clearance, an age limit, another school's members only). */
+  reachable: boolean;
+  /** Requirements the person does not clearly meet yet, each in a few words (shown on the card as 「差在哪里」). */
+  partialRequirements: string[];
+  /** What the agent can prepare for the person (a draft, a material), shown on the card. */
+  agentCanPrepare: string[];
+  why: string;
+};
+
+/** `fit`: the reader's judgement the verdict was made from (absent on records read before 2026-11-25 and on listed calls for papers). */
 export type EligibilityVerdict =
-  | { state: "eligible"; basis: Array<{ dim: EligibilityDim; factId?: string | undefined; slot?: string | undefined }> }
+  | { state: "eligible"; basis: Array<{ dim: EligibilityDim; factId?: string | undefined; slot?: string | undefined }>; fit?: OpportunityFit | undefined }
   | { state: "unknown"; questions: Array<{ dim: EligibilityDim; question: string }> }
-  | { state: "ineligible"; failed: Array<{ dim: EligibilityDim; rule: string; why: string }> };
+  | { state: "ineligible"; failed: Array<{ dim: EligibilityDim; rule: string; why: string }>; fit?: OpportunityFit | undefined };
 
 /** What the person chose on the offer card (§8). `apply` writes an approved milestone; `register` queues a `FormRun`. */
 /** `read`: news or a paper the person found useful (§7.3): read, nothing to decide. */

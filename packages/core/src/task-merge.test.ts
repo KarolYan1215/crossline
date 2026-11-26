@@ -27,11 +27,21 @@ test("differently worded titles that share enough go to the reviewer, in any lan
   expect(duplicateOf(task("n", "汇集 ECE 548 复习材料"), [task("b", "整理 ECE 548 复习材料")])).toBeUndefined();
 });
 
-test("structure still keeps tasks apart: another side, due days a week apart, far milestones", () => {
+test("only the line, project and side keep tasks apart; far due days and milestones go to the reviewer, never ruled out (2026-11-25)", () => {
   expect(comparePair(task("a", "整理复习材料"), task("b", "整理复习材料", "", { owner: "assistant" })).verdict).toBe("different");
-  expect(comparePair(task("a", "整理复习材料", "", { dueDate: "2026-10-01" }), task("b", "整理复习材料", "", { dueDate: "2026-10-20" })).verdict).toBe("different");
-  expect(comparePair(task("a", "整理复习材料", "", { milestoneDeadline: "2026-10-20" }),
-    task("b", "整理复习材料", "", { milestoneId: "m2", milestoneDeadline: "2026-12-17" })).verdict).toBe("different");
+  expect(comparePair(task("a", "整理复习材料"), task("b", "整理复习材料", "", { projectId: "ece555" })).verdict).toBe("different");
+  const dueApart = [task("a", "整理复习材料", "", { dueDate: "2026-10-01" }), task("b", "整理复习材料", "", { dueDate: "2026-10-20" })] as const;
+  expect(comparePair(...dueApart).verdict).toBe("unsure");
+  const farMilestones = [task("a", "整理复习材料", "", { milestoneDeadline: "2026-10-20" }),
+    task("b", "整理复习材料", "", { milestoneId: "m2", milestoneDeadline: "2026-12-17" })] as const;
+  expect(comparePair(...farMilestones)).toMatchObject({ verdict: "unsure", score: 1 });
+  // Not merged by code, not even at creation; the reviewer's yes merges them, its no keeps them two.
+  expect(planMerges([...farMilestones]).groups).toEqual([]);
+  expect(planMerges([...farMilestones]).unsure).toEqual([expect.objectContaining({ a: "a", b: "b", score: 1 })]);
+  expect(planMerges([...farMilestones], new Set(["a|b"])).groups).toMatchObject([{ kind: "duplicate", absorb: ["b"] }]);
+  expect(duplicateOf(farMilestones[1], [farMilestones[0]])).toBeUndefined();
+  // Different numbers are a candidate, not a refusal: 作业 2 and 作业 3 are the reviewer's.
+  expect(comparePair(task("a", "完成作业 2", "", { dueDate: "2026-10-01" }), task("b", "完成作业 3", "", { dueDate: "2026-10-30" })).verdict).toBe("unsure");
 });
 
 test("merge reasons are written in the person's language; a request is what its Skill marked", () => {

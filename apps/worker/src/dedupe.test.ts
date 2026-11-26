@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { planMerges, type MergeTask } from "@crossline/core";
-import { DEDUPE_DAY_SETTING, DEDUPE_JUDGED_SETTING, DEDUPE_REVIEW_DAY_SETTING, dedupePass, mergeTasks, renameByScope } from "./dedupe";
+import { DEDUPE_DAY_SETTING, DEDUPE_JUDGED_SETTING, DEDUPE_REVIEW_DAY_SETTING, REVIEW_PAIRS_PER_RUN, dedupePass, mergeTasks, renameByScope, reviewPairs } from "./dedupe";
 import { fakeRuntime } from "./testing/fake-runtime";
 
 /** The daily self-check that merges repeated tasks and folds requests for a fact into the task they serve (2026-10-15). */
@@ -17,7 +17,7 @@ const step = (id: string, title: string, executor: "human" | "agent" = "human") 
 const deps = (now = new Date("2026-10-15T15:00:00.000Z")) => ({ store, workspaceId: ws, cwd: ".", client: () => undefined,
   spend: async () => ({ mode: "normal" as const }) as never, paused: () => false, enterUsage: () => {}, now });
 
-test("rules: the same title merges, a milestone weeks apart never does, and every other near title is left to the reviewer (2026-11-22)", () => {
+test("rules: the same title merges, a milestone weeks apart goes to the reviewer, and every other near title is left to it (2026-11-25)", () => {
   const task = (id: string, title: string, intent = title, extra: Partial<MergeTask> = {}): MergeTask => ({ id, identityId: "research", projectId: "ece548",
     milestoneId: "mid1", title, intent, state: "approved", dueDate: "", milestoneDeadline: "2026-10-27", progress: 0, hasStepPlan: false, started: false, dependsOn: [], ...extra });
   const { groups, unsure } = planMerges([
@@ -29,12 +29,14 @@ test("rules: the same title merges, a milestone weeks apart never does, and ever
   // Synonyms (汇集 / 整理) and numbers (作业 2 / 作业 3) are the reviewer's call now; code merges nothing here by itself.
   expect(groups).toEqual([]);
   expect(unsure.map((pair) => [pair.a, pair.b].sort().join("~"))).toEqual(expect.arrayContaining(["a~b", "b~outline", "hw2~hw3"]));
-  // Serving milestones whose deadlines are over three weeks apart: apart, and not even put to the reviewer.
-  expect(unsure.some((pair) => [pair.a, pair.b].includes("final"))).toBe(false);
+  // Serving milestones whose deadlines are over three weeks apart: no longer ruled out by code, put to the reviewer (2026-11-25).
+  expect(unsure.map((pair) => [pair.a, pair.b].sort().join("~"))).toEqual(expect.arrayContaining(["b~final"]));
   // Identical titles are settled by code.
   expect(planMerges([task("a", "汇集 ECE 548 复习材料"), task("b", "汇集 ECE 548 复习材料", "x", { progress: 0.5 })]).groups)
     .toEqual([expect.objectContaining({ kind: "duplicate", keep: "b", absorb: ["a"] })]);
-  expect(planMerges([task("b", "汇集 ECE 548 复习材料", "x"), task("final", "汇集 ECE 548 复习材料", "x", { milestoneId: "final", milestoneDeadline: "2026-12-17" })], new Set(["b|final"])).groups).toEqual([]);
+  const twoExams = [task("b", "汇集 ECE 548 复习材料", "x"), task("final", "汇集 ECE 548 复习材料", "x", { milestoneId: "final", milestoneDeadline: "2026-12-17" })];
+  expect(planMerges(twoExams).groups).toEqual([]);
+  expect(planMerges(twoExams, new Set(["b|final"])).groups).toEqual([expect.objectContaining({ kind: "duplicate" })]);
   // The reviewer's yes merges a pair the rules left open.
   expect(planMerges([task("b", "汇集 ECE 548 复习材料", "汇集讲义"), task("outline", "整理 ECE 548 复习提纲", "在周末前整理前几章的复习提纲")], new Set(["outline|b"])).groups)
     .toEqual([expect.objectContaining({ kind: "duplicate", keep: "b", absorb: ["outline"] })]);
@@ -123,6 +125,23 @@ test("pairs left open while the quota was not normal are reviewed on a later tic
   order("dup", "汇集 ECE 548 复习材料");
   expect(await dedupePass(later)).toEqual([]);
   expect(turns()).toBe(1);
+});
+
+test("the reviewer sees at most three calls of pairs a run, likeliest first; the rest wait for a later day (2026-11-25)", async () => {
+  store = new CrosslineStore(":memory:");
+  const pairs = Array.from({ length: REVIEW_PAIRS_PER_RUN + 10 }, (_, index) => {
+    order(`a${index}`, `整理第 ${index} 章笔记`); order(`b${index}`, `汇集第 ${index} 章笔记`);
+    return { a: `a${index}`, b: `b${index}`, why: "", score: index / 100 };
+  });
+  const answer = (count: number) => JSON.stringify({ pairs: Array.from({ length: count }, (_, index) => ({ id: `p${index + 1}`, same: false, why: "不同" })) });
+  const { rpc, turns } = fakeRuntime([answer(12), answer(12), answer(12), answer(12)], "crossline:crossline-validation-reviewer");
+  await reviewPairs(store, ws, rpc, ".", pairs);
+  expect(turns()).toBe(3);
+  const judged = Object.keys(JSON.parse(store.getSetting(ws, DEDUPE_JUDGED_SETTING)!) as Record<string, boolean>);
+  expect(judged).toHaveLength(REVIEW_PAIRS_PER_RUN);
+  // The ten least alike were left for another day.
+  expect(judged).not.toContain("a0|b0");
+  expect(judged).toContain(`a${REVIEW_PAIRS_PER_RUN + 9}|b${REVIEW_PAIRS_PER_RUN + 9}`);
 });
 
 test("same-named tasks for different exams stay apart and get the exam in their names", () => {

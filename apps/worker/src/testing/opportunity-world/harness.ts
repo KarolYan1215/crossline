@@ -6,7 +6,7 @@ import { AVAILABILITY_SETTING, SCOUT_PURPOSE, type AvailabilityWindow, type Feas
 import { setUsageSink, withUsageWorkspace } from "@crossline/codex";
 import { CrosslineStore, decideWatch, opportunityCosts, readWatchList, retireQuietWatches, settleOpportunityOutcomes, surfacedOpportunities,
   type StoredOpportunity } from "@crossline/db";
-import { addMailCandidate, deriveWatches, rejudge, runWatch, todayFor, watchesDeriveDue, watchesToRun, type Clients, type FeasibilityFn } from "../../opportunities";
+import { addMailCandidate, deriveWatches, runWatch, todayFor, watchesDeriveDue, watchesToRun, type Clients, type FeasibilityFn } from "../../opportunities";
 import { afterScout, opportunityScoutDue, SCOUT_FILE, startScout } from "../../opportunity-scout";
 import { opportunityNotices } from "../../notify";
 import { worldRuntime, type Persona } from "./model";
@@ -49,8 +49,13 @@ export type Engine = {
 
 export const localDay = (now: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: PERSON_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
 const canonical = (url: string) => { try { return new URL(url).toString(); } catch { return url; } };
-/** What the card asks of the person: an eligibility question, a clash to settle (the verdict kept on the row, §17.7), or a plain offer. */
-const labelOf = (row: StoredOpportunity): Push["label"] => row.verdict.state === "unknown" ? "ask" : row.feasibility?.state === "conflict" ? "push_conflict" : "push";
+/**
+ * What the card shows the person: what is still missing (the reader's partial requirements, 2026-11-25; a question on a row read before),
+ * a clash to settle (the verdict kept on the row, §17.7), or a plain offer.
+ */
+const labelOf = (row: StoredOpportunity): Push["label"] => row.verdict.state === "unknown"
+  || (row.verdict.state === "eligible" && (row.verdict.fit?.partialRequirements.length ?? 0) > 0) ? "partial"
+  : row.feasibility?.state === "conflict" ? "push_conflict" : "push";
 
 // ── The engine: track ①'s watches, scout and flywheel, as `opportunityPass` runs them ─────────────────────────────
 
@@ -98,7 +103,7 @@ const ledgerCost = (store: CrosslineStore, workspaceId: string, purpose: string,
 
 /**
  * Track ① as the worker runs it (`opportunityPass` in apps/worker/src/index.ts): outcomes settled and quiet watches retired, lines due
- * derived (the person keeps what is proposed), due watches run, the weekly scout, verdicts judged again. The worker takes one line and two
+ * derived (the person keeps what is proposed), due watches run, the weekly scout. The worker takes one line and two
  * watches a tick every few minutes; the world ticks once a day, so it takes all that are due. With `check` (track ②'s `feasibilityOf`)
  * every find gets its time–space verdict through `Clients.feasibility`, the way the worker passes it.
  */
@@ -123,7 +128,6 @@ export function watchEngine(check?: FeasibilityOf): Engine {
         await runScout(ctx, now, deps(ctx, now));
         keepProposed(ctx, now);
       }
-      rejudge(ctx.store, ctx.workspaceId, now);
     },
     pushes: (ctx, now) => {
       const today = todayFor(ctx.store, ctx.workspaceId, now);

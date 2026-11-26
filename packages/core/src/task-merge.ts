@@ -9,10 +9,12 @@ import { tFor, type Locale } from "./i18n";
  * are gone).
  *
  * Three kinds of merge:
- * - **duplicate**: code settles only titles that are identical once spaces, punctuation and case are set aside. Any other pair on the
- *   same line, project and side whose titles or intents share enough to be worth a look (`CANDIDATE`, character-bigram Dice) goes to the
- *   reviewer, which merges it or not. Code still rules out what is structural: due days more than a week apart, and tasks serving
- *   different milestones whose deadlines are more than 21 days apart (decided 2026-10-15: a midterm's material is not the final's).
+ * - **duplicate**: code settles only titles that are identical once spaces, punctuation and case are set aside, and only where nothing
+ *   else tells the two apart. Any other pair on the same line, project and side whose titles or intents share enough to be worth a look
+ *   (`CANDIDATE`, character-bigram Dice) goes to the reviewer, which merges it or not. Since 2026-11-25 (the owner: the hard pre-filters go
+ *   to the model) due days more than a week apart, or milestones whose deadlines are more than 21 days apart, no longer rule a pair out:
+ *   they only take an identical-title pair away from code and give it to the reviewer, which knows a midterm's material is not the
+ *   final's (2026-10-15).
  * - **info request**: a standalone request for a fact (the `request` its Skill wrote, `info-request.ts`) is folded into the task it
  *   serves — the one that names it as a dependency, else the main task of the same milestone, else of the same project — as that task's
  *   first step. Requests with nothing to serve in one milestone are merged into one (one email can ask both).
@@ -38,10 +40,12 @@ const sideOf = (task: MergeTask) => task.owner ?? "person";
  * absorbed tasks each name a part of the kept one (`partOf`, W-194) — an earlier due day of theirs is a sub-deadline, not the whole's.
  */
 export type MergeGroup = { kind: "duplicate" | "info_request"; keep: string; absorb: string[]; reason: string; requests: Record<string, InfoRequest>; part?: boolean };
-export type MergePair = { a: string; b: string; why: string };
+/** `score`: the title similarity that drew the pair (1 for identical titles), so the reviewer sees the likeliest pairs first. */
+export type MergePair = { a: string; b: string; why: string; score?: number };
 
 /** Titles or intents sharing this much are worth the reviewer's look; it only draws candidates, it never merges. */
 export const CANDIDATE = 0.4;
+/** Identical titles this far apart (milestone deadlines, due days) are the reviewer's to merge, not code's; never a reason to keep them apart. */
 const FAR_DEADLINES_DAYS = 21;
 const DUE_APART_DAYS = 7;
 
@@ -94,19 +98,22 @@ export function partOf(part: MergeTask, whole: MergeTask): boolean {
 const days = (a: string, b: string) => Math.abs(Date.parse(`${a}T12:00:00Z`) - Date.parse(`${b}T12:00:00Z`)) / 86_400_000;
 
 /**
- * What code says about two tasks: the same work only when the titles are identical as compared, never when the structure keeps them apart,
- * and otherwise a candidate for the reviewer (`unsure`) or nothing worth a look. Which differently worded titles mean the same work —
- * 汇集 / 整理, 作业 2 / 作业 3 — is the reviewer's call.
+ * What code says about two tasks: the same work only when the titles are identical as compared and nothing else tells them apart; a
+ * candidate for the reviewer (`unsure`) when the titles or intents are alike, or identical but serving far-apart milestones or due days;
+ * otherwise nothing worth a look. Only the line, the project and the side (person / assistant) are structural. Which differently worded
+ * titles mean the same work — 汇集 / 整理, 作业 2 / 作业 3, the midterm's and the final's material — is the reviewer's call.
  */
 export function comparePair(a: MergeTask, b: MergeTask, locale?: Locale): { verdict: "same" | "unsure" | "different"; why: string; score: number } {
   const t = tFor(locale);
   if (a.identityId !== b.identityId || a.projectId !== b.projectId) return { verdict: "different", why: t("不同主线或项目"), score: 0 };
   if (sideOf(a) !== sideOf(b)) return { verdict: "different", why: t("一个是本人的工作，一个是助手的准备或问题"), score: 0 };
-  if (a.dueDate && b.dueDate && days(a.dueDate, b.dueDate) > DUE_APART_DAYS) return { verdict: "different", why: t("截止日相差一周以上"), score: 0 };
-  if (a.milestoneId !== b.milestoneId && a.milestoneDeadline && b.milestoneDeadline && days(a.milestoneDeadline, b.milestoneDeadline) > FAR_DEADLINES_DAYS)
-    return { verdict: "different", why: t("服务的里程碑截止相差三周以上"), score: 0 };
   const titleA = normalizeTaskTitle(a.title), titleB = normalizeTaskTitle(b.title);
-  if (titleA && titleA === titleB) return { verdict: "same", why: t("标题相同"), score: 1 };
+  if (titleA && titleA === titleB) {
+    if (a.dueDate && b.dueDate && days(a.dueDate, b.dueDate) > DUE_APART_DAYS) return { verdict: "unsure", why: t("标题相同，截止日相差一周以上"), score: 1 };
+    if (a.milestoneId !== b.milestoneId && a.milestoneDeadline && b.milestoneDeadline && days(a.milestoneDeadline, b.milestoneDeadline) > FAR_DEADLINES_DAYS)
+      return { verdict: "unsure", why: t("标题相同，服务的里程碑截止相差三周以上"), score: 1 };
+    return { verdict: "same", why: t("标题相同"), score: 1 };
+  }
   const score = textSimilarity(titleA, titleB);
   const intents = textSimilarity(normalizeTaskTitle(a.intent), normalizeTaskTitle(b.intent));
   if (score >= CANDIDATE || intents >= CANDIDATE) return { verdict: "unsure", why: t("标题相似度 {{score}}、说明相似度 {{intents}}", { score, intents }), score };
@@ -192,7 +199,7 @@ export function planMerges(tasks: MergeTask[], sameByModel: ReadonlySet<string> 
     if (pair.verdict === "same" || (model && pair.verdict === "unsure")) {
       parent.set(find(b.id), find(a.id));
       why.set(find(a.id), model && pair.verdict !== "same" ? t("复核判断为同一项工作") : pair.why);
-    } else if (pair.verdict === "unsure") unsure.push({ a: a.id, b: b.id, why: pair.why });
+    } else if (pair.verdict === "unsure") unsure.push({ a: a.id, b: b.id, why: pair.why, score: pair.score });
   }
   const clusters = new Map<string, MergeTask[]>();
   for (const task of rest) clusters.set(find(task.id), [...(clusters.get(find(task.id)) ?? []), task]);
