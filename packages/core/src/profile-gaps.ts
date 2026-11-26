@@ -8,6 +8,7 @@ import { roughWindow } from "./rough-dates";
  * A deadline the person said there is none of, typed as the answer to the app's own deadline question (IR-015: typed words are written as
  * the fact only when they say a day, or that there is none). Moved here from the checklist on 2026-11-25, which no longer reads fact values.
  */
+// rule: profile-gaps.no-deadline
 export const NO_DEADLINE = /没有截止|无截止|不设截止|no deadline/i; // i18n-ignore: matched against the person's answer
 import { tFor, type Locale } from "./i18n";
 import { ruleFired } from "./rule-spec";

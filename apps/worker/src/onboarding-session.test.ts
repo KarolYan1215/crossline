@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore, interviewChecklistFor, rateInsight, writeExtractState } from "@crossline/db";
 import { cardWordsHead, documentsByRef, DISCLOSURE_PLACEHOLDER, LESSON_QUESTION, PROFILE_SECTIONS_SETTING, ONBOARDING_STAGES, PROFILE_FRAMEWORK, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
-  type OnboardingProgress, type ProfileCard } from "@crossline/core";
+  type OnboardingProgress, type ProfileCard, setRuleSink, type RuleFiredLine } from "@crossline/core";
 import { createOnboardingSessionRunner as createRunner, enqueueInterview, finishInterview, INSTRUCTIONS, interviewQueueKey, ONBOARDING_SKILL, readQueued, stageGuide,
   steerInterview } from "./onboarding-session";
 import { correctedSince, correctionUnread, INSTRUCTIONS as EXTRACT_INSTRUCTIONS } from "./onboarding-extract";
@@ -53,15 +53,14 @@ beforeEach(() => {
   store = new CrosslineStore(":memory:");
   workspaceId = store.createPrincipalWithWorkspace("user-1", "个人 workspace").workspace.id;
 });
-afterEach(() => { store.close(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
+afterEach(() => { store.close(); setRuleSink(undefined); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 /**
- * The record-only rules that fired in this test (`ruleFired`, 2026-11-25): with no data dir each is a JSON line on stdout, caught here.
+ * The record-only rules that fired in this test (`ruleFired` under `interview.record`, 2026-11-25), caught by a sink of the test's own.
  */
 function watchFired(): () => Array<{ rule: string; detail?: string }> {
-  vi.stubEnv("CROSSLINE_DATA_DIR", "");
-  const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
-  return () => info.mock.calls.map(([line]) => { try { return JSON.parse(String(line)) as { type?: string; rule: string; detail?: string }; } catch { return { rule: "" }; } })
-    .filter((item) => (item as { type?: string }).type === "rule.fired");
+  const lines: RuleFiredLine[] = [];
+  setRuleSink((line) => lines.push(line));
+  return () => lines.filter((line) => line.id === "interview.record").map((line) => ({ rule: String(line.rule), detail: String(line.detail) }));
 }
 
 // A test round's `insight` is the dialogue's one card (`insights`, 2026-11-14): an empty one is none. Its question is the same every

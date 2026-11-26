@@ -16,6 +16,7 @@
  * Coverage is per symbol, not per test case: the covering test file must name the symbol or the test that exercises it.
  */
 export type RuleLayer = "L0" | "L1" | "L2" | "L3" | "L4";
+// rule: interview.record — the "record" verdict's firings go to `ruleFired("interview.record", { rule })`.
 export type RuleVerdict = "keep" | "return" | "model" | "record" | "delete";
 
 export type InterviewRule = {
@@ -437,7 +438,7 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
   { id: "IR-195", layer: "L0", verdict: "keep", status: "active", rule: "回复里问的题记进问题账本；本人下一条回复（卡片行除外）在读账本之前写成它的回答",
     code: { file: `${WORKER}/question-ledger.ts`, symbol: "answerMainQuestions", test: `${WORKER}/question-ledger.test.ts` } },
   { id: "IR-196", layer: "L0", verdict: "keep", status: "active", rule: "只记录的规则触发时写一行 rule-fired.jsonl（数据目录下的 telemetry），不进账本、不发事件",
-    code: { file: `${WORKER}/rule-fired.ts`, symbol: "ruleFired", test: `${WORKER}/rule-fired.test.ts` } },
+    code: { file: `${CORE}/rule-spec.ts`, symbol: "ruleFired", test: `${CORE}/rule-spec.test.ts` } },
   { id: "IR-197", layer: "L2", verdict: "model", status: "active", rule: "对着账本快照逐项判清单：answered / partial / missing / not_applicable，带逐字依据",
     text: { file: INTERVIEW_SKILL, anchor: "**对着账本快照判清单，不靠记忆。**" } },
   { id: "IR-198", layer: "L2", verdict: "model", status: "active", rule: "出题前按意思对照已问题目：同义不再问，答了一部分只问缺的；每道题写 gist、repeats、followUp",

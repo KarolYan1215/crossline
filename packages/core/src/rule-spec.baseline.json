@@ -125,7 +125,6 @@
  "packages/core/src/interview-checklist.ts::/^(假设|assumption|assumed)[：:]/i",
  "packages/core/src/interview-checklist.ts::/不固定|没有固定|没固定|记不清|说不准|随机|看情况|看课表|no fixed|not sure|varies/i",
  "packages/core/src/interview-checklist.ts::/周[一二三四五六日天末]|星期|礼拜|工作日|每天|每晚|每早|weekday|weekend|daily|monday|tuesday|wednesday|thursday|friday|saturday|sunday/i",
- "packages/core/src/interview-checklist.ts::/没有截止|无截止|不设截止|no deadline/i",
  "packages/core/src/ledger.ts::/^(元|cny|rmb|usd|美元|eur|欧元|hkd|cad|gbp)$/i",
  "packages/core/src/life.ts::/^(公司|办公室|单位|学校|校园|实验室|lab|office|work|campus|school)$/i",
  "packages/core/src/life.ts::/https?:\\/\\/|\\bzoom\\b|\\bteams\\b|google meet|\\bmeet\\.google|\\bwebex\\b|\\bonline\\b|\\bremote\\b|\\bvirtual\\b|线上|远程|在线|视频会议|腾讯会议|飞书会议|钉钉会议/i",

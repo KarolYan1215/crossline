@@ -110,7 +110,7 @@
 - 托管 web 搜索的结果不经过 Crossline，工具模式看不到，所以「读网页」本身不算污点来源；网页只在开始时作为 `input.untrusted: ["page"]` 或保存的网页文件计入。
 - ChatGPT 连接器（Gmail、Drive）的内容表里记为 `private`（本人自己的账户），读它不污染运行；被污染的运行不再开连接器。
 - 聊天摘要、录音转写这类「别人的话」的文件，`read_document` 不算外部来源（录音来的捕获另有 `RECORDING_CAPTURE_PREFIX` 一律等本人）。
-## 10. Skill 供应链 ✅ 已实现 2026-11-25
+## 11. Skill 供应链 ✅ 已实现 2026-11-25
 
 本人决定（2026-11-25）：公开 skill 继续自动安装，不改成审批制，只加强扫描；读过不可信内容的工作流修订要本人采纳；shell 与文件工具不能写 skill 目录。实现记录见 `docs/claude/skill-library.md`（「Skill supply chain」「Shell and file tools never write a skill folder」「A revision that read someone else's words waits for the person」三条）。
 
@@ -126,7 +126,7 @@
 **与 taint-tools 会话的衔接（合并时接上）**：本会话不改 `agent-task.ts`，污点只从现有字段和文件判断（`revisionTaint`）。taint-tools 把 `flow-*`、`collect-*` 标为不可信后，只要它落在以下任一处，这里自动认得：`agent.task.requested` 的 `untrusted`（标签数组或 `true`）或 `profile: "untrusted-input"`；结果文件夹里的 `untrusted.json` 或 `.untrusted`。现在已经按 `inputs` 路径里的 `collect-*`（标 `site`）、`flow-*`（标 `workflow-output`）和 `agent.task.completed.searches > 0`（标 `web`）判断，taint-tools 合并后这几条可留作兜底。
 
 **未做 / 后续**：Skill 库页面还不显示 lock 的禁用状态与原因；「全部按推荐」（`apps/web/lib/answer-all.ts`）会以本人名义采纳待确认的结果，包括待定修订——要不要把待定修订排除在「全部按推荐」之外，留给本人定。
-## 10. 联网外泄（本人决定 2026-11-25：拆出不带隐私的搜索子调用）
+## 12. 联网外泄（本人决定 2026-11-25：拆出不带隐私的搜索子调用）
 
 **问题**：此前每个 Skill 线程默认开 Codex 的 hosted `web_search: live`（`withSourceDefaults`），去标识只靠一句提示（`SOURCE_ORDER_INSTRUCTION`）。拿着整场访谈、画像、120 条事实、上传文件全文的模型，可以把这些写进搜索词或带查询串的网址发出去；provider 路径的 `web_fetch` 经 `safeGet` 只拒私网地址，带查询串的 GET 照样放行；调用方事后打开模型引用的网址核实来源，也会替模型把它拼的网址发出去。
 
@@ -166,7 +166,7 @@
 - 一个会话在升级前以 live 开的访谈线程（内存里最多留 1 小时），升级后续轮再搜会被当作不允许的工具拦下，重试即可。
 
 **验证**：`packages/core/src/web-egress.test.ts`（标识、逐字片段、网址、编码串、围栏），`packages/codex/src/skill-runner.test.ts`（默认改为 `web_research`、scout 不拿查阅、闸门拒绝时 scout 不启动、读不出 guard 时 fail closed、替身 `web_fetch` 只开结果里的网址），`apps/worker/src/web-research-split.test.ts`（真实 runner + 假 runtime：主线程 `web_search: disabled` 且有 `web_research`，含姓名的 query 被拒，scout 线程 live、提示里没有姓名和事实，回答带围栏，`audit.webUrls`；live 运行里出现姓名的 `webSearch` 项结束运行）。本机真跑：`scripts/web-research-check.ts`（2026-11-25，本机 Codex 登录，额度 5 小时窗口已用 27%）：material-researcher 拿着虚构的私人上下文（姓名、学号、导师要求），主线程没有搜索，调了一次 `web_research`（3 条一般主题的英文 query，purpose 不含个人细节），scout（`gpt-6-luna`）85 秒返回 5 个页面，主运行 124 秒完成，引用的 4 个来源都在 `audit.webUrls` 里。
-## 10. 主动提问（2026-11-25） ✅ 已实现
+## 13. 主动提问（2026-11-25） ✅ 已实现
 
 本人原话：「模型如果有不确定的问题，给模型一个主动提问工具，允许其向用户提问获取信息（前提是用户应该知道这个信息）。」借鉴 LangGraph `interrupt`、MCP elicitation 与 Horvitz 混合主动（docs/competitors.md「主动询问的范式」）：有把握就做，只有本人知道的才问，问的时候先按假设往下做，不让运行停下来等人。
 
@@ -177,7 +177,7 @@
 - **接入**：`step-planner`（与拆步骤计划里的 `questions` 分工：`ask_person` 只问「步骤现在就会错」的事实，能等周复盘的仍写进 `questions`，同一问题不两头问；拦截时也读得到已答的步骤问题）、`goal-backplanner`（只有本人知道的输入用 `ask_person` 并按假设拆分，`blockers` 的 `what`/`whoHas` 留给别人掌握或要去获取的东西）、`manualbook` 的设计器（只问会改变本人学哪几步、怎么学的事）。三处都经 `optionalTools` 提供：不能调用函数的路线不提供工具，运行照旧。
 - **Accretion 账**：新增一个事件类型 `person.question.asked`（读者：待确认卡片 `skill_question`；`ask-tool.ts` 找可并入的开放问题）和一个 ask kind `skill_question`（读者：`collectAsks`/`answerAsk`）。没有复用 `agent.question.*`：那条线是助手运行中等 10 分钟的同步提问，15 分钟后被自检过期，这里的问题要留到本人回答；状态和答案复用问题账本，答案复用 `profile_facts`，重跑复用现有事件，没有新设置项和环境变量。
 - 测试：`apps/worker/src/ask-tool.test.ts`（已答拦截、每次上限、同题并入与重跑对象、按假设不重跑、不可信运行禁链接、推送条件、工具拼接）、`apps/web/lib/skill-questions.test.ts`（卡片、回答成为事实、blocking 任务重排与里程碑重新倒推、周复盘、任务关闭后不再问）。
-## 10. 评测与消融（2026-11-25）
+## 14. 评测与消融（2026-11-25）
 
 本人要求：规则删不删用数据决定；关键 Skill 测一致性。CI 不跑模型评测（仓库公开、没有凭据），确定性部分进 vitest。怎么跑、怎么登记见 `docs/claude/operational-scripts.md`「规则登记、评测与消融」。
 
@@ -203,7 +203,7 @@
 - `money.*`、`activity.private-window`：拒绝消融（设计如此）。
 
 **下一步（数据够了再做）**：遥测攒 30 天后按 `ablate.ts --telemetry` 看三条兜底的触发次数，零触发即删；邮件分拣把 `movie-night` 的期望改成「不进待办」后再测；拆步骤对本人记录的做法利用不足，值得给 Skill 更好的上下文，而不是加规则。
-## 10. 机会放宽（2026-11-25）
+## 15. 机会放宽（2026-11-25）
 
 本人原话：
 
@@ -215,7 +215,7 @@
 - **资格交给模型。** `crossline-opportunity-reader` 每条给 `fit`：`stageFit`（fits / stretch / wrong_stage）、`directionFit`（same / adjacent / unrelated）、`reachable`、`partialRequirements`、`agentCanPrepare`、`why`。判断标准写在 SKILL.md「How it fits the person」，是目标不是正则。输入 v4 带 `person`：确认过的资料事实（不含姓名、邮箱、电话、地址、证件号等标识，不含「假设」，≤30）和各条活跃监视项的「标题：判断」（`seeking`，≤12）。
 - **代码只验结构**（`fitOf`）并照判（`verdictFromFit`）：只有 `wrong_stage`、`unrelated`、`reachable: false` 不推；其余都是 eligible，fit 存在 verdict 上。没有 fit（列表里的 CFP、旧行）算 eligible，不再问。
 - **删掉的确定性规则**：`judgeEligibility`、`meets`、`applicantFrom`、`degreeStageOf`、`DEGREE_STAGES`、`FACT_HINTS`、欧盟/国家词表与 `countriesIn`/`countryMeets`、`STEM_FIELD`/`OPEN_TO_ALL`/`ANY_FIELD`/`broadMeets`、`eligibilityQuestion` 和维度标签、db 的 `rejudgeOpportunities` 与 worker 的 `rejudge`、条款里的 `accepts`。保留：`phishingSigns`（安全）、引文核验、`eligibilityAnswer`（只为旧卡片上的问题）。
-- **分歧只记不拦。** 代码看监视项全是找实习、模型却没判正职为 `wrong_stage`（`stageConflict`）时，照模型，写一行 `rule-fired`：`ruleFired(rule, detail, dataDir?, now?)` 在 `apps/worker/src/rule-fired.ts`，追加到 `<CROSSLINE_DATA_DIR>/telemetry/rule-fired.jsonl`（无数据目录时打到 stdout），不进账本。这是一致性评估那边规划中 `ruleFired` 的本地替身，接口相同，合并时只换 import。
+- **分歧只记不拦。** 代码看监视项全是找实习、模型却没判正职为 `wrong_stage`（`stageConflict`）时，照模型，写一行 `rule-fired`：核心的 `ruleFired("opportunity.stage-conflict", …)`（RULE_SPEC 登记，record 模式），写进 `<数据目录>/telemetry/rule-fired.jsonl`，不进账本。
 - **`reachable: false` 也不推**（国籍或绿卡、安全审查、年龄、别校成员）。按「有可能能够到」理解为够不到的不推；若本人要连这些也看，改 `verdictFromFit` 一行即可。**待本人确认。**
 - **任务去重**：`task-merge.ts` 删掉「截止日相差 7 天以上」和「服务的里程碑截止相差 21 天以上」两条硬「不同」。同标题的这两种情况现在是「不确定」（score 1），交给已有的模型复核；相似度只挑候选。`partOf` 的数字检查保留：它只管代码自己合并部分任务，那一对仍会交给模型。
 
@@ -251,7 +251,7 @@
 - `travel-grant`：以前读取器给出自由文本条款时，卡片会问本人；现在不再问，卡片列出还差什么（`partial`）。
 
 真模型回放（`--live`）这次没有跑：需要 Codex 额度和独立的 Codex home。读取器的提示词与 schema 改了，下次真跑应先看 `fit` 的分布，特别是 `wrong_stage` 有没有判得过严。
-## 访谈账本驱动（2026-11-25）
+## 16. 访谈账本驱动（2026-11-25）
 
 本人原话：访谈清单是模型对着账本确认，不是正则判断；账本是可信的、不会被上下文压缩的外部记忆，保证不重复追问、也不漏问。打回改为每轮更新账本、把最新的账本和规则写进 prompt，让模型自己避免复述经历和编造日期。出题检查同上：靠账本排除，模型按意思确认，不出看着不同、意思相同的题。
 
@@ -267,7 +267,7 @@
 - 清单：只判结构——计数（主线、里程碑、文件归属）、本人的点选、账本里每周重复的日期、整理按句子编号写出的画像部分；凡是读字面判断「说没说清」的正则删掉（`statesSchedule`、`VAGUE_SCHEDULE`、`WEEKDAY`、`CLOCK`、`DESCRIBES_LINE`、画像部分的槽位名、`ASSUMPTION_PREFIX`、项目槽位名、`NO_DEADLINE` 在清单里的用法），这些项改看模型的判定。模型的判定只核对依据（`checkChecklistVerdicts`，IR-192）：id 在快照里、状态四选一、answered/partial 有逐字依据且所引回复不是披露、not_applicable 写理由。
 - 出题：只退回结构（重复 id、重复选项、两个以上日子选项、日期题缺 `about`、换说法问应用自己的待问题）和模型自己的判定（`repeats` 标了答过的题却不是 `followUp`，IR-047/IR-194 附本人的回答退回）。字面相似（IR-047）、同一件事第三次（IR-014）、一轮第六题（IR-051）、同一日期主题再问（IR-126）只记录。
 - 回复：只退回安全（本人回复有自伤字眼的确认 IR-046、回复和卡用自伤字眼 IR-123、自由文本不标 `mark_round` IR-181）。编造日期（IR-006）、披露独有原话（IR-123 的后半）、卡片写法（IR-190）、「还没答」（IR-191）、不该问的 askLesson（IR-124，应用照旧不出那道题）、开始标准没齐说可以开始和报分数（IR-165）只记录，回复不再删句。编造的日子进不了账本和日历：整理只能引 `reply-N`/`src-N`，日期要落在原话的窗口里（IR-005）。
-- 记录写到 `<CROSSLINE_DATA_DIR>/telemetry/rule-fired.jsonl`（`apps/worker/src/rule-fired.ts`，IR-196），不进账本、不加事件类型；`onboarding.round_edited` 不再带 `noted`。consistency-eval 分支有同形的 `ruleFired`，合并时改接它。
+- 记录走核心的 `ruleFired("interview.record", { rule: "IR-…" })`（RULE_SPEC 一条登记覆盖全部 record 规则，IR-196），写到 `<数据目录>/telemetry/rule-fired.jsonl`，不进账本、不加事件类型；`onboarding.round_edited` 不再带 `noted`。
 
 **Skill。** 访谈 Skill 加「账本快照」一节（不加核心规则，仍是 15 条）：对着快照判清单（IR-197）、按意思对照已问题目并写 `gist`/`repeats`/`followUp`（IR-198）、一轮一个主问题最多五道、同一件事最多问两次再记成假设、回复里的日子只用快照/文件/调研里的（IR-199）；核心规则 6 的「在线程里找到那一问」改成在快照里找。
 

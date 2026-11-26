@@ -123,6 +123,11 @@ export const RULE_SPEC = {
     what: "hoursFromText: 「每周约 12 小时」「10–20 小时」 as a number of hours.",
     readers: "plan-stats' stated shares (the person's own weekly hours per line).",
     retire: "The interview stores weekly hours as a number slot; then the facts are read as numbers." },
+  // ── interview-rules.ts ───────────────────────────────────────────────────────────────────────────────────────────────
+  "interview.record": { file: `${CORE}/interview-rules.ts`, kind: "semantic", mode: "record",
+    what: "The interview's record-only checks (verdict \"record\" in INTERVIEW_RULES: IR-006, IR-014, IR-047, IR-051, IR-123's disclosure half, IR-124, IR-126's repeat, IR-165, IR-190, IR-191); the line's `rule` names which.",
+    readers: "None at run time; the interview replays count them (docs/claude/profile-first-loop.md).",
+    retire: "Each IR rule retires on its own status in INTERVIEW_RULES; this entry goes when no record-only IR rule is left." },
   // ── profile-gaps.ts ──────────────────────────────────────────────────────────────────────────────────────────────────
   "profile-gaps.weekly-skip": { file: `${CORE}/profile-gaps.ts`, kind: "semantic", mode: "enforce",
     what: "An undated item titled 每周/weekly recurs, so no 「大致日期」 question.",
@@ -143,7 +148,11 @@ export const RULE_SPEC = {
   "profile-gaps.states-day": { file: `${CORE}/profile-gaps.ts`, kind: "evidence", mode: "enforce",
     what: "statesDay/statesTime: typed text under 「我来写日期」 says a day or a time (月/周一/上午/a rough window) before it is written as a fact.",
     readers: "answeredGapFacts (what becomes a confirmed fact).",
-    retire: "A date picker replaces free text for these answers." }
+    retire: "A date picker replaces free text for these answers." },
+  "profile-gaps.no-deadline": { file: `${CORE}/profile-gaps.ts`, kind: "evidence", mode: "enforce",
+    what: "NO_DEADLINE: 没有截止/no deadline typed under the app's own deadline question is an answer (IR-015).",
+    readers: "answeredGapFacts (whether 「没有截止」 is written as the fact).",
+    retire: "The deadline question offers 「没有截止」 as an option, so the answer is a pick rather than typed text." }
 } as const satisfies Record<string, RuleSpec>;
 // i18n-ignore-end
 

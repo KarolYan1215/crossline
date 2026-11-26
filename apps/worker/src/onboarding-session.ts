@@ -10,7 +10,7 @@ import {
   inventedDates, type KnownSources, type OnboardingDialogue, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, ONBOARDING_LAST_FAILURE, readPartialTurn, type OnboardingProgress, calendarWeek,
   tFor, flowOf, INTERVIEW_FLOW_STAGES, INTERVIEW_ROUND_LIMIT, ONBOARDING_STAGES, readCardAnswers, mergeInstrumentAnswers, readInstrumentAnswers,
   PROFILE_INSTRUMENTS_SETTING, type InterviewFlow, type ProfileCard, checkChecklistVerdicts, judgedItems, renderInterviewSnapshot, datesWritten,
-  type StoredVerdict
+  type StoredVerdict, ruleFired
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, steerTurn, type CodexRpcBoundary, type SkillProgress, type SkillTools } from "@crossline/codex";
 import {
@@ -21,7 +21,6 @@ import { sourceIds } from "./source-ids";
 import { localeOf } from "./locale";
 import { adoptLineGoal, identityLines } from "./lines";
 import { answerMainQuestions, checklistAnswered, interviewLedger, linesAnsweredUnread, recordAsked, recordReplyAnswers, recordRound, syncGapQuestions } from "./question-ledger";
-import { ruleFired } from "./rule-fired";
 import { mergeTools } from "./ledger-index";
 import { PART_ROUNDS, SATURATED_RUNS, questionsAsked, roundsInPart, standingLines } from "./onboarding-standing";
 import { interviewReadTools, READ_TOOLS_INSTRUCTIONS } from "./onboarding-read-tools";
@@ -881,7 +880,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     if (edits.removed.length || edits.added.length) store.appendEvent({ ownerId, workspaceId,
       idempotencyKey: `onboarding:round-edited:${sessionId}:${replyId}:${heardAt}`, type: "onboarding.round_edited", entityId: sessionId,
       payload: { replyId, ...edits } });
-    for (const fired of firedAfter(result.output, desk)) ruleFired({ ...fired, workspaceId, sessionId, replyId });
+    for (const fired of firedAfter(result.output, desk)) ruleFired("interview.record", { key: `${sessionId}|${replyId}|${fired.rule}|${fired.detail}`,
+      rule: fired.rule, detail: fired.detail, workspaceId, sessionId, replyId });
     // Observation cards that passed their check (`checkInsights`). Under the points rules every card is one hypothesis of the log: one on
     // record by its id, or a new one added to the log here under the reply's number, so 准 / 不准 lands on what it rates. Cards ready together
     // come in one round and are answered one after another (the owner, 2026-11-14). Never beside the safety check.
