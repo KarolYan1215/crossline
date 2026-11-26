@@ -169,7 +169,8 @@ describe("eligibility, judged by the reader's fit (2026-11-25)", () => {
     expect(partial).toMatchObject({ state: "eligible", fit: { partialRequirements: ["无顶会论文"], agentCanPrepare: ["求职信草稿"] } });
     expect(verdictFromFit(fit({ stageFit: "wrong_stage", why: "正职，本人在找实习" }))).toMatchObject({ state: "ineligible", failed: [{ dim: "degree_stage", why: "正职，本人在找实习" }] });
     expect(verdictFromFit(fit({ directionFit: "unrelated" }))).toMatchObject({ state: "ineligible", failed: [{ dim: "field" }] });
-    expect(verdictFromFit(fit({ reachable: false }))).toMatchObject({ state: "ineligible", failed: [{ dim: "other" }] });
+    // A bar the person cannot clear is shown, marked 「不满足」 on the card, after the reachable ones (the owner, 2026-11-26).
+    expect(verdictFromFit(fit({ reachable: false }))).toMatchObject({ state: "eligible", fit: { reachable: false } });
     // No fit (a listed call for papers, a reading from before): eligible, never a question.
     expect(verdictFromFit(undefined)).toEqual({ state: "eligible", basis: [] });
   });
@@ -207,6 +208,10 @@ describe("eligibility, judged by the reader's fit (2026-11-25)", () => {
     const sorted = [row("late-same", 0.7, {}, "2027-01-10"), row("adjacent", 0.9, { directionFit: "adjacent" }, "2026-11-30"), row("soon-same", 0.6, {}, "2026-12-01")]
       .sort(offerOrder("2026-11-25")).map((item) => item.id);
     expect(sorted).toEqual(["soon-same", "late-same", "adjacent"]);
+    // One the person cannot clear comes after every one they can, however close its deadline.
+    const withBar = [row("barred", 0.9, { reachable: false }, "2026-11-28"), row("adjacent", 0.9, { directionFit: "adjacent" }, "2026-12-20")]
+      .sort(offerOrder("2026-11-25")).map((item) => item.id);
+    expect(withBar).toEqual(["adjacent", "barred"]);
   });
 
   it("still reads an answer to a question on a card from before", () => {

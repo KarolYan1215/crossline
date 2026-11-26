@@ -51,9 +51,11 @@ export const localDay = (now: Date) => new Intl.DateTimeFormat("en-CA", { timeZo
 const canonical = (url: string) => { try { return new URL(url).toString(); } catch { return url; } };
 /**
  * What the card shows the person: what is still missing (the reader's partial requirements, 2026-11-25; a question on a row read before),
- * a clash to settle (the verdict kept on the row, §17.7), or a plain offer.
+ * a clash to settle (the verdict kept on the row, §17.7), or a plain offer; first of all a bar the person cannot clear, pushed and marked
+ * 「不满足」 (owner, 2026-11-26).
  */
-const labelOf = (row: StoredOpportunity): Push["label"] => row.verdict.state === "unknown"
+const labelOf = (row: StoredOpportunity): Push["label"] => row.verdict.state === "eligible" && row.verdict.fit?.reachable === false ? "push_unmet"
+  : row.verdict.state === "unknown"
   || (row.verdict.state === "eligible" && (row.verdict.fit?.partialRequirements.length ?? 0) > 0) ? "partial"
   : row.feasibility?.state === "conflict" ? "push_conflict" : "push";
 

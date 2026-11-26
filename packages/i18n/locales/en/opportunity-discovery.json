@@ -1,5 +1,6 @@
 {
   "还差：{{items}}。": "Still missing: {{items}}.",
+  "不满足：{{why}}。": "Not met: {{why}}.",
   "可代为准备：{{items}}。": "The assistant can prepare: {{items}}.",
   "阶段不对": "Wrong stage",
   "方向无关": "Unrelated direction",
