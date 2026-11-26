@@ -1,10 +1,10 @@
 import { quoteSupportsDate } from "./date-schema";
-import { countryKey } from "./feasibility";
 import { tFor, type Locale } from "./i18n";
-import { ELIGIBILITY_DIMS, type ApplicationSlot, type DatedQuote, type EligibilityDim, type EligibilityRule, type EligibilityVerdict, type NeedSource, type Opportunity,
-  type OpportunityNeed } from "./opportunity";
+import { DIRECTION_FITS, ELIGIBILITY_DIMS, STAGE_FITS, type ApplicationSlot, type DatedQuote, type EligibilityDim, type EligibilityRule, type EligibilityVerdict, type NeedSource,
+  type Opportunity, type OpportunityFit, type OpportunityNeed } from "./opportunity";
 import type { EventPlace } from "./opportunity-watch";
-import { CLASSIFICATION_PROPERTIES, CLASSIFICATION_REQUIRED, type RawClassification } from "./opportunity-tags";
+import { CLASSIFICATION_PROPERTIES, CLASSIFICATION_REQUIRED, KEEP_RELEVANCE, bestRelevance, isReading, pushable, type RawClassification,
+  type TaggedOpportunity } from "./opportunity-tags";
 
 /**
  * The discovery half of the opportunity agent (docs/opportunity-agent.md §5–8, track A): what a line needs from outside, where to look,
@@ -27,18 +27,21 @@ export const OPPORTUNITY_READER_SKILL = "crossline:crossline-opportunity-reader"
 
 // ── ① Needs (read by the watch migration and `watchFromProposal`; the Skill proposes watches since §17.2) ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-const TERM_SCHEMA = { type: "object", additionalProperties: false, required: ["dim", "rule", "quote", "accepts"], properties: {
+/** A term on who may take part, quoted from the page; the reader's `fit` (not code) says how the person stands against it (2026-11-25). */
+const TERM_SCHEMA = { type: "object", additionalProperties: false, required: ["dim", "rule", "quote"], properties: {
   dim: { type: "string", enum: [...ELIGIBILITY_DIMS] },
   rule: { type: "string", minLength: 1, maxLength: 200 },
-  quote: { type: "string", maxLength: 300 },
-  accepts: { type: "object", additionalProperties: false, required: ["kind", "values", "min", "max"], properties: {
-    kind: { type: "string", enum: ["one_of", "range", "text"] },
-    values: { type: "array", maxItems: 12, items: { type: "string", maxLength: 60 } },
-    min: { type: "number" }, max: { type: "number" } } } } } as const;
+  quote: { type: "string", maxLength: 300 } } } as const;
+
+const FIT_LIST = (max: number) => ({ type: "array", maxItems: max, items: { type: "string", maxLength: 120 } }) as const;
+/** The reader's judgement of how an opening fits the person (`OpportunityFit`). */
+const FIT_SCHEMA = { type: "object", additionalProperties: false, required: ["stageFit", "directionFit", "reachable", "partialRequirements", "agentCanPrepare", "why"],
+  properties: { stageFit: { type: "string", enum: [...STAGE_FITS] }, directionFit: { type: "string", enum: [...DIRECTION_FITS] }, reachable: { type: "boolean" },
+    partialRequirements: FIT_LIST(5), agentCanPrepare: FIT_LIST(4), why: { type: "string", maxLength: 240 } } } as const;
 
 export type EligibilityAccepts = { kind: "one_of" | "range" | "text"; values: string[]; min: number; max: number };
-/** A term as the reader returns it: the contract's rule plus what it accepts, so code (not a model) can compare it with the person. */
-export type EligibilityTerm = EligibilityRule & { accepts: EligibilityAccepts };
+/** A term as the reader returns it. `accepts` is what readings before 2026-11-25 gave for code to compare; no reading gives it now. */
+export type EligibilityTerm = EligibilityRule & { accepts?: EligibilityAccepts | undefined };
 export type ProposedNeed = {
   key: string; kind: OpportunityNeed["kind"]; title: string; why: string; factIds: string[]; milestoneIds: string[];
   window: { opensMonth: number; closesMonth: number; basis: string; sourceUrl: string };
@@ -109,8 +112,8 @@ export function mergeNeeds(kept: StoredNeed[], lineId: string, fresh: StoredNeed
 export const OPPORTUNITY_READING_SCHEMA = {
   type: "object", additionalProperties: false, required: ["items", "blocked"], properties: {
     items: { type: "array", maxItems: 12, items: { type: "object", additionalProperties: false,
-      required: ["pageId", "url", "title", "organizer", "kind", "deadlines", "startsAt", "cost", "location", "place", "eligibility", "needsAccount", "materials", "consents", "registrationUrl",
-        ...CLASSIFICATION_REQUIRED],
+      required: ["pageId", "url", "title", "organizer", "kind", "deadlines", "startsAt", "cost", "location", "place", "eligibility", "fit", "needsAccount", "materials", "consents",
+        "registrationUrl", ...CLASSIFICATION_REQUIRED],
       properties: {
         ...CLASSIFICATION_PROPERTIES,
         pageId: { type: "string", maxLength: 40 },
@@ -129,6 +132,7 @@ export const OPPORTUNITY_READING_SCHEMA = {
           mode: { type: "string", enum: ["online", "in_person", "hybrid", "unknown"] }, city: { type: "string", maxLength: 80 },
           country: { type: "string", maxLength: 60 }, quote: { type: "string", maxLength: 300 } } },
         eligibility: { type: "array", maxItems: 12, items: TERM_SCHEMA },
+        fit: FIT_SCHEMA,
         needsAccount: { type: "boolean" },
         materials: { type: "array", maxItems: 10, items: { type: "string", maxLength: 80 } },
         consents: { type: "array", maxItems: 6, items: { type: "string", maxLength: 160 } },
@@ -143,6 +147,8 @@ export type ReadItem = {
   /** Optional in the type for answers and fixtures written before it; the schema requires it. */
   place?: ReadPlace | undefined;
   eligibility: EligibilityTerm[]; needsAccount: boolean; materials: string[]; consents: string[]; registrationUrl: string;
+  /** How it fits the person (2026-11-25); optional for answers and fixtures written before, the schema requires it. */
+  fit?: OpportunityFit | undefined;
   /** The classifier's type, reason and lines (§18, reader input v3); optional for answers and fixtures written before. */
   type?: string | undefined; reason?: string | undefined; lines?: RawClassification["lines"] | undefined; lowValue?: boolean | undefined;
 };
@@ -337,11 +343,11 @@ export function opportunityFromRead(item: ReadItem, input: { lineId: string; nee
     needsAccount: item.needsAccount, materials: item.materials, consents: item.consents, foundVia: input.foundVia, foundAt: input.foundAt };
 }
 
-// ── ③ Eligibility, judged by code ───────────────────────────────────────────────────────────────────────────────────
+// ── ③ Eligibility, judged by the reader (the owner's decision of 2026-11-25) ───────────────────────────────────────────
 
 /**
- * Where the answer to each dimension is kept: a confirmed fact of the `person` line, slot `apply.<name>` (§12). The names the form-filling
- * track also fills are the contract's `APPLICATION_SLOTS`; the rest are this track's own and not sensitive.
+ * Where an answer to an eligibility term is kept: a confirmed fact of the `person` line, slot `apply.<name>` (§12). The names the
+ * form-filling track also fills are the contract's `APPLICATION_SLOTS`; the rest are this track's own and not sensitive.
  */
 export const DIM_SLOT: Record<Exclude<EligibilityDim, "other">, ApplicationSlot | string> = {
   degree_stage: "degree_stage", year: "year", graduation_year: "graduation_year", citizenship: "citizenship", work_authorization: "work_authorization",
@@ -356,194 +362,62 @@ function hashText(text: string): string {
   return (h >>> 0).toString(36);
 }
 
-export const DEGREE_STAGES = ["high_school", "undergraduate", "masters", "phd", "postdoc", "graduate", "professional"] as const;
-/** A degree stage in words (a fact, an answer) as one of `DEGREE_STAGES`. */
-export function degreeStageOf(text: string): string | undefined {
-  const value = text.toLowerCase();
-  /* i18n-ignore-start: patterns matched against what the person wrote */
-  if (/post-?doc|博士后/.test(value)) return "postdoc";
-  if (/ph\.?\s?d|doctor|博士|博一|博二|博三|博四|博五/.test(value)) return "phd";
-  if (/master|m\.?s\.?\b|msc|硕士|研究生|研一|研二|研三/.test(value)) return "masters";
-  if (/undergrad|bachelor|b\.?s\.?\b|本科|大一|大二|大三|大四/.test(value)) return "undergraduate";
-  if (/high school|高中/.test(value)) return "high_school";
-  if (/working|professional|在职|工作/.test(value)) return "professional";
-  /* i18n-ignore-end */
-  return undefined;
-}
-
 type Fact = { identityId: string; projectId: string; slot: string; value: string; status: "confirmed" | "inferred" };
-export type Applicant = Partial<Record<EligibilityDim, { value: string; factId: string; slot?: string }>> & { terms: Record<string, { meets: boolean; factId: string }> };
-
-/** Slot names an interview used for the same thing before `apply.*` existed, tried after the person's own `apply.*` answer. */
-const FACT_HINTS: Partial<Record<EligibilityDim, RegExp>> = {
-  /* i18n-ignore-start: slot names written by the interview */
-  degree_stage: /degree|学位|学历|stage|program|年级|education/i,
-  school: /school|university|学校|院校|大学|institution/i,
-  field: /major|field|专业|方向|discipline/i,
-  graduation_year: /graduat|毕业/i,
-  region: /country|city|location|所在地|城市|国家|地区|residence/i,
-  citizenship: /citizen|nationality|国籍/i,
-  work_authorization: /visa|work_?auth|签证|工作许可/i
-  /* i18n-ignore-end */
-};
-
-/** What the ledger knows about the person for each dimension, from confirmed facts only (an inference never decides eligibility). */
-export function applicantFrom(facts: Fact[]): Applicant {
-  const confirmed = facts.filter((fact) => fact.status === "confirmed" && fact.value.trim() && !fact.value.startsWith("假设")); // i18n-ignore
-  const id = (fact: Fact) => `${fact.identityId}/${fact.projectId}/${fact.slot}`;
-  const applicant: Applicant = { terms: {} };
-  for (const fact of confirmed) {
-    if (!fact.slot.startsWith("apply.term.")) continue;
-    applicant.terms[fact.slot] = { meets: /^(yes|true|是|满足|符合|y)$/i.test(fact.value.trim()), factId: id(fact) }; // i18n-ignore
-  }
-  for (const dim of ELIGIBILITY_DIMS) {
-    if (dim === "other") continue;
-    const slot = applySlot(DIM_SLOT[dim]);
-    const own = confirmed.find((fact) => fact.slot === slot);
-    const hint = FACT_HINTS[dim];
-    // A slot name alone says little across lines (an investment line's `stage`, a course's `meeting_location`): only the person's own
-    // facts are read by name, and a degree stage from another line only when its value reads as one.
-    const found = own ?? (hint ? confirmed.find((fact) => !fact.slot.startsWith("apply.") && hint.test(fact.slot)
-      && (fact.identityId === "person" || (dim === "degree_stage" && degreeStageOf(fact.value) !== undefined))) : undefined);
-    if (found) applicant[dim] = { value: found.value, factId: id(found), ...(own ? { slot } : {}) };
-  }
-  return applicant;
+/** Slots that identify the person and say nothing about fit: never handed to the reader. */
+const IDENTIFYING = /name|email|phone|address|birth|id_number|passport|student_id|website|github|resume|^apply\.term\./i;
+/**
+ * The person as the reader judges fit against (2026-11-25): the confirmed facts of the `person` line (degree stage, school, field,
+ * graduation year, citizenship, country…; never an inference, an assumption or an identifier), and what the person is looking for — the
+ * active watches' titles and how each tells a find worth their attention. The stage the person is in is read from here by the model.
+ */
+export function readerPerson(facts: Fact[], watches: Array<{ title: string; judge: string; state: string }>): { facts: Array<{ slot: string; value: string }>; seeking: string[] } {
+  return {
+    facts: facts.filter((fact) => fact.identityId === "person" && fact.status === "confirmed" && fact.value.trim() && !fact.value.startsWith("假设") // i18n-ignore
+      && !IDENTIFYING.test(fact.slot)).slice(0, 30).map((fact) => ({ slot: fact.slot, value: fact.value.slice(0, 120) })),
+    seeking: watches.filter((watch) => watch.state === "active").map((watch) => `${watch.title}${watch.judge ? `：${watch.judge}` : ""}`.slice(0, 160)).slice(0, 12)
+  };
 }
 
-const NUMERIC: EligibilityDim[] = ["year", "graduation_year", "age", "team_size"];
-const numberIn = (text: string) => { const match = /\d+(\.\d+)?/.exec(text); return match ? Number(match[0]) : undefined; };
-const same = (a: string, b: string) => { const x = squashText(a), y = squashText(b); return Boolean(x && y) && (x === y || x.includes(y) || y.includes(x)); };
-
-// i18n-ignore-start: words read from pages and facts, never shown
-const EU = ["at", "be", "bg", "hr", "cy", "cz", "dk", "ee", "fi", "fr", "de", "gr", "hu", "ie", "it", "lv", "lt", "lu", "mt", "nl", "pl", "pt", "ro", "sk", "si", "es", "se"];
-const EEA = [...EU, "is", "li", "no"];
-const COUNTRY_GROUPS: Record<string, string[]> = { eu: EU, "european union": EU, 欧盟: EU, eea: EEA, "european economic area": EEA, 欧洲经济区: EEA };
-/** Words around a country name in a clause or a fact ("U.S. citizens", 「居住于欧盟成员国」), dropped before the name is keyed. */
-const COUNTRY_NOISE = /\b(citizens?|citizenship|nationals?|nationality|passport holders?|residing|reside|residents?|living|based|located|in|of|from|an?|the|any|member states?|countries|country|only)\b|公民|国籍|居住于|居住在|居民|成员国|国家|地区|仅限|籍/gi;
-/** Residency is not citizenship: a citizenship clause that also admits residents cannot be settled by the person's citizenship alone. */
-const RESIDENCY = /permanent resident|green card|lawful|asylee|refugee|daca|永久居民|绿卡|难民/i;
-const STEM_FIELD = /engineer|comput|electrical|science|math|physic|chemi|biolog|statist|data|robot|工程|计算机|电子|电气|数学|物理|化学|生物|统计|数据|理工/i;
-const OPEN_TO_ALL = /open to (the )?(general )?(public|everyone|all|anyone)|anyone (may|can)|no (eligibility )?restrictions?|向公众开放|面向公众|对所有人开放|任何人都?可/i;
-const ANY_FIELD = /\bany (field|discipline|major|background|subject)s?\b|\ball (fields|disciplines|majors|backgrounds)\b|不限专业|任意专业|任何专业/i;
-const ANY_STEM = /\b(any|all)\s+stem\b|stem (field|discipline|major)s?|任意 ?stem|任何 ?stem/i;
-// i18n-ignore-end
+/** A fit as the schema allows it, or undefined for an answer that has none or a malformed one (read as before: pushed, nothing ruled out). */
+export function fitOf(value: unknown): OpportunityFit | undefined {
+  const fit = value as Partial<OpportunityFit> | undefined;
+  if (!fit || !(STAGE_FITS as readonly string[]).includes(fit.stageFit ?? "") || !(DIRECTION_FITS as readonly string[]).includes(fit.directionFit ?? "")) return undefined;
+  const list = (items: unknown, max: number) => (Array.isArray(items) ? items : []).map((item) => String(item ?? "").trim()).filter(Boolean).slice(0, max).map((item) => item.slice(0, 120));
+  return { stageFit: fit.stageFit!, directionFit: fit.directionFit!, reachable: fit.reachable !== false, partialRequirements: list(fit.partialRequirements, 5),
+    agentCanPrepare: list(fit.agentCanPrepare, 4), why: String(fit.why ?? "").trim().slice(0, 240) };
+}
 
 /**
- * The countries a clause or a fact names, as keys ("U.S. citizen" → us; 「欧盟成员国」 → the 27). Every piece must name a known country or
- * group, or there is no answer: an unrecognised word is a question, never a refusal.
+ * The verdict on an opening, from the reader's fit (§7 as of 2026-11-25). The model decides; code only maps its fields: the wrong stage,
+ * an unrelated direction or a bar the person cannot clear is ineligible, everything else — a partial match, a stretch, an adjacent
+ * direction — is eligible and reaches the person with what is missing on the card. No fit (a listed call for papers, an older answer) is
+ * eligible: when in doubt, more reaches the person, never less.
  */
-export function countriesIn(text: string): Set<string> | undefined {
-  const pieces = text.toLowerCase().split(/,|;|\/|\bor\b|\band\b|、|，|或|和|及/)
-    .map((piece) => piece.replace(COUNTRY_NOISE, " ").replace(/[()（）]/g, " ").replace(/\s+/g, " ").trim()).filter(Boolean);
-  if (!pieces.length) return undefined;
-  const out = new Set<string>();
-  for (const piece of pieces) {
-    const group = COUNTRY_GROUPS[piece];
-    if (group) { for (const code of group) out.add(code); continue; }
-    const code = countryKey(piece);
-    if (!/^[a-z]{2}$/.test(code)) return undefined;
-    out.add(code);
-  }
-  return out;
-}
-/** The one country a person's fact names: the last piece that keys as one ("Madison, Wisconsin, United States" → us). */
-function personCountry(value: string): string | undefined {
-  for (const piece of value.split(/,|，/).reverse()) {
-    const found = countriesIn(piece);
-    if (found?.size === 1) return [...found][0];
-  }
-  return undefined;
-}
-/**
- * Citizenship and region compared by country, from what the clause accepts or, for a clause the reader gave as text, from its own words:
- * the person's country outside every accepted one is a clear no (D2), spellings of one country are one key.
- */
-function countryMeets(term: EligibilityTerm, value: string): boolean | undefined {
-  const sources = term.accepts.kind === "text" || !term.accepts.values.length ? [term.rule] : term.accepts.values;
-  if (term.dim === "citizenship" && [term.rule, ...sources].some((item) => RESIDENCY.test(item))) return undefined;
-  const accepted = new Set<string>();
-  for (const item of sources) {
-    const found = countriesIn(item);
-    if (!found) return undefined;
-    for (const code of found) accepted.add(code);
-  }
-  const mine = personCountry(value);
-  if (!mine || !accepted.size) return undefined;
-  return accepted.has(mine);
-}
-/** A clause that restricts nothing ("open to the public", 「不限专业」) is met by anyone; "any STEM discipline" by a STEM field on record. */
-function broadMeets(term: EligibilityTerm, applicant: Applicant): boolean {
-  if (OPEN_TO_ALL.test(term.rule) || ANY_FIELD.test(term.rule)) return true;
-  return ANY_STEM.test(term.rule) && STEM_FIELD.test(applicant.field?.value ?? "");
-}
-const COUNTRY_DIMS: EligibilityDim[] = ["citizenship", "region"];
-
-/** The question put to the person for a term the ledger cannot settle, in their language. */
-export function eligibilityQuestion(term: EligibilityTerm, locale?: Locale): string {
+export function verdictFromFit(fit: OpportunityFit | undefined, locale?: Locale): EligibilityVerdict {
+  if (!fit) return { state: "eligible", basis: [] };
   const t = tFor(locale);
-  if (term.dim === "other" || term.accepts.kind === "text") return t("是否满足：{{rule}}", { rule: term.rule });
-  return t("{{dim}}是什么？（条件：{{rule}}）", { dim: t(ELIGIBILITY_DIM_LABEL[term.dim]), rule: term.rule });
+  const why = fit.why || t("阅读器的判断");
+  if (fit.stageFit === "wrong_stage") return { state: "ineligible", failed: [{ dim: "degree_stage", rule: t("阶段不对"), why }], fit };
+  if (fit.directionFit === "unrelated") return { state: "ineligible", failed: [{ dim: "field", rule: t("方向无关"), why }], fit };
+  if (!fit.reachable) return { state: "ineligible", failed: [{ dim: "other", rule: t("有本人无法达到的硬门槛"), why }], fit };
+  return { state: "eligible", basis: [], fit };
 }
-export const ELIGIBILITY_DIM_LABEL: Record<EligibilityDim, string> = {
-  degree_stage: "学历阶段", year: "年级", graduation_year: "毕业年份", citizenship: "国籍", work_authorization: "工作许可", region: "所在地区", age: "年龄",
-  school: "学校", field: "专业领域", team_size: "团队人数", company_stage: "公司阶段", other: "其他条件"
-};
 
 /**
- * The verdict on an opportunity's terms (§7), by code: every term met → eligible; one no fact can settle → unknown, with its question; one
- * clearly not met → ineligible. Citizenship and region are compared by country key; a school or field that does not match is a question, never a refusal: two
- * spellings of one country must not turn the person away.
+ * Whether the reader's type contradicts what the person is looking for, as code reads the watch's words: a full-time job while every
+ * watch of the line looks for internships. Never a verdict — the model's fit stands ("rather more than fewer") — only a `rule-fired` line
+ * for the consistency review (docs/plans/harness-1125.md 「机会放宽」).
  */
-export function judgeEligibility(terms: EligibilityTerm[], applicant: Applicant, locale?: Locale): EligibilityVerdict {
-  const basis: Array<{ dim: EligibilityDim; factId?: string; slot?: string }> = [];
-  const questions: Array<{ dim: EligibilityDim; question: string }> = [];
-  const failed: Array<{ dim: EligibilityDim; rule: string; why: string }> = [];
-  const t = tFor(locale);
-  for (const term of terms) {
-    const direct = applicant.terms[termSlot(term.rule)];
-    if (direct) {
-      if (direct.meets) basis.push({ dim: term.dim, factId: direct.factId, slot: termSlot(term.rule) });
-      else failed.push({ dim: term.dim, rule: term.rule, why: t("本人确认不满足") });
-      continue;
-    }
-    if (broadMeets(term, applicant)) { basis.push({ dim: term.dim, ...(term.dim === "field" && applicant.field ? { factId: applicant.field.factId } : {}) }); continue; }
-    const known = term.dim === "other" ? undefined : applicant[term.dim];
-    const byCountry = COUNTRY_DIMS.includes(term.dim);
-    if (!known || (term.accepts.kind === "text" && !byCountry) || term.dim === "other") { questions.push({ dim: term.dim, question: eligibilityQuestion(term, locale) }); continue; }
-    const met = byCountry ? countryMeets(term, known.value) : meets(term, known.value);
-    if (met === true) basis.push({ dim: term.dim, factId: known.factId, ...(known.slot ? { slot: known.slot } : {}) });
-    else if (met === false) failed.push({ dim: term.dim, rule: term.rule, why: t("记录为「{{value}}」", { value: known.value.slice(0, 60) }) });
-    else questions.push({ dim: term.dim, question: eligibilityQuestion(term, locale) });
-  }
-  if (failed.length) return { state: "ineligible", failed };
-  if (questions.length) return { state: "unknown", questions };
-  return { state: "eligible", basis };
+export function stageConflict(type: string | undefined, fit: OpportunityFit | undefined, seeking: string[]): boolean {
+  if (type !== "job" || !fit || fit.stageFit === "wrong_stage" || !seeking.length) return false;
+  return seeking.every((text) => INTERN.test(text));
 }
 
-function meets(term: EligibilityTerm, value: string): boolean | undefined {
-  const { accepts } = term;
-  if (NUMERIC.includes(term.dim) || accepts.kind === "range") {
-    const n = numberIn(value);
-    if (n === undefined) return undefined;
-    if (accepts.kind !== "range") return accepts.values.some((item) => numberIn(item) === n) ? true : undefined;
-    return (accepts.min < 0 || n >= accepts.min) && (accepts.max < 0 || n <= accepts.max);
-  }
-  if (term.dim === "degree_stage") {
-    const stage = degreeStageOf(value);
-    if (!stage) return undefined;
-    const wanted = accepts.values.map((item) => DEGREE_STAGES.includes(item as never) ? item : degreeStageOf(item) ?? item);
-    if (wanted.includes(stage)) return true;
-    if (wanted.includes("graduate") && (stage === "masters" || stage === "phd")) return true;
-    return wanted.some((item) => DEGREE_STAGES.includes(item as never)) ? false : undefined;
-  }
-  return accepts.values.some((item) => same(item, value)) ? true : undefined;
-}
-
-/** The answer to an eligibility question as the value kept in the person's slot; undefined when it cannot be read. */
+/** The answer to an eligibility question on a card read before 2026-11-25, as the value kept in the person's slot; undefined when unreadable. */
 export function eligibilityAnswer(term: EligibilityTerm, answer: string): { slot: string; value: string } | undefined {
   const text = answer.trim();
   if (!text) return undefined;
-  if (term.dim === "other" || term.accepts.kind === "text") {
+  if (term.dim === "other" || term.accepts?.kind === "text") {
     /* i18n-ignore-start: the person's words */
     if (/^(是|满足|符合|yes|y|对)/i.test(text)) return { slot: termSlot(term.rule), value: "yes" };
     if (/^(否|不|no|n)/i.test(text)) return { slot: termSlot(term.rule), value: "no" };
@@ -563,6 +437,30 @@ export const nextDeadline = (opportunity: Pick<Opportunity, "deadlines">, today:
 export function opportunityRank(input: { deadline?: string | undefined; today: string; lineWeight: number; milestoneLinked: boolean }): number {
   const urgency = input.deadline ? 1 / (1 + Math.max(0, daysBetweenDays(input.today, input.deadline)) / 14) : 0.2;
   return input.lineWeight * urgency * (input.milestoneLinked ? 1.5 : 1);
+}
+/**
+ * Whether a find may be pushed as a card (2026-11-25). A line holding it at the push threshold, as before (`pushable`, §18); besides, an
+ * opening the reader judged in the same or an adjacent direction, as long as some line still holds it at all (each line's claim is
+ * checked by code, `classifyFind`). News and papers keep the old rule.
+ */
+export function offerPushable(row: TaggedOpportunity & { verdict?: EligibilityVerdict | undefined }): boolean {
+  if (pushable(row)) return true;
+  const fit = row.verdict && row.verdict.state !== "unknown" ? row.verdict.fit : undefined;
+  return !isReading(row.type) && Boolean(fit && fit.directionFit !== "unrelated") && bestRelevance(row) >= KEEP_RELEVANCE;
+}
+const DIRECTION_RANK: Record<string, number> = { same: 2, adjacent: 1 };
+/**
+ * The order offers are listed in (the brief's count, 待确认 and the weekly review, 2026-11-25): direction first (the reader's same before
+ * adjacent; with no fit, a line holding it at the push threshold counts as same), then the nearest deadline, then relevance.
+ */
+export function offerOrder(today: string) {
+  type Row = TaggedOpportunity & Pick<Opportunity, "deadlines"> & { verdict?: EligibilityVerdict | undefined };
+  const direction = (row: Row) => {
+    const fit = row.verdict && row.verdict.state !== "unknown" ? row.verdict.fit : undefined;
+    return fit ? DIRECTION_RANK[fit.directionFit] ?? 0 : pushable(row) ? 2 : 1;
+  };
+  return (a: Row, b: Row) => direction(b) - direction(a) || (nextDeadline(a, today) ?? "9999").localeCompare(nextDeadline(b, today) ?? "9999")
+    || bestRelevance(b) - bestRelevance(a);
 }
 /** The latest day preparation can start, worked back from the deadline by the need's lead time; undefined without a deadline. */
 export function prepStartFor(deadline: string | undefined, leadDays: number): string | undefined {

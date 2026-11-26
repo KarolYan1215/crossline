@@ -134,7 +134,12 @@ export function opportunityOfferAsks(ctx: AccessContext, now = new Date()): Ask[
     const left = deadline ? daysUntil(today, deadline) : undefined;
     const start = prepStartFor(deadline, watch?.leadDays ?? 0);
     const quote = row.deadlines.find((item) => item.day === deadline)?.quote;
-    const facts = row.verdict.state === "eligible" && row.terms.length ? t("资格：按记录全部符合。") : "";
+    // The reader's fit (2026-11-25): a partial match says what is missing and what the agent can prepare, so one look decides it.
+    const fit = row.verdict.state === "eligible" ? row.verdict.fit : undefined;
+    const facts = fit ? "" : row.verdict.state === "eligible" && row.terms.length ? t("资格：按记录全部符合。") : "";
+    const sepList = locale === "en" ? "; " : "；";
+    const gaps = fit?.partialRequirements.length ? t("还差：{{items}}。", { items: fit.partialRequirements.slice(0, 3).join(sepList) }) : "";
+    const prepare = fit?.agentCanPrepare.length ? t("可代为准备：{{items}}。", { items: fit.agentCanPrepare.slice(0, 3).join(sepList) }) : "";
     const questions = row.verdict.state === "unknown" ? row.verdict.questions : [];
     // News and a paper have no deadline, place or eligibility: the card says only why it is worth reading and where it came from.
     const reading = isReading(row.type);
@@ -151,7 +156,7 @@ export function opportunityOfferAsks(ctx: AccessContext, now = new Date()): Ask[
       row.cost ? t("费用：{{amount}} {{currency}}。", { amount: row.cost.amount, currency: row.cost.currency }) : "",
       row.location && !row.place ? t("地点：{{place}}。", { place: row.location }) : "",
       ...spaceLines(row, verdict, locale),
-      facts,
+      facts, gaps, prepare,
       questions.length ? t("还差 {{count}} 条资格要本人确认，答案会记进资料，下次不再问。", { count: questions.length }) : "",
       row.materials.length ? t("需要：{{items}}。", { items: row.materials.slice(0, 4).join(locale === "en" ? ", " : "、") }) : "",
       row.consents.length ? t("报名即同意：{{items}}。", { items: row.consents.slice(0, 3).join(locale === "en" ? "; " : "；") }) : ""

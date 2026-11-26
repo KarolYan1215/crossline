@@ -63,7 +63,7 @@ import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-clas
 import { createTimeDraftPass } from "./time-drafts";
 import { createInsightCompiler, linesAwaitingMineSkill } from "./insight-compiler";
 import { cleanPublicSkills, createPublicSkillInstaller, createSkillScout, lineSetupDue, rescanDue, rescanPublicSkills, scoutDue } from "./public-skills";
-import { deriveWatches, opportunityAgentOn, rejudge, runWatch, todayFor, watchesDeriveDue, watchesToRun } from "./opportunities";
+import { deriveWatches, opportunityAgentOn, runWatch, todayFor, watchesDeriveDue, watchesToRun } from "./opportunities";
 import { opportunityScoutDue, startScout } from "./opportunity-scout";
 import { discoveryFeasibility, timeSpacePass } from "./time-space";
 import { browserProfilesRoot, cleanGrownSkills, configureFavouritesCollector, configureRemoteLogin, finishWorkflowLogin, growCandidates, growTask, installGrown, loginBrowser, markWorkflowRun,
@@ -727,7 +727,6 @@ async function opportunityPass(workspaceId: string, checkedAt: string): Promise<
         { feasibility, costSince: (store, ws, purpose, since) => opportunityCosts(store, ws, since).filter((row) => row.purpose === purpose).reduce((sum, row) => sum + row.weighted, 0) });
       console.info(JSON.stringify({ type: "opportunity.scout", checkedAt, workspaceId, state: started.state }));
     }
-    rejudge(analysisStore, workspaceId);
   } finally { discovering.delete(workspaceId); }
 }
 

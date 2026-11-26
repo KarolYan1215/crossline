@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { judgeEligibility, applicantFrom, type EligibilityTerm, type Opportunity } from "@crossline/core";
+import type { EligibilityTerm, Opportunity } from "@crossline/core";
 import { CrosslineStore, opportunityWeek, queueFormRun, readFormRuns, recordEligibilityAnswer } from "./index";
 
 let store: CrosslineStore;
@@ -30,13 +30,16 @@ test("one row per opening across sources; a re-read keeps the person's decision"
   expect(store.exportSnapshot(ws).tables.opportunities).toHaveLength(1);
 });
 
-test("an eligibility answer is a confirmed fact of the person line and judges the waiting opportunities again", () => {
-  const verdict = judgeEligibility([graduate], applicantFrom([]));
-  expect(verdict.state).toBe("unknown");
+test("an answer on a card from before 2026-11-25 is a confirmed fact of the person line and settles that card by the person's own word", () => {
+  // A row read before the reader judged fit, still waiting on its question.
+  const verdict = { state: "unknown" as const, questions: [{ dim: "degree_stage" as const, question: "学历阶段是什么？" }] };
   store.saveOpportunity(ws, { opportunity: opportunity(), terms: [graduate], verdict });
   expect(recordEligibilityAnswer(store, ws, "apply.degree_stage", "硕士在读", "opp-1")).toBe(1);
   expect(store.listOpportunities(ws, { id: "opp-1" })[0]?.verdict.state).toBe("eligible");
   expect(store.listProfileFacts(ws).find((fact) => fact.slot === "apply.degree_stage")).toMatchObject({ identityId: "person", status: "confirmed" });
+  // The person's own 「不满足」 rules it out.
+  expect(recordEligibilityAnswer(store, ws, "apply.term.x", "no", "opp-1")).toBe(1);
+  expect(store.listOpportunities(ws, { id: "opp-1" })[0]?.verdict).toMatchObject({ state: "ineligible", failed: [{ why: "本人确认不满足" }] });
 });
 
 test("报名 queues one form run, however often it is pressed", () => {

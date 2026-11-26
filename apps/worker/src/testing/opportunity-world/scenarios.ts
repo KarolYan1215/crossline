@@ -7,11 +7,11 @@ import { emptyWorld, html, type Reading, type World } from "./world";
  * The scenarios of §17.9 ③, each planted in the synthetic world with its ground truth fixed here, before anything runs. A scenario owns
  * one opportunity (or one trap) and the addresses it can be reached at; the harness looks only at what reached the person.
  *
- * `expect` is what the person should get: `push` (an offer, eligible), `ask` (an offer carrying an eligibility question), `push_conflict`
+ * `expect` is what the person should get: `push` (an offer, eligible), `partial` (an offer saying what is still missing, 2026-11-25), `push_conflict`
  * (an offer that says what it clashes with, §17.7) or `no_push`. `requires` names what only tracks ① and ② build; a scenario whose
  * engine lacks it is pending, not failed.
  */
-export type Expect = "push" | "ask" | "push_conflict" | "no_push";
+export type Expect = "push" | "partial" | "push_conflict" | "no_push";
 export type Capability = "watches" | "scout" | "feasibility" | "local_today";
 export type NoPushReason = InfeasibleCode | "ineligible" | "duplicate" | "unverifiable" | "injection" | "not_this_year";
 
@@ -102,6 +102,8 @@ const EDGEML = `- title: EdgeML
 `;
 
 const HACK_URL = "https://lakeshore-hack.devpost.com/";
+const NEW_GRAD_URL = "https://synth-silicon.example/careers/new-grad-hardware";
+const ROBOTICS_URL = "https://lakeshore.example/robotics/founders-fellowship";
 const HACK_MAIL_URL = "https://lakeshore-hack.devpost.com/?utm_source=newsletter";
 const AGE_TERM = term("age", "年满 18 岁", "Open to participants 18 years of age or older.", { kind: "range", min: 18, max: -1 });
 
@@ -171,6 +173,12 @@ export function buildWorld(facts: PersonFacts = BASE_PERSON): World {
   page("https://lakeshore.example/entrepreneurship", html("Lakeshore Entrepreneurship", "Programs for student founders: mentoring, the Academic Startup Competition, office hours."));
   page("https://lakeshore.example/entrepreneurship/academic-startup-competition", html("Lakeshore Academic Startup Competition 2027",
     "For ventures built on graduate research. Applications due January 30, 2027.", "Open to teams that include at least one current graduate student.", "Prize: $25,000."));
+  // The owner's widening (2026-11-25): a full-time role while the person seeks internships (the wrong stage), and a fellowship in an
+  // adjacent direction a line holds only weakly (shown, with what is missing).
+  page(NEW_GRAD_URL, html("Hardware Engineer, New Grad (Full-time)", "Full-time role on the accelerator team.",
+    "Requires a completed bachelor's or master's degree and 2+ years of industry experience.", "Apply by December 18, 2026."));
+  page(ROBOTICS_URL, html("Lakeshore Robotics Founders Fellowship 2027", "A one-year fellowship for student founders building robots.",
+    "Applications due January 15, 2027.", "Open to current students."));
   page("https://edgeaccel.example/2026/workshop-talks", html("EdgeAccel 2026 Workshop Lightning Talks", "Submit a two-page abstract by December 20, 2026.",
     "Open to authors of EdgeAccel 2026 submissions."));
 
@@ -307,6 +315,16 @@ const SEARCH: World["search"] = [
     title: "Lakeshore Academic Startup Competition 2027", organizer: "Lakeshore Entrepreneurship", kind: "application",
     deadlines: [at("2027-01-30", "Applications due January 30, 2027.")],
     eligibility: [term("degree_stage", "团队含在读研究生", "Open to teams that include at least one current graduate student.", { values: ["graduate"] })] }) },
+  { query: "accelerator hardware engineer", reading: reading({ url: NEW_GRAD_URL, title: "Hardware Engineer, New Grad (Full-time)", organizer: "Synth Silicon",
+    kind: "application", deadlines: [at("2026-12-18", "Apply by December 18, 2026.")], type: "job", reason: "加速器硬件岗位",
+    lines: [{ lineId: "research", confidence: 0.8, reason: "加速器方向", anchors: ["goal"] }],
+    fit: { stageFit: "wrong_stage", directionFit: "same", reachable: true, partialRequirements: ["需已毕业并有 2 年以上全职经验"], agentCanPrepare: [],
+      why: "正职岗位，要求毕业后全职经验；本人在读博士、在找实习" } }) },
+  { query: "student founders fellowship", reading: reading({ url: ROBOTICS_URL, title: "Lakeshore Robotics Founders Fellowship 2027", organizer: "Lakeshore Robotics",
+    kind: "application", deadlines: [at("2027-01-15", "Applications due January 15, 2027.")], type: "program", reason: "面向学生创始人的一年期项目",
+    lines: [{ lineId: "startup", confidence: 0.35, reason: "机器人创业与硬件创业相邻", anchors: [] }],
+    fit: { stageFit: "fits", directionFit: "adjacent", reachable: true, partialRequirements: ["需有机器人方向的原型"], agentCanPrepare: ["申请陈述草稿", "项目简介"],
+      why: "在读学生可申请；机器人创业与本人的硬件创业相邻" } }) },
   { query: "edgeaccel workshop lightning talk", reading: reading({ url: "https://edgeaccel.example/2026/workshop-talks", title: "EdgeAccel 2026 Workshop Lightning Talks",
     organizer: "EdgeAccel", kind: "application", deadlines: [at("2026-12-20", "Submit a two-page abstract by December 20, 2026.")],
     eligibility: [term("other", "EdgeAccel 2026 投稿作者", "Open to authors of EdgeAccel 2026 submissions.", { kind: "text" })] }) }
@@ -323,7 +341,7 @@ export const SCENARIOS: Scenario[] = [
     because: "no_time_to_prepare", requires: ["feasibility"] },
   { id: "cfp-year-boundary", lineId: "research", title: "SYNTHSYS 2027", covers: ["planted", "year_boundary", "zone:AoE"], urls: ["https://synthsys.example/2027"], expect: "push" },
   { id: "workshop-list", lineId: "research", title: "EdgeML 2027", covers: ["planted", "year_boundary"], urls: ["https://edgeml-workshop.example"], expect: "push" },
-  { id: "travel-grant", lineId: "research", title: "SYNTHSYS 2027 Student Travel Grants", covers: ["planted", "mail"], urls: ["https://synthsys.example/2027/travel-grants"], expect: "ask" },
+  { id: "travel-grant", lineId: "research", title: "SYNTHSYS 2027 Student Travel Grants", covers: ["planted", "mail"], urls: ["https://synthsys.example/2027/travel-grants"], expect: "partial" },
   { id: "injection-page", lineId: "research", title: "Winter Hardware Research Internship", covers: ["injection"], urls: ["https://quickhire.example/winter-intern"],
     expect: "no_push", because: "ineligible",
     injected: { titles: ["URGENT: Winter Hardware Research Internship — open to everyone"], days: ["2027-12-31"] } },
@@ -354,8 +372,11 @@ export const SCENARIOS: Scenario[] = [
     expect: "no_push", because: "unverifiable" },
   { id: "scout-cross-line", lineId: "research", title: "Lakeshore Academic Startup Competition 2027", covers: ["planted", "cross_line", "scout"],
     urls: ["https://lakeshore.example/entrepreneurship/academic-startup-competition"], expect: "push", requires: ["scout"] },
+  { id: "fulltime-while-intern", lineId: "research", title: "Hardware Engineer, New Grad (Full-time)", covers: ["wrong_stage"], urls: [NEW_GRAD_URL], expect: "no_push",
+    because: "ineligible" },
+  { id: "adjacent-direction", lineId: "startup", title: "Lakeshore Robotics Founders Fellowship 2027", covers: ["planted", "adjacent"], urls: [ROBOTICS_URL], expect: "partial" },
   { id: "talks-after-milestone", lineId: "research", title: "EdgeAccel 2026 Workshop Lightning Talks", covers: ["longrun"], urls: ["https://edgeaccel.example/2026/workshop-talks"],
-    expect: "ask", scope: "longrun" }
+    expect: "partial", scope: "longrun" }
 ];
 
 export const COUNTERFACTUALS: Counterfactual[] = [
@@ -384,7 +405,7 @@ export function watchesFor(lineId: string, done: Set<string>): ProposedWatch[] {
   if (lineId === "research") return [
     need("summer-research-internship", "cycle", "暑期研究实习", ["ms-research-intern"], 30, [
       { kind: "ats", provider: "greenhouse", board: "synthsilicon", query: "intern" }, { kind: "ats", provider: "lever", board: "nationalaccel", query: "intern" },
-      { kind: "web", query: "winter hardware research internship" }],
+      { kind: "web", query: "winter hardware research internship" }, { kind: "web", query: "accelerator hardware engineer" }],
     { opensMonth: 9, closesMonth: 1, basis: "往年 9 月开放、1 月截止", sourceUrl: "https://synth-silicon.example/careers/internship-cycles" }),
     done.has("ms-research-edgeaccel")
       ? need("talks", "stream", "论文投出后的研讨会与报告机会", ["ms-research-edgeaccel"], 14, [{ kind: "web", query: "edgeaccel workshop lightning talk" },
@@ -401,7 +422,8 @@ export function watchesFor(lineId: string, done: Set<string>): ProposedWatch[] {
     need("startup-events", "stream", "硬件创业活动", ["ms-startup-interviews"], 7, [
       { kind: "events", site: "devpost", query: "lakeshore" }, { kind: "web", query: "madison startup events november" },
       { kind: "web", query: "hardware startup events boston november" }, { kind: "web", query: "madison hardware founders demo night" }]),
-    need("startup-competitions", "stream", "创业比赛", ["ms-startup-interviews"], 7, [{ kind: "web", query: "hardware startup challenge" }])
+    need("startup-competitions", "stream", "创业比赛", ["ms-startup-interviews"], 7, [{ kind: "web", query: "hardware startup challenge" },
+      { kind: "web", query: "student founders fellowship" }])
   ];
   if (lineId === "media") return [
     need("writing-fellowships", "stream", "科普写作奖学金", ["ms-media-posts"], 14, [{ kind: "web", query: "science writing fellowship" }])

@@ -100,8 +100,8 @@ async function realClient() {
 
 try {
   heading(`账本副本 ${dataDir}，工作区 ${ws}，运行时 ${runtime}`);
-  const applicant = core.applicantFrom(store.listProfileFacts(ws));
-  console.info(`程序读到的申请人：${JSON.stringify(Object.fromEntries(Object.entries(applicant).filter(([key]) => key !== "terms")))}`);
+  // What the reader judges fit against (2026-11-25): the person's confirmed facts and what the watches seek.
+  console.info(`交给阅读器的本人：${JSON.stringify(core.readerPerson(store.listProfileFacts(ws), readWatchList(store, ws)))}`);
 
   if (step === "boards" || step === "all" || step === "postings") heading("公开招聘接口（真实请求）");
   const boards = step === "needs" ? [] : await liveBoards();
@@ -157,7 +157,7 @@ try {
     console.info(`运行结果（${Math.round((Date.now() - started) / 1000)} 秒）：${JSON.stringify(result)}`);
     for (const row of store.listOpportunities(ws)) {
       console.info(JSON.stringify({ title: row.title, url: row.url, via: row.foundVia, deadline: core.nextDeadline(row, today) ?? "",
-        terms: row.terms.map((term) => ({ dim: term.dim, quote: term.quote.slice(0, 120), accepts: term.accepts.values })), verdict: row.verdict }));
+        terms: row.terms.map((term) => ({ dim: term.dim, quote: term.quote.slice(0, 120), rule: term.rule })), verdict: row.verdict }));
     }
     // The cards the web would show (the same function the 待确认 page calls), on the copy.
     const { opportunityOfferAsks } = await import("../apps/web/lib/opportunities");

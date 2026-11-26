@@ -395,7 +395,7 @@ export const hostKey = (url: string) => { try { return new URL(url).hostname.toL
 
 export type SurfaceInput = {
   opportunity: Pick<Opportunity, "url" | "startsAt"> & Partial<Pick<Opportunity, "kind" | "title">> & Partial<TaggedOpportunity>;
-  verdict: { state: string };
+  verdict: { state: string; fit?: { directionFit: string } | undefined };
   feasibility?: Feasibility | undefined;
   watch?: Pick<StoredWatch, "weight" | "strictness" | "state"> | undefined;
   tuning: WatchTuning;
@@ -416,7 +416,8 @@ export function holdBack(input: SurfaceInput): string | undefined {
   if (tuning.knownHosts.includes(host)) return "known_source";
   if ((tuning.sourceWeights[host] ?? 1) < SOURCE_WEIGHT_FLOOR) return "untrusted_source";
   if (watch && watch.weight < WEIGHT_FLOOR) return "off_topic";
-  if (watch && watch.strictness >= 1 && verdict.state === "unknown") return "strict";
+  // A stricter watch (少来, §17.4) also leaves out what the reader judged only adjacent in direction (2026-11-25).
+  if (watch && watch.strictness >= 1 && (verdict.state === "unknown" || verdict.fit?.directionFit === "adjacent")) return "strict";
   if (opportunity.startsAt?.day) {
     const weekday = weekdayOf(opportunity.startsAt.day), part = dayPartOf(opportunity.startsAt.quote);
     if (tuning.badTimes.some((bad) => bad.weekday === weekday && (bad.part === "any" || part === "any" || bad.part === part))) return "bad_time";
