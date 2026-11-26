@@ -110,3 +110,19 @@
 - 托管 web 搜索的结果不经过 Crossline，工具模式看不到，所以「读网页」本身不算污点来源；网页只在开始时作为 `input.untrusted: ["page"]` 或保存的网页文件计入。
 - ChatGPT 连接器（Gmail、Drive）的内容表里记为 `private`（本人自己的账户），读它不污染运行；被污染的运行不再开连接器。
 - 聊天摘要、录音转写这类「别人的话」的文件，`read_document` 不算外部来源（录音来的捕获另有 `RECORDING_CAPTURE_PREFIX` 一律等本人）。
+## 10. Skill 供应链 ✅ 已实现 2026-11-25
+
+本人决定（2026-11-25）：公开 skill 继续自动安装，不改成审批制，只加强扫描；读过不可信内容的工作流修订要本人采纳；shell 与文件工具不能写 skill 目录。实现记录见 `docs/claude/skill-library.md`（「Skill supply chain」「Shell and file tools never write a skill folder」「A revision that read someone else's words waits for the person」三条）。
+
+- **隔离区**：下载先进 `%LOCALAPPDATA%\Crossline\skill-quarantine\<ws>\`，写入后读回核对 sha256 与路径，所有检查都读这份副本；通过才写进账本与 skill-library，失败或安装后删除，残留一天后清掉。
+- **lock.json**（`<skill-library>\<ws>\lock.json`）：每个 skill 一条，记来源 URL、commit、每个文件的 sha256、扫描器版本（`SKILL_SCANNER_VERSION`）、发现、注入审查结论、时间、信任级（`builtin`/`mine`/`grown`/`public`）、`status`（`ok`/`disabled` 及原因）。
+- **运行时只选 lock 完好且哈希一致的公开 skill**（`verifiedPublicIds`）：没有条目、条目被禁用、扫描器版本旧、或账本里的文件哈希与条目不一致，都不给运行。
+- **每日重扫**（`rescanPublicSkills`）：用当前扫描器重扫所有已装公开 skill；扫描器版本一变当天立即重扫，重扫前这些 skill 不用；lock 之前装的 skill 按钉住的 commit 重新拉取，逐文件比对。发现问题就禁用并记 `skill.public.rejected`（`stage: "rescan"`），直到新 commit 通过。没有模型或 GitHub 不通：等下一轮，期间不用。
+- **新 commit 走完整流程**：隔离区 → 代码扫描 → 自然语言注入审查 → 审查；失败保留旧版本（以前是删掉），事件记被拒的 `commit` 和保留的 `kept`，同一个被拒的 commit 不再拉取。
+- **自然语言注入审查**：`crossline-validation-reviewer` 的独立一次调用（无工具、无网络、无私人上下文，只读 SKILL.md 与所有文本文件），结构化回答四项：劫持指令、外传数据、索取凭据、隐藏字符；每个「是」都要带所在文件里的原文引用，引用不在文件里视为要修正。保留原来的 `scanSkillFiles` 和原来的审查。
+- **修订带污点要本人采纳**：修订读的结果文件夹里有不可信来源，新版本存为待定（`pendingRevision`），差异写进运行目录的 `REVISION-DIFF.md`，这次运行的结果回到待确认（复用助手结果卡，`agent.task.reopened` `why: "untrusted_revision"`，没有新 ask kind）；本人点采纳才生效，退回、系统代为采纳、文件被改、版本已变都丢弃。只依据本人反馈与失败记录、没读过不可信内容的修订仍自动生效。
+- **shell 不能写 skill 目录**：`decideCommand` 与 `decideFileChange` 拒绝（`skill.write`）写 `skill-library`、`skill-quarantine`、仓库 `skills\marketplace`、运行时插件缓存；MXC 的 `crossline-shell` 档里这几处（含仓库整个 `skills\`）是 `deny`。档由 `packages/codex/src/agent-mode.ts` 的 `windowsShellConfig` 生成，不在 `skill-runner.ts`，所以没改那个文件。
+
+**与 taint-tools 会话的衔接（合并时接上）**：本会话不改 `agent-task.ts`，污点只从现有字段和文件判断（`revisionTaint`）。taint-tools 把 `flow-*`、`collect-*` 标为不可信后，只要它落在以下任一处，这里自动认得：`agent.task.requested` 的 `untrusted`（标签数组或 `true`）或 `profile: "untrusted-input"`；结果文件夹里的 `untrusted.json` 或 `.untrusted`。现在已经按 `inputs` 路径里的 `collect-*`（标 `site`）、`flow-*`（标 `workflow-output`）和 `agent.task.completed.searches > 0`（标 `web`）判断，taint-tools 合并后这几条可留作兜底。
+
+**未做 / 后续**：Skill 库页面还不显示 lock 的禁用状态与原因；「全部按推荐」（`apps/web/lib/answer-all.ts`）会以本人名义采纳待确认的结果，包括待定修订——要不要把待定修订排除在「全部按推荐」之外，留给本人定。

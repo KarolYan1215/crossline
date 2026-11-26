@@ -563,6 +563,7 @@ export * from "./portrait-say-do";
 export * from "./background";
 export * from "./mine-skill";
 export * from "./public-skills";
+export * from "./skill-lock";
 export * from "./workflows";
 export * from "./work-owner";
 export * from "./ai-tools";

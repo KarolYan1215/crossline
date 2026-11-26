@@ -249,6 +249,14 @@ export type GrownSkillRecord = {
   /** Its time came while the assistant was busy: tried again at the next ticks of that day, past the usual three hours. */
   heldSince?: string;
   /**
+   * A revision that read content from outside (mail, web pages, a site, an untrusted folder) waiting for the person (the owner's decision
+   * of 2026-11-25, docs/plans/harness-1125.md 「Skill 供应链」): passed the same checks as any revision, kept in its run's folder with a
+   * diff, and put in force only when the person accepts that run's result on 待确认. `digest` is over the files that passed; anything
+   * changed in the folder since then voids it.
+   */
+  pendingRevision?: { taskId: string; directory: string; digest: string; fromVersion: number; untrusted: string[]; changes: string;
+    review: PublicSkillReview & { final: PublicSkillVerdict }; at: string };
+  /**
    * Which version is in force (1 when installed) and when Crossline last revised it from what its runs and the person said
    * (docs/skills-library.md 「工作流自我改进」); the versions it replaced are kept under `grownVersionsKey`.
    */

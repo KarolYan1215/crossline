@@ -1,15 +1,17 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   GROWN_PLUGIN, MINE_PLUGIN, PUBLIC_PLUGIN, PUBLIC_SKILLS_PER_RUN, currentMineVersion, grownSkillName, mineSkillDirName, mineSkillName, mineSkillSettingKey,
-  publicSkillName, publicSkillRelevance, readMineSkill, renameSkill
+  publicSkillName, publicSkillRelevance, readMineSkill, renameSkill, sameFiles, type SkillLockEntry, type SkillTrust
 } from "@crossline/core";
 import { installLibraryPlugin, type CodexRpcBoundary } from "@crossline/codex";
 import { linePacks } from "./lines";
 import { grownHomeLine, installedGrownFiles, installedPublicFiles, readGrownSkills, readPublicSkills, writeGrownSkills, type CrosslineStore } from "@crossline/db";
 import { markPublicSkillsUsed, wantPublicSkill } from "./public-skills";
-import { runtimesDir } from "./owner";
+import { fileHashes, skillLibraryDir, updateLock, verifiedPublicIds } from "./skill-lock";
+
+export { skillLibraryDir };
 
 /**
  * The person's skill library on disk (docs/skills-library.md): a local marketplace holding the runtime's second and third plugins,
@@ -18,9 +20,6 @@ import { runtimesDir } from "./owner";
  */
 export const LIBRARY_MARKETPLACE = "crossline-library";
 
-export function skillLibraryDir(workspaceId: string, env: NodeJS.ProcessEnv = process.env): string {
-  return path.join(path.dirname(runtimesDir(env)), "skill-library", workspaceId);
-}
 export const libraryMarketplacePath = (dir: string) => path.join(dir, ".agents", "plugins", "marketplace.json");
 
 type PluginFiles = { name: string; displayName: string; description: string; skills: Map<string, Map<string, string>> };
@@ -36,12 +35,14 @@ function minePlugin(store: CrosslineStore, workspaceId: string): PluginFiles {
 }
 
 /**
- * Every public skill that passed: its files as fetched (or without its scripts, when it is allowed only as text), its SKILL.md renamed to
- * the library id so two published skills with one name cannot collide.
+ * Every public skill that passed and whose lock entry is intact (`verifiedPublicIds`): its files as fetched (or without its scripts, when
+ * it is allowed only as text), its SKILL.md renamed to the library id so two published skills with one name cannot collide. One whose
+ * files no longer hash to what was checked, or that the current scanner has not read yet, is not written for the runtime at all.
  */
-function publicPlugin(store: CrosslineStore, workspaceId: string): PluginFiles {
+function publicPlugin(store: CrosslineStore, workspaceId: string, dir: string): PluginFiles {
   const skills = new Map<string, Map<string, string>>();
-  for (const record of readPublicSkills(store, workspaceId).filter((item) => item.review.final !== "reject")) {
+  const verified = verifiedPublicIds(store, workspaceId, dir);
+  for (const record of readPublicSkills(store, workspaceId).filter((item) => item.review.final !== "reject" && verified.has(item.id))) {
     const files = new Map(installedPublicFiles(store, workspaceId, record).map((file) => [file.path, file.path === "SKILL.md" ? renameSkill(file.text, record.id) : file.text]));
     if (files.has("SKILL.md")) skills.set(record.id, files);
   }
@@ -81,7 +82,8 @@ function writePlugin(dir: string, plugin: PluginFiles): void {
 /** Writes the library for a workspace and returns what it holds, with a hash that changes whenever any file does. */
 export function writeSkillLibrary(store: CrosslineStore, workspaceId: string, dir = skillLibraryDir(workspaceId)):
   { dir: string; hash: string; plugins: Array<{ name: string; skills: string[] }> } {
-  const plugins = [minePlugin(store, workspaceId), grownPlugin(store, workspaceId), publicPlugin(store, workspaceId)].filter((plugin) => plugin.skills.size > 0);
+  const mine = minePlugin(store, workspaceId), grown = grownPlugin(store, workspaceId);
+  const plugins = [mine, grown, publicPlugin(store, workspaceId, dir)].filter((plugin) => plugin.skills.size > 0);
   mkdirSync(path.dirname(libraryMarketplacePath(dir)), { recursive: true });
   writeFileSync(libraryMarketplacePath(dir), JSON.stringify({ name: LIBRARY_MARKETPLACE, interface: { displayName: "Crossline Library" },
     plugins: plugins.map((plugin) => ({ name: plugin.name, source: { source: "local", path: `./plugins/${plugin.name}` },
@@ -93,7 +95,52 @@ export function writeSkillLibrary(store: CrosslineStore, workspaceId: string, di
       for (const [relative, content] of [...files].sort(([a], [b]) => a.localeCompare(b))) hash.update(`${plugin.name}/${name}/${relative}\0${content}\0`);
     }
   }
+  lockLocalSkills(dir, { mine, grown });
   return { dir, hash: hash.digest("hex"), plugins: plugins.map((plugin) => ({ name: plugin.name, skills: [...plugin.skills.keys()].map((skill) => `${plugin.name}:${skill}`) })) };
+}
+
+/**
+ * The lock's entries for the skills that are not strangers' (docs/plans/harness-1125.md 「Skill 供应链」): the person's line skills and
+ * the grown workflows as written for the runtime, and the repository's own plugin. An inventory with hashes and a trust level — they are
+ * not fetched, so nothing gates on them; a public skill's entry is written only by its install or the daily rescan.
+ */
+function lockLocalSkills(dir: string, plugins: { mine?: PluginFiles | undefined; grown?: PluginFiles | undefined; builtin?: PluginFiles | undefined }): void {
+  const at = new Date().toISOString();
+  updateLock(dir, (lock) => {
+    for (const [trust, plugin] of Object.entries(plugins) as Array<[SkillTrust, PluginFiles | undefined]>) {
+      if (!plugin) continue;
+      const wanted = new Map([...plugin.skills].map(([skill, files]) => [`${plugin.name}:${skill}`,
+        fileHashes([...files].map(([relative, text]) => ({ path: relative, text })))]));
+      for (const [key, entry] of Object.entries(lock.skills)) if (entry.trust === trust && !wanted.has(key)) delete lock.skills[key];
+      for (const [key, files] of wanted) {
+        const previous = lock.skills[key];
+        if (previous && sameFiles(previous.files, files)) continue;
+        const entry: SkillLockEntry = { name: key, trust, files, scanner: "unknown", findings: [], at, status: "ok" };
+        lock.skills[key] = entry;
+      }
+    }
+  });
+}
+
+/** The repository's own plugin (`skills/marketplace/plugins/crossline/skills`), each skill's files as they are on disk. */
+function builtinPlugin(repoRoot: string): PluginFiles | undefined {
+  const root = path.join(repoRoot, "skills", "marketplace", "plugins", "crossline", "skills");
+  if (!existsSync(root)) return undefined;
+  const skills = new Map<string, Map<string, string>>();
+  const walk = (dir: string, prefix: string, into: Map<string, string>) => {
+    for (const entry of readdirSync(dir)) {
+      const full = path.join(dir, entry);
+      if (statSync(full).isDirectory()) walk(full, `${prefix}${entry}/`, into);
+      else into.set(`${prefix}${entry}`, readFileSync(full, "utf8"));
+    }
+  };
+  for (const skill of readdirSync(root)) {
+    const files = new Map<string, string>();
+    if (!statSync(path.join(root, skill)).isDirectory()) continue;
+    walk(path.join(root, skill), "", files);
+    skills.set(skill, files);
+  }
+  return { name: "crossline", displayName: "Crossline", description: "", skills };
 }
 
 /** What each runtime last installed, per workspace: an install is a plugin copy and a config write, so it happens only when the files changed. */
@@ -110,6 +157,7 @@ export async function ensureSkillLibrary(client: CodexRpcBoundary, store: Crossl
     const seen = installed.get(client) ?? new Map<string, string>();
     installed.set(client, seen);
     if (seen.get(workspaceId) !== library.hash) {
+      lockLocalSkills(library.dir, { builtin: builtinPlugin(options.cwd) });
       for (const plugin of library.plugins) await installLibraryPlugin(client, { marketplacePath: libraryMarketplacePath(library.dir), name: plugin.name, cwd: options.cwd });
       seen.set(workspaceId, library.hash);
     }
@@ -138,7 +186,7 @@ export const libraryInstruction = (skills: string[]) =>
 
 /**
  * The library skills a run on this line switches on beside its own Skill (docs/skills-library.md §3): the line's own skill when it has
- * one, and the public skills most relevant to the task (at most three). Installs first, so a rewrite or an update made since the last run
+ * one, and the public skills most relevant to the task (at most three, only those whose lock entry is intact). Installs first, so a rewrite or an update made since the last run
  * is the copy the run reads; each public skill chosen has its idle clock restarted. A task no public skill fits asks the next scout to look.
  */
 export async function librarySkillsFor(client: CodexRpcBoundary, store: CrosslineStore, workspaceId: string, lineId: string | undefined,
@@ -152,7 +200,9 @@ export async function librarySkillsFor(client: CodexRpcBoundary, store: Crosslin
     .filter((record) => record.status === "active" && record.review.final !== "reject" && grownHomeLine(store, workspaceId, record) === lineId)
     .map((record) => ({ record, score: publicSkillRelevance({ ...record, lines: [lineId] }, lineId, task) })).filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score).slice(0, PUBLIC_SKILLS_PER_RUN);
-  const publics = readPublicSkills(store, workspaceId).filter((record) => record.review.final !== "reject")
+  // Strangers' skills only while their lock entry is intact: checked by the current scanner, files hashing to what was checked.
+  const verified = verifiedPublicIds(store, workspaceId, options.dir ?? skillLibraryDir(workspaceId));
+  const publics = readPublicSkills(store, workspaceId).filter((record) => record.review.final !== "reject" && verified.has(record.id))
     .map((record) => ({ record, score: publicSkillRelevance(record, lineId, task) })).filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score).slice(0, PUBLIC_SKILLS_PER_RUN - grown.length);
   // Only a task in hand (the assistant's) asks for a search on demand; planning and writing use what is there.

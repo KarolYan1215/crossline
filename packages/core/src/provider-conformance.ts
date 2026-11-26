@@ -34,7 +34,7 @@ import { MILESTONE_GATE_OUTPUT_SCHEMA, MILESTONE_PROPOSAL_SCHEMA } from "./miles
 import { MILESTONE_PLAN_SCHEMA } from "./milestone-plan";
 import { MILESTONE_RISK_SCHEMA } from "./milestone-risk";
 import { MINE_SKILL_SCHEMA } from "./mine-skill";
-import { PUBLIC_SKILL_BATCH_REVIEW_SCHEMA, PUBLIC_SKILL_REVIEW_SCHEMA, SKILL_SCOUT_SCHEMA } from "./public-skills";
+import { PUBLIC_SKILL_BATCH_REVIEW_SCHEMA, PUBLIC_SKILL_REVIEW_SCHEMA, SKILL_INJECTION_CHECK_SCHEMA, SKILL_SCOUT_SCHEMA } from "./public-skills";
 import { ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA } from "./onboarding-turn-schema";
 import { PLAN_EXPLAINER_OUTPUT_SCHEMA } from "./plan-explainer-schema";
 import { PORTRAIT_GAP_SCHEMA, PORTRAIT_SCHEMA } from "./portrait";
@@ -95,7 +95,7 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-material-writer": { label: "教程写作", schemas: ["NODE_WRITEUP_SCHEMA"] },
   "crossline-step-planner": { label: "步骤拆分", schemas: ["STEP_PLAN_SCHEMA"] },
   "crossline-archetype-curator": { label: "任务类型整理", schemas: ["ARCHETYPE_CURATION_SCHEMA"], webSearch: true },
-  "crossline-validation-reviewer": { label: "复核", schemas: ["VALIDATION_REVIEW_SCHEMA", "PUBLIC_SKILL_REVIEW_SCHEMA", "PUBLIC_SKILL_BATCH_REVIEW_SCHEMA", "TASK_MERGE_REVIEW_SCHEMA"] },
+  "crossline-validation-reviewer": { label: "复核", schemas: ["VALIDATION_REVIEW_SCHEMA", "PUBLIC_SKILL_REVIEW_SCHEMA", "PUBLIC_SKILL_BATCH_REVIEW_SCHEMA", "TASK_MERGE_REVIEW_SCHEMA", "SKILL_INJECTION_CHECK_SCHEMA"] },
   "crossline-progress-judge": { label: "进度判断", schemas: ["PROGRESS_ASSESSMENT_SCHEMA"] },
   "crossline-deliverable-check": { label: "交付物验收", schemas: ["DELIVERABLE_CHECK_SCHEMA"] },
   // The execution gates (docs/plans/execution-gates-1124.md): each builds its schema per run from its verdict list (`gateBatchSchema`), so no
@@ -229,7 +229,7 @@ const CONFORMANCE_SCHEMAS: Record<string, Record<string, unknown>> = {
   OPPORTUNITY_WATCHES_SCHEMA, OPPORTUNITY_READING_SCHEMA, VISA_READING_SCHEMA, QUOTE_READING_SCHEMA,
   FORM_FILL_SCHEMA, FORM_CHECK_SCHEMA, FORM_OBSERVE_SCHEMA, DICTATION_CORRECTION_SCHEMA, WORKFLOW_TURN_SCHEMA, TIME_ATTRIBUTION_SCHEMA,
   // Appended, not sorted in: a case's position is its id's order in the conformance run, which recorded fixtures index by.
-  METHOD_RESEARCH_SCHEMA, DELIVERABLE_CHECK_SCHEMA, SCALE_ANALYSIS_SCHEMA, FOLDER_SCREEN_SCHEMA, SOURCE_VERSIONS_SCHEMA, FILE_PROJECTS_SCHEMA, CHAT_DIGEST_SCHEMA
+  METHOD_RESEARCH_SCHEMA, DELIVERABLE_CHECK_SCHEMA, SCALE_ANALYSIS_SCHEMA, FOLDER_SCREEN_SCHEMA, SOURCE_VERSIONS_SCHEMA, FILE_PROJECTS_SCHEMA, CHAT_DIGEST_SCHEMA, SKILL_INJECTION_CHECK_SCHEMA
 } as unknown as Record<string, Record<string, unknown>>;
 
 /** How many times a critical Skill's schema is run: at 3 runs, "repair rate ≤ 5%" means no repair at all. */
@@ -323,6 +323,8 @@ export const SCHEMA_PROXIES: Record<string, string> = { MAIL_TRIAGE_SCHEMA: "CAL
   MAIL_REPLY_DRAFT_SCHEMA: "NODE_WRITEUP_SCHEMA",
   // Several public-skill reviews in one answer (2026-10-21): the single review's object, in a list keyed by id.
   PUBLIC_SKILL_BATCH_REVIEW_SCHEMA: "PUBLIC_SKILL_REVIEW_SCHEMA",
+  // A skill's injection check (2026-11-25): four booleans and a short list of objects with an enum and short strings, like a review.
+  SKILL_INJECTION_CHECK_SCHEMA: "PUBLIC_SKILL_REVIEW_SCHEMA",
   // Favourites by topic (2026-10-22): a list of objects with two short strings and a list of numbers, like calendar filing's list.
   FAVOURITE_TOPICS_SCHEMA: "CALENDAR_CLASSIFICATION_SCHEMA",
   // Sorting an imported list (2026-10-28): a list of small objects with an enum and short strings, like mail sorting and calendar filing.

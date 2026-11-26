@@ -177,8 +177,10 @@ export function listAgentTasks(store: CrosslineStore, workspaceId: string, now =
     } else if (event.type === "agent.task.settled") {
       if (row.status === "needs_review" && (p.how === "superseded" || p.how === "expired" || p.how === "not_repeated")) row.settled = p.how;
     } else if (event.type === "agent.task.reopened") {
-      // An undo of the daily pass: the result is the person's to look at again, whatever the pass did with it.
-      if (row.status === "needs_review" || (row.status === "accepted" && row.reviewedBy === "system")) {
+      // An undo of the daily pass: the result is the person's to look at again, whatever the pass did with it. Also a result accepted by
+      // itself that turned out to need the person (a workflow revision that read untrusted content, workflow-improver.ts); never one the
+      // person decided.
+      if (row.status === "needs_review" || (row.status === "accepted" && row.reviewedBy !== "person")) {
         row.status = "needs_review";
         delete row.settled;
         delete row.reviewedBy;

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { PACKAGE_DOMAINS, readWindowsSandbox, SANDBOX_PROFILE, sandboxProfile, WINDOWS_SHELL_PROFILE, windowsShellConfig } from "./agent-mode";
+import { PACKAGE_DOMAINS, protectSkillFolders, readWindowsSandbox, SANDBOX_PROFILE, sandboxProfile, WINDOWS_SHELL_PROFILE, windowsShellConfig } from "./agent-mode";
 import { appServerLaunchFlags, type CodexRpcBoundary } from "./index";
 
 test("the runtime's own helper folder is read-only inside a writable tmp under a denied state folder", () => {
@@ -44,4 +44,11 @@ test("the runtime's word on its Windows sandbox: readiness and the configured ba
 test("on Windows the runtime is launched preferring MXC, so its readiness can say whether MXC is there", () => {
   expect(appServerLaunchFlags("win32")).toEqual(["-c", "features.prefer_mxc=true"]);
   expect(appServerLaunchFlags("linux")).toEqual([]);
+});
+
+test("the skill folders the worker protects are denied in the owner's shell profile, even under a writable root", () => {
+  protectSkillFolders(["C:\\Users\\k\\AppData\\Local\\Crossline\\skill-library", "C:\\repo\\skills"]);
+  const config = windowsShellConfig({ writable: ["C:\\Users\\k\\AppData\\Local\\Crossline"], deny: [], env: {}, backend: "mxc", egress: "none" });
+  expect((config.permissions as Record<string, { filesystem: Record<string, string> }>)[WINDOWS_SHELL_PROFILE]!.filesystem).toMatchObject({
+    "C:\\Users\\k\\AppData\\Local\\Crossline": "write", "C:\\Users\\k\\AppData\\Local\\Crossline\\skill-library": "deny", "C:\\repo\\skills": "deny" });
 });
