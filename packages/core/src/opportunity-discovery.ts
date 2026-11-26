@@ -473,6 +473,7 @@ export function prepStartFor(deadline: string | undefined, leadDays: number): st
 export type Posting = { id: string; title: string; url: string; location: string; text: string; deadline?: DatedQuote | undefined };
 
 /** Internship words, as words: 「internal」 and 「international」 are not internships. */
+// rule: opportunity.stage-conflict
 export const INTERN = /\b(intern|interns|internship|internships|co-?op|summer student)\b|实习/i;
 
 const decodeEntities = (html: string) => html.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");

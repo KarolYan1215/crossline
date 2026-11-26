@@ -47,6 +47,11 @@ export const RULE_SPEC = {
     what: "Clock words in an opportunity's quote: 北京时间, noon/中午, midnight/午夜, a 「至/到/-」 range, Chinese text for the zone.",
     readers: "When an opportunity starts and ends (feasibility, the calendar hold).",
     retire: "The reader returns start/end with the quote and the check only verifies them against the quote (then this becomes quote verification)." },
+  // ── opportunity-discovery.ts (owner, 2026-11-25: eligibility is the model's, 「宁可多推」) ──
+  "opportunity.stage-conflict": { file: `${CORE}/opportunity-discovery.ts`, kind: "semantic", mode: "record",
+    what: "stageConflict: a full-time job while every watch of the line looks for internships, which the reader did not call wrong_stage.",
+    readers: "Nobody acts on it: the reader's stageFit stands; the line is for the consistency review.",
+    retire: "30 days of rule-fired lines show the reader's call agrees with what the person kept or dismissed; then delete stageConflict and INTERN." },
   // ── completion.ts ────────────────────────────────────────────────────────────────────────────────────────────────────
   "completion.legacy-title": { file: `${CORE}/completion.ts`, kind: "semantic", mode: "fallback",
     what: "completionRule's title words (考试/提交/探索/撰写…) for a task with no `payload.completion` from the model.",

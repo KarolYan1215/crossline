@@ -7,7 +7,8 @@ import {
   validateWatchProposals, watchDue, watchFromProposal, watchPurpose, watchYield, CLASSIFICATION_INSTRUCTIONS, classifyFind, opportunityTypeOf, primaryLineOf,
   parseTopicPlan, type Classified, type LineBrief, type RawClassification,
   type Feasibility, type NeedSource, type Opportunity, type OpportunityFit, type ReadItem, type ReadingAnswer, type StoredWatch, type WatchTarget, type WatchesAnswer,
-  type WatchesContext
+  type WatchesContext,
+  ruleFired,
 } from "@crossline/core";
 import { runCodexSkill, webResearchBlocker, withUsagePurpose, type CodexRpcBoundary } from "@crossline/codex";
 import {
@@ -20,7 +21,6 @@ import { claimedTitleMatches } from "./diligence";
 import { identityLines } from "./lines";
 import { localeOf } from "./locale";
 import { ownerOf, runtimeOwner } from "./owner";
-import { ruleFired } from "./rule-fired";
 import { defaultSafeGetDeps, htmlToText, safeGet, type SafeGetDeps } from "./safe-fetch";
 import { citable, citableUrls } from "./cited-urls";
 
@@ -324,8 +324,8 @@ export async function runWatch(store: CrosslineStore, workspaceId: string, watch
     const verdict = verdictFromFit(fit, locale);
     // A full-time job while every watch of the line looks for internships, which the reader did not call the wrong stage: the reader's
     // call stands (rather more than fewer, 2026-11-25), and the disagreement is written down for the consistency review.
-    if (stageConflict(opportunity.type, fit, seeking)) ruleFired("opportunity.stage_conflict", { workspaceId, watchId: watch.id, title: opportunity.title,
-      url: opportunity.url, type: opportunity.type, stageFit: fit?.stageFit, why: fit?.why });
+    if (stageConflict(opportunity.type, fit, seeking)) ruleFired("opportunity.stage-conflict", { key: opportunity.url || opportunity.title, verdict: fit?.stageFit ?? "none",
+      sample: opportunity.title, workspaceId, watchId: watch.id, type: opportunity.type, why: fit?.why });
     const feasibility = await deps.feasibility?.(opportunity, { store, workspaceId, now, watch }).catch(() => undefined);
     const saved = store.saveOpportunity(workspaceId, { opportunity, terms, verdict, ...(feasibility ? { feasibility } : {}) }, now.toISOString());
     found += 1;
