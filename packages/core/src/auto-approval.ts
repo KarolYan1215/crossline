@@ -139,8 +139,11 @@ export function proposalReady(order: { state: string; payload?: unknown }, stepP
  */
 export type TaintRisk = "external" | "money" | "link" | "login";
 /* i18n-ignore-start: patterns read against what a model wrote from someone else's text */
+// rule: taint.money-signal
 const MONEY = /[¥$€£]\s*\d|\d\s*(?:元|块钱|美元|美金|欧元|英镑|刀\b|usd|rmb|cny|eur|gbp)|付款|支付|缴费|缴纳|交费|汇款|转账|打款|退款|账单|发票|学费|罚款|押金|订金|定金|充值|\b(?:pay|payment|payments|paid|invoice|invoices|billing|bill|refund|wire|deposit|tuition|fee|fees|charge|charges)\b/i;
+// rule: taint.link-signal
 const LINK = /https?:\/\/|\bwww\.|\b[a-z0-9-]+\.(?:com|net|org|edu|gov|io|cn|ly|me|co|app|xyz|info|link|top|site|online)\b/i;
+// rule: taint.login-signal
 const LOGIN = /登录|登陆|登入|密码|口令|验证码|动态码|账号|帐号|账户|帐户|用户名|身份证|护照|证件|社保号|学号|银行卡|卡号|\b(?:log ?in|sign ?in|password|passcode|verification code|otp|2fa|credentials?|account|username|ssn|passport|social security|id card)\b/i;
 /* i18n-ignore-end */
 export function taintedRisk(order: { intent: string; payload?: unknown }): TaintRisk[] {

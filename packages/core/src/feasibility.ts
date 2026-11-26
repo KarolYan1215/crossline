@@ -9,6 +9,7 @@
  */
 import { availableSlots, type AvailabilityWindow } from "./availability";
 import { tFor, type Locale } from "./i18n";
+import { ruleApplies, ruleFired } from "./rule-spec";
 import type { DatedQuote, Opportunity } from "./opportunity";
 import {
   LOCAL_MINUTES_MAX, VISA_LEAD_FALLBACK_DAYS, type CalendarClash, type EventPlace, type Feasibility, type InfeasibleCode,
@@ -82,7 +83,7 @@ const ZONE_WORDS: Record<string, number> = {
   HST: -600, AKST: -540, AKDT: -480, PST: -480, PDT: -420, PT: -480, MST: -420, MDT: -360, CST: -360, CDT: -300, CT: -360, EST: -300, EDT: -240,
   ET: -300, "北京时间": 480
 };
-const CHINESE = /[一-鿿]|china|beijing|中国/i;
+const CHINESE = /[一-鿿]|china|beijing|中国/i; // rule: opportunity.quote-time
 // i18n-ignore-end
 /** A deadline's zone from its quote, in minutes from UTC; undefined when the quote names none (the person's zone is taken then). */
 export function quotedZoneOffset(quote: string): number | undefined {
@@ -203,13 +204,17 @@ export function travelEstimate(km: number, eventDays = 1): TravelEstimate {
 }
 
 // i18n-ignore-start: words read from titles, never shown
+// rule: opportunity.far-words
 const FAR_WORDS = /conference|symposium|congress|summit|workshop|hackathon|competition|challenge|olympiad|contest|fellowship|internship|intern\b|residency|summer school|大会|会议|研讨会|峰会|比赛|竞赛|大赛|挑战赛|黑客松|实习|奖学金|暑期学校/i;
 // i18n-ignore-end
 /** The category an opportunity is held to: its own, else an application or a conference-like title is not local, else a local event. */
 export function opportunityCategory(opportunity: Pick<Opportunity, "kind" | "title"> & { category?: OpportunityCategory | undefined }): OpportunityCategory {
   if (opportunity.category) return opportunity.category;
-  if (opportunity.kind === "application") return /intern|实习/i.test(opportunity.title) ? "internship" : "program";
-  return FAR_WORDS.test(opportunity.title) ? (/hackathon|competition|challenge|contest|比赛|竞赛|大赛|黑客松/i.test(opportunity.title) ? "competition" : "conference") : "local_event";
+  const neutral: OpportunityCategory = opportunity.kind === "application" ? "program" : "local_event";
+  const guessed: OpportunityCategory = opportunity.kind === "application" ? (/intern|实习/i.test(opportunity.title) ? "internship" : "program") // rule: opportunity.far-words
+    : FAR_WORDS.test(opportunity.title) ? (/hackathon|competition|challenge|contest|比赛|竞赛|大赛|黑客松/i.test(opportunity.title) ? "competition" : "conference") : "local_event"; // rule: opportunity.far-words
+  ruleFired("opportunity.far-words", { key: opportunity.title, verdict: guessed, sample: opportunity.title });
+  return ruleApplies("opportunity.far-words") ? guessed : neutral;
 }
 
 // ── When ──────────────────────────────────────────────────────────────────────────────────────────────────────────────

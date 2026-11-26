@@ -10,6 +10,7 @@
  * every reader of `goals` keeps working.
  */
 import { joinList, tFor, type Locale } from "./i18n";
+import { ruleApplies, ruleFired } from "./rule-spec";
 
 export const ATTRIBUTE_KINDS = ["domain", "ability", "state"] as const;
 export type AttributeKind = (typeof ATTRIBUTE_KINDS)[number];
@@ -40,7 +41,7 @@ const KIND_RANK: Record<AttributeKind, number> = { domain: 0, ability: 1, state:
 const PUNCTUATION = /[^\p{L}\p{N}]+/gu;
 
 /** A leading 「成为」 or "become (a/an/the)" — the goal's verb, not part of what it says about the person. */
-const BECOME = /^(成为|become(\s+(an?|the))?\b)\s*/i;
+const BECOME = /^(成为|become(\s+(an?|the))?\b)\s*/i; // rule: attribute.goal-grammar
 
 /** An attribute as kept: trimmed, without a leading 「成为」 (or "become a") or a trailing 「的」, inner whitespace collapsed. */
 export function cleanAttribute(text: string): string {
@@ -105,6 +106,7 @@ export function duplicateAttributes(texts: string[]): Array<[string, string]> {
 }
 
 /** One attribute that is really two (「严谨、高产」, "rigorous, prolific"): an enumeration comma or a clause break inside it. */
+// rule: attribute.not-atomic
 export const notAtomic = (text: string) => /[、，,；;／/]|以及|并且|\b(as well as|and also)\b/i.test(text);
 
 /**
@@ -147,6 +149,7 @@ const TRAIT_END = /([力感性]强|扎实|过硬|出色|突出|严谨|高效|细
  * model: 「能/会/善于…」, 「…能力」 and words for how someone works (严谨, 高产, 判断力强) are abilities; words describing a lasting
  * condition or standing are states; anything else names a field.
  */
+// rule: attribute.guess-kind
 export function guessKind(text: string): AttributeKind {
   if (/^(能|会|可以|善于|擅长|懂得|具备|拥有.*能力)|能力|水平$|技能/.test(text)) return "ability";
   // 「作息有序」「体面」 are states like 「情绪稳定」 (W-269: read as a field, 「…有序」 got its own 的, and the goal was saved as
@@ -157,6 +160,16 @@ export function guessKind(text: string): AttributeKind {
   if (/^(trusted|respected|recogni[sz]ed) by\b|\b(stable|steady|sustained|sustainable|long-term|free|independent|calm|balanced|healthy|influential|well-known|renowned|leading|confident|reliable|dependable|self-sufficient|at ease)\b/i.test(text)) return "state";
   if (TRAIT_WORD.test(text) || TRAIT_END.test(text)) return "ability";
   return "domain";
+}
+
+/**
+ * guessKind where a model should have said the kind and did not (an old stored attribute, a split without one, a goal kept whole):
+ * recorded as a fallback firing; under `record` the neutral 「领域」.
+ */
+function fallbackKind(text: string, where: string): AttributeKind {
+  const kind = guessKind(text);
+  ruleFired("attribute.guess-kind", { key: `${where}|${text}`, verdict: kind, where, sample: text });
+  return ruleApplies("attribute.guess-kind") ? kind : "domain";
 }
 
 /** Sorted by the order Chinese attributives take — 领域, 能力, 状态 — keeping the given order within a kind. */
@@ -250,10 +263,10 @@ export function recomposes(parts: string[], noun: string, original: string): boo
  */
 export function lineAttributes(profile: StoredLineProfile | undefined, noun: string): AttributeCandidate[] {
   if (profile?.attributes?.length) return profile.attributes.filter((item) => item && typeof item.text === "string" && item.text.trim())
-    .map((item) => ({ text: item.text, kind: ATTRIBUTE_KINDS.includes(item.kind) ? item.kind : guessKind(item.text), sourceRef: item.sourceRef ?? "" }));
+    .map((item) => ({ text: item.text, kind: ATTRIBUTE_KINDS.includes(item.kind) ? item.kind : fallbackKind(item.text, "stored"), sourceRef: item.sourceRef ?? "" }));
   const seen = new Set<string>();
   return (profile?.goalCandidates ?? []).map((goal) => goalCore(goal, noun)).filter((text) => text && !seen.has(text) && Boolean(seen.add(text)))
-    .map((text) => ({ text, kind: guessKind(text), sourceRef: "" }));
+    .map((text) => ({ text, kind: fallbackKind(text, "old-goal"), sourceRef: "" }));
 }
 
 /**
@@ -310,7 +323,7 @@ export function validateGoalSplit(value: unknown, context: GoalSplitContext): Go
     for (const goal of line.goals) {
       const split = answered.goals.find((item) => item.goal.trim() === goal.trim());
       if (!split) reject("GOAL_SPLIT_GOAL_MISSING", `缺少长期目标「${goal}」的拆分；goal 字段须逐字照抄原句。`);
-      const parts = split.parts.map((part) => ({ text: cleanAttribute(part.text), kind: ATTRIBUTE_KINDS.includes(part.kind) ? part.kind : guessKind(part.text) })).filter((part) => part.text);
+      const parts = split.parts.map((part) => ({ text: cleanAttribute(part.text), kind: ATTRIBUTE_KINDS.includes(part.kind) ? part.kind : fallbackKind(part.text, "split") })).filter((part) => part.text);
       if (!parts.length) reject("GOAL_SPLIT_EMPTY", `「${goal}」没有拆出任何定语。`);
       const duplicate = duplicateAttributes(parts.map((part) => part.text))[0];
       if (duplicate) reject("GOAL_SPLIT_DUPLICATE", `「${goal}」的定语「${duplicate[0]}」与「${duplicate[1]}」重复。`);
@@ -330,7 +343,7 @@ export function validateGoalSplit(value: unknown, context: GoalSplitContext): Go
 /** The goal kept whole, as one attribute: what a goal becomes when no split of it recomposes. */
 export const wholeGoalPart = (goal: string, noun: string) => {
   const text = goalCore(goal, noun) || cleanAttribute(goal);
-  return { text, kind: guessKind(text) };
+  return { text, kind: fallbackKind(text, "whole-goal") };
 };
 
 /**

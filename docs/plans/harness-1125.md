@@ -177,3 +177,29 @@
 - **接入**：`step-planner`（与拆步骤计划里的 `questions` 分工：`ask_person` 只问「步骤现在就会错」的事实，能等周复盘的仍写进 `questions`，同一问题不两头问；拦截时也读得到已答的步骤问题）、`goal-backplanner`（只有本人知道的输入用 `ask_person` 并按假设拆分，`blockers` 的 `what`/`whoHas` 留给别人掌握或要去获取的东西）、`manualbook` 的设计器（只问会改变本人学哪几步、怎么学的事）。三处都经 `optionalTools` 提供：不能调用函数的路线不提供工具，运行照旧。
 - **Accretion 账**：新增一个事件类型 `person.question.asked`（读者：待确认卡片 `skill_question`；`ask-tool.ts` 找可并入的开放问题）和一个 ask kind `skill_question`（读者：`collectAsks`/`answerAsk`）。没有复用 `agent.question.*`：那条线是助手运行中等 10 分钟的同步提问，15 分钟后被自检过期，这里的问题要留到本人回答；状态和答案复用问题账本，答案复用 `profile_facts`，重跑复用现有事件，没有新设置项和环境变量。
 - 测试：`apps/worker/src/ask-tool.test.ts`（已答拦截、每次上限、同题并入与重跑对象、按假设不重跑、不可信运行禁链接、推送条件、工具拼接）、`apps/web/lib/skill-questions.test.ts`（卡片、回答成为事实、blocking 任务重排与里程碑重新倒推、周复盘、任务关闭后不再问）。
+## 10. 评测与消融（2026-11-25）
+
+本人要求：规则删不删用数据决定；关键 Skill 测一致性。CI 不跑模型评测（仓库公开、没有凭据），确定性部分进 vitest。怎么跑、怎么登记见 `docs/claude/operational-scripts.md`「规则登记、评测与消融」。
+
+**基础设施（已做）**
+- `RULE_SPEC`（`packages/core/src/rule-spec.ts`）：23 条，覆盖 `line-attributes`（`guessKind` 等 3 条）、`feasibility`（`FAR_WORDS`、报价里的时间 2 条）、`completion`（旧数据标题规则）、`money-events`（VETO、金额标签、商户键、退款词 4 条，`kind: money`，本人决定**保持强制**，覆盖一律无效）、`rough-dates`（2 条）、`activity-state`（隐私窗口为 `invariant`、窗口分类）、`agent-failure`（3 条）、`importance.hoursFromText`、`profile-gaps`（5 条）。纯兜底的三条标 `fallback`（`completion.legacy-title`、`opportunity.far-words`、`attribute.guess-kind`），只在模型字段缺失时生效，生效时 `ruleFired`；默认模式下判定结果与之前逐字相同（core 1298 个测试照过）。
+- `ruleFired` → `<数据目录>/telemetry/rule-fired.jsonl`（worker 与 web 启动时装 sink；同进程同 key 只记一次；钱只记事件类型和位置，不记金额与标题）。`CROSSLINE_RULE_MODE` / `setRuleModes` 运行时改模式。
+- lint（`scripts/rule-spec-lint.test.ts`）：`packages/core/src` 里带中文交替的正则字面量，新增的必须 `// rule: <id>` 或 `// not-nl: <why>`；现有 289 条为基线（`rule-spec.baseline.json`），只拦新增。另两条：每个登记项在自己的文件里有 `rule:` 锚点，每个 `rule:` 锚点都指向登记项。
+- `scripts/pass-k.ts`、`scripts/golden-from-corrections.ts`、`scripts/ablate.ts`（纯逻辑在 `scripts/eval-lib.ts`，测试 `scripts/eval-lib.test.ts`）。
+
+**pass^k 实测（k=3，本人电脑，安装版运行时，模型 `gpt-6-luna`，额度短窗读数 20%（第一套开跑前）→ 23%（最后一套开跑前））**
+
+| Skill | 样例 | pass^3 | pass@1 | 分歧率 | 说明 |
+|---|---|---|---|---|---|
+| 邮件分拣 `crossline-mail-triage` | `mail-intake-1120.json` 3 例 | 0.667 | 0.667 | 0 | `movie-night` 三次都判 `event`（不进待办、captures 0），夹具期望 `unlisted`（录制答案走 todo + serves none）。结果对本人无害，失败在于期望只认一条路径——夹具该放宽成「不进待办」还是让 Skill 回到 todo，留给夹具的主人判断。另两例三次全过。 |
+| 里程碑关口 `crossline-milestone-gate` | 手写证据 3 例 | 1 | 1 | 0 | 交付齐全 → 三次 `pass`；只说「做完了」、只交一半 → 三次 `insufficient`。 |
+| 拆步骤 `crossline-step-planner` | 3 个任务 | 1 | 1 | 0.667 | 判定（不写本人没说过的订正/错题）三次全过，但**结构**不稳：作业题 2 步或 3 步；本人记了「订正、错题本」的期中复习 2 步或 3 步，且三次都没用上本人的做法。 |
+
+**golden（本人纠正）**：用 2026-11-25 18:15 的备份恢复出副本（`restored\e1125`，活账本未动），抽出 **2 条**：1 次撤销（本人自己的操作，非系统所为）、1 次拒绝提案。同一账本里关口判定 55 次、0 次 override，没有改估时、改截止日或选完成方式。样本太少，现在还不能用本人纠正给任何一条规则下结论。
+
+**消融（确定性，不调模型）**
+- `opportunity.far-words`：`opportunity-mail-social-and-lines.json` 8 例，规则改变 0 例答案，enforce 与 record 与标签一致都是 7/8。不一致的那例是 Badger Hacks：`kind: application` 走「实习/项目」分支得 `program`，标签是 `competition`——这条规则本身没机会出手。按退场条件，等遥测 30 天没有触发就删。
+- `completion.legacy-title`：只有虚构示例（真实账本没有本人选过完成方式），不下结论。
+- `money.*`、`activity.private-window`：拒绝消融（设计如此）。
+
+**下一步（数据够了再做）**：遥测攒 30 天后按 `ablate.ts --telemetry` 看三条兜底的触发次数，零触发即删；邮件分拣把 `movie-night` 的期望改成「不进待办」后再测；拆步骤对本人记录的做法利用不足，值得给 Skill 更好的上下文，而不是加规则。

@@ -145,6 +145,7 @@ The app grew to ~230 event types, 40 ask kinds, ~190 settings keys and 66 `CROSS
 - **Who reads it and which home it belongs to.** An event type, ask kind, setting key or env var with no named reader is not added. Prefer a field on an existing event or setting over a new type.
 - **Model context before a rule.** A walkthrough finding is first answered by giving the model better context or a schema field; a new regex, word list or threshold over natural language needs a reason a model cannot be trusted there (money, an irreversible or external act, a security boundary, verifying a model's claim).
 - **Telemetry is not the ledger.** What only a developer reads goes to the JSONL logs, not `appendEvent`.
+- **Every rule over natural language is registered** in `RULE_SPEC` (`packages/core/src/rule-spec.ts`: kind, mode, readers, when it is retired) with `// rule: <id>` beside its pattern; `rule-spec.test.ts` fails on a new unregistered Chinese alternation regex in `packages/core/src`. How to register, measure (`scripts/pass-k.ts`, `scripts/ablate.ts`) and retire: `docs/claude/operational-scripts.md`.
 - `pnpm review:ledger [-- --db <backup copy>]` lists write-only event types and settings keys. Run it monthly. "Write-only" is a candidate, not a verdict: person decisions and external effects stay in the ledger as audit even when no code reads them back; system telemetry and one-off backfill markers go.
 
 ## Notes

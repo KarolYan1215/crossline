@@ -1,4 +1,5 @@
 import { quoteSupportsDate } from "./date-schema";
+import { ruleFired } from "./rule-spec";
 
 /**
  * Bookkeeping from mail and the other money sources (docs/mail-bookkeeping.md, 2026-10-28). A mail about money is one event of a closed
@@ -43,6 +44,7 @@ export type MoneyVerdict =
   | { book: false; reason: "not_money" | "not_booked" | "vetoed" | "amount_unverified"; event: MoneyEvent; voids?: Omit<MoneyEvidence, "sourceKey" | "source" | "sourceRef" | "note"> };
 
 // Words in a mail's own text, matched, never shown.
+// rule: money.veto (VETO, REFUND_OK); rule: money.amount-label (EXCLUDE_LABEL, INCLUDE_LABEL)
 /* i18n-ignore-start */
 const VETO = /\brequest(?:ed|s)?\b|\bexpir(?:ed|es|y)\b|\bdeclined\b|\bfail(?:ed|ure)?\b|\bcancel(?:l?ed|lation)?\b|\brevers(?:ed|al)\b|\bpending\b|\b(?:pre-?)?authori[sz](?:ation|ed)\b|\bhold\b|\bstatement\b|\bminimum\b|\bbalance\b|\b(?:credit\s+)?limit\b|\bdue\b|\bupcoming\b|\bwill be charged\b|\btrial\b|请求|过期|失效|失败|被拒|拒绝|取消|撤销|冲正|预授权|冻结|待入账|账单|最低还款|余额|额度|到期|即将扣|试用/iu;
 const REFUND_OK = /\bcancel(?:l?ed|lation)?\b|取消/iu;
@@ -90,6 +92,7 @@ function lineAt(text: string, index: number): string {
 export const normalizeRef = (ref: string): string => ref.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/^0+/, "");
 
 /* i18n-ignore-start */
+// rule: money.merchant-key
 const PROCESSOR_PREFIX = /^(?:paypal\s*\*|sq\s*\*|tst\s*\*|sp\s*\*|apple\.com\/bill|google\s*\*|支付宝[-－—]|财付通[-－—]|微信支付[-－—])\s*/iu;
 const NOISE = /\b(?:inc|llc|ltd|co|corp|com|www|store|#\d+|\d{3,})\b\.?|有限公司|公司|旗舰店|官方/giu;
 /* i18n-ignore-end */
@@ -162,7 +165,11 @@ export function moneyEventFromMail(reading: MoneyReading, mail: { subject: strin
   if (event === "failed") return { book: false, reason: "not_booked", event, ...(evidence ? { voids: evidence } : {}) };
   if (!BOOKABLE_EVENTS.includes(event)) return { book: false, reason: "not_booked", event };
   const veto = (value: string) => VETO.test(event === "refund" ? value.replace(new RegExp(REFUND_OK.source, "giu"), "") : value);
-  if (veto(mail.subject) || (located && veto(lineAt(text, located.index)))) return { book: false, reason: "vetoed", event };
+  if (veto(mail.subject) || (located && veto(lineAt(text, located.index)))) {
+    // Counted only (the owner keeps the veto enforced): how often it overrules the triage's bookable reading. No subject or amount.
+    ruleFired("money.veto", { verdict: "vetoed", event, where: veto(mail.subject) ? "subject" : "amount_line" });
+    return { book: false, reason: "vetoed", event };
+  }
   if (!evidence) return { book: false, reason: "amount_unverified", event };
   return { book: true, evidence };
 }
@@ -171,7 +178,7 @@ export function moneyEventFromMail(reading: MoneyReading, mail: { subject: strin
 export const moneySubjectVetoed = (subject: string, refund = false): boolean =>
   VETO.test(refund ? subject.replace(new RegExp(REFUND_OK.source, "giu"), "") : subject);
 /** A refund named in a mail's subject or a record's note. */
-export const REFUND_WORDS = /\brefund(?:ed)?\b|退款|退货款/iu; // i18n-ignore
+export const REFUND_WORDS = /\brefund(?:ed)?\b|退款|退货款/iu; // i18n-ignore; rule: money.refund-words
 
 /** What a stored record offers the matcher: its own fields and the evidence already behind it. */
 export type MatchTarget = { kind: string; value: number; currency: string; at: string; merchantKey: string; account: string;

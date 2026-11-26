@@ -621,3 +621,4 @@ export * from "./self-check";
 export * from "./interview-completeness";
 export * from "./mcp";
 export * from "./web-egress";
+export * from "./rule-spec";

@@ -16,6 +16,11 @@ export async function register(): Promise<void> {
   // imports still pulled `better-sqlite3` (a native module, unavailable on edge) into that bundle and
   // failed the whole dev server on `Module not found: Can't resolve 'fs'`, found by actually starting it.
   if (process.env.NEXT_RUNTIME === "nodejs") {
+    // Rule firings (packages/core/src/rule-spec.ts) go to `<data dir>/telemetry/rule-fired.jsonl`, never the ledger.
+    if (!process.env.VITEST) {
+      const [{ installRuleTelemetry }, { dataDirectory }] = await Promise.all([import("@crossline/db"), import("./lib/crossline")]);
+      installRuleTelemetry(dataDirectory());
+    }
     // A linked device (docs/device-mode.md) does none of this: the hosted site publishes, keeps the attention snapshot and speaks first.
     // Asked on every pass, so linking or unlinking takes effect without restarting the web app.
     const { devicePrimaryUrl } = await import("./lib/device-mode");

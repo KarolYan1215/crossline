@@ -1,5 +1,6 @@
 import type { SuccessCriterion } from "./index";
 import { tFor, type Locale } from "./i18n";
+import { ruleApplies, ruleFired } from "./rule-spec";
 
 /**
  * Pressing 完成 is acceptance (the owner's decision of 2026-10-15). 「ECE 555 作业 2」 marked done is done: nothing asks again, nothing
@@ -70,6 +71,7 @@ const askFor = (reason: AssessmentReason, title: string, locale?: Locale) => {
 };
 
 // Fallback for tasks written before the models judged completion (no `payload.completion`); a new task never reaches these rules.
+// rule: completion.legacy-title
 // Each rule reads English titles as well as Chinese ones: an English workspace's tasks are written in English.
 /** Something sat or submitted for somebody else's judgement. */
 const JUDGED_EVENT = /(考试|测验|小测|期中|期末|面试|答辩|投稿|竞赛|比赛|路演|评审|quiz|exam|midterm|final|interview|pitch|submission to|\b(?:thesis )?defen[cs]e\b|\bcompetition\b|\bcontest\b)/i;
@@ -105,6 +107,15 @@ export function completionRule(order: OrderLike, locale?: Locale): CompletionRul
     const reason = model.reason as AssessmentReason;
     return { mode: "needs_assessment", reason, why: model.why || t("完成后再问结果"), question: model.question || askFor(reason, title, locale), askAfterHours: model.askAfterHours, by: "model" };
   }
+  const neutral: CompletionRule = { mode: "self_evident", why: t("点完成即验收"), by: "rule" };
+  const ruled = legacyTitleRule(title, text, locale) ?? neutral;
+  ruleFired("completion.legacy-title", { key: title, verdict: ruled.mode === "needs_assessment" ? ruled.reason : ruled.mode, sample: title });
+  return ruleApplies("completion.legacy-title") ? ruled : neutral;
+}
+
+/** The title rules for a task the model never judged; undefined when none matches. */
+function legacyTitleRule(title: string, text: string, locale?: Locale): CompletionRule | undefined {
+  const t = tFor(locale);
   if (JUDGED_EVENT.test(title) && !TOWARDS.test(title))
     return { mode: "needs_assessment", reason: "result_pending", why: t("结果由别人之后评定（成绩、录用、评审意见）"),
       question: askFor("result_pending", title, locale), askAfterHours: 24, by: "rule" };
@@ -113,7 +124,7 @@ export function completionRule(order: OrderLike, locale?: Locale): CompletionRul
     question: askFor("exploration", title, locale), askAfterHours: 2, by: "rule" };
   if (QUALITY.test(title)) return { mode: "needs_assessment", reason: "quality", why: t("产出的质量难以直接判断"),
     question: askFor("quality", title, locale), askAfterHours: 2, by: "rule" };
-  return { mode: "self_evident", why: t("点完成即验收"), by: "rule" };
+  return undefined;
 }
 
 export function completionMode(order: OrderLike): CompletionMode {
