@@ -1,4 +1,4 @@
-import { autoApprovalEligible, AUTO_APPROVER_ID, onPersonsBoard, taskTitleOf, tFor } from "@crossline/core";
+import { autoApprovalEligible, AUTO_APPROVER_ID, onPersonsBoard, provenanceSaid, readProvenance, taskTitleOf, tFor } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 import { ownerOf } from "./owner";
 import { sayToPerson } from "./workflow-smith";
@@ -16,7 +16,7 @@ export function autoApproveEligible(store: CrosslineStore, workspaceId: string, 
   const wanted = ids ? new Set(ids) : undefined;
   // The reason recorded and the message said are in the workspace's language.
   const locale = localeOf(store, workspaceId);
-  const approved: Array<{ id: string; title: string; board: boolean }> = [];
+  const approved: Array<{ id: string; title: string; board: boolean; from?: string }> = [];
   // An automatic approval the person took back is never re-applied: their undo is a decision.
   const revoked = new Set(store.listEvents(workspaceId, { type: "work_order.auto_approval_revoked" }).map((event) => event.entityId));
   for (const order of store.listWorkOrders(workspaceId)) {
@@ -33,7 +33,9 @@ export function autoApproveEligible(store: CrosslineStore, workspaceId: string, 
     }
     store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `work_order.auto_approved:${order.id}`,
       type: "work_order.auto_approved", entityId: order.id, payload: { reason: verdict.reason } });
-    approved.push({ id: order.id, title: taskTitleOf(order), board: onPersonsBoard(order) });
+    // Written after a model read someone else's words and judged low-risk (docs/plans/harness-1125.md §10): said with where it came from.
+    const provenance = readProvenance((order.payload as { provenance?: unknown } | undefined)?.provenance);
+    approved.push({ id: order.id, title: taskTitleOf(order), board: onPersonsBoard(order), ...(provenance?.tainted ? { from: provenanceSaid(provenance, locale) } : {}) });
   }
   // The assistant's preparation took effect too, but it puts nothing on the person's week: only their own tasks are announced.
   const told = approved.filter((item) => item.board);
@@ -44,7 +46,9 @@ export function autoApproveEligible(store: CrosslineStore, workspaceId: string, 
     const values = { count: told.length, names };
     // Said at approval, before the step planner has run: whether a step gets a block is not known yet, so it claims none (W-278).
     const said = told.length > 5 ? t("{{count}} 项任务已自动生效：{{names}} 等。", values) : t("{{count}} 项任务已自动生效：{{names}}。", values);
-    sayToPerson(store, workspaceId, said + t("排好的时段会出现在日历里；要先交材料的，任务里会请本人提供。") + t("它们无需本人选择或授权，对外的那一步由本人自己做；24 小时内可在待确认页「最近自动生效」撤销。"),
+    const quoted = (title: string) => locale === "en" ? `"${title.slice(0, 30)}"` : `「${title.slice(0, 30)}」`;
+    const sourced = told.filter((item) => item.from).slice(0, 5).map((item) => t("{{title}}{{from}}。", { title: quoted(item.title), from: item.from! })).join("");
+    sayToPerson(store, workspaceId, said + sourced + t("排好的时段会出现在日历里；要先交材料的，任务里会请本人提供。") + t("它们无需本人选择或授权，对外的那一步由本人自己做；24 小时内可在待确认页「最近自动生效」撤销。"),
       "auto_approved", `auto-approved:${told.map((item) => item.id).sort().join(",")}`, [{ label: t("去看看"), href: "/approvals" }], now);
   }
   return approved.map((item) => item.id);

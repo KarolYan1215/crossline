@@ -4,7 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameS
 import path from "node:path";
 import type { SkillTools } from "@crossline/codex";
 import { dueDateReader, type CrosslineStore, type StoredSourceDocument } from "@crossline/db";
-import { tFor } from "@crossline/core";
+import { tFor, untrustedFile, type CaptureProvenance, type TaintSource } from "@crossline/core";
 import { localeOf } from "./locale";
 import { extractText } from "./extract";
 
@@ -23,7 +23,15 @@ export type MailLookup = {
 
 export type ToolCall = { tool: string; subject: string; ok: boolean };
 export type ToolboxAction = { kind: "inbox"; text: string } | { kind: "tell"; text: string };
-export type AgentToolbox = SkillTools & { calls: ToolCall[]; actions: ToolboxAction[]; written: () => string[] };
+/**
+ * What a run has read of someone else's words (docs/plans/harness-1125.md §10): once anything is in `sources` the whole run is tainted,
+ * its inbox lines carry that on their captures, and the run keeps no outbound function for the rest of its work (`agent-task.ts`).
+ */
+export type RunTaint = { tainted: boolean; sources: TaintSource[] };
+export type AgentToolbox = SkillTools & { calls: ToolCall[]; actions: ToolboxAction[]; written: () => string[]; taint: () => RunTaint };
+
+/** Thrown instead of an answer when untrusted text would reach a run that can still reach the network: the run goes on without it first. */
+export const TAINT_HELD = "TAINT_HELD";
 
 /** Text the assistant may write; anything else (scripts, programs, archives) is not its to make here. */
 const WRITABLE = /\.(md|markdown|txt|csv|tsv|json|html?|ics|ya?ml|xml)$/i;
@@ -55,6 +63,13 @@ export function createAgentToolbox(deps: {
   mail?: MailLookup;
   readFile?: (uri: string) => Uint8Array;
   now?: () => Date;
+  /** Someone else's words the run was handed at the start (`input.untrusted`, mail or web files, `flow-`/`collect-` folders). */
+  untrusted?: TaintSource[];
+  /**
+   * Asked before untrusted text is handed to the model: false while the run still has an outbound function, and then the call fails
+   * with `TAINT_HELD` and nothing of that text is answered (the caller goes on without the network and the model reads it again there).
+   */
+  admitTaint?: (source: TaintSource) => boolean;
 }): AgentToolbox {
   const calls: ToolCall[] = [];
   const actions: ToolboxAction[] = [];
@@ -64,6 +79,12 @@ export function createAgentToolbox(deps: {
   /** Copies of the person's files: counted against their own allowance, so organising large files leaves room to write the index. */
   const copied = new Set<string>();
   const read = deps.readFile ?? ((uri: string) => readFileSync(uri.replace(/^file:\/\//, "")));
+  const sources = new Set<TaintSource>(deps.untrusted ?? []);
+  /** Marks the run tainted by `source`, or refuses the read when the run may not take it in yet. */
+  const taintWith = (source: TaintSource) => {
+    if (!sources.has(source) && deps.admitTaint && !deps.admitTaint(source)) throw Object.assign(new Error(TAINT_HELD), { source });
+    sources.add(source);
+  };
   mkdirSync(deps.directory, { recursive: true });
 
   /** `input/<n>/rest` → a file under that input; anything else → a file in the task directory. */
@@ -226,6 +247,8 @@ export function createAgentToolbox(deps: {
       }
       case "read_document": {
         const doc = documents().find((item) => item.id === s("id")) ?? fail(`没有 id 为「${s("id")}」的文件。`);
+        const external = untrustedFile(doc.fileName) ?? untrustedFile(doc.uri);
+        if (external) taintWith(external === "download" ? "download" : "document");
         let text = doc.extractedText;
         if (!text && doc.extractionStatus !== "done") {
           const kind = doc.kind === "pdf" || doc.kind === "docx" || doc.kind === "text" ? doc.kind : undefined;
@@ -290,12 +313,14 @@ export function createAgentToolbox(deps: {
       }
       case "mail_search": {
         if (!deps.mail) fail("本人没有接入邮箱。");
+        taintWith("mail");
         const hits = await deps.mail!.search({ ...(s("text") ? { text: s("text") } : {}), ...(s("from") ? { from: s("from") } : {}),
           ...(n("sinceDays") ? { sinceDays: n("sinceDays") } : {}), limit: Math.min(30, n("limit") || 15) });
         return JSON.stringify({ messages: hits });
       }
       case "mail_read": {
         if (!deps.mail) fail("本人没有接入邮箱。");
+        taintWith("mail");
         const message = await deps.mail!.read(s("id")) ?? fail(`没有 id 为「${s("id")}」的邮件。`);
         return JSON.stringify({ ...message, text: message.text.slice(0, READ_CHARS) });
       }
@@ -304,7 +329,7 @@ export function createAgentToolbox(deps: {
   }
 
   return {
-    specs, calls, actions, written: () => [...written, ...copied],
+    specs, calls, actions, written: () => [...written, ...copied], taint: () => ({ tainted: sources.size > 0, sources: [...sources] }),
     async call(name, args) {
       // What a call is about, offset included: reading one long file page by page is not going round in circles. Nor is reading a file
       // again after writing it: the write count is part of the subject (2026-10-28: two runs that wrote, re-read and revised their own
@@ -332,14 +357,20 @@ export function createAgentToolbox(deps: {
   };
 }
 
-/** Carries out what a finished run asked for: its inbox lines become captures (planned like anything typed); what it had to say is returned. */
-export function applyToolboxActions(store: CrosslineStore, workspaceId: string, ownerId: string, taskId: string, actions: ToolboxAction[]):
+/**
+ * Carries out what a finished run asked for: its inbox lines become captures (planned like anything typed); what it had to say is returned.
+ * A tainted run's captures carry where they came from (`provenance`), which the approval rule reads (docs/plans/harness-1125.md §10).
+ */
+export function applyToolboxActions(store: CrosslineStore, workspaceId: string, ownerId: string, taskId: string, actions: ToolboxAction[], taint?: RunTaint):
   { captures: string[]; told: string[] } {
   const captures: string[] = [];
+  const t = tFor(localeOf(store, workspaceId));
+  const provenance: CaptureProvenance | undefined = taint?.tainted ? { run: taskId, by: "assistant", tainted: true, sources: taint.sources } : undefined;
   for (const [index, action] of actions.entries()) {
     if (action.kind !== "inbox") continue;
     const id = `cap-agent-${randomUUID().slice(0, 12)}`;
-    store.capture({ id, ownerId, workspaceId, title: action.text, context: tFor(localeOf(store, workspaceId))("助手在「{{task}}」中记下", { task: taskId }) }, `agent:inbox:${taskId}:${index}`);
+    store.capture({ id, ownerId, workspaceId, title: action.text, context: provenance ? t("助手读了别人写的内容后在「{{task}}」中记下", { task: taskId }) : t("助手在「{{task}}」中记下", { task: taskId }) },
+      `agent:inbox:${taskId}:${index}`, undefined, provenance);
     captures.push(action.text);
   }
   return { captures, told: actions.filter((action) => action.kind === "tell").map((action) => action.text) };

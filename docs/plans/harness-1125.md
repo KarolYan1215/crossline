@@ -88,3 +88,25 @@
 - shell 助手真实回合：今日输入框建任务（模型判 `external: false`），`/api/agent/dispatch` 交给助手；`agent.task.requested` 记 `isolation: "mxc"`、`profile: research`，`audit.json` 为 `egress: "packages"`、2 条命令、`reproduced: true`（worker 在沙箱里重跑 run.py，HTML 哈希一致），49 秒。测试任务已归档。
 - 本机是完整模式，敏感资料本来就在本机密钥库，服务器→电脑的迁移与 48 小时提醒在这台电脑上不适用（单元与真 Chrome 测试见 `form-vault.test.ts`）。
 - 打包时发现 `scripts/package-node.ts` 的白名单漏了 `apps/worker/src/browser-port.ts`（ffffbd2cbc 引入，只用 `node:net`），已补；独立节点安装包 1.2.2 能构建，但没发布。
+
+## 10. 工具模式 Rule of Two（2026-11-25，本人决定，已做）
+
+目的：切断「邮件文字不经本人就进日历」这条链路。§3 只管了机主本机的 shell；工具模式（托管账户的助手、自动化）原来忽略 `input.untrusted`，开着 web 搜索和连接器，`add_to_inbox` 的捕获无条件进分析、自动批准、排程、写日历。
+
+- **工具登记表 `TOOL_SPEC`**（`packages/core/src/tool-spec.ts`，参照 `GATE_SPEC`）：助手工具模式的每个函数、小帮手的每个查询（`CONCIERGE_TOOL_SPECS`）和运行时的 `web_search`/`web_fetch`/`connectors`，各标 `reads: untrusted|private|none`、`effect: none|local_write|ledger_write|outbound`。不在表里的按 `untrusted` + `outbound`（`toolSpecOf`，fail-closed）。Rule of Two 只从这张表算（`withheldByRuleOfTwo`）：读过别人写的内容、又持有本人私人数据的运行，所有 `outbound` 的函数都拿掉。测试保证工具箱和小帮手的每个函数都在表里（`agent-tools.test.ts`、`tool-spec.test.ts`）。
+- **污点按运行传播**（`agent-tools.ts` 的 `taint()`、`agent-task.ts` 的 `runWithTools`）：
+  - 开始时就被交给别人写的内容——`input.untrusted`、`input.reader`、`collect-*` 或 `flow-*` 结果目录、输入里的 `.eml/.msg/.html` 等或 `Downloads` 下的文件（`untrustedSourcesOf`）——整个运行从一开始就不开 web 搜索和连接器。
+  - 运行中读到别人写的内容——`mail_search`（结果带正文开头）、`mail_read`、读到外部文件的 `read_document`（文件名或位置是邮件、网页文件或下载目录，`untrustedFile`）——而运行还开着 web 时：这次读取**不回答**（`TAINT_HELD`），本轮停下，同一个对话以 `resumeThreadId` 续跑，续跑的线程没有 web 搜索和连接器，模型在那里重读。理由：托管搜索是 OpenAI 那边执行的，线程开着 web 就没法在轮中途撤销，只有换一个不带 web 的线程才算真的关掉。写出的文件、已排队的收件箱行都留着。
+  - 被污染运行的收件箱行在 `capture.created` 上带 `provenance: {run, by, tainted, sources}`（`store.capture` 的第四个参数，不新增事件类型）；分析把它抄到工作单的 `payload.provenance`。`agent.task.completed` 和 `audit.json` 带 `tainted: [来源]`。
+  - 来源名（`TaintSource`）：`mail`、`page`、`site`、`document`、`download`、`flow`。**`flow`** 就是 `flow-*` 结果目录，skill-supply 读这个名字。
+- **按风险分流**（`autoApprovalEligible` 读 `payload.provenance`，web 的 permission mode 读同一条规则）：
+  - 高风险 = 对外或承诺（模型的 `external === true`，或 `mentionsExternalAction` 词表命中，取或）**或** 金额与付款、链接、登录与账号密码证件（`taintedRisk` 的三条确定性规则；这是安全边界，钓鱼邮件要的就是这些，而读邮件的模型正是被骗的那一方）。高风险不自动批准、不排程、不写日历，留在待确认作为现有的「任务提案」，本人按了才继续；也不并进本人已批准的任务、不吸收别的任务为其部分（`analysis.ts` 的 `held`）。没有新增 ask kind。
+  - 低风险照常自动生效，`work_order.auto_approved` 的理由写「来自助手读邮件，低风险，默认生效」，铃铛里那条「已自动生效」的消息逐项写明「来自助手读邮件」（`auto_approved` 本来就只进铃铛、不推送），24 小时内可在待确认撤销。
+  - 本来就要等本人的（`needsPerson` 等）照旧，理由不变。没读过不可信内容的运行，行为完全不变。
+- **邮件分拣**（`mailbox.ts`）的 todo/date 捕获本来也会不经本人进日历，现在带 `provenance: {run: "mail-triage", by: "mail_triage", sources: ["mail"]}`，走同一套分流，铃铛写「来自邮件分拣」。注意：课程邮件里的「提交 HW4」会因「提交」命中词表而等本人确认——这是本人要的「对外或承诺取或」，与 W-257（本人自己的作业不因「提交」卡住）不冲突，因为 W-257 管的是本人自己写进来的任务。
+- 沙箱模式（`sandbox`）和节点也用同一个工具箱，收件箱行同样带来源；但它们的 web 工具在 shell 旁边，运行中途不切线程，只记录。
+
+**没做 / 限制**
+- 托管 web 搜索的结果不经过 Crossline，工具模式看不到，所以「读网页」本身不算污点来源；网页只在开始时作为 `input.untrusted: ["page"]` 或保存的网页文件计入。
+- ChatGPT 连接器（Gmail、Drive）的内容表里记为 `private`（本人自己的账户），读它不污染运行；被污染的运行不再开连接器。
+- 聊天摘要、录音转写这类「别人的话」的文件，`read_document` 不算外部来源（录音来的捕获另有 `RECORDING_CAPTURE_PREFIX` 一律等本人）。
