@@ -43,8 +43,11 @@ export async function startProviderHarness(store: CrosslineStore, client: CodexR
     if (!workspaceId) return undefined;
     const routing = service.routing(workspaceId);
     if (!routing || !forced.has(workspaceId)) return routing;
-    const forcedRouting: ProviderRouting = { ...routing, admitted: REAL_SKILLS, codexSignedIn: true,
+    // As production serves a provider that calls functions (the developer's model always does): the interview's card tools, the web
+    // through `web_research` and the lookups. Without it every `--provider` interview ran in its one-JSON fallback (2026-11-26).
+    const forcedRouting: ProviderRouting = { ...routing, admitted: REAL_SKILLS, codexSignedIn: true, functionCalls: true,
       capabilities: { ...THIRD_PARTY_CAPABILITIES, ...routing.capabilities, shell: true } };
+    delete forcedRouting.functionCallsFor;
     return forcedRouting;
   });
   return {

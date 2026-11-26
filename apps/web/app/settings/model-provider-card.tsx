@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { interviewServed } from "@crossline/core";
 import { Tag } from "../ui/tag";
 import { useLocale, useT } from "../locale-context";
 import { intlLocale, type Translate } from "../../lib/i18n";
@@ -43,9 +44,10 @@ export function ModelProviderCard({ initial, onReady, local = false }: { initial
   const t = useT();
   const locale = useLocale();
   const [view, setView] = useState<ProviderView | undefined>(initial);
-  // The interview is the first thing an account does: once the added model has passed the check for it, the connect page moves on.
-  const interviewServed = Boolean(view?.features.some((feature) => feature.skill.endsWith("crossline-onboarding") && feature.served));
-  useEffect(() => { if (view) onReady?.(interviewServed); }, [interviewServed, Boolean(view)]);
+  // The interview is the first thing an account does: once the added model has passed the check for it (its dialogue and its
+  // extraction, `interviewServed`), the connect page moves on.
+  const servesInterview = interviewServed(view?.features);
+  useEffect(() => { if (view) onReady?.(servesInterview); }, [servesInterview, Boolean(view)]);
   const [draft, setDraft] = useState<Draft>();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string>();

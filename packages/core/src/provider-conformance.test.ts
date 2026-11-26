@@ -109,3 +109,49 @@ test("a record made before the interview was split into two schemas still admits
     [...runs, { caseId: "ONBOARDING_TURN_SCHEMA", ok: true, repairs: 0, ms: 1 }]);
   expect(admittedSkills(record)).toEqual(expect.arrayContaining(["crossline-onboarding", "crossline-onboarding-extract"]));
 });
+
+test("interview parity (2026-11-26): the portrait's narrative is admitted on the long-text case, not without it", async () => {
+  const { LONG_TEXT_CASE_ID } = await import("./provider-conformance");
+  expect(admittedSkills(summarizeConformance(base, allPassing()))).toContain("crossline-portrait-narrative");
+  const failed = allPassing().map((item) => item.caseId === LONG_TEXT_CASE_ID ? run(LONG_TEXT_CASE_ID, false) : item);
+  expect(admittedSkills(summarizeConformance(base, failed))).not.toContain("crossline-portrait-narrative");
+  // A free-text Skill is not admitted by default: only one marked `freeText` is.
+  expect(Object.entries(SKILL_NEEDS).filter(([, needs]) => !needs.schemas.length && needs.freeText).map(([skill]) => skill)).toEqual(["crossline-portrait-narrative"]);
+});
+
+test("interview parity: a record from before the scout, the query review and the scale reading still admits the interview and its research", async () => {
+  const { conformanceCases: cases } = await import("./provider-conformance");
+  const later = new Set(["WEB_SCOUT_SCHEMA", "QUERY_REVIEW_SCHEMA", "SCALE_ANALYSIS_SCHEMA", "INTERVIEW_CARD_TOOLS"]);
+  const older = cases().filter((item) => !later.has(item.id)).flatMap((item) => Array.from({ length: item.runs }, () => run(item.id)));
+  expect(admittedSkills(summarizeConformance(base, older), { ...THIRD_PARTY_CAPABILITIES, webSearch: true })).toEqual(expect.arrayContaining([
+    "crossline-onboarding", "crossline-onboarding-extract", "crossline-onboarding-research", "crossline-web-scout"]));
+});
+
+test("interview parity: the card-tools case checks a question card's real schema, and its failure keeps only the interview off functions", async () => {
+  const { INTERVIEW_TOOLS_CASE_ID, callsFunctions, callsFunctionsFor, ONBOARDING_DIALOGUE_SCHEMA } = await import("./index");
+  const item = conformanceCases().find((entry) => entry.id === INTERVIEW_TOOLS_CASE_ID)!;
+  expect(item.tool?.checkArgs).toBe(true);
+  expect(item.tool?.inputSchema).toEqual((ONBOARDING_DIALOGUE_SCHEMA as unknown as { properties: { questions: { items: unknown } } }).properties.questions.items);
+  expect(jsonSchemaProblems({ id: "q1", text: "哪几个晚上空着？" }, item.tool!.inputSchema).length).toBeGreaterThan(0);
+  const passing = summarizeConformance(base, allPassing());
+  expect(callsFunctionsFor(passing, "crossline-onboarding")).toBe(true);
+  const failed = summarizeConformance(base, allPassing().map((entry) => entry.caseId === INTERVIEW_TOOLS_CASE_ID ? run(INTERVIEW_TOOLS_CASE_ID, false) : entry));
+  expect(callsFunctions(failed)).toBe(true);
+  expect(callsFunctionsFor(failed, "crossline:crossline-onboarding")).toBe(false);
+  expect(callsFunctionsFor(failed, "crossline-onboarding-extract")).toBe(true);
+  // Still admitted: the dialogue runs in its one-JSON mode, which its schema case measured.
+  expect(admittedSkills(failed)).toContain("crossline-onboarding");
+  // A record from before the case: as the generic tools case says.
+  const older = summarizeConformance(base, allPassing().filter((entry) => entry.caseId !== INTERVIEW_TOOLS_CASE_ID));
+  expect(callsFunctionsFor(older, "crossline-onboarding")).toBe(true);
+  const noTools = summarizeConformance(base, allPassing().map((entry) => entry.caseId === "ADVERSARIAL_TOOLS" ? run("ADVERSARIAL_TOOLS", false) : entry));
+  expect(callsFunctionsFor(noTools, "crossline-onboarding")).toBe(false);
+});
+
+test("interview parity: a provider serves the interview only when both the dialogue and its extraction are served", async () => {
+  const { interviewServed } = await import("./index");
+  expect(interviewServed(undefined)).toBe(false);
+  expect(interviewServed([{ skill: "crossline-onboarding", served: true }])).toBe(false);
+  expect(interviewServed([{ skill: "crossline-onboarding", served: true }, { skill: "crossline-onboarding-extract", served: false }])).toBe(false);
+  expect(interviewServed([{ skill: "crossline:crossline-onboarding", served: true }, { skill: "crossline-onboarding-extract", served: true }])).toBe(true);
+});

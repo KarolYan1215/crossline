@@ -623,7 +623,9 @@ export function createSponsorService(options: {
     if (!workspaceId?.startsWith(SPONSOR_DIALOGUE_PREFIX) || !settings()) return undefined;
     const model = workspaceId.slice(SPONSOR_DIALOGUE_PREFIX.length);
     return { provider: providerFor(model), gatewayUrl: options.gateway.urlFor(workspaceId, SPONSOR_PROVIDER_ID),
-      admitted: new Set(["crossline-onboarding", "crossline-onboarding-extract"]), codexSignedIn: false, capabilities: options.capabilities };
+      admitted: new Set(["crossline-onboarding", "crossline-onboarding-extract"]), codexSignedIn: false, capabilities: options.capabilities,
+      // As an invited account runs it: a chosen model always calls functions (the extraction needs them), so the dialogue has its card tools.
+      functionCalls: true };
   }
 
   /** The usage sink's share: evaluation runs are counted here, never written to a workspace's ledger. */

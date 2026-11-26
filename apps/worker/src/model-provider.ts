@@ -1,6 +1,6 @@
 import { caseTools } from "./conformance-tools";
 import {
-  admittedSkills, callsFunctions, conformanceCases, conformanceCurrent, conformanceProblems, SKILL_NEEDS, summarizeConformance, unavailableOnThirdParty,
+  admittedSkills, callsFunctions, callsFunctionsFor, conformanceCases, conformanceCurrent, conformanceProblems, SKILL_NEEDS, summarizeConformance, unavailableOnThirdParty,
   capabilityGap, CHATGPT_EXHAUSTED_SETTING, chatgptExhausted, chatgptQuotaSpent, tFor, THIRD_PARTY_CAPABILITIES, type ChatgptExhausted, type ConformanceCase, type ConformanceRecord, type ConformanceRun, type CostSignal
 } from "@crossline/core";
 import {
@@ -116,7 +116,7 @@ export function createModelProviderService(options: {
     if (budget && budget.spent >= budget.cap) return { ...base, provider: sponsor.providerFor(pick.model), admitted: new Set(),
       blocked: { code: "MODEL_SPONSOR_BUDGET", message: tFor(localeOf(options.store, workspaceId))("本月邀请额度（¥{{cap}}）已用完，下月 1 日恢复；也可以在 设置 → 模型连接 连接自己的 ChatGPT 或 API。", { cap: budget.cap }) } };
     return { ...base, provider: sponsor.providerFor(pick.model), admitted: new Set(admittedSkills(pick.record, capabilities)), functionCalls: callsFunctions(pick.record),
-      modelFor: (skill: string) => sponsor.modelFor(skill) };
+      functionCallsFor: (skill: string) => callsFunctionsFor(pick.record, skill), modelFor: (skill: string) => sponsor.modelFor(skill) };
   };
 
   /** The account's own ChatGPT quota is spent (`CHATGPT_EXHAUSTED_SETTING`), until when; undefined once it is back. */
@@ -153,7 +153,8 @@ export function createModelProviderService(options: {
     }
     const record = current(workspaceId, provider);
     return { provider, gatewayUrl: options.gateway.urlFor(workspaceId, provider.id),
-      admitted: new Set(record ? admittedSkills(record, capabilities) : []), functionCalls: Boolean(record && callsFunctions(record)), codexSignedIn: options.signedIn(workspaceId),
+      admitted: new Set(record ? admittedSkills(record, capabilities) : []), functionCalls: Boolean(record && callsFunctions(record)),
+      ...(record ? { functionCallsFor: (skill: string) => callsFunctionsFor(record, skill) } : {}), codexSignedIn: options.signedIn(workspaceId),
       capabilities, ...(search ? { webTools: createWebTools(search) } : {}) };
   };
 

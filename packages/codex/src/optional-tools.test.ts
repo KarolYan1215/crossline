@@ -81,3 +81,15 @@ test("a provider whose record shows function calls gets the lookups", async () =
   expect(modes).toEqual(["tools"]);
   expect((fake.requests.find((request) => request.method === "thread/start")!.params.dynamicTools as unknown[]).length).toBe(1);
 });
+
+test("a provider that calls functions but failed one Skill's own tools case runs that Skill without its optional tools", async () => {
+  const asked: string[] = [];
+  codex.setProviderResolver(() => ({ ...routing(true), functionCallsFor: (skill) => { asked.push(skill); return skill !== "crossline-step-planner"; } }));
+  const fake = runtime();
+  const { modes } = await run(fake.client);
+  expect(asked).toContain("crossline-step-planner");
+  expect(modes).toEqual(["fallback"]);
+  expect(JSON.stringify(fake.requests.find((request) => request.method === "turn/start")!.params.input)).toContain("picked in full");
+  codex.setProviderResolver(() => ({ ...routing(true), functionCallsFor: () => true }));
+  expect((await run(runtime().client)).modes).toEqual(["tools"]);
+});

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
+import { interviewServed } from "@crossline/core";
 import { DateBatchCard } from "./date-batch-card";
 import { FileReadList } from "./file-read-list";
 import { InsightCard } from "./insight-card";
@@ -93,7 +94,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
       if (invite?.available && invite.sponsored) { setConnected(true); return; }
       // Another model's API that has passed the check for the interview is a connection too (decided 2026-10-17), and so is an invite
       // code: a round on the developer's model while it is still being tested says so itself, instead of sending the person away.
-      if (provider?.sponsor?.active || provider?.features?.some((feature) => feature.skill.endsWith("crossline-onboarding") && feature.served)) { setConnected(true); return; }
+      if (provider?.sponsor?.active || interviewServed(provider?.features)) { setConnected(true); return; }
       // Only a definite "not signed in" sends the person there: with the background service unreachable /connect could not help either.
       // A guest served by its own computer alone (a compute node) has no sign-in here and is connected all the same.
       if (account) setConnected(account.account || account.connected ? true : account.blocker ? undefined : false);

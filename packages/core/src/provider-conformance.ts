@@ -74,6 +74,12 @@ export type SkillNeeds = {
   shell?: true;
   /** Test-only Skills are never routed for real work. */
   testOnly?: true;
+  /**
+   * Answers in free text (no schema, so no schema case measures it): admitted on a record whose long-text case passed and whose whole
+   * run passed at least 90%, the bar any other Skill clears. Without this a free-text Skill was never admitted on any provider, and a
+   * portrait written there lost its narrative (2026-11-26).
+   */
+  freeText?: true;
 };
 
 export const SKILL_NEEDS: Record<string, SkillNeeds> = {
@@ -123,7 +129,7 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-insight-compiler": { label: "主线 skill 整理", schemas: ["MINE_SKILL_SCHEMA"], webSearch: true },
   "crossline-skill-scout": { label: "公开 skill 检索", schemas: ["SKILL_SCOUT_SCHEMA"], webSearch: true },
   "crossline-portrait-writer": { label: "画像", schemas: ["PORTRAIT_SCHEMA", "PORTRAIT_GAP_SCHEMA"] },
-  "crossline-portrait-narrative": { label: "画像叙事", schemas: [] },
+  "crossline-portrait-narrative": { label: "画像叙事", schemas: [], freeText: true },
   "crossline-portrait-illustrator": { label: "画像插图", schemas: [], image: true },
   "crossline-eval-persona": { label: "访谈评测", schemas: [], testOnly: true },
   "crossline-conformance": { label: "模型检验", schemas: [], testOnly: true },
@@ -159,6 +165,17 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
 };
 
 export const skillKey = (skill: string) => skill.replace(/^crossline:/, "");
+
+/**
+ * The interview is its dialogue and its extraction (`onboarding-extract.ts`), which records what was said: the start standard, the
+ * checklist, the dates and the portrait all read what the extraction wrote. A model that can hold the dialogue but not the extraction
+ * would talk without anything reaching the ledger, so a provider serves the interview only when it serves both (2026-11-26; the
+ * developer's model was already held to both by `chooseSponsorModel`).
+ */
+export const INTERVIEW_SKILLS = ["crossline-onboarding", "crossline-onboarding-extract"] as const;
+export function interviewServed(features: ReadonlyArray<{ skill: string; served: boolean }> | undefined): boolean {
+  return INTERVIEW_SKILLS.every((skill) => Boolean(features?.some((feature) => skillKey(feature.skill) === skill && feature.served)));
+}
 
 /** What a provider outside the person's own Codex sign-in can do. Fixed by what it is, not measured. */
 export type ProviderCapabilities = { webSearch: boolean; image: boolean; shell: boolean; connectors: boolean; memories: boolean; tools: boolean };
@@ -200,17 +217,33 @@ export function unavailableOnThirdParty(capabilities: Pick<ProviderCapabilities,
 
 // ── Conformance ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** `tool`: the case offers one function and passes only when the model called it and answered with what it returned. */
+/**
+ * `tool`: the case offers one function and passes only when the model called it and answered with what it returned. With `checkArgs`
+ * a call whose arguments break `inputSchema` is answered with the problems instead (as a production tool answers 「要改的问题」), and
+ * only a call with valid arguments counts.
+ */
 export type ConformanceCase = { id: string; schema: Record<string, unknown>; prompt: string; runs: number; skills: string[];
-  tool?: { name: string; description: string; inputSchema: Record<string, unknown>; reply: string } };
+  tool?: { name: string; description: string; inputSchema: Record<string, unknown>; reply: string; checkArgs?: true } };
 /**
  * Whether a model calls a function before answering (2026-10-19): every schema case passed on SiliconFlow's DeepSeek while, in use, the
  * tools assistant and the interview's lookups never made a call. A Skill that needs functions is admitted only when this case passed;
  * a record from before the case existed is read as it was.
  */
 export const TOOLS_CASE_ID = "ADVERSARIAL_TOOLS";
+/**
+ * The interview's card tools (2026-11-26): on a route that calls functions the dialogue hands its questions in through `ask_question`,
+ * whose arguments are a question card's twelve required fields — an enum, a nested list of options — where the generic tools case asks
+ * for one string. The schema case measures the dialogue only as one JSON answer, which production uses only where functions are not
+ * called, so nothing measured what the interview really runs on a provider. A record where this case failed keeps the interview in its
+ * one-JSON mode (`callsFunctionsFor`); a record from before it is read as the generic tools case says.
+ */
+export const INTERVIEW_TOOLS_CASE_ID = "INTERVIEW_CARD_TOOLS";
+/** The Skill whose optional tools a case beyond the generic one gates (see `callsFunctionsFor`). */
+export const SKILL_TOOL_CASES: Record<string, string> = { "crossline-onboarding": INTERVIEW_TOOLS_CASE_ID };
 const TOOLS_CASE_SCHEMA = { type: "object", additionalProperties: false, required: ["code"], properties: { code: { type: "string", minLength: 1, maxLength: 40 } } } as const;
 
+/** The long-text case: what a free-text Skill (`SkillNeeds.freeText`) is admitted on. */
+export const LONG_TEXT_CASE_ID = "ADVERSARIAL_LONG_TEXT";
 const LONG_TEXT_SCHEMA = { type: "object", additionalProperties: false, required: ["title", "report"], properties: {
   title: { type: "string", minLength: 1, maxLength: 60 }, report: { type: "string", minLength: 1500, maxLength: 6000 } } } as const;
 const UNION_SCHEMA = { type: "object", additionalProperties: false, required: ["items", "note"], properties: {
@@ -254,7 +287,7 @@ export function conformanceCases(): ConformanceCase[] {
         + "Use short Chinese text, one or two items in each array unless the schema asks for more, ids as plain slugs, dates as YYYY-MM-DD in late 2026." };
   });
   cases.push(
-    { id: "ADVERSARIAL_LONG_TEXT", schema: LONG_TEXT_SCHEMA as unknown as Record<string, unknown>, runs: 1, skills: [],
+    { id: LONG_TEXT_CASE_ID, schema: LONG_TEXT_SCHEMA as unknown as Record<string, unknown>, runs: 1, skills: [],
       prompt: "Write a Chinese study report of at least 1,600 characters (not words) on how to prepare for a VLSI final exam, in the field `report`." },
     { id: "ADVERSARIAL_UNION", schema: UNION_SCHEMA as unknown as Record<string, unknown>, runs: 1, skills: [],
       prompt: "List four items for tomorrow: two tasks (with minutes) and two notes, mixed in order. Set `note` to null." },
@@ -264,7 +297,14 @@ export function conformanceCases(): ConformanceCase[] {
       skills: Object.entries(SKILL_NEEDS).filter(([, needs]) => needs.tools).map(([skill]) => skill),
       prompt: "The project's access code is not in this message: call the function `lookup_code` with key \"stat610\" to get it, then answer with that code in `code`.",
       tool: { name: "lookup_code", description: "Returns the access code stored for a key.", reply: "QX-4417-PL",
-        inputSchema: { type: "object", additionalProperties: false, required: ["key"], properties: { key: { type: "string" } } } } });
+        inputSchema: { type: "object", additionalProperties: false, required: ["key"], properties: { key: { type: "string" } } } } },
+    { id: INTERVIEW_TOOLS_CASE_ID, schema: TOOLS_CASE_SCHEMA as unknown as Record<string, unknown>, runs: 1, skills: ["crossline-onboarding"],
+      prompt: "You are interviewing a graduate student about their week. Hand in one single-choice question card, in Chinese, about which "
+        + "evenings they keep free, with two or three options, by calling the function `ask_question` with every field its schema requires "
+        + "(\"\" for identityId, projectId, about and gist; 0 for repeats; false for followUp and date). If the call answers with problems, "
+        + "fix them and call again. Once it accepts the card it returns a receipt code: answer with that code in `code`.",
+      tool: { name: "ask_question", description: "Hands in one question card for this round. Answers with problems to fix, or a receipt code.",
+        reply: "RCPT-0731-QA", checkArgs: true, inputSchema: interviewQuestionSchema() } });
   return cases;
 }
 export const exportedSchemaNames = () => Object.keys(CONFORMANCE_SCHEMAS);
@@ -349,7 +389,20 @@ export const SCHEMA_PROXIES: Record<string, string> = { MAIL_TRIAGE_SCHEMA: "CAL
   // Quotes (2026-11-10): a short list of objects with short strings and a number, like calendar filing.
   QUOTE_READING_SCHEMA: "CALENDAR_CLASSIFICATION_SCHEMA",
   // An interview research run (2026-11-12): a few strings, one of them long, and a short list of two-string objects, like a tutorial step's write-up.
-  ONBOARDING_RESEARCH_SCHEMA: "NODE_WRITEUP_SCHEMA" };
+  ONBOARDING_RESEARCH_SCHEMA: "NODE_WRITEUP_SCHEMA",
+  // The interview's scale reading (2026-11-22, the extraction's second schema): one long text and a short list of two-string objects,
+  // like a tutorial step's write-up. Without it a record from before 2026-11-22 admitted the dialogue and not its extraction.
+  SCALE_ANALYSIS_SCHEMA: "NODE_WRITEUP_SCHEMA",
+  // The search run behind `web_research` (2026-11-25): a list of pages with title, url and an excerpt, like a material search's sources.
+  // Without it a provider measured before 2026-11-25 had every `web_research` refused, the interview's research included.
+  WEB_SCOUT_SCHEMA: "MATERIAL_SEARCH_SCHEMA",
+  // A search's review (2026-11-26): a verdict and a short reason, like a review.
+  QUERY_REVIEW_SCHEMA: "VALIDATION_REVIEW_SCHEMA" };
+/** A question card as the interview's `ask_question` takes it (the dialogue schema's own item). */
+function interviewQuestionSchema(): Record<string, unknown> {
+  const schema = ONBOARDING_DIALOGUE_SCHEMA as unknown as { properties: { questions: { items: Record<string, unknown> } } };
+  return schema.properties.questions.items;
+}
 const caseRuns = (record: ConformanceRecord) => {
   const runs = record.runs.flatMap((run) => LEGACY_CASES[run.caseId] ? LEGACY_CASES[run.caseId]!.split("|").map((caseId) => ({ ...run, caseId })) : [run]);
   const proxied = Object.entries(SCHEMA_PROXIES).filter(([schema]) => !runs.some((run) => run.caseId === schema))
@@ -373,11 +426,24 @@ export function callsFunctions(record: ConformanceRecord): boolean {
   const runs = record.runs.filter((run) => run.caseId === TOOLS_CASE_ID);
   return runs.length > 0 && runs.every((run) => run.ok);
 }
+/**
+ * `callsFunctions` for one Skill: a Skill with a tools case of its own (`SKILL_TOOL_CASES`) also needs that case passed, when the record
+ * ran it. Its optional tools are offered only then; otherwise it runs the way a route without functions runs it.
+ */
+export function callsFunctionsFor(record: ConformanceRecord, skill: string): boolean {
+  if (!callsFunctions(record)) return false;
+  const own = SKILL_TOOL_CASES[skillKey(skill)];
+  return (own ? record.runs.filter((run) => run.caseId === own) : []).every((run) => run.ok);
+}
 
 export function admittedSkills(record: ConformanceRecord, capabilities: ProviderCapabilities = THIRD_PARTY_CAPABILITIES): string[] {
   const all = caseRuns(record);
   return Object.entries(SKILL_NEEDS).filter(([skill, needs]) => {
-    if (capabilityGap(skill, capabilities) || !needs.schemas.length) return false;
+    if (capabilityGap(skill, capabilities)) return false;
+    if (!needs.schemas.length) {
+      const long = all.filter((run) => run.caseId === LONG_TEXT_CASE_ID);
+      return Boolean(needs.freeText) && long.length > 0 && long.every((run) => run.ok) && record.passRate >= 0.9;
+    }
     const runs = all.filter((run) => needs.schemas.includes(run.caseId));
     if (!needs.schemas.every((schema) => runs.some((run) => run.caseId === schema)) || runs.some((run) => !run.ok)) return false;
     if (needs.tools && all.some((run) => run.caseId === TOOLS_CASE_ID && !run.ok)) return false;

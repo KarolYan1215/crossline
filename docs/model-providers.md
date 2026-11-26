@@ -210,6 +210,7 @@ export interface RuntimeRegistry {
 - 运行：测试专用 Skill `crossline-conformance` 经**同一条**路径（网关、Codex、修正循环），输出 schema 就是被测 schema；`validateOutput` = `jsonSchemaProblems`，不合格就作为拒绝送回修正。
 - 判定：critical Skill 每次都过且修正率 ≤ 5%（3 次即不许修正）；其余 Skill 自己的 schema 都过且整体通过率 ≥ 90%；缺能力的永不准入。
 - 记录：`model.provider.conformance` 事件（`ConformanceRecord`：通过率、修正率、p95、每次运行）。换模型、换运行时（以钉死二进制的哈希为版本）、满 30 天、或配置在检验之后又保存过，都算过期，需重测。
+- 访谈对等（2026-11-26）：访谈的卡片工具单列一个用例 `INTERVIEW_CARD_TOOLS`（调用 `ask_question`，参数按真实问题卡的 schema 校验，不合格就把问题当工具结果退回，只有合格的那次算数）；没过的记录上，访谈对话改走单 JSON 模式（`callsFunctionsFor`），联网与查阅仍照通用工具用例。自由文本的画像叙事（`SKILL_NEEDS.freeText`）按长文本用例与 ≥90% 通过率准入。`WEB_SCOUT_SCHEMA`、`QUERY_REVIEW_SCHEMA`、`SCALE_ANALYSIS_SCHEMA` 由相近 schema 代测（`SCHEMA_PROXIES`），旧记录不会因此把访谈调研或整理挡在外面。访谈只有在对话与整理都被准入时才算接上（`interviewServed`，与开发者提供的模型的 `REQUIRED_SKILLS` 同一标准）。差异清单与每条的处理见 `docs/claude/profile-first-loop.md`「The interview on other models」。
 - 真实运行脚本：`scripts/provider-conformance.ts <chat|responses> <baseUrl> <model> [密钥环境变量名] [json_object]`（临时账本、临时 CODEX_HOME；密钥只按变量名读，不作参数）。
 
 ### 3.5 额度

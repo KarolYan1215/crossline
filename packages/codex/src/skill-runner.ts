@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { agentLanguageLine, runLocale, schemaForLocale, styleInstructions } from "./style";
 import { join } from "node:path";
 import { looksLooping, repairJsonBrackets } from "./json-repair";
-import { cleanAnswerStrings, designNoteText, instructionsText, privateLeak, tFor, UNTRUSTED_WEB_INSTRUCTION, untrustedWebBlock, urlKnown, urlsIn, validateWebScout,
+import { cleanAnswerStrings, designNoteText, instructionsText, privateLeak, skillKey, tFor, UNTRUSTED_WEB_INSTRUCTION, untrustedWebBlock, urlKnown, urlsIn, validateWebScout,
   WEB_RESEARCH_LIMITS, WEB_SCOUT_SCHEMA, QUERY_REVIEW_SCHEMA, validateQueryReview, webQueryProblem, type Locale, type PrivateGuard, type QueryReview,
   type WebScoutAnswer } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
@@ -433,7 +433,9 @@ type RunContext = { route: ModelRoute | undefined; spendMode: SpendMode; usage: 
   /** Whether the thread kept only Crossline's own plugins (`onlyOwnPlugins`) or every plugin; logged on `skill.run`. */
   plugins?: "own" | "all";
   /** Whether the model on this route calls functions: the account's own Codex does; a provider has to have shown it (`functionCalls`). */
-  functionCalls: boolean };
+  functionCalls: boolean;
+  /** Set (false) only where the route calls functions but this Skill's own tools case failed: its optional tools are not offered. */
+  optionalCalls?: boolean };
 
 /**
  * A run's optional lookups resolved for its route: merged into its tools with their instructions where the model calls functions,
@@ -443,7 +445,7 @@ function withOptionalTools<T>(options: SkillRunOptions<T>, input: unknown, conte
   const optional = options.optionalTools;
   if (!optional) return { options, input };
   const { optionalTools: _resolved, ...rest } = options;
-  if (!context.functionCalls) { optional.onMode?.("fallback"); return { options: rest, input: optional.withoutTools(input) }; }
+  if (!(context.optionalCalls ?? context.functionCalls)) { optional.onMode?.("fallback"); return { options: rest, input: optional.withoutTools(input) }; }
   optional.onMode?.("tools");
   if (optional.freeText) rest.outputSchema = undefined;
   const own = options.tools;
@@ -842,7 +844,10 @@ async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: stri
   const webTools = provider ? options.webTools ?? routing?.webTools : undefined;
   // The conformance check (`options.provider`) measures a provider and offers whatever its case needs.
   const functionCalls = !provider || Boolean(options.provider) || routing?.functionCalls === true;
-  const context: RunContext = { route, spendMode, usage: createUsageCollector(), client, ...(provider ? { provider } : {}), ...(webTools ? { webTools } : {}), extraSkills: [], functionCalls };
+  // A Skill whose own tools were measured apart (the interview's card tools) is offered its optional ones only where that passed.
+  const optionalCalls = functionCalls && (!provider || Boolean(options.provider) || (routing?.functionCallsFor?.(skillKey(options.skillName)) ?? true));
+  const context: RunContext = { route, spendMode, usage: createUsageCollector(), client, ...(provider ? { provider } : {}), ...(webTools ? { webTools } : {}), extraSkills: [],
+    functionCalls, ...(optionalCalls === functionCalls ? {} : { optionalCalls }) };
   // The skills this run holds on (its own and the library skills named for it); each is released after the run.
   const holding: string[] = [];
   const extras: string[] = [];

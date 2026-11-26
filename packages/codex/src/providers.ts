@@ -103,6 +103,12 @@ export type ProviderRouting = {
    */
   functionCalls?: boolean;
   /**
+   * Whether one Skill (by key) is offered its optional tools (`SkillRunOptions.optionalTools`), where the record measured that Skill's
+   * own tools apart (`callsFunctionsFor`: the interview's card tools). Its other function use (the web, lookups) follows `functionCalls`.
+   * Unset, every Skill reads `functionCalls`.
+   */
+  functionCallsFor?: (skillKey: string) => boolean;
+  /**
    * Why this provider serves nothing right now, in the person's words (the developer's model for invited accounts: still being tested,
    * or this month's cap reached). The workspace's own Codex sign-in still serves; without one the run stops with this.
    */

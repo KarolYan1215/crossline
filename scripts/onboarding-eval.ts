@@ -2,7 +2,7 @@
  * Does the interview itself draw out what Crossline needs? (asked 2026-10-08: the real account's interview was fed a profile the person
  * had already organised, so it never showed whether the interview leads — and it skipped stages and never asked when ECE 548 meets.)
  *
- *   pnpm exec tsx scripts/onboarding-eval.ts [persona.md] [--turns 20] [--provider <config.json>:<id>]
+ *   pnpm exec tsx scripts/onboarding-eval.ts [persona.md] [--turns 20] [--provider <config.json>:<id> | --sponsor [model]]
  *
  * A throwaway database and a fresh account. The person is played by Skill `crossline-eval-persona` from a hidden persona sheet (default:
  * the person's own profile under `data/profile/`, never committed): it answers only what it is asked, never volunteers, uploads a file only
@@ -17,6 +17,12 @@
  * own `MATERIALS_FIRST_REPLY`. The person's clicks are simulated as the screen would take them: confirming read dates, adopting the first
  * attribute candidates (two, or the one there is) as a line's goal, and 「画像符合我」 once the interview says it is done. Simulated attention time is
  * (questions shown + clicks) × 20 seconds per round; the model's time is reported apart and not counted. Any target missed sets exit code 1.
+ *
+ * `--provider` runs every real Skill of the account on that model, `--sponsor` on the developer's model (`CROSSLINE_SPONSOR_API_KEY`,
+ * `CROSSLINE_SPONSOR_MODELS`, `CROSSLINE_SPONSOR_BASE_URL` as the worker reads them; the model named, else the main model, else the first
+ * listed), both through the same gateway and in the same mode as production (card tools, `web_research` where a search key is set). The
+ * simulated person stays on the Codex sign-in. The report's head names the route, so runs on three routes compare side by side
+ * (docs/claude/profile-first-loop.md 「The interview on other models」).
  *
  * `--lite` (docs/domain-lines.md, 2026-10-19): the lite edition's opening — an office worker whose fixed-schedule line is 职场人 (they say 上班) plus the two
  * domain lines 健康管理者 (wellness) and 理财者 (wealth), set through `setupLines` as the opening card does, the first reply being the card's
@@ -40,7 +46,8 @@ import { extractText, sha256 } from "../apps/worker/src/extract";
 import { identityLines } from "../apps/worker/src/lines";
 import { createOnboardingExtractor, extractionSettled, requestExtraction } from "../apps/worker/src/onboarding-extract";
 import { createOnboardingSessionRunner } from "../apps/worker/src/onboarding-session";
-import { readMatrixConfig, startProviderHarness } from "./provider-harness";
+import { readMatrixConfig, startProviderHarness, type ProviderSpec } from "./provider-harness";
+import { sponsorFromEnv } from "../apps/worker/src/sponsor";
 
 // The web library guards itself with `import "server-only"`, which only Next resolves; here it is an empty module.
 // A component's stylesheet (`import "./x.css"`, opening-card → CalendarSetupStep since 2026-11-22) is Next's to bundle: empty here too.
@@ -245,15 +252,26 @@ const client = supervisor.client;
 // `--provider <config.json>:<id>`: every real Skill of this account runs on that model (docs/beta-launch.md §10.4); the simulated
 // person stays on the Codex sign-in, so only the interview's side changes between runs.
 const providerArg = args[args.indexOf("--provider") + 1];
-const harness = args.includes("--provider") && providerArg ? await (async () => {
-  const at = providerArg.lastIndexOf(":");
-  const spec = readMatrixConfig(providerArg.slice(0, at)).providers.find((item) => item.id === providerArg.slice(at + 1));
+const sponsorArg = args.includes("--sponsor") ? args[args.indexOf("--sponsor") + 1] : undefined;
+/** `--sponsor [model]`: the developer's model as a provider spec; the key stays in its environment variable. */
+const sponsorSpec = (): ProviderSpec => {
+  const sponsor = sponsorFromEnv();
+  if (!sponsor) throw new Error("CROSSLINE_SPONSOR_API_KEY / CROSSLINE_SPONSOR_MODELS are not set");
+  const named = sponsorArg && !sponsorArg.startsWith("--") && !sponsorArg.endsWith(".md") ? sponsorArg : undefined;
+  const model = named ?? sponsor.mainModel ?? sponsor.models[0]!.model;
+  if (!sponsor.models.some((item) => item.model === model)) throw new Error(`not a listed sponsor model: ${model}`);
+  return { id: "sponsor-eval", label: "开发者提供的模型", kind: "chat", baseUrl: sponsor.baseUrl, model, keyEnv: "CROSSLINE_SPONSOR_API_KEY", responseFormat: "json_object" };
+};
+const route = args.includes("--sponsor") ? "sponsor" : args.includes("--provider") && providerArg ? "provider" : "codex";
+const harness = route !== "codex" ? await (async () => {
+  const at = providerArg?.lastIndexOf(":") ?? -1;
+  const spec = route === "sponsor" ? sponsorSpec() : readMatrixConfig(providerArg!.slice(0, at)).providers.find((item) => item.id === providerArg!.slice(at + 1));
   if (!spec) throw new Error(`provider not found: ${providerArg}`);
   const started = await startProviderHarness(store, client, repoRoot);
   await started.add(workspaceId, spec);
   started.force(workspaceId);
   console.info(JSON.stringify({ step: "provider", id: spec.id, model: spec.model }));
-  return started;
+  return { ...started, spec };
 })() : undefined;
 // Entered here, not inside the helper above: entering a workspace only reaches the async chain it is called in.
 if (harness) enterUsageWorkspace(workspaceId);
@@ -355,6 +373,8 @@ try {
   const report = [
     `# 访谈评测 · ${new Date().toISOString().slice(0, 16)}`, "",
     `- 模拟用户：${path.basename(personaFile)}（只答所问，不主动交代）`,
+    `- 访谈所用模型：${harness ? `${route === "sponsor" ? "开发者提供的模型" : harness.spec.label} · ${harness.spec.model}` : "本机 Codex 登录"}；`
+      + `卡片工具：${(store.getOnboardingSession(workspaceId, "eval")?.coverage as { cardTools?: string } | undefined)?.cardTools ?? "未记录"}`,
     `- 结束状态：${state}；${turns} 轮，${questionsAsked} 个问题，${minutes} 分钟；模型调用 ${runs} 次，修复 ${repairs} 次`,
     `- 访谈自身的清单项：完成 ${own.filter((item) => item.done).length}/${own.length}`, "",
     "## 时间", "",
