@@ -1,15 +1,15 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
-import { CrosslineStore, addWorkflowFeedback, consentToGrownSkill, readGrownSkills, readGrownVersions, revertGrownSkill } from "@crossline/db";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { CrosslineStore, addWorkflowFeedback, consentToGrownSkill, listAgentTasks, readGrownSkills, readGrownVersions, revertGrownSkill, reviewAgentTask } from "@crossline/db";
 import { LINE_SETTING } from "@crossline/identity-packs";
 import { grownSkillFilesKey } from "@crossline/core";
 import type { AgentOutcome, AgentTaskInput } from "./agent-task";
 import { claimOrganising, collectionDone, configureFavouritesCollector, startWorkflowRun } from "./workflow-smith";
 import { collectFolder, readCollectLedger, writeCollectLedger } from "./favourites-reader";
 import { carryTopicFiles, installFavouritesTopicsWorkflow } from "./favourites-topics";
-import { improvementDue, improvementSignals, installRevision, workflowImprovePass } from "./workflow-improver";
+import { applyPendingRevisions, improvementDue, improvementSignals, installRevision, revisionTaint, workflowImprovePass } from "./workflow-improver";
 import { scriptedRuntime } from "./testing/fake-runtime";
 
 const REVIEWER = "crossline:crossline-validation-reviewer";
@@ -201,4 +201,126 @@ test("one run of its own that failed is enough for Crossline to repair the workf
   blocked(`flow-${record.id.replace(/^flow-/, "")}-2`, "AGENT_ARTIFACT_EMPTY", "脚本报错：KeyError 'note_card'", later(2_000));
   const signals = improvementDue(store, ws, record, new Date(Date.now() + 5_000));
   expect(signals?.map((signal) => signal.kind)).toEqual(["failure"]);
+});
+
+// ── Revisions that read someone else's words (docs/plans/harness-1125.md 「Skill 供应链」) ─────────────────────────────────────
+
+/** A run of the workspace with its folder: requested (with what it was handed) and completed, accepted by itself. */
+const ranRun = (taskId: string, directory: string, requested: Record<string, unknown> = {}, completed: Record<string, unknown> = {}) => {
+  mkdirSync(directory, { recursive: true });
+  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: `r:${taskId}`, type: "agent.task.requested", entityId: taskId,
+    payload: { taskId, title: "整理收藏", category: "read_research_organize", workOrderId: "", ...requested } } as never);
+  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: `c:${taskId}`, type: "agent.task.completed", entityId: taskId,
+    payload: { taskId, directory, reviewRequired: false, checksPassed: true, artifacts: [], ...completed } } as never);
+  return directory;
+};
+const revisedFolder = (name: string, record: { manifest: unknown }) => {
+  const dir = path.join(root, name);
+  mkdirSync(path.join(dir, "skill"), { recursive: true });
+  writeFileSync(path.join(dir, "skill", "SKILL.md"), "---\nname: xiaohongshu-favourites-topics\ndescription: 按话题整理收藏\n---\n# 整理\n每篇三行要点。\n");
+  writeFileSync(path.join(dir, "skill", "workflow.json"), JSON.stringify(record.manifest));
+  writeFileSync(path.join(dir, "skill", "CHANGES.md"), "逐篇摘记从五行改为三行要点\n");
+  return dir;
+};
+
+test("what the folders a revision is handed hold decides its taint: a site's collection, a workflow's output, the web, a mark, or no run at all", () => {
+  const clean = ranRun("flow-a-1", path.join(root, "runs", "a1"), { inputs: [path.join(root, "notes")] });
+  expect(revisionTaint(store, ws, [clean])).toEqual([]);
+  expect(revisionTaint(store, ws, [ranRun("flow-a-2", path.join(root, "runs", "a2"), { inputs: [path.join(root, "out", "collect-flow-x")] })])).toEqual(["site"]);
+  expect(revisionTaint(store, ws, [ranRun("flow-a-3", path.join(root, "runs", "a3"), { inputs: [path.join(root, "work", "flow-y-1", "out")] })])).toEqual(["workflow-output"]);
+  expect(revisionTaint(store, ws, [ranRun("flow-a-4", path.join(root, "runs", "a4"), {}, { searches: 3 })])).toEqual(["web"]);
+  // The assistant's own taint tracking: labels on the request, or the untrusted-input profile.
+  expect(revisionTaint(store, ws, [ranRun("flow-a-5", path.join(root, "runs", "a5"), { untrusted: ["mail"], profile: "untrusted-input" })]).sort()).toEqual(["mail", "untrusted-input"]);
+  const marked = ranRun("flow-a-6", path.join(root, "runs", "a6"));
+  writeFileSync(path.join(marked, "untrusted.json"), "{}");
+  expect(revisionTaint(store, ws, [marked])).toEqual(["marked"]);
+  // A folder no run of this workspace made is not trusted.
+  mkdirSync(path.join(root, "stray"));
+  expect(revisionTaint(store, ws, [path.join(root, "stray")])).toEqual(["unknown"]);
+});
+
+test("a revision that read untrusted content waits on 待确认 with its diff and goes in force only on the person's accept", async () => {
+  const record = favouritesFlow();
+  const dir = revisedFolder("tainted", record);
+  ranRun("improve-t1", dir);
+  const result = await installRevision(store, ws, record, done("improve-t1", dir), { client: reviewer().rpc, cwd: ".", untrusted: ["site"] });
+  expect(result).toEqual({ state: "pending", untrusted: ["site"] });
+  // Not in force: the stored files and the version are as they were.
+  expect(readGrownSkills(store, ws)[0]).toMatchObject({ pendingRevision: { taskId: "improve-t1", fromVersion: 1, untrusted: ["site"] } });
+  expect(readGrownSkills(store, ws)[0]!.version).toBeUndefined();
+  expect(filesOf(record.id).find((file) => file.path === "SKILL.md")!.text).not.toContain("每篇三行要点");
+  // The diff is in the run's folder, and the run's result is back on 待确认.
+  const diff = readFileSync(path.join(dir, "REVISION-DIFF.md"), "utf8");
+  expect(diff).toContain("+ 每篇三行要点。");
+  expect(diff).toContain("site");
+  expect(listAgentTasks(store, ws).find((run) => run.taskId === "improve-t1")).toMatchObject({ status: "needs_review" });
+  expect(said().at(-1)).toContain("待确认");
+  // While it waits, no other revision of this workflow starts.
+  expect(addWorkflowFeedback(store, ws, record.id, "再短一点", new Date(Date.now() + 1_000))).toBe(true);
+  expect(improvementDue(store, ws, readGrownSkills(store, ws)[0]!, new Date(Date.now() + 2_000))).toBeUndefined();
+  expect(applyPendingRevisions(store, ws)).toEqual([]);
+
+  // The person accepts the result: the next pass puts it in force.
+  expect(reviewAgentTask(store, ws, "improve-t1", "accepted").ok).toBe(true);
+  expect(applyPendingRevisions(store, ws)).toEqual([{ id: record.id, state: "revised" }]);
+  expect(readGrownSkills(store, ws)[0]).toMatchObject({ version: 2 });
+  expect(readGrownSkills(store, ws)[0]!.pendingRevision).toBeUndefined();
+  expect(filesOf(record.id).find((file) => file.path === "SKILL.md")!.text).toContain("每篇三行要点");
+  expect(said().at(-1)).toContain("按本人的采纳生效");
+});
+
+test("a held revision is dropped when the person returns it, the daily pass accepts it in their place, or its files change", async () => {
+  const record = favouritesFlow();
+  const hold = async (taskId: string) => {
+    const dir = revisedFolder(taskId, record);
+    ranRun(taskId, dir);
+    expect(await installRevision(store, ws, readGrownSkills(store, ws)[0]!, done(taskId, dir), { client: reviewer().rpc, cwd: ".", untrusted: ["web"] })).toMatchObject({ state: "pending" });
+    return dir;
+  };
+  await hold("improve-r1");
+  reviewAgentTask(store, ws, "improve-r1", "rejected", "不要");
+  expect(applyPendingRevisions(store, ws)).toEqual([{ id: record.id, state: "dropped", reason: "person_declined" }]);
+
+  await hold("improve-r2");
+  reviewAgentTask(store, ws, "improve-r2", "accepted", "系统代为采纳", { by: "system" });
+  expect(applyPendingRevisions(store, ws)).toEqual([{ id: record.id, state: "dropped", reason: "not_reviewed" }]);
+
+  const dir = await hold("improve-r3");
+  writeFileSync(path.join(dir, "skill", "SKILL.md"), "---\nname: xiaohongshu-favourites-topics\ndescription: 按话题整理收藏\n---\n# 换掉了\n");
+  reviewAgentTask(store, ws, "improve-r3", "accepted");
+  expect(applyPendingRevisions(store, ws)).toEqual([{ id: record.id, state: "dropped", reason: "files_changed" }]);
+  expect(readGrownSkills(store, ws)[0]!.version).toBeUndefined();
+  expect(store.listEvents(ws, { type: "skill.grown.revision_rejected" }).map((item) => (item.payload as { reason: string }).reason))
+    .toEqual(["person_declined", "not_reviewed", "files_changed"]);
+});
+
+test("a revision from the person's feedback whose runs read nothing untrusted goes in force by itself", async () => {
+  const record = favouritesFlow();
+  // Its last run read only the person's own folder.
+  ranRun(`flow-${record.id.replace(/^flow-/, "")}-1`, path.join(root, "own-run"), { inputs: [path.join(root, "mine")] });
+  expect(addWorkflowFeedback(store, ws, record.id, "每篇只留三行要点", new Date(Date.now() + 1_000))).toBe(true);
+  let after: ((outcome: AgentOutcome | { state: "failed"; message: string }) => void) | undefined;
+  const runs: Array<AgentTaskInput & { taskId: string }> = [];
+  workflowImprovePass(store, ws, (input, then) => { runs.push(input); after = then; return { state: "started", taskId: input.taskId }; },
+    { client: () => reviewer().rpc, cwd: ".", workRoot: path.join(root, "work"), spend: () => true, now: new Date(Date.now() + 2_000) });
+  expect(store.listEvents(ws, { type: "skill.grown.improve_started" })[0]!.payload).not.toHaveProperty("untrusted");
+  after?.(done(runs[0]!.taskId, revisedFolder("auto", record)));
+  await vi.waitFor(() => expect(readGrownSkills(store, ws)[0]).toMatchObject({ version: 2 }));
+  expect(readGrownSkills(store, ws)[0]!.pendingRevision).toBeUndefined();
+});
+
+test("the same pass over a workflow whose run read a site's collection holds the revision", async () => {
+  const record = favouritesFlow();
+  ranRun(`flow-${record.id.replace(/^flow-/, "")}-1`, path.join(root, "site-run"), { inputs: [path.join(root, "out", `collect-${record.id}`)] });
+  expect(addWorkflowFeedback(store, ws, record.id, "每篇只留三行要点", new Date(Date.now() + 1_000))).toBe(true);
+  let after: ((outcome: AgentOutcome | { state: "failed"; message: string }) => void) | undefined;
+  const runs: Array<AgentTaskInput & { taskId: string }> = [];
+  workflowImprovePass(store, ws, (input, then) => { runs.push(input); after = then; return { state: "started", taskId: input.taskId }; },
+    { client: () => reviewer().rpc, cwd: ".", workRoot: path.join(root, "work"), spend: () => true, now: new Date(Date.now() + 2_000) });
+  expect(store.listEvents(ws, { type: "skill.grown.improve_started" })[0]!.payload).toMatchObject({ untrusted: ["site"] });
+  const dir = revisedFolder("held", record);
+  ranRun(runs[0]!.taskId, dir);
+  after?.(done(runs[0]!.taskId, dir));
+  await vi.waitFor(() => expect(readGrownSkills(store, ws)[0]!.pendingRevision).toMatchObject({ untrusted: ["site"] }));
+  expect(readGrownSkills(store, ws)[0]!.version).toBeUndefined();
 });

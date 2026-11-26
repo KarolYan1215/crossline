@@ -70,6 +70,16 @@ export const SHELL_DENIED_IN_HOME = [".ssh", ".aws", ".gnupg", ".kube", ".azure"
   "AppData\\Local\\Microsoft\\Edge\\User Data", "AppData\\Local\\BraveSoftware", "AppData\\Roaming\\Mozilla\\Firefox"] as const;
 
 /**
+ * Folders the owner's shell never writes, whatever its writable roots (the owner's decision of 2026-11-25, docs/plans/harness-1125.md
+ * 「Skill 供应链」): the skill library, its quarantine and the repository's own `skills` folder. The worker names them once at start
+ * (`protectSkillFolders`); every sandboxed thread denies them, so a worktree of the Crossline repository cannot rewrite a skill either.
+ */
+const protectedSkillFolders = new Set<string>();
+export function protectSkillFolders(folders: string[]): void {
+  for (const folder of folders) if (folder) protectedSkillFolders.add(folder);
+}
+
+/**
  * The thread config for the owner's shell under a Windows sandbox. The profile carries at least one `deny`: Codex re-runs a command
  * that failed in the sandbox without it once the command was approved (`tools/orchestrator.rs`), unless the profile denies a read
  * (`unsandboxed_execution_allowed`) — so the deny is what keeps every command inside. `features.network_proxy` starts Codex's managed
@@ -79,6 +89,8 @@ export function windowsShellConfig(sandbox: WindowsShellSandbox): Record<string,
   const filesystem: Record<string, string> = { ":root": "read" };
   for (const path of sandbox.deny) filesystem[path] = "deny";
   for (const path of sandbox.writable) filesystem[path] = "write";
+  // After the writable roots, so a skill folder inside one (or named as one) stays denied.
+  for (const path of protectedSkillFolders) filesystem[path] = "deny";
   const network = sandbox.egress === "packages"
     ? { enabled: true, domains: Object.fromEntries(PACKAGE_DOMAINS.map((domain) => [domain, "allow"])) } : { enabled: false };
   return {

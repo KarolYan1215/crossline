@@ -209,6 +209,43 @@ export function validatePublicSkillReview(value: unknown): PublicSkillReview {
   return answer;
 }
 
+// ── Injection check (crossline-validation-reviewer, `crossline.skill-injection-check.v1`) ───────────────────────────────
+
+/**
+ * The natural-language read of a skill's text (the owner's decision of 2026-11-25, docs/plans/harness-1125.md 「Skill 供应链」): pattern
+ * matching misses an injection written as ordinary prose (OpenClaw's lesson), so before any review every text file is read by a model in a
+ * run of its own — no tools, no web, nothing about the person, only the files — which answers four yes/no questions with the quotes behind
+ * them. Any yes refuses the skill (an update keeps the version in force).
+ */
+export type SkillInjectionKind = "hijack" | "exfiltration" | "credentials" | "hidden_text";
+export type SkillInjectionCheck = { hijack: boolean; exfiltration: boolean; credentials: boolean; hiddenText: boolean;
+  findings: Array<{ file: string; kind: SkillInjectionKind; quote: string }> };
+export const SKILL_INJECTION_CHECK_SCHEMA = object({
+  hijack: { type: "boolean" }, exfiltration: { type: "boolean" }, credentials: { type: "boolean" }, hiddenText: { type: "boolean" },
+  findings: { type: "array", maxItems: 12, items: object({
+    file: str(200), kind: { type: "string", enum: ["hijack", "exfiltration", "credentials", "hidden_text"] }, quote: str(300) }) }
+});
+const INJECTION_FLAGS: Array<[keyof Omit<SkillInjectionCheck, "findings">, SkillInjectionKind]> =
+  [["hijack", "hijack"], ["exfiltration", "exfiltration"], ["credentials", "credentials"], ["hiddenText", "hidden_text"]];
+export const injectionFlagged = (check: SkillInjectionCheck) => INJECTION_FLAGS.some(([flag]) => check[flag]);
+/** Each yes carries at least one quote of its kind from a file the check was shown; a quote that is not in that file is a repair. */
+export function validateSkillInjectionCheck(value: unknown, files: Array<{ path: string; text: string }>): SkillInjectionCheck {
+  const answer = value as SkillInjectionCheck;
+  // i18n-ignore-start: repair messages to the reviewer Skill
+  if (!answer || INJECTION_FLAGS.some(([flag]) => typeof answer[flag] !== "boolean") || !Array.isArray(answer.findings))
+    throw Object.assign(new Error("SKILL_INJECTION_SHAPE_INVALID"), { detail: "hijack、exfiltration、credentials、hiddenText 为布尔值，findings 为数组" });
+  for (const [flag, kind] of INJECTION_FLAGS) if (answer[flag] && !answer.findings.some((finding) => finding.kind === kind))
+    throw Object.assign(new Error("SKILL_INJECTION_EVIDENCE_MISSING"), { detail: `${flag} 为 true 时 findings 里要有 kind=${kind} 的原文引用` });
+  const squash = (text: string) => text.replace(/\s+/g, " ").trim();
+  for (const finding of answer.findings) {
+    const file = files.find((item) => item.path === finding.file);
+    if (!file || !squash(file.text).includes(squash(finding.quote).slice(0, 120)))
+      throw Object.assign(new Error("SKILL_INJECTION_QUOTE_UNKNOWN"), { detail: `「${finding.quote.slice(0, 60)}」不在 ${finding.file} 里：引用文件原文` });
+  }
+  // i18n-ignore-end
+  return answer;
+}
+
 /**
  * Several candidates of one line in one review run (2026-10-21, docs/token-economy.md §2.4: the public-skill reviews were 12% of the
  * ChatGPT quota, with a 24% cache share, one run per candidate). At most `PUBLIC_SKILL_BATCH_MAX` a run; a candidate whose files shown

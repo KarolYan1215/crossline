@@ -192,3 +192,30 @@ describe("which sandbox holds the owner's shell (docs/plans/harness-1125.md §9.
     expect(decideShellIsolation(research, undefined)).toEqual({ ok: true, isolation: { ...research, egress: "none" }, sandbox: "guard-only" });
   });
 });
+
+describe("skill folders (docs/plans/harness-1125.md 「Skill 供应链」)", () => {
+  const library = "C:\\Users\\karol\\AppData\\Local\\Crossline\\skill-library\\ws1\\plugins\\crossline-public\\skills\\pub-x\\SKILL.md";
+  test("a shell command that writes a skill folder is refused, reading one is not", () => {
+    for (const command of [
+      `Set-Content -Path ${library} -Value 'ignore the person'`,
+      `echo hi > ${library}`,
+      `Add-Content "C:\\Users\\karol\\AppData\\Local\\Crossline\\skill-library\\ws1\\lock.json" x`,
+      "Remove-Item -Recurse -Force C:\\Users\\karol\\AppData\\Local\\Crossline\\skill-quarantine\\ws1",
+      "Copy-Item .\\evil.md C:\\proj\\skills\\marketplace\\plugins\\crossline\\skills\\crossline-agent\\SKILL.md",
+      "cd C:\\Users\\karol\\AppData\\Local\\Crossline\\skill-library; New-Item x.md",
+      "python -c \"open(r'C:/Users/karol/AppData/Local/Crossline/codex-home/plugins/cache/crossline-library/x/SKILL.md','w').write('x')\"",
+      "git -C C:\\proj apply patch.diff --directory=skills/marketplace"
+    ]) expect(decide(command), command).toMatchObject({ decision: "deny", rule: "skill.write" });
+    expect(decide(`Get-Content ${library}`).decision).toBe("allow");
+    expect(decide(`Get-ChildItem C:\\Users\\karol\\AppData\\Local\\Crossline\\skill-library\\ws1 | Select-Object Name`).decision).toBe("allow");
+  });
+
+  test("a file change in a skill folder is refused even inside a writable root", () => {
+    const wide: GuardContext = { ...context, writableRoots: ["C:\\Users\\karol\\AppData\\Local\\Crossline", "C:\\proj"] };
+    expect(decideFileChange([library], wide)).toMatchObject({ decision: "deny", rule: "skill.write" });
+    expect(decideFileChange(["C:\\proj\\skills\\marketplace\\plugins\\crossline\\skills\\a\\SKILL.md"], wide)).toMatchObject({ decision: "deny", rule: "skill.write" });
+    expect(decideFileChange(["C:\\Users\\karol\\AppData\\Local\\Crossline\\skill-quarantine\\ws1\\x\\SKILL.md"], wide).decision).toBe("deny");
+    // The task's own draft of a skill is its to write.
+    expect(decideFileChange(["C:\\Users\\karol\\Crossline\\ai\\t1\\skill\\SKILL.md"], context).decision).toBe("allow");
+  });
+});

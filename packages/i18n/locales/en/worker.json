@@ -235,7 +235,6 @@
   "{{path}}：{{reason}}": "{{path}}: {{reason}}",
   "目录内容超过 600 KB": "The folder's contents exceed 600 KB",
   "{{days}} 天未调用": "Not called for {{days}} days",
-  "新版本未通过：{{reason}}": "The new version did not pass: {{reason}}",
   "模型服务未运行。": "The model service is not running.",
   "会话不存在。": "The conversation does not exist.",
   "没有可复核的回答。": "There is no answer to review.",
@@ -917,5 +916,15 @@
   "重新运行 run 脚本生成的 {{files}} 与交付的不一致": "Running the run script again made {{files}} differently from what was delivered",
   "仅本地：内容不读，只记修改时间 {{at}}、大小 {{size}} 字节": "Local only: content not read; only the modified time {{at}} and size {{size}} bytes are kept",
   "这是仅本地的文件夹或文件，内容不读。": "This folder or file is local only; its content is not read.",
-  "这台电脑上没有可用的沙箱（MXC 不可用，也没有设置好的 elevated 沙箱），这件事要读别人写的内容，所以没有运行；本人可以自己处理，或在有沙箱的电脑上再交给助手。": "This computer has no sandbox available (MXC is unavailable and no elevated sandbox is set up), and this errand reads content someone else wrote, so it did not run; handle it yourself, or hand it to the assistant on a computer that has a sandbox."
+  "这台电脑上没有可用的沙箱（MXC 不可用，也没有设置好的 elevated 沙箱），这件事要读别人写的内容，所以没有运行；本人可以自己处理，或在有沙箱的电脑上再交给助手。": "This computer has no sandbox available (MXC is unavailable and no elevated sandbox is set up), and this errand reads content someone else wrote, so it did not run; handle it yourself, or hand it to the assistant on a computer that has a sandbox.",
+  "隔离区校验没有通过：{{detail}}": "The quarantine check did not pass: {{detail}}",
+  "文本含有劫持模型、外传数据、索取凭据或隐藏指令的内容：{{quotes}}": "The text hijacks the model, sends data out, asks for credentials or hides instructions: {{quotes}}",
+  "注入审阅未完成：{{message}}": "Injection check not finished: {{message}}",
+  "账本里的文件与来源 {{commit}} 不一致": "The files in the ledger do not match the source at {{commit}}",
+  "文件的哈希与检查时记下的不一致": "The files' hashes differ from those recorded when they were checked",
+  "# 工作流「{{summary}}」的修订（待本人采纳）\n\n这次修订读过别人写的内容（{{sources}}），所以不会自己生效：在待确认里采纳这次运行的结果，新版才生效；退回则不改。\n\n改了什么：{{changes}}": "# Revision of the workflow \"{{summary}}\" (waiting for your accept)\n\nThis revision read content someone else wrote ({{sources}}), so it does not take effect by itself: accept this run's result in Pending and the new version takes effect; return it and nothing changes.\n\nWhat changed: {{changes}}",
+  "工作流「{{summary}}」按意见改好了，但这次修改读过别人写的内容（{{sources}}），要本人在待确认里看过改动再生效；不采纳就保持原样。": "The workflow \"{{summary}}\" was revised as asked, but the revision read content someone else wrote ({{sources}}), so it takes effect only after you look at the change in Pending; if you do not accept it, nothing changes.",
+  "工作流「{{summary}}」的修订已按本人的采纳生效（第 {{version}} 版）；改后要读的内容或风险有变，请本人重新看过风险再启用。": "The revision of the workflow \"{{summary}}\" took effect on your accept (version {{version}}); what it reads or its risks changed, so look at the risks again before turning it back on.",
+  "工作流「{{summary}}」的修订已按本人的采纳生效（第 {{version}} 版），下次运行就按新版做。": "The revision of the workflow \"{{summary}}\" took effect on your accept (version {{version}}); the next run follows the new version.",
+  "skill 目录只由 Crossline 在扫描和审查之后写入，助手不能直接改": "Only Crossline writes skill folders, after scanning and review; the assistant cannot change them directly"
 }

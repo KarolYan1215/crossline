@@ -67,6 +67,23 @@ const EXAMPLE_ENV = /\.env\.(example|sample|template)$/i;
 
 export const isSecretPath = (value: string): boolean => !EXAMPLE_ENV.test(value) && SECRET_PATH.some((pattern) => pattern.test(value));
 
+/**
+ * Where the skills a run is given live (the owner's decision of 2026-11-25, docs/plans/harness-1125.md 「Skill 供应链」): the skill library
+ * Crossline writes (`…\Crossline\skill-library\<workspace>`, its `lock.json` and the quarantine beside it), the repository's own plugin
+ * (`skills\marketplace\…`), and the runtime's copies of Crossline's plugins. Only the worker writes them, after its scan and review; the
+ * assistant's shell and file tools may read them but never write — the hole in Hermes was a generic file tool getting round the skill
+ * install's approval.
+ */
+const SKILL_STORE = [/[\\/]skill-(library|quarantine)(?![\w.-])/i, /(^|[\\/\s=:])skills[\\/]marketplace(?![\w.-])/i,
+  /[\\/]plugins[\\/]cache[\\/]crossline-(library|local)(?![\w.-])/i];
+export const isSkillStorePath = (value: string): boolean => SKILL_STORE.some((pattern) => pattern.test(value));
+/** Commands that only read or list: the one kind that may name a skill folder. Anything else, or any redirect, is a write. */
+const READ_ONLY_WORDS = new Set(["cat", "type", "gc", "get-content", "ls", "dir", "gci", "get-childitem", "head", "tail", "less", "more", "select-string", "sls",
+  "findstr", "grep", "rg", "test-path", "get-item", "gi", "resolve-path", "get-filehash", "sha256sum", "shasum", "wc", "stat", "tree", "measure-object", "select-object",
+  "sort-object", "where-object", "format-table", "format-list", "write-output", "echo"]);
+const readsOnly = (command: string) => !/(^|[^-=<>])>/.test(command.replace(/["'`][^"'`]*["'`]/g, ""))
+  && commandsIn(command).every(({ word }) => READ_ONLY_WORDS.has(word));
+
 /** Things that publish, send, spend, or change the machine. A task can ask for none of them; the last step is the person's. */
 const NEVER: Array<{ rule: string; reason: string; pattern: RegExp }> = [
   { rule: "send.mail", reason: "发送邮件由本人完成；助手只起草", pattern: /send-mailmessage|\bsendmail\b|\bsmtp\b|outlook\.application|createitem\s*\(|mailto:/i },
@@ -102,6 +119,7 @@ export function decideCommand(command: string, context: GuardContext): GuardDeci
     if (isSecretPath(token)) return { decision: "deny", rule: "secret.path", reason: t("「{{path}}」是凭据、密钥或会话所在的位置，不读不写", { path: token.slice(0, 80) }) };
   }
   if (isSecretPath(unquoted)) return { decision: "deny", rule: "secret.path", reason: t("命令里涉及凭据、密钥或会话所在的位置，不读不写") };
+  if (isSkillStorePath(unquoted) && !readsOnly(text)) return { decision: "deny", rule: "skill.write", reason: t("skill 目录只由 Crossline 在扫描和审查之后写入，助手不能直接改") };
   for (const entry of NEVER) if (entry.pattern.test(text)) return { decision: "deny", rule: entry.rule, reason: t(entry.reason) };
   // Deleting from a root or from the home directory is never a task.
   if (/(remove-item|\brm\b|\bdel\b|\brmdir\b|\brd\b)[^|;&]*(-recurse|\s-r|\s\/s)/i.test(text)) {
@@ -299,6 +317,8 @@ export function decideFileChange(paths: string[], context: GuardContext): GuardD
   const roots = [context.taskDir, ...(context.writableRoots ?? [])];
   for (const path of paths) {
     if (isSecretPath(path)) return { decision: "deny", rule: "secret.path", reason: t("「{{path}}」是凭据、密钥或会话所在的位置", { path: path.slice(0, 80) }) };
+    // Even inside a writable root (a worktree of the Crossline repository holds `skills\marketplace`).
+    if (isSkillStorePath(path)) return { decision: "deny", rule: "skill.write", reason: t("skill 目录只由 Crossline 在扫描和审查之后写入，助手不能直接改") };
     if (!roots.some((root) => inside(path, root))) {
       return { decision: "deny", rule: "write.outside", reason: t("只能写任务自己的目录；「{{path}}」在外面。需要改原文件时，把改动做成补丁放在任务目录里，由你合并", { path: path.slice(0, 80) }) };
     }

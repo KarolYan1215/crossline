@@ -4,7 +4,7 @@ import { get } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { accountConcurrency, breakdownOfResponsesUsage, codexProcessEnvironment, flushMeteredUsage, recordMeteredUsage, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, installUndiciAssertionGuard, modelGateStatus, setDesignNoteProvider, setInstructionsProvider, setLocalLookupProvider, setWebAvailableProvider, webResearchBlocker, setEffortPreferenceProvider, setModelChoiceProvider, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
+import { accountConcurrency, breakdownOfResponsesUsage, codexProcessEnvironment, flushMeteredUsage, recordMeteredUsage, configureModelGate, enterUsageWorkspace, protectSkillFolders, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, installUndiciAssertionGuard, modelGateStatus, setDesignNoteProvider, setInstructionsProvider, setLocalLookupProvider, setWebAvailableProvider, webResearchBlocker, setEffortPreferenceProvider, setModelChoiceProvider, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
 import { containerMemory, containerPeak, createCollectMemory, heldMemory } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
@@ -62,7 +62,7 @@ import { createTaskTitler, unreadTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
 import { createTimeDraftPass } from "./time-drafts";
 import { createInsightCompiler, linesAwaitingMineSkill } from "./insight-compiler";
-import { cleanPublicSkills, createPublicSkillInstaller, createSkillScout, lineSetupDue, scoutDue } from "./public-skills";
+import { cleanPublicSkills, createPublicSkillInstaller, createSkillScout, lineSetupDue, rescanDue, rescanPublicSkills, scoutDue } from "./public-skills";
 import { deriveWatches, opportunityAgentOn, rejudge, runWatch, todayFor, watchesDeriveDue, watchesToRun } from "./opportunities";
 import { opportunityScoutDue, startScout } from "./opportunity-scout";
 import { discoveryFeasibility, timeSpacePass } from "./time-space";
@@ -123,6 +123,7 @@ import { createWorkflowThreadService } from "./workflow-thread";
 import { monthSpend, ownerOf, runtimeOwner, runtimeTmpFor, runtimesDir } from "./owner";
 import { createNodeHub, type NodeHub } from "./node/hub";
 import { skillLibraryDir } from "./skill-library";
+import { skillStoreFolders } from "./skill-lock";
 import { identityLines } from "./lines";
 import { createBackgroundSpend, nonCoreAllowed } from "./spend";
 import { telemetryPass } from "./telemetry";
@@ -138,6 +139,8 @@ for (const file of [".env.local", ".env"]) {
   const envFile = path.join(repoRoot, file);
   if (existsSync(envFile)) { try { process.loadEnvFile(envFile); } catch { /* malformed: fall through */ } }
 }
+// Only the worker writes skills: the owner's shell under MXC is denied the library, its quarantine and the repository's own skills.
+protectSkillFolders([...skillStoreFolders(), path.join(repoRoot, "skills")]);
 
 const intervalMinutes = Number(process.env.CROSSLINE_SYNC_INTERVAL_MINUTES ?? 15);
 const webHealthUrl = process.env.CROSSLINE_WEB_HEALTH_URL ?? "http://127.0.0.1:3210/api/health";
@@ -654,6 +657,16 @@ async function publicSkillPass(workspaceId: string, checkedAt: string, offPeakWa
     const removed = cleanPublicSkills(analysisStore, workspaceId);
     if (removed.length) console.info(JSON.stringify({ type: "skill.public.cleaned", checkedAt, workspaceId, removed }));
   } catch { /* housekeeping */ }
+  // The daily rescan of installed public skills (and at once after a scanner upgrade): a safety check, so not held by the planning pause;
+  // without a model only the hashes and the code scan run, and a skill that needs the injection check waits, unused, for the next pass.
+  if (!scoutingSkills.has(workspaceId) && rescanDue(skillLibraryDir(workspaceId))) {
+    scoutingSkills.add(workspaceId);
+    try {
+      const rescan = await rescanPublicSkills(analysisStore, workspaceId, codexSupervisor ? accountClient(workspaceId) : undefined);
+      if (rescan.checked.length || rescan.disabled.length || rescan.waiting.length) console.info(JSON.stringify({ type: "skill.public.rescanned", checkedAt, workspaceId, ...rescan }));
+    } catch (error) { console.warn(JSON.stringify({ type: "skill.public.rescan_failed", workspaceId, message: String(error).slice(0, 200) })); }
+    finally { scoutingSkills.delete(workspaceId); }
+  }
   if (paused(workspaceId, "planning")) return;
   if (scoutingSkills.has(workspaceId) || !codexSupervisor) return;
   // A line's search when it is set up is part of setting the account up: it runs as core work and does not wait for the developer's

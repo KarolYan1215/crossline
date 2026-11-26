@@ -1,8 +1,9 @@
+import { createHash } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   WORKFLOW_FEEDBACK_EVENT, classifyAgentFailure, finalVerdict, grownSkillFilesKey, grownSkillName, scanForDeclaredAccess, scanSkillFiles, skillFrontmatter, validateWorkflowManifest,
-  tFor, type GrownSkillRecord, type Locale
+  workflowLineDiff, tFor, type GrownSkillRecord, type Locale, type Translate, type WorkflowManifest
 } from "@crossline/core";
 import type { CodexRpcBoundary } from "@crossline/codex";
 import { listAgentTasks, readGrownSkills, reviseGrownSkill, writeGrownSkills, type CrosslineStore } from "@crossline/db";
@@ -24,6 +25,12 @@ import { readRunFile, readSkillDir, reviewWorkflow, sayToPerson, SKILL_CREATOR }
  * What it can change is what a workflow is: its SKILL.md, its scripts and its manifest. Crossline's own code (the favourites reader, the
  * pace, the checks) is not a workflow and is not changed this way; a revision that reaches further than what the person agreed to (a new
  * site, login, risk or step leaving the machine) waits for their consent again (`revisionWidens`).
+ *
+ * A revision whose inputs held someone else's words — a result folder of a run that read mail, web pages, a site or an untrusted folder —
+ * is not put in force by itself (the owner's decision of 2026-11-25, docs/plans/harness-1125.md 「Skill 供应链」): those words could have
+ * written the new version. It passes the same checks, then waits as `pendingRevision` with a diff in its run's folder, and that run's
+ * result goes to 待确认; the person's 采纳 puts it in force, 退回 drops it. A revision from the person's feedback and failures alone, with
+ * no such folder, is put in force as before.
  */
 type RunFree = (input: AgentTaskInput & { taskId: string }, after?: (outcome: AgentOutcome | { state: "failed"; message: string }) => void) => DispatchResult;
 export type ImprovementSignal = { at: string; kind: "feedback" | "review" | "retry" | "failure" | "merge"; text: string; taskId?: string; absorbed?: string };
@@ -79,7 +86,8 @@ export function improvementSignals(store: CrosslineStore, workspaceId: string, r
 
 /** Whether to revise it now: something the person said, or failures enough, newer than the cooldown allows, within the tries a set gets. */
 export function improvementDue(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord, now = new Date()): ImprovementSignal[] | undefined {
-  if (record.status !== "active") return undefined;
+  // One revision waiting for the person is enough: the signals it answered stay until they decide.
+  if (record.status !== "active" || record.pendingRevision) return undefined;
   const signals = improvementSignals(store, workspaceId, record);
   const person = signals.filter((signal) => signal.kind !== "failure");
   if (!person.length && signals.length < FAILURES_TO_IMPROVE) return undefined;
@@ -121,7 +129,9 @@ export function improveTask(record: GrownSkillRecord, current: string, signals: 
  * way. A run that judged no change was needed says why and counts as answering the signals.
  */
 export async function installRevision(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord, outcome: AgentOutcome | { state: "failed"; message: string },
-  deps: { client: CodexRpcBoundary | undefined; cwd: string; now?: () => Date }): Promise<{ state: "revised"; version: number } | { state: "unchanged" | "rejected" | "skipped"; reason: string }> {
+  deps: { client: CodexRpcBoundary | undefined; cwd: string; now?: () => Date;
+    /** What the revision read that someone else wrote (`revisionTaint`): non-empty, it waits for the person instead of going in force. */
+    untrusted?: string[] }): Promise<{ state: "revised"; version: number } | { state: "pending"; untrusted: string[] } | { state: "unchanged" | "rejected" | "skipped"; reason: string }> {
   const now = deps.now?.() ?? new Date();
   const ownerId = ownerOf(store, workspaceId);
   const locale = localeOf(store, workspaceId);
@@ -182,6 +192,11 @@ export async function installRevision(store: CrosslineStore, workspaceId: string
   // The review took a while: checked again right before it is put in force.
   const late = moved();
   if (late) return skip(late);
+  if (deps.untrusted?.length) {
+    holdRevision(store, workspaceId, record, { taskId: outcome.taskId, directory: outcome.directory, files, changes, untrusted: deps.untrusted,
+      review: { ...reviewed.output, final } }, now, t);
+    return { state: "pending", untrusted: deps.untrusted };
+  }
   const revised = reviseGrownSkill(store, workspaceId, record.id, { manifest, files, scan, review: { ...reviewed.output, final }, changes, taskId: outcome.taskId }, now);
   if (!revised) return reject(t("工作流已被删除"));
   const values = { summary, version: revised.version, changes: changes.replace(/\s*\n+\s*/g, locale === "en" ? "; " : "；").slice(0, 300) };
@@ -190,6 +205,134 @@ export async function installRevision(store: CrosslineStore, workspaceId: string
     : t("工作流「{{summary}}」按意见改了（第 {{version}} 版）：{{changes}}。下次运行就按新版做；不合适可在设置里回到上一版。", values),
     "workflow_improved", `improved:${record.id}:${revised.version}`, [{ label: revised.needsConsent ? t("查看风险并启用") : t("查看或回到上一版"), href: `/automation/${encodeURIComponent(record.id)}` }], now);
   return { state: "revised", version: revised.version };
+}
+
+// ── Revisions that read someone else's words ────────────────────────────────────────────────────────────────────────────
+
+/** A result folder's own mark that it holds untrusted content (the assistant's taint tracking may leave one; docs/claude/personal-agent.md). */
+const UNTRUSTED_MARKS = ["untrusted.json", ".untrusted"];
+const sameDirectory = (a: string, b: string) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+
+/**
+ * What in the folders a revision is handed was written by someone else, judged from each folder's own run (docs/plans/harness-1125.md
+ * 「Skill 供应链」). A folder is untrusted when its run's `agent.task.requested` says so (`untrusted` labels, the `untrusted-input`
+ * profile), when that run was itself handed a site's collection (`collect-*`) or another workflow run's output (`flow-*`), when it searched
+ * the web, when the folder carries a mark (`untrusted.json`, `.untrusted`), or when no run of this workspace made it (unknown is untrusted).
+ * Returns the labels found, none for a revision from the person's feedback and failures alone.
+ */
+export function revisionTaint(store: CrosslineStore, workspaceId: string, directories: string[]): string[] {
+  const found = new Set<string>();
+  const runs = listAgentTasks(store, workspaceId);
+  for (const directory of directories) {
+    if (UNTRUSTED_MARKS.some((mark) => readRunFile(directory, mark) !== undefined)) found.add("marked");
+    const run = runs.find((item) => item.directory && sameDirectory(item.directory, directory));
+    const requested = run ? store.listEvents(workspaceId, { type: "agent.task.requested", entityId: run.taskId }).at(-1)?.payload as Record<string, unknown> | undefined : undefined;
+    if (!run || !requested) { found.add("unknown"); continue; }
+    if (Array.isArray(requested.untrusted)) for (const label of requested.untrusted) found.add(String(label));
+    else if (requested.untrusted === true) found.add("untrusted");
+    if (requested.profile === "untrusted-input") found.add("untrusted-input");
+    for (const input of Array.isArray(requested.inputs) ? requested.inputs.map(String) : []) {
+      const top = path.basename(input);
+      if (/^collect-/i.test(top) || input.split(/[\\/]/).some((part) => /^collect-/i.test(part))) found.add("site");
+      else if (input.split(/[\\/]/).some((part) => /^flow-/i.test(part))) found.add("workflow-output");
+    }
+    const completed = store.listEvents(workspaceId, { type: "agent.task.completed", entityId: run.taskId }).at(-1)?.payload as { searches?: number } | undefined;
+    if (Number(completed?.searches ?? 0) > 0) found.add("web");
+  }
+  return [...found];
+}
+
+const revisionDigest = (files: Array<{ path: string; text: string }>) => {
+  const hash = createHash("sha256");
+  for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) hash.update(`${file.path}\0${file.text}\0`);
+  return hash.digest("hex");
+};
+
+/** The change, file by file, as the person reads it on 待确认: unchanged lines left out, each file's added and removed lines. */
+function revisionDiff(before: Array<{ path: string; text: string }>, after: Array<{ path: string; text: string }>, header: string): string {
+  const paths = [...new Set([...before, ...after].map((file) => file.path))].sort();
+  const sections = paths.flatMap((file) => {
+    const old = before.find((item) => item.path === file)?.text ?? "";
+    const now = after.find((item) => item.path === file)?.text ?? "";
+    if (old === now) return [];
+    const lines = workflowLineDiff(old, now).filter((line) => line.op !== "same").map((line) => `${line.op === "add" ? "+" : "-"} ${line.text}`);
+    return [`## ${file}`, "", "```diff", ...lines.slice(0, 400), ...(lines.length > 400 ? [`… ${lines.length - 400}`] : []), "```", ""];
+  });
+  return [header, "", ...sections].join("\n");
+}
+
+/** Keeps a checked revision that read untrusted content for the person: the diff in its folder, its result back on 待确认, the person told. */
+function holdRevision(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord,
+  next: { taskId: string; directory: string; files: Array<{ path: string; text: string }>; changes: string; untrusted: string[]; review: NonNullable<GrownSkillRecord["pendingRevision"]>["review"] },
+  now: Date, t: Translate): void {
+  const at = now.toISOString();
+  const sources = next.untrusted.join(", ");
+  // i18n-ignore: the file's heading is read with the files it introduces, in the workspace's language below
+  writeFileSync(path.join(next.directory, "REVISION-DIFF.md"), revisionDiff(storedFiles(store, workspaceId, record.id), next.files,
+    t("# 工作流「{{summary}}」的修订（待本人采纳）\n\n这次修订读过别人写的内容（{{sources}}），所以不会自己生效：在待确认里采纳这次运行的结果，新版才生效；退回则不改。\n\n改了什么：{{changes}}",
+      { summary: record.manifest.summary, sources, changes: next.changes.replace(/\s*\n+\s*/g, "；").slice(0, 400) })), "utf8");
+  writeGrownSkills(store, workspaceId, readGrownSkills(store, workspaceId).map((item) => item.id !== record.id ? item : { ...item,
+    pendingRevision: { taskId: next.taskId, directory: next.directory, digest: revisionDigest(next.files), fromVersion: record.version ?? 1, untrusted: next.untrusted,
+      changes: next.changes.slice(0, 600), review: next.review, at } }));
+  // The run's result is the decision: back on 待确认 even though it was accepted by itself.
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `agent.task.reopened:${next.taskId}:untrusted`, type: "agent.task.reopened",
+    entityId: next.taskId, payload: { taskId: next.taskId, why: "untrusted_revision", workflowId: record.id, untrusted: next.untrusted } });
+  sayToPerson(store, workspaceId, t("工作流「{{summary}}」按意见改好了，但这次修改读过别人写的内容（{{sources}}），要本人在待确认里看过改动再生效；不采纳就保持原样。",
+    { summary: record.manifest.summary, sources }), "workflow_improved", `improve-held:${record.id}:${next.taskId}`, [{ label: t("去待确认"), href: "/approvals#assistant" }], now);
+}
+
+/**
+ * Settles the revisions waiting for the person, every pass: the run's result accepted by the person puts the revision in force, as long
+ * as its files are still exactly those that passed and the workflow has not moved on; returned, put away unreviewed or changed, it is
+ * dropped. Nothing is asked of a model: the checks ran before it waited.
+ */
+export function applyPendingRevisions(store: CrosslineStore, workspaceId: string, now = new Date()): Array<{ id: string; state: "revised" | "dropped"; reason?: string }> {
+  const t = tFor(localeOf(store, workspaceId));
+  const out: Array<{ id: string; state: "revised" | "dropped"; reason?: string }> = [];
+  const runs = listAgentTasks(store, workspaceId, now);
+  for (const record of readGrownSkills(store, workspaceId)) {
+    const pending = record.pendingRevision;
+    if (!pending) continue;
+    const run = runs.find((item) => item.taskId === pending.taskId);
+    const accepted = run?.status === "accepted" && run.reviewedBy === "person";
+    // Accepted by the daily pass in the person's place (date-advance.ts) is not the person's accept: the revision is dropped, as one put away.
+    const declined = !run || run.status === "rejected" || Boolean(run.settled) || run.filesGone || (run.status === "accepted" && run.reviewedBy !== "person");
+    if (!accepted && !declined) continue;
+    const clear = () => writeGrownSkills(store, workspaceId, readGrownSkills(store, workspaceId).map((item) => {
+      if (item.id !== record.id) return item;
+      const { pendingRevision: _done, ...rest } = item;
+      return rest;
+    }));
+    const drop = (reason: string) => {
+      clear();
+      store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.revision_rejected:${record.id}:${pending.taskId}`,
+        type: "skill.grown.revision_rejected", entityId: record.id, payload: { id: record.id, reason, taskId: pending.taskId, untrusted: pending.untrusted } });
+      out.push({ id: record.id, state: "dropped", reason });
+    };
+    if (declined) { drop(run?.status === "rejected" ? "person_declined" : "not_reviewed"); continue; }
+    if ((record.version ?? 1) !== pending.fromVersion) { drop("version_changed"); continue; }
+    const read = readSkillDir(path.join(pending.directory, "skill"), t);
+    const files = read.files.filter((file) => file.path !== "CHANGES.md");
+    if (read.problem || revisionDigest(files) !== pending.digest) { drop("files_changed"); continue; }
+    let manifest: WorkflowManifest;
+    try {
+      const raw = JSON.parse(files.find((file) => file.path === "workflow.json")?.text ?? "null") as unknown;
+      manifest = { ...validateWorkflowManifest(raw, identityLines(store, workspaceId).map((line) => line.id)), lines: record.manifest.lines,
+        name: record.manifest.name, category: record.manifest.category };
+    } catch { drop("manifest_invalid"); continue; }
+    const scan = scanForDeclaredAccess(scanSkillFiles(files), manifest.access.length > 0);
+    clear();
+    const revised = reviseGrownSkill(store, workspaceId, record.id, { manifest, files, scan, review: { ...pending.review, final: finalVerdict(scan, pending.review) },
+      changes: pending.changes, taskId: pending.taskId }, now);
+    if (!revised) { out.push({ id: record.id, state: "dropped", reason: "removed" }); continue; }
+    out.push({ id: record.id, state: "revised" });
+    const values = { summary: record.manifest.summary, version: revised.version };
+    sayToPerson(store, workspaceId, revised.needsConsent
+      ? t("工作流「{{summary}}」的修订已按本人的采纳生效（第 {{version}} 版）；改后要读的内容或风险有变，请本人重新看过风险再启用。", values)
+      : t("工作流「{{summary}}」的修订已按本人的采纳生效（第 {{version}} 版），下次运行就按新版做。", values),
+      "workflow_improved", `improved:${record.id}:${revised.version}`, [{ label: t("查看或回到上一版"), href: `/automation/${encodeURIComponent(record.id)}` }], now);
+  }
+  return out;
 }
 
 /**
@@ -201,6 +344,7 @@ export function workflowImprovePass(store: CrosslineStore, workspaceId: string, 
   deps: { client: () => CodexRpcBoundary | undefined; cwd: string; workRoot: string; spend: (kind: "core" | "discretionary") => boolean; now?: Date }): string | undefined {
   if (improving.has(workspaceId)) return undefined;
   const now = deps.now ?? new Date();
+  for (const settled of applyPendingRevisions(store, workspaceId, now)) console.info(JSON.stringify({ type: `skill.grown.pending_${settled.state}`, workspaceId, ...settled }));
   for (const record of readGrownSkills(store, workspaceId)) {
     const signals = improvementDue(store, workspaceId, record, now);
     if (!signals || !deps.spend(signals.some(fromPerson) ? "core" : "discretionary")) continue;
@@ -226,11 +370,13 @@ export function workflowImprovePass(store: CrosslineStore, workspaceId: string, 
       }
     const results = listAgentTasks(store, workspaceId).filter((run) => run.taskId.startsWith(workflowRunPrefix(record.id)) && run.directory && run.status !== "running")
       .slice(-2).map((run) => run.directory);
+    // Judged before the run: what the folders it is handed hold decides whether its revision may go in force by itself.
+    const untrusted = revisionTaint(store, workspaceId, results);
     store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.improve_started:${taskId}`, type: "skill.grown.improve_started",
-      entityId: record.id, payload: { id: record.id, taskId, signals: signals.map((signal) => signal.kind) } });
+      entityId: record.id, payload: { id: record.id, taskId, signals: signals.map((signal) => signal.kind), ...(untrusted.length ? { untrusted } : {}) } });
     improving.add(workspaceId);
     const started = runFree(improveTask(record, current, signals, results, taskId, localeOf(store, workspaceId)), (outcome) => {
-      void installRevision(store, workspaceId, record, outcome, { client: deps.client(), cwd: deps.cwd })
+      void installRevision(store, workspaceId, record, outcome, { client: deps.client(), cwd: deps.cwd, untrusted })
         .then((result) => console.info(JSON.stringify({ type: `skill.grown.improve_${result.state}`, workspaceId, id: record.id, ...result })))
         .catch(() => undefined).finally(() => improving.delete(workspaceId));
     });
