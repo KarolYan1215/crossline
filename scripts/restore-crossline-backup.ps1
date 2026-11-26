@@ -1,4 +1,4 @@
-<#
+﻿<#
   Decrypts a Crossline backup and rebuilds working databases from it — the main ledger, and (if the
   backup carries one — stage six) `auth.db`, Better Auth's own SQLite file.
 
@@ -38,23 +38,40 @@ $zip = Join-Path $OutputDirectory 'crossline-restored.zip'
 Expand-Archive -LiteralPath $zip -DestinationPath $OutputDirectory -Force
 Remove-Item -LiteralPath $zip -Force
 
-$json = Get-ChildItem -LiteralPath $OutputDirectory -Filter 'crossline-*.json' |
-  Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if ($null -eq $json) { throw 'Backup contained no crossline-*.json snapshot.' }
+# A backup since 2026-11-25 carries one crossline-<workspace>.json per workspace, plus crossline.db (SQLite's online
+# backup of the whole ledger), auth.db, backup-info.json and the materials/sources/portrait folders. Older ones carry a
+# single crossline-<time>.json and auth-<time>.db. Every snapshot is rebuilt and read back.
+$snapshots = @(Get-ChildItem -LiteralPath $OutputDirectory -Filter 'crossline-*.json' | Sort-Object Name)
+if ($snapshots.Count -eq 0) { throw 'Backup contained no crossline-*.json snapshot.' }
 # Present only for a backup taken after a real login had completed — `backup-crossline.ps1` skips it
 # entirely on a fresh install with no `auth.db` yet, which is not itself a restore failure.
-$authDb = Get-ChildItem -LiteralPath $OutputDirectory -Filter 'auth-*.db' -ErrorAction SilentlyContinue |
-  Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$authDb = Get-ChildItem -LiteralPath $OutputDirectory -Filter 'auth*.db' -ErrorAction SilentlyContinue |
+  Where-Object { $_.Name -notlike 'auth-restored-*' } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$info = Join-Path $OutputDirectory 'backup-info.json'
+$backupInfo = if (Test-Path -LiteralPath $info) { Get-Content -LiteralPath $info -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
+$ledgerCopy = Join-Path $OutputDirectory 'crossline.db'
 
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$targetDb = Join-Path $OutputDirectory "crossline-restored-$stamp.db"
-# pnpm writes its banner to stderr. Under `$ErrorActionPreference = 'Stop'`, PowerShell 5.1 turns a
-# native command's stderr line into a terminating NativeCommandError whenever stderr is redirected —
-# which is exactly what happens under a scheduled task or any non-interactive host. The script then
-# died before it could read $LASTEXITCODE, so the backup worked by hand and silently never ran
-# unattended. The exit code is the authority here, so stderr must not be allowed to pre-empt it.
-& { $ErrorActionPreference = 'Continue'; & pnpm --dir $repo restore -- $json.FullName $targetDb }
-if ($LASTEXITCODE -ne 0) { throw 'Restore verification failed; the backup did not rebuild a readable ledger.' }
+$restored = @()
+foreach ($json in $snapshots) {
+  $name = $json.BaseName -replace '^crossline-', ''
+  $targetDb = Join-Path $OutputDirectory "crossline-restored-$name-$stamp.db"
+  # pnpm writes its banner to stderr. Under `$ErrorActionPreference = 'Stop'`, PowerShell 5.1 turns a
+  # native command's stderr line into a terminating NativeCommandError whenever stderr is redirected —
+  # which is exactly what happens under a scheduled task or any non-interactive host. The script then
+  # died before it could read $LASTEXITCODE, so the backup worked by hand and silently never ran
+  # unattended. The exit code is the authority here, so stderr must not be allowed to pre-empt it.
+  $restoreOutput = & { $ErrorActionPreference = 'Continue'; & pnpm --dir $repo restore -- $json.FullName $targetDb 2>&1 }
+  if ($LASTEXITCODE -ne 0) { throw "Restore verification failed for $($json.Name); the backup did not rebuild a readable ledger." }
+  $text = ($restoreOutput | ForEach-Object { "$_" }) -join "`n"
+  $completed = if ($text -match '(?s)\{\s*"status": "restore\.completed".*?\n\}') { $Matches[0] | ConvertFrom-Json } else { $null }
+  $restored += [pscustomobject]@{ Snapshot = $json.Name; Database = $targetDb; WorkspaceId = $completed.workspaceId
+    Events = $completed.counts.events; WorkOrders = $completed.counts.workOrders; Milestones = $completed.counts.milestones
+    Rows = $completed.counts.rows }
+  # The backup script goes to the trouble of shredding its plaintext temp file; leaving the decrypted
+  # snapshot behind here would quietly undo that. The rebuilt database is the artifact worth keeping.
+  Remove-Item -LiteralPath $json.FullName -Force
+}
 
 $authDbTarget = $null
 $authDbCounts = $null
@@ -69,13 +86,12 @@ if ($null -ne $authDb) {
   Remove-Item -LiteralPath $authDb.FullName -Force
 }
 
-# The backup script goes to the trouble of shredding its plaintext temp file; leaving the decrypted
-# snapshot behind here would quietly undo that. The rebuilt database is the artifact worth keeping.
-Remove-Item -LiteralPath $json.FullName -Force
-
 Write-Output ([pscustomobject]@{
   SnapshotPlaintextRemoved = $true
-  RestoredDatabase    = $targetDb
+  TakenFrom           = if ($backupInfo) { $backupInfo.dataDirectory } else { $null }
+  TakenAt             = if ($backupInfo) { $backupInfo.takenAt } else { $null }
+  Restored            = $restored
+  LedgerCopy          = if (Test-Path -LiteralPath $ledgerCopy) { $ledgerCopy } else { $null }
   Verified            = $true
   LiveLedgerUntouched = $true
   AuthDbRestored      = $null -ne $authDbTarget

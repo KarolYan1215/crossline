@@ -35,13 +35,6 @@ $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances 
 Register-ScheduledTask -TaskName 'Crossline' `
   -Description 'Keeps the local Crossline PWA and worker running, and restarts them if they stop.' `
   -Action $action -Trigger @($atLogon, $watchdog) -Settings $settings -User $env:USERNAME -Force | Out-Null
-# A daily encrypted backup (ledger, auth.db, Codex memory), kept for two weeks. A backup that only runs when someone remembers
-# to run it is not a backup; this one runs at 04:00 when nothing else is happening, and catches up after the machine was off.
-$backup = Join-Path $repo 'scripts\backup-crossline.ps1'
-$backupAction = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument "$hidden -File `"$backup`" -RepoRoot `"$repo`" -Keep 14"
-$daily = New-ScheduledTaskTrigger -Daily -At '04:00'
-$backupSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 1)
-Register-ScheduledTask -TaskName 'Crossline Backup' `
-  -Description 'Daily encrypted backup of the Crossline ledger, login database and Codex memory; keeps the last 14.' `
-  -Action $backupAction -Trigger $daily -Settings $backupSettings -User $env:USERNAME -Force | Out-Null
-Write-Output "Crossline startup task installed (logon + every $WatchdogMinutes minutes), and a daily 04:00 backup."
+# The daily encrypted backup has its own registration script, so the task is defined in one place.
+& (Join-Path $PSScriptRoot 'install-backup-schedule.ps1') -RepoRoot $repo
+Write-Output "Crossline startup task installed (logon + every $WatchdogMinutes minutes), and the daily backup."

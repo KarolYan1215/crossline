@@ -4,8 +4,16 @@ rem session: powershell.exe answers "Access is denied" there, cmd.exe does not).
 setlocal
 if "%~1"=="" (echo usage: install-personal.cmd ^<setup exe^> & exit /b 2)
 set "ROOT=%LOCALAPPDATA%\Crossline"
-rem The backup folder's stamp: the second argument (yyyyMMdd-HHmmss from the caller), else a random number (%date% is locale-shaped).
+rem The backup folder's stamp, yyyyMMdd-HHmmss. A second argument is used only in that shape: callers built it from the
+rem DATE variable, which is locale-shaped, and left before-personal-<weekday>022611-091748 behind (2026-11-23). Otherwise the
+rem installed app's own node.exe prints the local time; random digits only when there is no node.exe.
 set "STAMP=%~2"
+echo(%STAMP%| findstr /r /x "[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]" >nul || set "STAMP="
+if "%STAMP%"=="" if exist "%ROOT%\app\node.exe" (
+  "%ROOT%\app\node.exe" -e "const d=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString();process.stdout.write(d.slice(0,10).replace(/-/g,'')+'-'+d.slice(11,19).replace(/:/g,''))" > "%TEMP%\crossline-stamp.txt" 2>nul
+  set /p STAMP=<"%TEMP%\crossline-stamp.txt"
+  del "%TEMP%\crossline-stamp.txt" 2>nul
+)
 if "%STAMP%"=="" set "STAMP=r%RANDOM%%RANDOM%"
 if not exist "%ROOT%" mkdir "%ROOT%"
 rem 1. Stop the installed tray; its job object ends the launcher, web, worker and Codex.

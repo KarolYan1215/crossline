@@ -131,9 +131,9 @@ try {
   }
 
   // ---- Backup/restore carries `auth.db` alongside the ledger: a real WAL checkpoint, copy, and
-  // independent read-back of `user`/`session`/`account`/`verification` row counts — the same drill
-  // `scripts/checkpoint-auth-db.ts` and `scripts/read-auth-db-counts.ts` perform, run inline here so this
-  // script stays self-contained.
+  // independent read-back of `user`/`session`/`account`/`verification` row counts (the backup itself now
+  // copies by online backup in `scripts/snapshot-ledger.ts`; `scripts/read-auth-db-counts.ts` reads it back),
+  // run inline here so this script stays self-contained.
   const before = new Database(authDbPath, { readonly: false });
   before.pragma("wal_checkpoint(TRUNCATE)");
   const beforeCounts = Object.fromEntries(["user", "session", "account", "verification"].map((table) =>

@@ -127,7 +127,7 @@ pnpm worker     # 后台作业：分析、手册、闸门、日历同步、尽�
 
 - 事件账本 append-only，按 `(workspace_id, idempotency_key)` 幂等；迁移按版本号在事务里整体执行，并先备份。
 - `pnpm export` 导出完整快照；有回归测试对着 `sqlite_master` 断言每张表都在导出里。`pnpm doctor:ledger` 检查孤儿行、半迁移和 WAL 体积。
-- `scripts\backup-crossline.ps1`：DPAPI 加密 + SHA-256 校验，连 `auth.db` 一起备份。
+- `scripts\backup-crossline.ps1`：备份本机安装版的账本（`%LOCALAPPDATA%\Crossline\data`，含 `auth.db`、材料与 Codex 记忆），DPAPI 加密 + SHA-256 校验；每次结果写进 `backups\backup.log`，失败弹 Windows 通知并以非零退出。
 - `scripts\restore-crossline-backup.ps1`：**真的重建一个可用的 SQLite 账本**并逐表读回校验；写实时账本会被拒绝。
 
 ---

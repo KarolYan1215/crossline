@@ -39,7 +39,7 @@ Web 与 worker 依然只绑定 `127.0.0.1`；`private` 部署模式不改变这�
   Tailscale 身份"，写进 `tailscale_bindings`，但不构成任何登录旁路——每个页面依然要求正常的 Better Auth
   session，这是计划里明确要求的（"不做成自动透传登录"）。
 - `scripts/backup-crossline.ps1`/`restore-crossline-backup.ps1`：现在同时备份/恢复 `auth.db`
-  （`scripts/checkpoint-auth-db.ts` 做 WAL checkpoint 后拷贝，`scripts/read-auth-db-counts.ts` 在恢复后读回
+  （当时由 `scripts/checkpoint-auth-db.ts` 做 WAL checkpoint 后拷贝——2026-11-25 起改为 `scripts/snapshot-ledger.ts` 只读在线备份，见 `docs/claude/operational-scripts.md`；`scripts/read-auth-db-counts.ts` 在恢复后读回
   `user`/`session`/`account`/`verification` 行数）。**真实跑过一遍完整演练**：种一个真实 workspace + 一个空
   `auth.db`，备份、加密、解密、解压、恢复两个库、读回所有表——见下面"已验证"。
 - `apps/worker/src/export.ts` 顺带修的一个真实 bug：默认 workspace id 之前硬编码成 `"personal-crossline"`，
