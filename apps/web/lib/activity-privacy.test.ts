@@ -37,12 +37,12 @@ const rel = (file: string) => path.relative(root, file).replaceAll("\\", "/");
 const using = (needle: string) => files.filter((file) => readFileSync(file, "utf8").includes(needle)).map(rel).sort();
 
 test("window titles are readable from one place only: the settings route that shows the person what is kept", () => {
-  expect(using("recentActivityEntries")).toEqual(["apps/web/app/api/settings/local-activity/route.ts", "packages/db/src/index.ts"]);
-  expect(using("activityEntriesSince")).toEqual(["apps/worker/src/device/payloads.ts", "apps/worker/src/gates/attention.ts", "apps/worker/src/time-drafts.ts", "packages/db/src/index.ts"]);
+  expect(using("recentActivityEntries")).toEqual(["apps/web/app/api/settings/local-activity/route.ts", "packages/db/src/signal-types.ts", "packages/db/src/store.ts"]);
+  expect(using("activityEntriesSince")).toEqual(["apps/worker/src/device/payloads.ts", "apps/worker/src/gates/attention.ts", "apps/worker/src/time-drafts.ts", "packages/db/src/store.ts"]);
 });
 
 test("only the tracker writes readings, and nothing that builds a model context touches segments at all", () => {
-  expect(using("recordActivityReading")).toEqual(["apps/worker/src/activity-recorder.ts", "packages/db/src/index.ts"]);
+  expect(using("recordActivityReading")).toEqual(["apps/worker/src/activity-recorder.ts", "packages/db/src/store.ts"]);
   const codexFacing = files.filter((file) => /packages\/codex|apps\/worker\/src\/(analysis|assistant|diligence|flywheel|manualbook|materials|milestone|onboarding|plan-explainer)/.test(rel(file)));
   expect(codexFacing.length).toBeGreaterThan(5);
   const offenders = codexFacing.filter((file) => /listActivitySegments|recentActivityEntries|activity_segments/.test(readFileSync(file, "utf8"))).map(rel);
