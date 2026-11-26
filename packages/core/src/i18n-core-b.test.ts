@@ -8,7 +8,7 @@ import { acceptanceStandardLines, completionRule, outcomeCriteriaVerdict } from 
 import { mentionsExternalAction } from "./external-action";
 import { describeEvent, fixedEventBlocks, type FixedEvent } from "./fixed-events";
 import { advanceWorkOrder, validateCommandEnvelope, validateSuccessCriteria } from "./index";
-import { ASSUMPTION_PREFIX, interviewChecklist } from "./interview-checklist";
+import { interviewChecklist } from "./interview-checklist";
 import { openAccessVerdict } from "./manualbook-schema";
 import { portraitLabels, typeFromScores } from "./portrait-type";
 import { answerLine, answeredGapFacts, profileGaps, readAnswerLine, undatedKey } from "./profile-gaps";
@@ -158,7 +158,5 @@ describe("heuristics read English as well as Chinese", () => {
     expect(plainProject("ECE 548", projects)?.id).toBe("ece548");
     expect(plainProject("possibly ECE 548", projects)).toBeUndefined();
     expect(plainProject("可能为 ECE 548", projects)).toBeUndefined();
-    expect(ASSUMPTION_PREFIX.test("假设：按日历判断")).toBe(true);
-    expect(ASSUMPTION_PREFIX.test("Assumption: read from the calendar")).toBe(true);
   });
 });

@@ -1,4 +1,4 @@
-import { PROFILE_SECTIONS_SETTING, ATTENTION_SETTING, START_CONFIRMED_SETTING, START_CONFIRM_SINCE, interviewChecklist, lineAttributes, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, portraitConfirmedByInsights, readInsightRatings, ONBOARDING_INSIGHTS, type ChecklistItem, type ProfileGap, type ProfileModel, type StoredLineProfile, type Locale } from "@crossline/core";
+import { PROFILE_SECTIONS_SETTING, ATTENTION_SETTING, START_CONFIRMED_SETTING, START_CONFIRM_SINCE, interviewChecklist, readChecklistVerdicts, lineAttributes, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, portraitConfirmedByInsights, readInsightRatings, ONBOARDING_INSIGHTS, type ChecklistItem, type ProfileGap, type ProfileModel, type StoredLineProfile, type Locale } from "@crossline/core";
 import { interviewLocale, readLocale } from "./locale";
 import { unfiledFilesIn } from "./file-belonging";
 import { latestFileDates } from "./index";
@@ -73,7 +73,9 @@ export function interviewChecklistFor(store: CrosslineStore, workspaceId: string
       .filter(([, record]) => Array.isArray(record?.sentences) && record.sentences.length > 0).map(([name]) => name),
     portraitConfirmed: portraitStillConfirmed(confirmed?.fingerprint, profile) || portraitConfirmedByInsights(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS))),
     // Labels in the interview's language (docs/i18n.md): the list is about the interview.
-    locale: extras.locale ?? interviewLocale(store, workspaceId) ?? readLocale(store, workspaceId)
+    locale: extras.locale ?? interviewLocale(store, workspaceId) ?? readLocale(store, workspaceId),
+    // What the dialogue judged of each item against the ledger, kept by its rounds (2026-11-25): the items that need a reading of words.
+    verdicts: readChecklistVerdicts(store.listOnboardingSessions(workspaceId).map((session) => session.coverage))
   });
 }
 

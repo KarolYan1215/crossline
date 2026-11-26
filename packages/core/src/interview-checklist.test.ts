@@ -1,5 +1,12 @@
 import { expect, test } from "vitest";
-import { interviewChecklist, interviewOwnedOpen, partsUncovered, portraitFingerprint, readyToStart, type ChecklistInput } from "./index";
+import { checkChecklistVerdicts, interviewChecklist, interviewOwnedOpen, judgedItems, partsUncovered, portraitFingerprint, readChecklistVerdicts, readyToStart,
+  type ChecklistInput, type ChecklistVerdict } from "./index";
+
+/** A verdict the model gave against the ledger snapshot (2026-11-25), citing the person's reply. */
+const said = (id: string, status: ChecklistVerdict["status"] = "answered", note = ""): ChecklistVerdict =>
+  ({ id, status, basis: status === "answered" || status === "partial" ? [{ ref: "reply-2", quote: "本人原话" }] : [], note });
+
+
 
 const full: ChecklistInput = {
   lines: [{ id: "research", label: "研究者", hard: true, goals: ["成为外推知识边界的研究者"] }],
@@ -18,7 +25,10 @@ const full: ChecklistInput = {
     { identityId: "research", projectId: "", slot: "near_term", status: "confirmed", sourceRef: "reply-7", value: "11/24 前提交 ECE 555 HW4" }],
   projects: [{ id: "ece555", identityId: "research", name: "ECE 555" }, { id: "research-default", identityId: "research", name: "研究者" }],
   dates: [{ project: "ECE 555", kind: "class", recurring: true, pending: false, sourceRef: "src-2" }, { project: "ECE 555", kind: "exam", recurring: false, pending: false, sourceRef: "src-1" }],
-  availability: true, unfiledFiles: 0, portraitConfirmed: true
+  availability: true, unfiledFiles: 0, portraitConfirmed: true,
+  // Three parts written from the person's sentences (structure); how they work and the project's details only the model's verdict settles.
+  groundedSections: ["situation", "compass", "energy"],
+  verdicts: { "portrait:method": said("portrait:method"), "project:ece555": said("project:ece555") }
 };
 
 test("a complete record ticks every item, the portrait included", () => {
@@ -29,7 +39,7 @@ test("a complete record ticks every item, the portrait included", () => {
 });
 
 test("a portrait written only from inferences is not finished, and what is missing is named", () => {
-  const items = interviewChecklist({ ...full, facts: full.facts.filter((fact) => fact.identityId !== "person"), profile: { ...full.profile, trueNorth: "", energyMap: [] } });
+  const items = interviewChecklist({ ...full, groundedSections: [], verdicts: {}, profile: { ...full.profile, trueNorth: "", energyMap: [] } });
   expect(items.find((item) => item.id === "portrait_grounded")).toMatchObject({ done: false, detail: "尚无本人依据：现状与真问题、工作观与人生观、能量与心流、做事方法" });
   expect(items.find((item) => item.id === "portrait_fields")?.detail).toContain("正北");
   expect(interviewOwnedOpen(items).map((item) => item.id)).toEqual(["portrait_fields", "portrait_grounded"]);
@@ -54,13 +64,20 @@ test("a graded project needs its fixed times, a hard line its fixed schedule; a 
   expect(portraitFingerprint({ portrait: "a" })).not.toBe(portraitFingerprint({ portrait: "b" }));
 });
 
-test("what the person could not say is assumed (「假设：」) and settles the item, saying so; a bare guess does not", () => {
-  const without = { ...full, facts: full.facts.filter((fact) => fact.identityId !== "person" || !/energy|flow/.test(fact.slot)) };
-  expect(interviewChecklist(without).find((item) => item.id === "portrait_grounded")?.done).toBe(false);
-  const guessed = { ...without, facts: [...without.facts, { identityId: "person", projectId: "", slot: "energy_sources", status: "inferred", sourceRef: "", value: "深夜写代码" }] };
-  expect(interviewChecklist(guessed).find((item) => item.id === "portrait_grounded")?.done).toBe(false);
-  const assumed = { ...without, facts: [...without.facts, { identityId: "person", projectId: "", slot: "energy_sources", status: "inferred", sourceRef: "", value: "假设：深夜写代码时充电" }] };
-  expect(interviewChecklist(assumed).find((item) => item.id === "portrait_grounded")).toMatchObject({ done: true, detail: "以假设代替：能量与心流" });
+// 2026-11-25 (「访谈账本驱动」): whether the person's words settle an item is the model's verdict against the ledger; the 「假设：」 prefix
+// and the slot-name patterns that read fact values are gone.
+test("a partial verdict keeps the item open and says what is missing; not_applicable settles it; a fact's wording settles nothing", () => {
+  const without = { ...full, verdicts: {} };
+  const method = (input: ChecklistInput) => interviewChecklist(input).find((item) => item.id === "portrait_grounded")!;
+  expect(method(without)).toMatchObject({ done: false, detail: "尚无本人依据：做事方法" });
+  expect(method({ ...without, facts: [...without.facts, { identityId: "person", projectId: "", slot: "method_learning", status: "inferred", sourceRef: "", value: "假设：先做往年题" }] }).done).toBe(false);
+  expect(method({ ...without, verdicts: { "portrait:method": said("portrait:method", "partial", "只说了考试怎么准备，学新东西还没说") } }).done).toBe(false);
+  expect(method({ ...without, verdicts: { "portrait:method": said("portrait:method") } }).done).toBe(true);
+  const undated = { ...full, dates: full.dates.filter((entry) => !entry.recurring) };
+  const schedule = (verdict?: ChecklistVerdict) => interviewChecklist({ ...undated, verdicts: { ...full.verdicts, ...(verdict ? { [verdict.id]: verdict } : {}) } })
+    .find((item) => item.id === "hard_schedule:research")!;
+  expect(schedule(said("hard_schedule:research", "partial", "只知道周二没课，其余几天的时间还没说"))).toMatchObject({ done: false, detail: "只知道周二没课，其余几天的时间还没说" });
+  expect(schedule(said("hard_schedule:research", "not_applicable", "本人说这条线每周没有固定要占的时间")).done).toBe(true);
 });
 
 test("可开始标准（D10，2026-11-22）：只剩「至少一条主线」与「至少一个里程碑」；画像、日程、截止都不再挡开始", () => {
@@ -88,51 +105,29 @@ test("a milestone is one on the board, a current project of a line, or a `milest
   expect(milestone({ ...bare, facts: [...bare.facts, fact("inferred", "")] }).done).toBe(false);
 });
 
-test("「假设：」 settles no fixed schedule: only the person's word or a file", () => {
-  const assumed = { ...full, dates: full.dates.filter((entry) => !entry.recurring),
-    facts: [...full.facts, { identityId: "research", projectId: "", slot: "fixed_schedule", status: "inferred", sourceRef: "", value: "假设：周二四上课" }] };
-  expect(interviewChecklist(assumed).find((item) => item.id === "hard_schedule:research")?.done).toBe(false);
-});
-
-test("本人用汉字说的钟点也算固定日程（「早八点到晚九点」）", () => {
-  const said = { ...full, dates: full.dates.filter((entry) => !entry.recurring),
-    facts: [...full.facts, { identityId: "research", projectId: "", slot: "weekly_hours", status: "confirmed", sourceRef: "reply-7", value: "周一到周五按课表走，课在早八点到晚九点之间随机分布，周二没课" }] };
-  expect(interviewChecklist(said).find((item) => item.id === "hard_schedule:research")?.done).toBe(true);
-});
-
-test("固定日程的槽位里没有哪天、几点，也没说定不下来，不算收集到（第十一次回放：开场卡的「有固定日程」被记成了日程）", () => {
+// The fixed schedule: a recurring date on record (structure) or the model's verdict. The weekday, clock and 「不固定」 patterns over fact
+// values are gone (2026-11-25): 「早八点到晚九点」 and 「8–21 点之间不固定」 are the model's to read, with the reply it quotes.
+test("a fixed schedule is a recurring date on record or the model's verdict; a fact's words alone settle nothing", () => {
   const undated = { ...full, dates: full.dates.filter((entry) => !entry.recurring) };
-  const fact = (value: string) => ({ identityId: "research", projectId: "", slot: "fixed_schedule", status: "confirmed" as const, sourceRef: "reply-1", value });
-  const done = (value: string) => interviewChecklist({ ...undated, facts: [...undated.facts, fact(value)] }).find((item) => item.id === "hard_schedule:research")?.done;
-  expect(done("有固定日程")).toBe(false);
-  expect(done("工作日白天上课")).toBe(true);
-  expect(done("课表记不清，之后补")).toBe(true);
+  const done = (input: ChecklistInput) => interviewChecklist(input).find((item) => item.id === "hard_schedule:research")?.done;
+  const fact = { identityId: "research", projectId: "", slot: "fixed_schedule", status: "confirmed", sourceRef: "reply-7", value: "周一到周五按课表走，课在早八点到晚九点之间" };
+  expect(done({ ...undated, facts: [...undated.facts, fact] })).toBe(false);
+  expect(done({ ...undated, verdicts: { ...full.verdicts, "hard_schedule:research": said("hard_schedule:research") } })).toBe(true);
+  expect(done(full)).toBe(true);
+  // A recurring date under no project counts for the only hard line; with two hard lines it stands for neither.
+  const loose = { ...undated, dates: [...undated.dates, { project: "上课", kind: "class", recurring: true, pending: false, sourceRef: "reply-13" }] };
+  expect(done(loose)).toBe(true);
+  expect(done({ ...loose, lines: [...loose.lines, { id: "venture", label: "创业者", hard: true, goals: ["x"] }] })).toBe(false);
 });
 
-test("「8–21 点之间不固定」 under any slot of the line closes the fixed-schedule item; the person's own 「不固定」 does not (W-268)", () => {
-  const undated = { ...full, dates: full.dates.filter((entry) => !entry.recurring) };
-  const fact = (identityId: string, slot: string, value: string) => ({ identityId, projectId: "", slot, status: "confirmed" as const, sourceRef: "reply-9", value });
-  const done = (extra: ReturnType<typeof fact>) => interviewChecklist({ ...undated, facts: [...undated.facts, extra] }).find((item) => item.id === "hard_schedule:research")?.done;
-  expect(done(fact("research", "course_hours", "8–21 点之间不固定"))).toBe(true);
-  expect(done(fact("person", "energy_pattern", "精力不固定，下午 3 点最困"))).toBe(false);
-  // A course whose class times the person said vary has its class times.
-  const course = { ...full, dates: full.dates.filter((entry) => !entry.recurring), facts: [...full.facts, { identityId: "research", projectId: "ece555", slot: "class_note", status: "confirmed", sourceRef: "reply-9", value: "上课在 8–21 点之间不固定" }] };
-  expect(interviewChecklist(course).find((item) => item.id === "project_course:ece555")?.done).toBe(true);
-});
-
-test("记在本人名下的课表算唯一那条硬线的固定日程；两条硬线时不替任何一条作数", () => {
-  const undated = { ...full, dates: full.dates.filter((entry) => !entry.recurring) };
-  const classes = { identityId: "person", projectId: "", slot: "fixed_schedule_class", status: "confirmed" as const, sourceRef: "reply-13", value: "周一到周五按课表上课，早八点到晚九点之间，周二没课" };
-  expect(interviewChecklist({ ...undated, facts: [...undated.facts, classes] }).find((item) => item.id === "hard_schedule:research")?.done).toBe(true);
-  const two = { ...undated, facts: [...undated.facts, classes], lines: [...undated.lines, { id: "venture", label: "创业者", hard: true, goals: ["x"] }] };
-  expect(interviewChecklist(two).find((item) => item.id === "hard_schedule:research")?.done).toBe(false);
-});
-
-test("每条主线至少一个当前项目且知道截止；「没有截止」也算", () => {
+test("每条主线至少一个当前项目且知道截止；「没有截止」由模型对着账本判定", () => {
   const undated = { ...full, dates: full.dates.filter((entry) => entry.recurring) };
   expect(interviewChecklist(undated).find((item) => item.id === "line_project:research")).toMatchObject({ done: false, owner: "interview" });
-  const none = { ...undated, facts: [...undated.facts, { identityId: "research", projectId: "ece555", slot: "no_deadline", status: "confirmed", sourceRef: "reply-4", value: "没有截止" }] };
+  const none = { ...undated, verdicts: { ...full.verdicts, "line_project:research": said("line_project:research") } };
   expect(interviewChecklist(none).find((item) => item.id === "line_project:research")?.done).toBe(true);
+  // A `no_deadline` fact's wording is no longer read here.
+  const fact = { ...undated, facts: [...undated.facts, { identityId: "research", projectId: "ece555", slot: "no_deadline", status: "confirmed", sourceRef: "reply-4", value: "没有截止" }] };
+  expect(interviewChecklist(fact).find((item) => item.id === "line_project:research")?.done).toBe(false);
   // 只有 `-default` 项目不算「当前项目」。
   const onlyDefault = { ...full, projects: full.projects.filter((project) => project.id.endsWith("-default")) };
   expect(interviewChecklist(onlyDefault).find((item) => item.id === "line_project:research")?.detail).toBe("尚无当前项目");
@@ -159,25 +154,15 @@ test("a confirmed portrait stays confirmed through a rewording, not through a re
   expect(portraitStillConfirmed(undefined, before)).toBe(false);
 });
 
-// 2026-10-15 walkthrough: every answer was in, written as `course_goal` / `progress_evidence` / `class_schedule`, and a course's final
-// project was asked for its own grading share and class times — the interview could not finish and had nothing left to ask.
-test("project items read slots by meaning, and a course's part needs no grading share or class times of its own", () => {
-  const facts = [...full.facts.filter((fact) => fact.projectId !== "ece555"),
-    { identityId: "research", projectId: "ece555", slot: "grading", status: "confirmed", sourceRef: "src-1" },
-    { identityId: "research", projectId: "ece555", slot: "course_goal", status: "confirmed", sourceRef: "reply-2" },
-    { identityId: "research", projectId: "ece555", slot: "progress_evidence", status: "confirmed", sourceRef: "reply-2" },
-    { identityId: "research", projectId: "ece555-final", slot: "goal", status: "confirmed", sourceRef: "reply-2" },
-    { identityId: "research", projectId: "ece555-final", slot: "proposal_deadline", status: "confirmed", sourceRef: "reply-2" },
-    { identityId: "research", projectId: "ece555-final", slot: "evaluation_evidence", status: "confirmed", sourceRef: "reply-2" }];
-  const items = interviewChecklist({ ...full, facts, projects: [...full.projects, { id: "ece555-final", identityId: "research", name: "ECE 555 期末项目" }],
+// 2026-10-15 walkthrough: every answer was in under slot names the checklist did not know, and the interview could not finish. Since
+// 2026-11-25 no slot name is read: a project's details are the model's verdict, a course's times a recurring date or the verdict.
+test("a project's details are the model's verdict, and a graded project's times a recurring date or the verdict", () => {
+  const items = interviewChecklist({ ...full, verdicts: {}, dates: [{ project: "ECE 555", kind: "exam", recurring: false, pending: false, sourceRef: "src-1" }] });
+  expect(items.find((item) => item.id === "project:ece555")).toMatchObject({ done: false, deferred: true, detail: "目标、截止与进展证据待确认" });
+  expect(items.find((item) => item.id === "project_course:ece555")?.detail).toBe("缺：固定时间");
+  const judged = interviewChecklist({ ...full, verdicts: { "project:ece555": said("project:ece555"), "project_course:ece555": said("project_course:ece555") },
     dates: [{ project: "ECE 555", kind: "exam", recurring: false, pending: false, sourceRef: "src-1" }] });
-  const course = items.find((item) => item.id === "project_course:ece555")!;
-  expect(course.detail).toBe("缺：固定时间");
-  expect(items.some((item) => item.id === "project_course:ece555-final")).toBe(false);
-  const withSchedule = interviewChecklist({ ...full, facts: [...facts, { identityId: "research", projectId: "ece555", slot: "class_schedule", status: "confirmed", sourceRef: "src-1" }],
-    projects: [...full.projects, { id: "ece555-final", identityId: "research", name: "ECE 555 期末项目" }],
-    dates: [{ project: "ECE 555", kind: "exam", recurring: false, pending: false, sourceRef: "src-1" }] });
-  expect(withSchedule.filter((item) => item.id.startsWith("project:")).map((item) => [item.id, item.done])).toEqual([["project:ece555", true], ["project:ece555-final", true]]);
+  expect(judged.filter((item) => item.id.endsWith(":ece555")).map((item) => [item.id, item.done])).toEqual([["project:ece555", true], ["project_course:ece555", true]]);
 });
 
 // 2026-11-12: the tiers are gone; a project's details wait for its planning.
@@ -188,35 +173,17 @@ test("a project's details wait for planning", () => {
     .toEqual({ "project:ece555": true, "project_course:ece555": true });
 });
 
-test("the portrait's parts are read by meaning: the slot names the extraction writes for risks, priorities and motives count", () => {
+test("the portrait's parts rest on a section written from the person's sentences or on the model's verdict; slot names count for nothing", () => {
   const person = (slot: string) => ({ identityId: "person", projectId: "", slot, status: "confirmed", sourceRef: "reply-3", value: "本人原话" });
-  const facts = [...full.facts.filter((fact) => fact.identityId !== "person"), person("near_risk"), person("work_motive"), person("flow_scene"), person("method_learning")];
-  expect(interviewChecklist({ ...full, facts }).find((item) => item.id === "portrait_grounded")).toMatchObject({ done: true, detail: "" });
-  const other = [...full.facts.filter((fact) => fact.identityId !== "person"), person("one_year_priority"), person("motto"), person("drain_activity"), person("method_writing")];
-  expect(interviewChecklist({ ...full, facts: other }).find((item) => item.id === "portrait_grounded")?.done).toBe(true);
-  // 2026-11-01: 「过得好」 and 「做事看重」 were written as good_life and work_standards.
-  const third = [...full.facts.filter((fact) => fact.identityId !== "person"), person("worry"), person("good_life"), person("habits"), person("study_habit")];
-  expect(interviewChecklist({ ...full, facts: third }).find((item) => item.id === "portrait_grounded")?.done).toBe(true);
-  // A section the extraction wrote from numbered sentences grounds its part whatever the slot names were.
-  const odd = [...full.facts.filter((fact) => fact.identityId !== "person"), person("hard_day"), person("misc"), person("method_exam_prep")];
-  expect(interviewChecklist({ ...full, facts: odd }).find((item) => item.id === "portrait_grounded")?.done).toBe(false);
-  expect(interviewChecklist({ ...full, facts: odd, groundedSections: ["compass", "energy"] }).find((item) => item.id === "portrait_grounded")?.done).toBe(true);
-});
-
-test("做事方法 is its own part: the energy part is not finished until the person said how they prepare, learn and write (2026-11-10)", () => {
-  const without = { ...full, facts: full.facts.filter((fact) => fact.slot !== "method_exam_prep") };
-  const item = interviewChecklist(without).find((entry) => entry.id === "portrait_grounded")!;
-  expect(item).toMatchObject({ done: false, detail: "尚无本人依据：做事方法", ask: "遇到要准备的考核、要赶的截止，或者要学一样新东西，你平时是怎么做的？" });
-  expect(interviewOwnedOpen(interviewChecklist(without)).map((entry) => entry.id)).toEqual(["portrait_grounded"]);
-  // No portrait section stands for it: an energy section written from the person's sentences does not settle how they work.
-  expect(interviewChecklist({ ...without, groundedSections: ["situation", "compass", "energy"] }).find((entry) => entry.id === "portrait_grounded")?.done).toBe(false);
-  // An energy habit is not a method; a method fact under any of the names the extraction writes is.
-  const habit = { identityId: "person", projectId: "", slot: "energy_habit", status: "confirmed", sourceRef: "reply-4", value: "晚上效率高" };
-  expect(interviewChecklist({ ...without, facts: [...without.facts, habit] }).find((entry) => entry.id === "portrait_grounded")?.done).toBe(false);
-  for (const slot of ["method_learning", "method_writing", "exam_prep_method", "work_style"]) {
-    const fact = { identityId: "person", projectId: "", slot, status: "confirmed", sourceRef: "reply-7", value: "先做一遍往年题，再回头看讲义" };
-    expect(interviewChecklist({ ...without, facts: [...without.facts, fact] }).find((entry) => entry.id === "portrait_grounded")?.done).toBe(true);
-  }
+  const bare = { ...full, groundedSections: [], verdicts: {}, facts: [...full.facts.filter((fact) => fact.identityId !== "person"),
+    person("near_risk"), person("work_motive"), person("flow_scene"), person("method_learning")] };
+  const grounded = (input: ChecklistInput) => interviewChecklist(input).find((item) => item.id === "portrait_grounded")!;
+  expect(grounded(bare).done).toBe(false);
+  expect(grounded({ ...bare, groundedSections: ["situation", "compass", "energy"] }).detail).toBe("尚无本人依据：做事方法");
+  const verdicts = Object.fromEntries(["situation", "compass", "energy", "method"].map((part) => [`portrait:${part}`, said(`portrait:${part}`)]));
+  expect(grounded({ ...bare, verdicts })).toMatchObject({ done: true, detail: "" });
+  // Each part is judged on its own: the snapshot lists the parts, not the summary item.
+  expect(judgedItems(interviewChecklist(bare)).map((item) => item.id).filter((id) => id.startsWith("portrait"))).toEqual(["portrait:situation", "portrait:compass", "portrait:energy", "portrait:method"]);
 });
 
 test("no deep part holds the start any more (D10): the person decides when to start", () => {
@@ -235,4 +202,31 @@ test("near-term work is still asked (2026-11-20): a thing named, a 「没有」,
   const guessed = { ...without, facts: [...without.facts, { identityId: "research", projectId: "", slot: "near_term", status: "inferred", sourceRef: "", value: "写论文" }] };
   expect(near(guessed).done).toBe(false);
   expect(near({ ...without, nearTermSettled: { research: true } }).done).toBe(true);
+});
+
+test("a verdict stands only on words found where it says: a listed id, a status of the four, a verbatim quote, never a disclosure's reply", () => {
+  const ids = new Set(["hard_schedule:research", "portrait:method"]);
+  const texts = { "reply-3": "工作日 10:00 到 19:30 在公司，周一上午例会。", "reply-5": "大二那段不想再说。", "src-1": "Lecture: Tue/Thu 9:30–10:45" };
+  const { accepted, problems } = checkChecklistVerdicts([
+    { id: "hard_schedule:research", status: "answered", basis: [{ ref: "reply-3", quote: "工作日 10:00 到 19:30 在公司" }], note: "" },
+    { id: "portrait:method", status: "answered", basis: [{ ref: "reply-3", quote: "先做往年题" }], note: "" },
+    { id: "portrait:method", status: "partial", basis: [], note: "" },
+    { id: "portrait:method", status: "not_applicable", basis: [], note: "" },
+    { id: "portrait:method", status: "answered", basis: [{ ref: "reply-5", quote: "大二那段" }], note: "" },
+    { id: "line_desc:x", status: "missing", basis: [], note: "" },
+    { id: "hard_schedule:research", status: "answered", basis: [{ ref: "src-9", quote: "Lecture" }], note: "" }
+  ], { ids, texts, sensitive: new Set(["reply-5"]) });
+  expect(accepted.map((verdict) => verdict.id)).toEqual(["hard_schedule:research"]);
+  expect(problems).toHaveLength(6);
+  expect(problems.join("\n")).toMatch(/不在 reply-3 里[\s\S]*至少引一处[\s\S]*note 写为什么[\s\S]*不作依据[\s\S]*不在快照的清单里[\s\S]*src-9 不存在/u);
+});
+
+test("the latest verdict per item stands, over every interview of the workspace", () => {
+  const at = (when: string, status: ChecklistVerdict["status"]) => ({ ...said("near_term:research", status, status === "partial" ? "缺一件" : ""), round: 3, at: when });
+  const verdicts = readChecklistVerdicts([
+    { checklist: { "near_term:research": at("2026-11-25T10:00:00Z", "partial") } },
+    { checklist: { "near_term:research": at("2026-11-25T11:00:00Z", "answered"), "bad": { id: "bad", status: "done", at: "2026-11-25T12:00:00Z" } } },
+    null, { checklist: "x" }
+  ]);
+  expect(verdicts).toEqual({ "near_term:research": said("near_term:research") });
 });

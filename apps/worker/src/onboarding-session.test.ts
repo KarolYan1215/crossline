@@ -53,7 +53,16 @@ beforeEach(() => {
   store = new CrosslineStore(":memory:");
   workspaceId = store.createPrincipalWithWorkspace("user-1", "个人 workspace").workspace.id;
 });
-afterEach(() => { store.close(); vi.unstubAllEnvs(); });
+afterEach(() => { store.close(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
+/**
+ * The record-only rules that fired in this test (`ruleFired`, 2026-11-25): with no data dir each is a JSON line on stdout, caught here.
+ */
+function watchFired(): () => Array<{ rule: string; detail?: string }> {
+  vi.stubEnv("CROSSLINE_DATA_DIR", "");
+  const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+  return () => info.mock.calls.map(([line]) => { try { return JSON.parse(String(line)) as { type?: string; rule: string; detail?: string }; } catch { return { rule: "" }; } })
+    .filter((item) => (item as { type?: string }).type === "rule.fired");
+}
 
 // A test round's `insight` is the dialogue's one card (`insights`, 2026-11-14): an empty one is none. Its question is the same every
 // round, so it is marked a follow-up: the repeat check comes back to the model (onboarding-cards.test.ts), which these tests are not about.
@@ -237,18 +246,21 @@ test("every round's input opens with the progress header, counted from the round
   expect(first).toContain('{"standing":["这是第 1 轮；');
   // A later round reads it with `read_interview_state` (2026-11-22); its input is the person's words and one line.
   expect(second).toContain('{"standing":["这是第 2 轮；当前部分 narrative 连这一轮已经 2 轮。"');
-  expect(second!.startsWith("导师管得松\n\n〔reply-3｜")).toBe(true);
+  // The ledger snapshot leads it (2026-11-25), rendered after the last round wrote the ledger; then the person's words and the note.
+  expect(second!.startsWith("〔账本快照 · 第 2 轮开始前")).toBe(true);
+  expect(second).toContain("\n\n导师管得松\n\n〔reply-3｜");
   expect(second).toContain("开始标准：还没齐，缺 ");
   expect(store.getOnboardingSession(workspaceId, "s")?.coverage).not.toHaveProperty("startMetRound");
 });
 
 test("a reply saying the app can be used before the start standard stands is recorded, not sent back or cut (2026-11-22, IR-035 retired)", async () => {
+  const fired = watchFired();
   const reply = "要用的几样都在了，你可以开始使用应用了。周末一般怎么过？";
   const { rpc, prompts } = fakeRuntime([turn({ reply })]);
   await createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" })({ sessionId: "s", text: "差不多了吧" });
   expect(dialogue(prompts)).toHaveLength(1);
   expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string }).reply).toBe(reply);
-  expect(store.listEvents(workspaceId, { type: "onboarding.round_edited" }).at(-1)?.payload).toMatchObject({ noted: ["reply said the app can be used before the start standard stands"] });
+  expect(fired()).toEqual([expect.objectContaining({ rule: "IR-165", detail: "reply said the app can be used before the start standard stands" })]);
 });
 
 test("with no Codex runtime the turn is a blocker and saves nothing", async () => {
@@ -528,22 +540,23 @@ test("a 「符合」 for the portrait holds for the portrait the same turn rewri
   expect(portraitStillConfirmed(confirmed.fingerprint, rewritten)).toBe(true);
 });
 
-test("the question ledger: a round's questions are numbered, an answer is recorded with its sentences, and asking it again comes back to the model", async () => {
+test("the question ledger: a round's questions are numbered, an answer is recorded with its sentences, and one the model marks as asked again comes back", async () => {
   const ask = (repeats = 0) => ({ id: "q1", text: "西湖合作的图表清单由谁提供？", kind: "single", allowOther: true, identityId: "research", projectId: "",
     options: [{ id: "a", label: "师兄", detail: "" }, { id: "b", label: "导师", detail: "" }], repeats });
-  const { rpc, prompts } = fakeRuntime([turn({ questions: [ask()] }), turn({ questions: [], nextAction: "ready_for_milestones" }), turn({ questions: [{ ...ask(), id: "q9" }] })]);
+  const { rpc, prompts } = fakeRuntime([turn({ questions: [ask()] }), turn({ questions: [], nextAction: "ready_for_milestones" }), turn({ questions: [{ ...ask(1), id: "q9" }] })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   await run({ sessionId: "s1", text: "西湖那篇 10/31 前要投出，数据下周到。" });
   const asked = store.questionByKey(workspaceId, "iq:s1:2:q1")!;
+  expect(asked.id).toBe(1);
   expect(asked).toMatchObject({ status: "open", text: "西湖合作的图表清单由谁提供？" });
   await run({ sessionId: "s1", text: "【西湖合作的图表清单由谁提供？】选择：师兄" });
   expect(store.questionByKey(workspaceId, "iq:s1:2:q1")).toMatchObject({ status: "answered", answer: "选择：师兄" });
   expect(store.questionByKey(workspaceId, "iq:s1:2:q1")!.answerSentences.length).toBeGreaterThan(0);
-  // The next prompt shows the ledger with that answer. A round asking it again in the same words is sent back with the answer the person
-  // gave; a model that keeps it without saying it is a follow-up has it left out once the repairs run out, and is told so next round.
+  // The next round's snapshot shows that answer. A round that names it as the question it asks again (`repeats`), not deeper, is sent back
+  // with the answer the person gave; kept without `followUp`, it is left out once the repairs run out, and told so next round.
   await run({ sessionId: "s1", text: "继续" });
-  expect(dialogue(prompts).some((prompt) => prompt.includes(`#${asked.id} [已答] 西湖合作的图表清单由谁提供？`))).toBe(true);
-  expect(dialogue(prompts).some((prompt) => prompt.includes(`#${asked.id}「西湖合作的图表清单由谁提供？」像是同一个问题，本人答过：「选择：师兄」`))).toBe(true);
+  expect(dialogue(prompts).some((prompt) => prompt.includes(`#${asked.id} 已答｜西湖合作的图表清单由谁提供？ → 「选择：师兄」`))).toBe(true);
+  expect(dialogue(prompts).some((prompt) => prompt.includes(`#${asked.id}「西湖合作的图表清单由谁提供？」是同一个问题，本人答过：「选择：师兄」`))).toBe(true);
   const last = store.listOnboardingMessages(workspaceId, "s1").at(-1)!.content as { questions: Array<{ id: string }> };
   expect(last.questions.map((question) => question.id)).not.toContain("q9");
   expect(store.listEvents(workspaceId, { type: "onboarding.round_edited" }).at(-1)?.payload).toMatchObject({ removed: [{ why: expect.stringContaining("followUp") }] });
@@ -798,7 +811,8 @@ test("a reply naming self-harm is sent back once when the round is not the safet
   expect(safe.insight).toBeUndefined();
 });
 
-test("a disclosure's words leave the dialogue's thread once answered, a card retelling it goes back, and the lesson is asked once by the app (2026-11-15)", async () => {
+test("a disclosure's words leave the dialogue's thread once answered, a card retelling it is recorded, and the lesson is asked once by the app (2026-11-15)", async () => {
+  const fired = watchFired();
   const good = { text: "你最投入的时候身边都有人，一个人做研究推得最慢。", falsifier: "如果独自时也常投入",
     refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-7", quote: "一个人做研究" }] };
   // Replay 15: the card retold the disclosure in its own words; here it uses the disclosure's 「没人可说」.
@@ -806,7 +820,7 @@ test("a disclosure's words leave the dialogue's thread once answered, a card ret
   const { rpc, prompts, threadStarts } = fakeRuntime([turn({ stage: "narrative" }),
     turn({ stage: "narrative", reply: "谢谢你愿意说出来。全国心理援助热线 12356。现在还有这样的念头吗？", safety: true }),
     turn({ stage: "narrative" }),
-    turn({ stage: "energy", insight: echo }), turn({ stage: "energy", insight: good }),
+    turn({ stage: "energy", insight: echo }),
     turn({ stage: "energy", askLesson: true }),
     turn({ stage: "energy" })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
@@ -824,9 +838,12 @@ test("a disclosure's words leave the dialogue's thread once answered, a card ret
   expect(rebuilt).toContain(DISCLOSURE_PLACEHOLDER);
   expect(rebuilt).not.toContain("自残过");
   expect(rebuilt).toContain("本人在 reply-3 谈到过一段艰难时期");
-  // The card that uses the disclosure's words goes back once; the one that does not is shown.
-  expect((await last("一个人做研究时最慢。")).insight).toMatchObject({ text: good.text });
-  expect(dialogue(prompts).filter((prompt) => prompt.includes("那段经历不作观察卡的材料"))).toHaveLength(1);
+  // A card using the disclosure's words is the model's to avoid (the snapshot says where the disclosure is); it is recorded, not sent back
+  // (2026-11-25). The snapshot carries the disclosure's note.
+  expect((await last("一个人做研究时最慢。")).insight).toMatchObject({ text: echo.text });
+  expect(fired()).toEqual([expect.objectContaining({ rule: "IR-123", detail: "a card used words only the disclosure said" })]);
+  expect(dialogue(prompts).filter((prompt) => prompt.includes("那段经历不作观察卡的材料"))).toHaveLength(0);
+  expect(dialogue(prompts).at(-1)).toContain("四、本人在 reply-3");
   expect(dialogue(prompts).some((prompt) => prompt.includes("自残过") || prompt.includes("现在没有了"))).toBe(true);
   expect(dialogue(prompts).at(-1)).not.toContain("自残过");
   // The model asks for the lesson question; the app puts it as written, and reads the answer next round.
@@ -846,13 +863,14 @@ test("the extraction never reads a disclosure's words: the reply goes to it as t
 });
 
 test("the dialogue reads the scale as readings, never taps; a reply quoting scores is recorded, not sent back (2026-11-22, IR-136 retired)", async () => {
+  const fired = watchFired();
   const { rpc, prompts } = fakeRuntime([turn({ stage: "energy", reply: "你尽责性 5/5，很有条理。" })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
   await run({ sessionId: "s", text: "【我做事有条理】点选：5/5（非常符合）\n周末一般在家。" });
   expect(dialogue(prompts)).toHaveLength(1);
   expect(dialogue(prompts)[0]).toContain("【我做事有条理】已点选（读数见 scaleReadings）");
   expect(dialogue(prompts)[0]).not.toContain("点选：5/5");
-  expect(store.listEvents(workspaceId, { type: "onboarding.round_edited" }).at(-1)?.payload).toMatchObject({ noted: ["reply quoted the scale's scores"] });
+  expect(fired()).toEqual([expect.objectContaining({ rule: "IR-165", detail: "reply quoted the scale's scores" })]);
 });
 
 test("a reply saying what the card beside it says is no longer sent back (2026-11-22, IR-133 retired)", async () => {
@@ -889,7 +907,35 @@ test("free text is the round's reply, with the cards and marks the tools handed 
   const content = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string; stage: string };
   expect(content).toMatchObject({ reply: "你说周末在家。那周末的时间给了哪条线？", stage: "compass" });
   expect(turnParams().filter((params) => params.outputSchema !== undefined)).toEqual([]);
-  expect(dialogue(prompts)[1]!.startsWith("周末一般在家。\n\n〔reply-3｜")).toBe(true);
+  expect(dialogue(prompts)[1]!.startsWith("〔账本快照 · 第 2 轮开始前")).toBe(true);
+  expect(dialogue(prompts)[1]).toContain("\n\n周末一般在家。\n\n〔reply-3｜");
+});
+
+// 2026-11-25 (「访谈账本驱动」): the ledger is the model's external memory. What a round judged and asked is written when it ends, the
+// person's next reply is written as the answer before the next round reads anything, and the next round opens with it rendered.
+test("a round's verdicts and the reply's own questions are in the ledger before the next round, whose snapshot shows them", async () => {
+  let calls = 0;
+  const marks: AgentScript = async ({ ask }) => {
+    calls += 1;
+    await ask("item/tool/call", { callId: `m${calls}`, tool: "mark_round", arguments: calls === 1 ? { stage: "energy" } : { stage: "energy",
+      checklist: [{ id: "portrait:method", status: "answered", basis: [{ ref: "reply-3", quote: "先做往年题" }], note: "" }],
+      asked: [{ text: "学新东西时你先做什么？", gist: "学新东西的第一步", repeats: 0, followUp: false }] } });
+  };
+  const { rpc, prompts } = fakeRuntime([turn(), "你备考先做往年题。学新东西时你先做什么？", "好。"], { script: marks });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  await run({ sessionId: "s", text: "先说经历" });
+  await run({ sessionId: "s", text: "备考我先做往年题。" });
+  expect(store.getOnboardingSession(workspaceId, "s")!.coverage).toMatchObject({ checklist: { "portrait:method": { status: "answered", round: 4 } } });
+  const main = store.questionByKey(workspaceId, "iq:s:4:main-1")!;
+  expect(main).toMatchObject({ status: "open", text: "学新东西时你先做什么？" });
+  expect(interviewChecklistFor(store, workspaceId, [], { unfiledFiles: 0 }).find((item) => item.id === "portrait_grounded")!.parts!
+    .find((part) => part.id === "portrait:method")!.done).toBe(true);
+  await run({ sessionId: "s", text: "先看一遍入门视频。" });
+  expect(store.questionByKey(workspaceId, "iq:s:4:main-1")).toMatchObject({ status: "answered", answer: "先看一遍入门视频。" });
+  const third = dialogue(prompts).at(-1)!;
+  expect(third.startsWith("〔账本快照 · 第 3 轮开始前")).toBe(true);
+  expect(third).toContain(`- #${main.id} 已答｜学新东西的第一步｜原题：学新东西时你先做什么？ → 「先看一遍入门视频。」`);
+  expect(third).toContain("- portrait:method｜做事方法｜answered ← reply-3「先做往年题」");
 });
 
 test("a free-text round that never marked its part is sent back once for `mark_round`, so the part moves on (replay 2026-11-23)", async () => {
@@ -925,7 +971,7 @@ test("a round's note says what the person asked the interviewer, and how long th
   await run({ sessionId: "s", text: "先说经历" });
   // The card's own question 【…？】 is not the person's; their own is said back in the note.
   await run({ sessionId: "s", text: "【最想先试哪个？】选择：咨询。你每轮都换一个方向，到底哪个最适合我？" });
-  const note = () => prompts().at(-1)!.split("〔")[1] ?? "";
+  const note = () => prompts().at(-1)!.split("\n\n〔").at(-1) ?? "";
   expect(note()).toContain("本人在这条里问了你：「你每轮都换一个方向，到底哪个最适合我？」");
   expect(note()).not.toContain("最想先试哪个");
   expect(note()).not.toContain("已到第");
@@ -1038,24 +1084,35 @@ test("as the person reads a round: the safety reply ends at its help lines; the 
   expect(round.questions[0]!.text).toBe("近一年最骄傲的一件事是什么？");
 });
 
-test("a reply that sets a date nobody gave is sent back once; the rewrite leaves the day to the person", async () => {
+// 2026-11-25 (「访谈账本驱动」): the days the person gave are in the snapshot and the Skill says a reply writes no other; a reply that does is
+// recorded (IR-006), not sent back. What keeps a made-up day off the ledger and the calendar is the write step (IR-005): the extraction
+// cites only the person's words or a file.
+test("a reply that sets a date nobody gave is recorded, not sent back; the snapshot lists the days the person did give", async () => {
+  const fired = watchFired();
   // A day ten days ahead: a fixed 11 月 17 日 stopped being invented on that day (it was today, 2026-11-17).
   const ahead = new Date(Date.now() + 10 * 86_400_000);
-  const { rpc, prompts } = fakeRuntime([turn({ reply: `试做定在 ${ahead.getMonth() + 1} 月 ${ahead.getDate()} 日：约两位从业者聊一次。` }), turn({ reply: "试做是约两位从业者聊一次，哪天由你定。" })]);
+  const reply = `试做定在 ${ahead.getMonth() + 1} 月 ${ahead.getDate()} 日：约两位从业者聊一次。`;
+  const { rpc, prompts } = fakeRuntime([turn({ reply }), turn({ reply: "好。" })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });
   await run({ sessionId: "s", text: "【未来两周先做哪一件？】选择：约两位从业者聊一次" });
-  expect(dialogue(prompts).some((prompt) => prompt.includes("可本人没说过这个日期"))).toBe(true);
-  expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string }).reply).toBe("试做是约两位从业者聊一次，哪天由你定。");
+  expect(dialogue(prompts)).toHaveLength(1);
+  expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string }).reply).toBe(reply);
+  expect(fired()).toEqual([expect.objectContaining({ rule: "IR-006" })]);
+  await run({ sessionId: "s", text: "12 月 5 日要交初稿。" });
+  expect(dialogue(prompts).at(-1)).toContain("- reply-3：12 月 5 日");
 });
 
-test("a reply copying a card's notation, or saying a question still waits, goes back to the model (2026-11-23, W-314, W-315)", async () => {
-  const { rpc, prompts } = fakeRuntime([turn({ reply: "清洗先定一条规则。[【问卷清洗】已点选]" }), turn({ reply: "上面那问还没答：接下来三四年你在做什么？" }),
-    turn({ reply: "接下来三四年你在做什么？说一个具体动作。" })]);
+// 2026-11-25: whether a question was asked and answered is in the snapshot (the ledger), so 「还没答」 and the cards' notation are the
+// model's to avoid; recorded (IR-190, IR-191), not sent back.
+test("a reply copying a card's notation, or saying a question still waits, is recorded, not sent back (2026-11-23, W-314, W-315)", async () => {
+  const fired = watchFired();
+  const { rpc, prompts } = fakeRuntime([turn({ reply: "清洗先定一条规则。[【问卷清洗】已点选]" }), turn({ reply: "上面那问还没答：接下来三四年你在做什么？" })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });
   await run({ sessionId: "s", text: "卡在清洗缺失值。" });
-  expect(dialogue(prompts).some((prompt) => prompt.includes("卡片答案的写法"))).toBe(true);
-  expect(dialogue(prompts).filter((prompt) => prompt.includes("在线程里找到那一问"))).toHaveLength(1);
-  expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string }).reply).toBe("接下来三四年你在做什么？说一个具体动作。");
+  await run({ sessionId: "s", text: "先这样。" });
+  expect(dialogue(prompts)).toHaveLength(2);
+  expect(fired().map((item) => item.rule)).toEqual(["IR-190", "IR-191"]);
+  expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string }).reply).toBe("上面那问还没答：接下来三四年你在做什么？");
 });
 
 test("a line with fewer than three goal candidates is told it has not enough, and the round does not ask for a goal yet", async () => {

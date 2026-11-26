@@ -54,7 +54,27 @@ export type TurnQuestion = {
    * six times in different words): a subject the person answered 「还没定」 is not asked again (`checkQuestions`). "" for other questions.
    */
   about?: string;
+  /**
+   * What the question asks, in a few words that name its meaning rather than its wording (2026-11-25, the interview ledger): kept in the
+   * ledger beside the question and shown in every round's snapshot, so a later question that means the same thing in other words is
+   * recognised by the model, not by the likeness of characters. "" on a question from before.
+   */
+  gist?: string;
 };
+/**
+ * The model's judgement of one checklist item this round (2026-11-25, the owner: the checklist is confirmed by the model against the
+ * ledger, not read off slot names by patterns). `basis` cites the person's replies or files (`reply-N` / `src-N` with a verbatim span),
+ * checked in code (`checkChecklistVerdicts`); `not_applicable` says why in `note`.
+ */
+export const CHECKLIST_STATUSES = ["answered", "partial", "missing", "not_applicable"] as const;
+export type ChecklistStatus = (typeof CHECKLIST_STATUSES)[number];
+export type ChecklistVerdict = { id: string; status: ChecklistStatus; basis: Array<{ ref: string; quote: string }>; note: string };
+/**
+ * A question the round asks in its reply text (the main question, 2026-11-22), as the model reports it so the ledger holds it: the
+ * sentence as written (`text`, found in the reply in code), its meaning in a few words (`gist`), and the model's own judgement against the
+ * ledger's earlier questions — `repeats` the number of one that means the same (0: none does), `followUp` when it builds on that answer.
+ */
+export type AskedInReply = { text: string; gist: string; repeats: number; followUp: boolean };
 /**
  * A fact as the rest of the app reads it. The model does not write `sourceRef` or `sourceQuote` any more (2026-10-19): it cites numbered
  * sentences (`refs` in `ONBOARDING_TURN_SCHEMA`) and `resolveOnboardingRefs` fills both in from the ledger, with the ids in `sentences`.
@@ -230,6 +250,10 @@ export type OnboardingTurn = {
   cards?: ProfileCard[];
   /** The extraction's reading of card items the person answered in words instead of a tap (`ItemScore`). */
   itemScores?: ItemScore[];
+  /** The dialogue's judgement of the checklist items this round (`ChecklistVerdict`), written to the ledger when the round ends. */
+  checklist?: ChecklistVerdict[];
+  /** The questions the round asks in its reply text, with their meaning and the model's same-or-new judgement (`AskedInReply`). */
+  asked?: AskedInReply[];
 };
 /** One card item the extraction read off the person's words: 1–5 on the item's own scale (before reverse keying), how sure, and why. */
 export type ItemScore = { itemId: string; score: number; confidence: number; sentences?: number[] };
@@ -318,10 +342,10 @@ export type OnboardingTurnContext = {
   /** Only when the conversation had to be rebuilt in a fresh thread: what was said before, oldest first. */
   history?: Array<{ id: string; role: "user" | "assistant"; text: string }>;
   /**
-   * The question ledger (`ledgerLines`): what was already asked, numbered, with its status and answer — the interview's own, the app's
-   * waiting ones (待问) and answered ones. A question that asks one of these again names its number in `repeats`.
+   * The ledger snapshot (`renderInterviewSnapshot`, 2026-11-25): the checklist with the model's last verdicts, every question asked so far
+   * with its meaning and answer, and the days the person gave — rendered from the ledger each round, so it holds after a compaction.
    */
-  questionLedger?: string[];
+  snapshot?: string;
   /**
    * How the app changed the dialogue's previous round before the person saw it: the questions it took out and why, and the ones it put
    * beside them. The person answered what was shown, not what the thread holds.
@@ -569,9 +593,17 @@ function turnFields(ids?: TurnIds) {
         // True when it builds on an answer already given: worded like that question, it is still not a repeat.
         followUp: { type: "boolean" },
         // A date question's subject in a few words, the same each time it is asked; "" for every other question.
-        about: { type: "string", maxLength: 40 }
+        about: { type: "string", maxLength: 40 },
+        // The question's meaning in a few words, kept in the ledger and compared by the model with the questions asked before.
+        gist: { type: "string", maxLength: 80 }
       })
     },
+    // The checklist items the round judged against the ledger snapshot: status and the verbatim spans it rests on (`ChecklistVerdict`).
+    checklist: { type: "array", maxItems: 40, items: object({ id: { type: "string", maxLength: 120 }, status: { type: "string", enum: [...CHECKLIST_STATUSES] },
+      basis: { type: "array", maxItems: 4, items: object({ ref: { type: "string", maxLength: 20 }, quote: { type: "string", maxLength: 80 } }) },
+      note: { type: "string", maxLength: 160 } }) },
+    // The questions the reply text asks, each with its meaning and the ledger number of an earlier one meaning the same (0: none).
+    asked: { type: "array", maxItems: 3, items: object({ text: text(400), gist: text(80), repeats: { type: "integer", minimum: 0 }, followUp: { type: "boolean" } }) },
     slotUpdates: {
       type: "array", maxItems: 40,
       items: object({
@@ -659,7 +691,8 @@ function turnFields(ids?: TurnIds) {
  * and the next questions. The **extraction** — facts with their sentence numbers, projects, dates, line attributes, hours, the
  * portrait — is written by its own run in the background, so its repairs never hold the conversation up.
  */
-export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage", "insights", "progress", "research", "safety", "openItems", "askLesson"] as const;
+export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage", "insights", "progress", "research", "safety", "openItems", "askLesson",
+  "checklist", "asked"] as const;
 export const EXTRACT_KEYS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles", "goalEdits", "availability", "settings", "profileSections", "itemScores",
   "hypotheses", "careers", "dimensions", "dropCareers", "pointChanges"] as const;
 export const onboardingDialogueSchema = (ids?: TurnIds) => object(pick(turnFields(ids), DIALOGUE_KEYS));
@@ -703,7 +736,8 @@ export function listsAtLimit(output: unknown, schema: unknown = ONBOARDING_EXTRA
   });
 }
 /** What the person waits for, and what is stored as the round. */
-export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage" | "insights" | "progress" | "research" | "safety" | "openItems" | "askLesson">;
+export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage" | "insights" | "progress" | "research" | "safety" | "openItems" | "askLesson"
+  | "checklist" | "asked">;
 /** What the background run writes to the ledger. */
 export type OnboardingExtraction = Pick<OnboardingTurn, "slotUpdates" | "projectsDetected" | "flywheelCandidates" | "lineProfiles" | "goalEdits"
   | "availability" | "settings" | "hypotheses" | "careers" | "dimensions" | "dropCareers" | "pointChanges"> & { fileDates?: DateExtraction; profileSections?: ProfileSections; itemScores?: ItemScore[] };

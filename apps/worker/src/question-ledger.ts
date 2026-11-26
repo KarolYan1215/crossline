@@ -1,4 +1,4 @@
-import { DISCLOSURE_PLACEHOLDER, answersInReply, freeTextAnswers, ledgerLines, sensitiveReplies, type LedgerQuestion, type ProfileGap, type TurnQuestion } from "@crossline/core";
+import { DISCLOSURE_PLACEHOLDER, answersInReply, freeTextAnswers, sensitiveReplies, type AskedInReply, type LedgerQuestion, type ProfileGap, type TurnQuestion } from "@crossline/core";
 import type { CrosslineStore, StoredSentence } from "@crossline/db";
 
 /**
@@ -7,8 +7,6 @@ import type { CrosslineStore, StoredSentence } from "@crossline/db";
  */
 const gapKey = (id: string) => `gap:${id}`;
 const roundKey = (sessionId: string, seq: number, id: string) => `iq:${sessionId}:${seq}:${id}`;
-/** The dialogue's own answered questions shown by text alone beyond the latest ones (`ledgerForModel`). */
-export const EARLIER_SHOWN = 80;
 
 const interviewQuestions = (store: CrosslineStore, workspaceId: string, sessionId: string) => withoutDisclosedAnswers(store, workspaceId, sessionId,
   store.listQuestions(workspaceId, { kind: "interview" }).filter((question) => question.key.startsWith("gap:") || question.key.startsWith(`iq:${sessionId}:`)));
@@ -61,26 +59,34 @@ export function syncGapQuestions(store: CrosslineStore, workspaceId: string, gap
     if (!live.has(question.key)) store.dropQuestion(workspaceId, question.id, at);
 }
 
+/** The ledger key of a question the reply itself asked (`mark_round.asked`): `main-<n>` within its round. */
+const mainKey = (sessionId: string, seq: number, index: number) => roundKey(sessionId, seq, `main-${index + 1}`);
+const isMain = (sessionId: string) => (key: string) => key.startsWith(`iq:${sessionId}:`) && /:main-\d+$/u.test(key);
+
 /**
- * What the model is shown of the ledger: the questions still waiting and the latest answered ones. The app's own waiting questions
- * (`gap:`) take at most a third of the room: on the owner's real interview the fifteen places were all the app's file-belonging
- * questions, and the dialogue could not see what it had itself asked and been told (docs/archive/onboarding-prompts.md).
+ * The questions the round's reply asked, as the model declared them (2026-11-25, 「访谈账本驱动」): open in the ledger like a card's, so the
+ * next round's snapshot lists them with their meaning and the person's answer. Returns the ledger numbers in order.
  */
-export function ledgerForModel(store: CrosslineStore, workspaceId: string, sessionId: string, limit = 60): string[] {
-  const all = interviewQuestions(store, workspaceId, sessionId).filter((question) => question.status !== "dropped");
-  const isWaiting = (question: (typeof all)[number]) => question.status === "pending" || question.status === "open";
-  const appWaiting = all.filter((question) => isWaiting(question) && question.key.startsWith("gap:")).slice(-Math.ceil(limit / 3));
-  const ownWaiting = all.filter((question) => isWaiting(question) && !question.key.startsWith("gap:")).slice(-Math.max(0, limit - appWaiting.length));
-  const room = Math.max(0, limit - appWaiting.length - ownWaiting.length);
-  const settledAll = all.filter((question) => question.status === "answered" || question.status === "assumed");
-  const settled = room ? settledAll.slice(-room) : [];
-  // The dialogue's older answered questions, without their answers: it rewords what it asks, and a rewording is below any bigram
-  // similarity the code could treat as a repeat. Shown only the latest fifteen, a quick interview's 27th round asked round 1's
-  // 「成长过程中，你欣赏过谁？」 again as 「成长过程中，你最欣赏谁？」 (0.50; 2026-11-06 walkthrough, W-239).
-  const older = settledAll.slice(0, settledAll.length - settled.length).filter((question) => !question.key.startsWith("gap:"))
-    .slice(-EARLIER_SHOWN).map((question) => ({ ...question, answer: "" }));
-  return ledgerLines([...older, ...settled, ...ownWaiting, ...appWaiting].sort((a, b) => a.id - b.id));
+export function recordAsked(store: CrosslineStore, workspaceId: string, sessionId: string, seq: number, asked: AskedInReply[], at: string): number[] {
+  return asked.map((item, index) => store.recordQuestion(workspaceId, { kind: "interview", key: mainKey(sessionId, seq, index), text: item.text,
+    status: "open", ...(item.repeats ? { repeats: item.repeats } : {}), at }));
 }
+
+/**
+ * The person's reply as the answer to the questions the last reply asked and that are still open: the reply follows the question it was
+ * written under, so it is that question's answer whole (the card lines aside, which answer the cards). Written before the next round's
+ * snapshot is read, never left to the thread's memory.
+ */
+export function answerMainQuestions(store: CrosslineStore, workspaceId: string, sessionId: string, reply: string, sentences: StoredSentence[], at: string): number {
+  const said = reply.split("\n").filter((line) => !/^\s*【[^】\n]+】/u.test(line)).join("\n").trim();
+  if (!said) return 0;
+  const open = interviewQuestions(store, workspaceId, sessionId).filter((question) => question.status === "open" && isMain(sessionId)(question.key));
+  for (const question of open) store.answerQuestion(workspaceId, question.id, { text: said.slice(0, MAIN_ANSWER_CHARS), at,
+    sentences: sentences.map((sentence) => sentence.id) });
+  return open.length;
+}
+/** What of the reply the ledger keeps as a main question's answer (the snapshot shows less; the reply itself stays in the conversation). */
+export const MAIN_ANSWER_CHARS = 400;
 
 /**
  * Whether one of the app's checklist questions has an answer the extraction has not read yet (`since`: when the first unread reply came):

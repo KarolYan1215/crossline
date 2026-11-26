@@ -160,3 +160,23 @@ Costs and open points:
 **After the karolyan1215 replay (2026-11-23, 24 rounds on gpt-6.1-terra high).** Three fixes. (1) The interview Skill's rule 2 no longer asks every round to name a 「模式」, read it as a bystander and point out a 漏洞: a round takes up what was said, adds at most one level-2 link, and asks one constrained question; patterns, gaps and motive guesses are level 3 and go to the report (IR-170 reworded). (2) A turn that ends with no final message is asked for it once in the same thread (`askedForAnswer` in `runTurnOrRetryStall`, `audit.emptyAnswers`); four of the 24 rounds had ended as `SKILL_REFUSED` and each came back whole on the person's retry. (3) A free-text round that never called `mark_round` kept the part it started in, so every round stayed `narrative` and the progress and completeness never moved; such a round is now sent back once for the mark (`stageAsked`, IR-181), and its second answer stands.
 
 **After the yaohuaqishu replay (2026-11-23, 30 rounds on gpt-6.1-terra high, a throwaway local ledger played from the tester's persona).** The fixes above held: no named patterns in the chat, the part moved, no empty answer; the one card rated 不准 became a refuted hypothesis, and the disclosure was handled as the safety section says and kept out of the narrative. Three new fixes. (1) 「你每轮都换一个方向，到底哪个最适合我？」 got a résumé question back, the answer only in `progress.next`: a question the person puts to the interviewer is now said in the round's note (`questionsAsked` in `onboarding-standing.ts`, 「本人在这条里问了你：「…」」; a card's own 【…？】 is left out), and core rule 13 says the reply's first sentence answers it, the judgement in the reply (IR-182, IR-183). (2) The recommended direction followed the latest answer — research, consulting, market analysis, strategy, coordination, business development in six rounds: rule 13 keeps one order in `progress.said` (「方向排序：A > B > C」), each reply only moves it and says why (IR-184). (3) The story took 9 rounds, the situation 11 and the compass 9, so energy was never reached in 30; 「不看轮数」 is gone: a part has at most six rounds, the round's note says so from the sixth (`PART_ROUNDS`, `roundsInPart`), and that round closes the part with what is still unclear kept as uncertain (IR-185).
+
+## 访谈账本驱动的回放 (2026-11-25, docs/plans/harness-1125.md 「访谈账本驱动」)
+
+Old code (`codex/crossline-mvp` at ae5232f79b, in a throwaway worktree) against new, `scripts/onboarding-eval.ts` with `freelancer-creator`, 12 turns each, gpt-6.1-terra, one run old and two new (run 1 ran while the full test suite loaded the machine). Both sides were scored by the **old** code's `interviewChecklistFor` (the regex yardstick, so the new verdicts cannot grade themselves), `inventedDates`, a verbatim-copy scan (longest span ≥12 chars of an earlier reply inside the next reply) and a reading of every question against the earlier ones.
+
+| | old | new run 1 | new run 2 |
+|---|---|---|---|
+| Asked again by meaning | 1 (round 6 re-asks round 4's 「具体一次经过」 after 「想不起来」) | 0 | 0 |
+| Old-yardstick items done | 3/14 | 5/14 | 5/14 |
+| Invented dates in replies | 0 | 0 | 0 |
+| Retelling (copied ≥12 chars) | 0 | 3 short referents (「咖啡店品牌 VI 的终稿」), no retold story | 0 |
+| Record-only rules fired (`rule-fired.jsonl`) | — (nothing was refused either) | 0 | 0 |
+| Empty answers (turn ended on a tool call) | 0 | 7 of 12 | 0 |
+| Model time per round, median | 14 s | 35 s | 19 s |
+| Input tokens at round 12 (mostly cached) | 44k | 126k | 71k |
+| 「可开始」 reached | never in 12 | round 8 | round 4 |
+
+- **The one regression, fixed before run 2.** In run 1 the model ended 7 rounds on a kept `mark_round` (now larger: `checklist` and `asked`), each needing the runner's second turn (`askedForAnswer`), which doubled the time and the input. The kept `mark_round` now answers 「…工具交完就写最终消息：本人读到的回复正文。」 and `CARD_TOOLS_INSTRUCTIONS` says the same; run 2 had none.
+- **What is dearer.** The snapshot is resent every round, so a round costs about a third more time and the input grows faster (71k vs 44k by round 12, almost all of it cached). No rule was re-enforced: nothing the old code refused showed up when only recorded — no invented date, no retelling, no repeat by meaning — so the comparison gives no reason to keep a refusal beyond safety and the write-step date guard.
+- **Limits.** One persona, one old run, two new; the persona answered 「不确定」 often, which is the case the dedup is for. Re-run with `--lite` (office-worker-lite) and a long persona before trusting the time figure.

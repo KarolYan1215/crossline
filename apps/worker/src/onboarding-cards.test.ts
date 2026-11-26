@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { profileGaps, type Hypothesis, type ResearchThread, type TurnInsight, type TurnQuestion } from "@crossline/core";
-import { cardTools, checkInsights, checkOpenItems, checkQuestions, checkResearch, emptyDraft, ROUND_QUESTIONS, withDraft,
+import { profileGaps, type AskedInReply, type Hypothesis, type ResearchThread, type TurnInsight, type TurnQuestion } from "@crossline/core";
+import { cardTools, checkAsked, checkInsights, checkOpenItems, checkQuestions, checkResearch, emptyDraft, ROUND_QUESTIONS, withDraft,
   type RoundDraft } from "./onboarding-cards";
 import { interviewLedger } from "./question-ledger";
 
@@ -33,35 +33,52 @@ test("a question like one answered comes back with the answer, and goes out once
   expect(checkQuestions([ask("什么事让你觉得煎熬？", { identityId: "person", followUp: true })], context()).accepted).toHaveLength(1);
 });
 
-test("rewordings are counted: the same thing is not put to the person a third time, a follow-up aside", () => {
+// 2026-11-25 (「访谈账本驱动」): the wording likeness and the count of askings are the model's to judge against the snapshot; when they
+// fire they are recorded (`fired`), never sent back, and the replay counts them.
+test("rewordings are counted, not refused: a third asking and a same-round twin are recorded for the replays", () => {
   store = new CrosslineStore(":memory:");
   const at = "2026-10-31T05:00:00Z";
   const money = (text: string, over: Partial<TurnQuestion> = {}) => ask(text, { identityId: "wealth", ...over });
   const context = () => ({ ledger: interviewLedger(store!, ws, "s1"), openItems: [] });
-  // Answered in prose the cards could not read: the question stays open, worded differently each round.
   store.recordQuestion(ws, { kind: "interview", key: "iq:s1:2:q1", text: "现在手上大概有多少应急的钱？", identityId: "wealth", status: "open", at });
-  expect(checkQuestions([money("现在手上应急的钱大概有多少？")], context()).accepted).toHaveLength(1);
+  expect(checkQuestions([money("现在手上应急的钱大概有多少？")], context()).fired).toEqual([]);
   store.recordQuestion(ws, { kind: "interview", key: "iq:s1:3:q1", text: "现在手上应急的钱大概有多少？", identityId: "wealth", status: "open", at });
   const third = checkQuestions([money("手上应急的钱现在大概是多少？"), money("每月大概能存下多少？", { id: "q2" })], context());
-  expect(third.accepted.map((question) => question.text)).toEqual(["每月大概能存下多少？"]);
-  expect(third.problems).toEqual([expect.stringContaining("已经问过 2 次")]);
-  // Two projects' deadlines are worded alike and are two questions.
-  expect(checkQuestions([ask("「A」大概什么时候完成？", { identityId: "media", projectId: "a" }),
-    ask("「B」大概什么时候完成？", { id: "q2", identityId: "media", projectId: "b" })], context()).accepted).toHaveLength(2);
-  // Two questions of one round that ask the same thing: the second comes back.
-  const twice = checkQuestions([ask("每周几点开始上班？", { identityId: "work" }), ask("每周几点开始上班呢？", { id: "q2", identityId: "work" })], context());
-  expect(twice.accepted).toHaveLength(1);
-  expect(twice.problems).toEqual([expect.stringContaining("留一个")]);
+  expect(third.accepted).toHaveLength(2);
+  expect(third.problems).toEqual([]);
+  expect(third.fired).toEqual([{ rule: "IR-014", detail: expect.stringContaining("asked 2 times") }]);
+  // Like an answered question by wording: recorded, and the question stands (the model said it is new).
+  const answered = store.recordQuestion(ws, { kind: "interview", key: "iq:s1:4:q1", text: "每周几点开始上班？", identityId: "work", status: "open", at });
+  store.answerQuestion(ws, answered, { text: "九点", at });
+  const like = checkQuestions([ask("每周几点开始上班呢？", { identityId: "work" })], context());
+  expect(like.accepted).toHaveLength(1);
+  expect(like.fired?.map((item) => item.rule)).toEqual(["IR-047"]);
 });
 
-test("structure and size come back as problems: a repeated option, a used id, the sixth question of a round", () => {
+test("a question the reply asks is declared with its meaning; it is refused only for its shape or for the model's own 「same as an answered one」", () => {
+  store = new CrosslineStore(":memory:");
+  const at = "2026-11-25T05:00:00Z";
+  const done = store.recordQuestion(ws, { kind: "interview", key: "iq:s1:2:main-1", text: "最近一次接单影响更新是什么时候？", status: "open", at });
+  store.answerQuestion(ws, done, { text: "想不起来", at });
+  const ledger = interviewLedger(store, ws, "s1");
+  const item = (over: Partial<AskedInReply> = {}): AskedInReply => ({ text: "每篇教程要做多久？", gist: "一篇教程的制作时长", repeats: 0, followUp: false, ...over });
+  expect(checkAsked([item()], ledger)).toEqual({ accepted: [item()], problems: [] });
+  expect(checkAsked([item({ gist: "" })], ledger).problems).toEqual([expect.stringContaining("gist")]);
+  expect(checkAsked([item({ repeats: 99 })], ledger).problems).toEqual([expect.stringContaining("不在账本快照")]);
+  expect(checkAsked([item({ repeats: done })], ledger).problems).toEqual([expect.stringContaining("想不起来")]);
+  expect(checkAsked([item({ repeats: done, followUp: true })], ledger).accepted).toEqual([item({ repeats: done, followUp: true })]);
+});
+
+test("structure comes back as problems: a repeated option, a used id; a sixth question of a round is recorded", () => {
   const context = { ledger: [], openItems: [] };
   const options = [{ id: "a", label: "周末", detail: "" }, { id: "b", label: "周末。", detail: "" }, { id: "c", label: "晚上", detail: "" }];
   expect(checkQuestions([ask("哪段时间最空？", { kind: "single", options })], context).problems).toEqual([expect.stringContaining("「周末。」重复")]);
   const many = Array.from({ length: ROUND_QUESTIONS + 1 }, (_, index) => ask(`第 ${index + 1} 件不同的事是什么样的情况？`, { id: `q${index}` }));
+  // The round's size is the Skill's goal now (2026-11-25): a sixth question goes out and is recorded.
   const checked = checkQuestions(many, context);
-  expect(checked.accepted).toHaveLength(ROUND_QUESTIONS);
-  expect(checked.problems).toEqual([expect.stringContaining("放到下一轮")]);
+  expect(checked.accepted).toHaveLength(ROUND_QUESTIONS + 1);
+  expect(checked.problems).toEqual([]);
+  expect(checked.fired).toEqual([{ rule: "IR-051", detail: expect.stringContaining("6") }]);
   expect(checkQuestions([ask("新的问题？")], context, [ask("别的问题？")]).problems).toEqual([expect.stringContaining("已经用过")]);
 });
 
@@ -79,9 +96,9 @@ test("the app's own waiting questions go out by id as the app wrote them; one as
   const number = store.recordQuestion(ws, { kind: "interview", key: `gap:${meetings.question.id}`, text: meetings.question.text, status: "pending", at: "2026-11-14T05:00:00Z" });
   const own = checkQuestions([ask("ECE 548 每周哪几天上课？", { repeats: number })], { ledger: interviewLedger(store, ws, "s1"), openItems: gaps });
   expect(own.problems).toEqual([expect.stringContaining(`把「${meetings.question.id}」放进 openItems`)]);
-  // They count in the round's size.
+  // They count in the round's size (recorded past it).
   const full = Array.from({ length: ROUND_QUESTIONS }, (_, index) => ask(`问题 ${index}`, { id: `q${index}` }));
-  expect(checkOpenItems([meetings.question.id], gaps, full).problems).toEqual([expect.stringContaining("放到下一轮")]);
+  expect(checkOpenItems([meetings.question.id], gaps, full).fired?.map((item) => item.rule)).toEqual(["IR-051"]);
 });
 
 const replies = { "reply-1": "最投入的是和同学一起赶比赛的时候。", "reply-2": "底座是我一个人做研究。", "reply-3": "那段时间我不想活了。" };
@@ -155,6 +172,14 @@ test("the card tools keep an item only once its checks pass, and the final answe
   expect(withDraft({ reply: "好", questions: [] }, draft)).toEqual({ reply: "好", questions: [] });
 });
 
+// 2026-11-25: in the ledger-driven replay the model ended 7 of 12 rounds on a kept `mark_round`, and each needed a second turn for the reply.
+test("a kept mark_round tells the model the reply is still to be written", () => {
+  const draft = emptyDraft();
+  const tools = cardTools({ schemas: { question: {}, insight: {}, research: {}, round: {} }, ids: () => ({ lines: [], projects: [] }), draft: () => draft, check: () => [] });
+  expect(tools.call("mark_round", { stage: "energy" })).toContain("工具交完就写最终消息");
+  expect(tools.call("ask_question", { id: "q1", text: "哪段时间最空？", kind: "free" })).not.toContain("最终消息");
+});
+
 test("a day is the person's to set: options that are days come back, a date question names its subject, and a subject answered is not asked again (2026-11-15)", () => {
   const context = (dates = [] as Array<{ about: string; answer: string }>) => ({ ledger: [], openItems: [], dates, today: "2026-11-15" });
   const options = (...labels: string[]) => labels.map((label, index) => ({ id: `o${index}`, label, detail: "" }));
@@ -166,10 +191,11 @@ test("a day is the person's to set: options that are days come back, a date ques
   expect(checkQuestions([ask("打算哪天恢复投递？", { date: true })], context()).problems).toEqual([expect.stringContaining("about")]);
   const resume = ask("打算哪天恢复投递？", { date: true, about: "恢复投递" });
   expect(checkQuestions([resume], context()).accepted).toHaveLength(1);
-  expect(checkQuestions([{ ...resume, about: "恢复投递的日子" }], context([{ about: "恢复投递", answer: "还没定" }])).problems)
-    .toEqual([expect.stringContaining("「还没定」，不再问")]);
-  expect(checkQuestions([resume], context([{ about: "恢复投递", answer: "12 月 1 日" }])).problems).toEqual([expect.stringContaining("12 月 1 日")]);
-  expect(checkQuestions([resume, { ...resume, id: "q2", text: "恢复投递放在哪天？" }], context()).problems).toEqual([expect.stringContaining("同一件事的日子")]);
+  // A subject answered is not asked again by the snapshot's say (the model's), recorded when it is (2026-11-25).
+  const again = checkQuestions([{ ...resume, about: "恢复投递的日子" }], context([{ about: "恢复投递", answer: "还没定" }]));
+  expect(again.accepted).toHaveLength(1);
+  expect(again.fired).toEqual([{ rule: "IR-126", detail: expect.stringContaining("恢复投递") }]);
+  expect(checkQuestions([resume, { ...resume, id: "q2", text: "恢复投递放在哪天？" }], context()).fired?.map((item) => item.rule)).toEqual(["IR-126"]);
 });
 
 test("a date question is a repeat only by its subject, not by wording like another date's (2026-11-22, W-308)", () => {
@@ -180,7 +206,8 @@ test("a date question is a repeat only by its subject, not by wording like anoth
   const context = { ledger: interviewLedger(store, ws, "s1"), openItems: [], dates: [{ about: "毕业论文", answer: "12 月中旬交初稿" }], today: "2026-11-22" };
   // Same line, same pattern, 0.67 alike: another project's day, not the thesis's.
   expect(checkQuestions([ask("「毕业设计」有截止日期吗？", { identityId: "study", date: true, about: "毕业设计" })], context).accepted).toHaveLength(1);
-  expect(checkQuestions([ask("论文初稿哪天交？", { identityId: "study", date: true, about: "毕业论文" })], context).problems).toEqual([expect.stringContaining("不再问")]);
+  expect(checkQuestions([ask("「毕业设计」有截止日期吗？", { identityId: "study", date: true, about: "毕业设计" })], context).fired).toEqual([]);
+  expect(checkQuestions([ask("论文初稿哪天交？", { identityId: "study", date: true, about: "毕业论文" })], context).fired?.map((item) => item.rule)).toEqual(["IR-126"]);
 });
 
 test("a card resting on the latest replies, or a stage's fourth card without a why, is no longer sent back (2026-11-22, IR-130/131 retired)", () => {

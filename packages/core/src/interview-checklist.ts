@@ -1,5 +1,5 @@
-import { METHOD_SLOT } from "./drill-forms";
-import type { ProfileModel } from "./onboarding-turn-schema";
+import { CHECKLIST_STATUSES, type ChecklistVerdict, type ProfileModel } from "./onboarding-turn-schema";
+import { locateQuote } from "./sentences";
 import { joinList, tFor, type Locale } from "./i18n";
 
 /**
@@ -11,6 +11,12 @@ import { joinList, tFor, type Locale } from "./i18n";
  * Each item is owned by the interview (more questions can settle it) or by the person (only their click can: confirming the portrait,
  * adopting a long-term goal, confirming a batch of dates, saying which project a file belongs to). The interview may not declare
  * itself ready while one of its own items is open; it is finished when every item is.
+ *
+ * What a person said is judged by the model, not by patterns over slot names and values (the owner, 2026-11-25: 「访谈清单是模型对着账本
+ * 进行确认」). Each item that needs a reading of words (`byModel`) is settled by the dialogue's verdict, given every round against the ledger
+ * snapshot and kept in the ledger (`readChecklistVerdicts`); code still settles what is structure — counts, recurring dates on record, the
+ * person's clicks, a section written from numbered sentences — and checks that a verdict's basis is the person's own words
+ * (`checkChecklistVerdicts`).
  */
 export type ChecklistItem = {
   id: string;
@@ -41,6 +47,14 @@ export type ChecklistItem = {
   deferred?: true;
   /** `portrait_grounded` only: the portrait's parts (`situation`, `compass`, `energy`, `method`) with nothing of the person's on record yet. */
   sections?: string[];
+  /**
+   * The item's `done` rests on the model's verdict against the ledger (2026-11-25, `ChecklistVerdict`): listed in every round's snapshot for
+   * the model to judge, with the verdict it gave last. Items that are counts or the person's clicks are the code's and carry neither.
+   */
+  byModel?: true;
+  verdict?: ChecklistVerdict;
+  /** `portrait_grounded` only: each part as the model judges it (`portrait:<section>`), with its verdict. */
+  parts?: Array<{ id: string; label: string; done: boolean; verdict?: ChecklistVerdict }>;
 };
 
 export type ChecklistInput = {
@@ -68,29 +82,24 @@ export type ChecklistInput = {
   groundedSections?: string[] | undefined;
   /** The language of each item's label and detail (default Chinese). */
   locale?: Locale | undefined;
+  /** The model's latest verdict per item id (`readChecklistVerdicts`), kept in the ledger by the interview's rounds. */
+  verdicts?: Record<string, ChecklistVerdict> | undefined;
 };
 
 const confirmedFact = (fact: { status: string; sourceRef: string }) => fact.status === "confirmed" && /^(reply|src)-\d+$/.test(fact.sourceRef);
 /**
- * An assumption the interview wrote for what the person could not say (「假设：…」, inferred; decided 2026-10-09: missing information is
- * assumed, not asked about forever). It settles an item so the interview moves on, and the item says it rests on an assumption.
+ * The parts of the portrait the person's own words must stand behind (2026-11-25: whether a part rests on them is the model's to judge
+ * against the ledger snapshot, as the checklist item `portrait:<section>`; the slot-name patterns that guessed it are gone). A part the
+ * extraction wrote from numbered sentences stands without a verdict: that is structure, not a reading of words.
  */
-export const ASSUMPTION_PREFIX = /^(假设|assumption|assumed)[：:]/i;
-const assumedFact = (fact: { status: string; value?: string }) => fact.status === "inferred" && ASSUMPTION_PREFIX.test(fact.value ?? "");
-const settledFact = (fact: { status: string; sourceRef: string; value?: string }) => confirmedFact(fact) || assumedFact(fact);
-/**
- * The parts of the portrait the person's own words must stand behind, read from the slots the interview files facts under. Read by
- * meaning: the 2026-11-01 rerun's extraction filed the person's answers as `near_risk`, `one_year_priority`, `work_motive`, `motto` and
- * `worth_day`, and all three people kept this item open to the round limit with every part answered.
- */
-const PORTRAIT_PARTS: Array<{ label: string; section: string; slots: RegExp; ask: string }> = [
-  { label: "现状与真问题", section: "situation", slots: /problem|situation|status|current|pressure|anxi|worry|constraint|gravity|stage|risk|priorit|change|lever|stuck|block|struggle|concern|fear|conflict|tension|dilemma|trouble|difficult|hard_day|regret|undone|stall/i, ask: "眼下最让你放不下的是哪件事？" },
-  { label: "工作观与人生观", section: "compass", slots: /work_view|life_view|true_north|value|meaning|compass|purpose|motive|motivation|motto|worth|good_day|ideal|belief|career|tradeoff|work_choice|work_feeling|good_life|standard|principle|dream|life_goal/i, ask: "做事的时候，你最看重的是什么？" },
-  { label: "能量与心流", section: "energy", slots: /flow|energy|drain|charge|anchor|behavio|habit/i, ask: "最近一次做得忘了时间，是在做什么？" },
+const PORTRAIT_PARTS: Array<{ label: string; section: string; ask: string }> = [
+  { label: "现状与真问题", section: "situation", ask: "眼下最让你放不下的是哪件事？" },
+  { label: "工作观与人生观", section: "compass", ask: "做事的时候，你最看重的是什么？" },
+  { label: "能量与心流", section: "energy", ask: "最近一次做得忘了时间，是在做什么？" },
   // How the person actually works (decided 2026-11-10, the owner: tasks take their form from the goal and the person's own habits, never
   // from an identity template such as 学生 → 订正/错题本/背诵/打卡; habits like these are asked in the interview). Asked in the energy part;
-  // no section of the portrait stands for it, so only a fact on record settles it.
-  { label: "做事方法", section: "method", slots: METHOD_SLOT, ask: "遇到要准备的考核、要赶的截止，或者要学一样新东西，你平时是怎么做的？" }
+  // no section of the portrait stands for it, so only the model's verdict settles it.
+  { label: "做事方法", section: "method", ask: "遇到要准备的考核、要赶的截止，或者要学一样新东西，你平时是怎么做的？" }
 ];
 /** The portrait's written parts, each a field of the working profile. */
 const PORTRAIT_FIELDS: Array<[keyof ProfileModel, string]> = [["problem", "真问题"],
@@ -102,43 +111,18 @@ const PORTRAIT_FIELDS: Array<[keyof ProfileModel, string]> = [["problem", "真�
  */
 const SYNTHESIS_FIELDS: Array<[keyof ProfileModel, string]> = [["portrait", "一句话画像"], ["coreConflict", "核心矛盾"]];
 const isDefaultProject = (id: string) => /-default$/.test(id);
-/** A deadline the person said there is none of: an answer, and as good as a date for starting. */
-export const NO_DEADLINE = /没有截止|无截止|不设截止|no deadline/i;
-// The slot names the interview actually writes vary (`course_goal`, `progress_evidence`, `class_schedule` on 2026-10-15): read by meaning,
-// or an interview that had every answer kept the person in a round with nothing left to ask and a list of what was 「missing」.
-const PROJECT_SLOTS: Array<[RegExp, string]> = [[/^goal$|^target|_goal$/, "目标"], [/^deadline$|^date_|_deadline$/, "截止日期"],
-  [/^evidence$|_evidence$|^progress/, "进展证据"]];
-const MEETING_SLOTS = /^(meeting|class)_?(times?|schedule)$|^no_meetings$|^fixed_class_time$/;
-/**
- * A weekly arrangement the person stated in a reply, filed as a fact of the line rather than as a dated item (2026-10-31: 「周日上午
- * 10:00–11:30 送娃去跳舞」 was `fixed_schedule`, and the fixed-schedule item stayed open, so the interview asked for it again and again).
- */
-const SCHEDULE_SLOT = /schedule|routine|meeting|class|shift|timetable/i;
-const WEEKDAY = /周[一二三四五六日天末]|星期|礼拜|工作日|每天|每晚|每早|weekday|weekend|daily|monday|tuesday|wednesday|thursday|friday|saturday|sunday/i;
-// 「早八点到晚九点」 in Chinese numerals is a time too (2026-11-12 replay: a student's class hours said so stayed 「not collected」, and the
-// interview asked for her fixed schedule again sixteen rounds after she gave it).
-const CLOCK = /\d{1,2}\s*[:：点]|[零一二两三四五六七八九十]{1,3}\s*点|[上下]午|早上|晚上|凌晨|\b\d{1,2}\s?(am|pm)\b/i;
-/** A schedule the person could only give as a range or said they cannot pin down: recorded as the range, it settles the item (the Skill). */
-const VAGUE_SCHEDULE = /不固定|没有固定|没固定|记不清|说不准|随机|看情况|看课表|no fixed|not sure|varies/i;
-/**
- * A schedule slot holds a schedule only when its value says when: a day, a time, or that it cannot be pinned down. Replay 11 (2026-11-14)
- * read the opening card's 「有固定日程的主线：学生」 into `fixed_schedule` with no day or time in it, and the start standard stood at
- * round 8 while her timetable was asked only in round 12.
- */
-const statesSchedule = (fact: { slot: string; value?: string; identityId?: string }) => {
-  const value = fact.value ?? "";
-  if (SCHEDULE_SLOT.test(fact.slot)) return WEEKDAY.test(value) || CLOCK.test(value) || VAGUE_SCHEDULE.test(value);
-  // 「8–21 点之间不固定」 under a slot of another name (`course_hours`) is the answer too (W-268: the interview asked 「几点到几点」 again in
-  // round 10). Not for a fact of the person's own, whose 「不固定」 is about energy or sleep, not a fixed arrangement.
-  return WEEKDAY.test(value) && CLOCK.test(value) || (fact.identityId !== "person" && VAGUE_SCHEDULE.test(value) && (CLOCK.test(value) || WEEKDAY.test(value)));
-};
-/** What a line is about, said by the person: enough to stand for its description while the extraction has not written one. */
-const DESCRIBES_LINE = /^(description|what)$/;
+/** Whether the model's latest verdict settles an item: answered, or not applicable with a reason. */
+const settledBy = (verdict: ChecklistVerdict | undefined) => verdict?.status === "answered" || verdict?.status === "not_applicable";
+/** What a partial verdict says is still missing, else the item's own words. */
+const verdictDetail = (verdict: ChecklistVerdict | undefined, fallback: string) => verdict?.status === "partial" && verdict.note.trim() ? verdict.note.trim() : fallback;
 
 export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
   const t = tFor(input.locale);
   const list = (labels: string[]) => input.locale === "en" ? joinList(input.locale, labels.map((label) => t(label))) : labels.join("、");
   const items: ChecklistItem[] = [];
+  const verdicts = input.verdicts ?? {};
+  /** An item whose `done` rests on the model's verdict: it carries the verdict, and the snapshot lists it for the model to judge. */
+  const judged = (id: string) => ({ byModel: true as const, ...(verdicts[id] ? { verdict: verdicts[id] } : {}) });
   const profile = input.profile;
   const missingFields = PORTRAIT_FIELDS.filter(([key]) => !String(profile[key] ?? "").trim()).map(([, label]) => label);
   if (!String(profile.anchor ?? "").trim() && !String(profile.realWant ?? "").trim()) missingFields.push("锚与真正想要的");
@@ -149,23 +133,22 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
   const missingSynthesis = SYNTHESIS_FIELDS.filter(([key]) => !String(profile[key] ?? "").trim()).map(([, label]) => label);
   items.push({ id: "portrait_synthesis", group: "画像", label: t("画像综合段已写出"), done: !missingSynthesis.length,
     detail: missingSynthesis.length ? t("整理中：{{items}}", { items: list(missingSynthesis) }) : "", owner: "interview", deferred: true });
-  const personFacts = input.facts.filter((fact) => fact.identityId === "person" && settledFact(fact));
-  // A part rests on the person's words when a fact of it is on record, or when the extraction wrote its section from numbered sentences
-  // (each one a span of a reply or a file): slot names vary run to run, and the 2026-11-01 reruns had 「hard_day」 and 「good_life」.
+  // A part rests on the person's words when the extraction wrote its section from numbered sentences (structure), or when the model judged
+  // so against the ledger (`portrait:<section>`). The summary item reads the parts; only the parts are judged.
   const sectioned = new Set(input.groundedSections ?? []);
-  const unbacked = PORTRAIT_PARTS.filter((part) => !sectioned.has(part.section) && !personFacts.some((fact) => part.slots.test(fact.slot))).map((part) => part.label);
-  const assumedParts = PORTRAIT_PARTS.filter((part) => !sectioned.has(part.section) && !personFacts.some((fact) => confirmedFact(fact) && part.slots.test(fact.slot))).map((part) => part.label)
-    .filter((label) => !unbacked.includes(label));
-  const unbackedSections = PORTRAIT_PARTS.filter((part) => unbacked.includes(part.label)).map((part) => part.section);
-  items.push({ id: "portrait_grounded", group: "画像", label: t("画像每部分都有本人原话或文件为据"), done: !unbacked.length, sections: unbackedSections,
-    detail: unbacked.length ? t("尚无本人依据：{{items}}", { items: list(unbacked) }) : assumedParts.length ? t("以假设代替：{{items}}", { items: list(assumedParts) }) : "", owner: "interview",
-    ...(unbacked.length ? { ask: t(PORTRAIT_PARTS.find((part) => part.label === unbacked[0])!.ask) } : {}) });
+  const grounded = (section: string) => sectioned.has(section) || settledBy(verdicts[`portrait:${section}`]);
+  const unbacked = PORTRAIT_PARTS.filter((part) => !grounded(part.section));
+  items.push({ id: "portrait_grounded", group: "画像", label: t("画像每部分都有本人原话或文件为据"), done: !unbacked.length, sections: unbacked.map((part) => part.section),
+    detail: unbacked.length ? t("尚无本人依据：{{items}}", { items: list(unbacked.map((part) => part.label)) }) : "", owner: "interview",
+    ...(unbacked.length ? { ask: t(unbacked[0]!.ask) } : {}),
+    parts: PORTRAIT_PARTS.map((part) => ({ id: `portrait:${part.section}`, label: t(part.label), done: grounded(part.section),
+      ...(verdicts[`portrait:${part.section}`] ? { verdict: verdicts[`portrait:${part.section}`]! } : {}) })) });
   items.push({ id: "portrait_confirmed", group: "画像", label: t("本人确认画像符合自己"), done: input.portraitConfirmed,
     detail: input.portraitConfirmed ? "" : t("在画像页读完后选「符合」，或说明哪里不对"), owner: "person" });
   // The scale is a page of its own before the first round (2026-11-22) and holds nothing up: the profile_cards start item is gone.
 
   // The two start items (D10): scheduling needs a line to put work on and a milestone to work towards. A current project of a line (not
-  // its default one) is a milestone in the making, as a `milestone` fact the person confirmed is.
+  // its default one) is a milestone in the making, as a `milestone` fact the person confirmed is. Both are counts, never a reading of words.
   items.push({ id: "start_line", group: "主线", label: t("至少有一条主线"), done: input.lines.length > 0,
     detail: input.lines.length ? "" : t("还没有主线"), owner: "interview", start: true, ask: t("眼下你同时在推进哪几件长期的事？") });
   const milestoneNow = (input.milestones ?? 0) > 0 || input.projects.some((project) => !isDefaultProject(project.id))
@@ -178,12 +161,14 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
     const described = input.descriptions[line.id];
     // A goal the person wrote themselves needs no candidates to choose it from.
     const candidates = (described?.candidates ?? 0) > 0 || line.goals.length > 0;
-    const describedNow = Boolean(described?.description.trim())
-      || input.facts.some((fact) => fact.identityId === line.id && !fact.projectId && confirmedFact(fact) && DESCRIBES_LINE.test(fact.slot) && Boolean(fact.value?.trim()));
-    items.push({ id: `line_desc:${line.id}`, group: "主线", label: t("「{{line}}」有个性化描述与长期目标候选", { line: line.label }),
+    const id = `line_desc:${line.id}`;
+    // Written by the extraction, or judged said by the model (the slot-name pattern that read a `description` fact is gone).
+    const describedNow = Boolean(described?.description.trim()) || settledBy(verdicts[id]);
+    items.push({ id, group: "主线", label: t("「{{line}}」有个性化描述与长期目标候选", { line: line.label }),
       done: describedNow && candidates,
-      detail: !describedNow ? t("尚无描述") : !candidates ? t("尚无长期目标的候选词") : "", owner: "interview",
-      ask: !describedNow ? t("「{{line}}」这条线眼下在做什么？", { line: line.label }) : t("在「{{line}}」这条线上，三五年后你希望成为什么样的人？", { line: line.label }) });
+      detail: !describedNow ? verdictDetail(verdicts[id], t("尚无描述")) : !candidates ? t("尚无长期目标的候选词") : "", owner: "interview",
+      ask: !describedNow ? t("「{{line}}」这条线眼下在做什么？", { line: line.label }) : t("在「{{line}}」这条线上，三五年后你希望成为什么样的人？", { line: line.label }),
+      ...judged(id) });
     items.push({ id: `line_goal:${line.id}`, group: "主线", label: t("「{{line}}」已选定至少一个长期目标", { line: line.label }), done: line.goals.length > 0,
       detail: line.goals.length ? "" : t("从候选中采用或自己写一个"), owner: "person" });
   }
@@ -192,18 +177,15 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
     ?? input.lines.find((line) => line.label === project || line.id === project)?.id;
   const hardLines = input.lines.filter((line) => line.hard);
   for (const line of hardLines) {
-    // A fixed weekly arrangement of this line: from its own projects, or — said in a reply under no project — when it is the only hard line.
+    // A fixed weekly arrangement of this line on record as a recurring date (structure): from its own projects, or — said in a reply under
+    // no project — when it is the only hard line. Otherwise whether the person stated it is the model's verdict (2026-11-25: the weekday,
+    // clock and 「不固定」 patterns over fact values are gone).
     const fixed = input.dates.filter((entry) => entry.recurring && (projectLine(entry.project) === line.id || (!projectLine(entry.project) && hardLines.length === 1)));
-    const lineProjects = new Set(input.projects.filter((project) => project.identityId === line.id).map((project) => project.id));
-    // A schedule filed under the person counts for the only hard line, as a recurring date does (2026-11-12 replay 3: her class hours were
-    // `person`/`fixed_schedule_class`, the item stayed open for 32 rounds and she was asked for her timetable a second time).
-    const stated = input.facts.some((fact) => (fact.identityId === line.id || lineProjects.has(fact.projectId) || (fact.identityId === "person" && hardLines.length === 1))
-      && confirmedFact(fact) && statesSchedule(fact));
-    // An assumed schedule does not count (dates still waiting in a batch do — the person supplied the file that has them).
-    const done = fixed.length > 0 || stated;
-    items.push({ id: `hard_schedule:${line.id}`, group: "日程", label: t("「{{line}}」的每周固定安排已收集", { line: line.label }), done,
-      detail: done ? "" : t("每周固定要占的时间尚未收集"), owner: "interview",
-      ask: t("「{{line}}」每周哪几天、几点到几点是固定占着的？比如工作日 10:00–19:30、周一上午 10:30–11:30 例会。", { line: line.label }) });
+    const id = `hard_schedule:${line.id}`;
+    const done = fixed.length > 0 || settledBy(verdicts[id]);
+    items.push({ id, group: "日程", label: t("「{{line}}」的每周固定安排已收集", { line: line.label }), done,
+      detail: done ? "" : verdictDetail(verdicts[id], t("每周固定要占的时间尚未收集")), owner: "interview",
+      ask: t("「{{line}}」每周哪几天、几点到几点是固定占着的？比如工作日 10:00–19:30、周一上午 10:30–11:30 例会。", { line: line.label }), ...judged(id) });
   }
   items.push({ id: "availability", group: "日程", label: t("已提出建议的可用时段"), done: input.availability,
     detail: input.availability ? "" : t("固定日程之外，每周哪些时段可以安排工作"), owner: "interview",
@@ -212,59 +194,52 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
   if (pending) items.push({ id: "dates_confirmed", group: "日程", label: t("文件与口述中的日期已确认"), done: false,
     detail: t("{{count}} 项日期等待确认", { count: pending }), owner: "person" });
 
-  // Every line has something it is working on now, and when that is due — or the person said it has no deadline.
+  // Every line has something it is working on now, and when that is due — or the person said it has no deadline (the model's verdict).
   for (const line of input.lines) {
     const current = input.projects.filter((project) => project.identityId === line.id && !isDefaultProject(project.id));
-    const knowsDeadline = (project: { id: string; name: string }) =>
-      input.facts.some((fact) => fact.projectId === project.id && confirmedFact(fact)
-        && (/^deadline$|^date_|^no_deadline$/.test(fact.slot) || NO_DEADLINE.test(fact.value ?? "")))
-      || input.dates.some((entry) => !entry.recurring && (entry.project === project.id || entry.project === project.name));
-    // 「这条线先不规划」 is the person's answer to this item too: the interview offers it and the app's own line question records it.
+    const dated = (project: { id: string; name: string }) => input.dates.some((entry) => !entry.recurring && (entry.project === project.id || entry.project === project.name));
+    // 「这条线先不规划」 is the person's answer to this item too: the app's own line question records it under the slot `skipped`.
     const skipped = input.facts.some((fact) => fact.identityId === line.id && fact.slot === "skipped" && confirmedFact(fact));
-    const done = skipped || current.some(knowsDeadline);
-    items.push({ id: `line_project:${line.id}`, group: "项目", label: t("「{{line}}」有当前项目，且知道截止或没有截止", { line: line.label }), done,
-      detail: done ? "" : current.length
+    const id = `line_project:${line.id}`;
+    const done = skipped || current.some(dated) || settledBy(verdicts[id]);
+    items.push({ id, group: "项目", label: t("「{{line}}」有当前项目，且知道截止或没有截止", { line: line.label }), done,
+      detail: done ? "" : verdictDetail(verdicts[id], current.length
         ? t("缺截止（或说明没有截止）：{{projects}}", { projects: input.locale === "en" ? joinList(input.locale, current.map((project) => project.name)) : current.map((project) => project.name).join("、") })
-        : t("尚无当前项目"),
+        : t("尚无当前项目")),
       owner: "interview",
       ask: current.length ? t("「{{project}}」大概什么时候要完成？没有截止也可以直接说。", { project: current[0]!.name })
-        : t("「{{line}}」这条线眼下在做的一件事是什么？大概什么时候要完成，没有截止也可以说。", { line: line.label }) });
+        : t("「{{line}}」这条线眼下在做的一件事是什么？大概什么时候要完成，没有截止也可以说。", { line: line.label }), ...judged(id) });
   }
 
   // What each line has to finish this week or next (2026-11-20, §3.6; no longer a start item since 2026-11-22): one thing the person named, their 「没有」, or 「这条线先
-  // 不规划」. What they name becomes a task the moment it is said (`nearTermCaptures` in the worker).
+  // 不规划」. What they name becomes a task the moment it is said (`nearTermCaptures` in the worker), under the slot `near_term`.
   for (const line of input.lines) {
     const lineProjects = new Set(input.projects.filter((project) => project.identityId === line.id).map((project) => project.id));
     const said = input.facts.some((fact) => (fact.identityId === line.id || lineProjects.has(fact.projectId)) && confirmedFact(fact)
       && (fact.slot === "near_term" || fact.slot === "skipped"));
-    const done = said || input.nearTermSettled?.[line.id] === true;
-    items.push({ id: `near_term:${line.id}`, group: "项目", label: t("「{{line}}」近两周要做完的事已说明", { line: line.label }), done,
-      detail: done ? "" : t("这周到下周已经定了要做完的事（没有也可以说）"), owner: "interview",
-      ask: t("「{{line}}」这周到下周有哪几件已经定了要做完的事？没有也可以直接说。", { line: line.label }) });
+    const id = `near_term:${line.id}`;
+    const done = said || input.nearTermSettled?.[line.id] === true || settledBy(verdicts[id]);
+    items.push({ id, group: "项目", label: t("「{{line}}」近两周要做完的事已说明", { line: line.label }), done,
+      detail: done ? "" : verdictDetail(verdicts[id], t("这周到下周已经定了要做完的事（没有也可以说）")), owner: "interview",
+      ask: t("「{{line}}」这周到下周有哪几件已经定了要做完的事？没有也可以直接说。", { line: line.label }), ...judged(id) });
   }
 
   for (const project of input.projects.filter((item) => !isDefaultProject(item.id))) {
-    const own = input.facts.filter((fact) => fact.projectId === project.id && settledFact(fact));
-    const dated = input.dates.some((entry) => entry.project === project.id || entry.project === project.name);
     // A graded project is one the record calls so (its grading breakdown); a name shaped like a course code no longer makes one (IR-028,
     // 2026-11-25): whether a project is judged and meets at fixed times is the interview's to ask (its Skill).
-    const course = own.some((fact) => fact.slot === "grading");
-    const missing = PROJECT_SLOTS.filter(([slot, label]) => !(own.some((fact) => slot.test(fact.slot)) || (label === "截止日期" && dated))).map(([, label]) => label);
-    // How a graded project is judged and when it meets: deferred, asked when its task is planned. The words are the same for a course, a
-    // certification or a client's review (2026-11-22: the person is not assumed to be a student).
-    const courseMissing: string[] = [];
-    // A project that meets: its weekly times are the frame of the person's week (one whose meetings nobody asked about left a hole).
-    const meets = input.dates.some((entry) => entry.recurring && (entry.project === project.id || entry.project === project.name))
-      || own.some((fact) => MEETING_SLOTS.test(fact.slot) || (VAGUE_SCHEDULE.test(fact.value ?? "") && statesSchedule(fact)));
-    if (course && !meets) courseMissing.push("固定时间");
-    const projectAsk = t("「{{project}}」要做成什么样，做到哪一步了？", { project: project.name });
-    items.push({ id: `project:${project.id}`, group: "项目", label: t("「{{project}}」目标、截止与进展证据", { project: project.name }),
-      done: !missing.length, detail: missing.length ? t("缺：{{items}}", { items: list(missing) }) : "", owner: "interview",
-      deferred: true as const, ...(missing.length ? { ask: projectAsk } : {}) });
-    if (course) items.push({ id: `project_course:${project.id}`, group: "项目", label: t("「{{project}}」怎么评定与固定时间", { project: project.name }),
-      done: !courseMissing.length, detail: courseMissing.length ? t("缺：{{items}}", { items: list(courseMissing) }) : "", owner: "interview",
-      deferred: true as const,
-      ...(courseMissing.length ? { ask: t("「{{project}}」每周有哪些固定要到场的时间？", { project: project.name }) } : {}) });
+    const course = input.facts.some((fact) => fact.projectId === project.id && fact.slot === "grading" && confirmedFact(fact));
+    const id = `project:${project.id}`;
+    const done = settledBy(verdicts[id]);
+    items.push({ id, group: "项目", label: t("「{{project}}」目标、截止与进展证据", { project: project.name }),
+      done, detail: done ? "" : verdictDetail(verdicts[id], t("目标、截止与进展证据待确认")), owner: "interview",
+      deferred: true as const, ...(done ? {} : { ask: t("「{{project}}」要做成什么样，做到哪一步了？", { project: project.name }) }), ...judged(id) });
+    if (!course) continue;
+    // A project that meets: its weekly times on record as recurring dates (structure), or the model's verdict that they were said.
+    const courseId = `project_course:${project.id}`;
+    const meets = input.dates.some((entry) => entry.recurring && (entry.project === project.id || entry.project === project.name)) || settledBy(verdicts[courseId]);
+    items.push({ id: courseId, group: "项目", label: t("「{{project}}」怎么评定与固定时间", { project: project.name }),
+      done: meets, detail: meets ? "" : verdictDetail(verdicts[courseId], t("缺：{{items}}", { items: list(["固定时间"]) })), owner: "interview",
+      deferred: true as const, ...(meets ? {} : { ask: t("「{{project}}」每周有哪些固定要到场的时间？", { project: project.name }) }), ...judged(courseId) });
   }
 
   if (input.unfiledFiles !== null) items.push({ id: "files_filed", group: "文件", label: t("上传的文件都已归属项目"), done: input.unfiledFiles === 0,
@@ -328,3 +303,67 @@ export function portraitStillConfirmed(confirmedFingerprint: string | undefined,
   for (const count of b.values()) total += count;
   return total > 0 && (2 * shared) / total >= PORTRAIT_SAME_SIMILARITY;
 }
+
+/** One item the model judges, as the snapshot lists it: the parts of `portrait_grounded` each on their own. */
+export type JudgedItem = { id: string; label: string; done: boolean; detail: string; deferred?: true; verdict?: ChecklistVerdict };
+/** The items whose `done` rests on the model's verdict, in checklist order. */
+export function judgedItems(items: readonly ChecklistItem[]): JudgedItem[] {
+  return items.flatMap((item): JudgedItem[] => item.parts
+    ? item.parts.map((part) => ({ id: part.id, label: part.label, done: part.done, detail: part.done ? "" : item.detail, ...(part.verdict ? { verdict: part.verdict } : {}) }))
+    : item.byModel ? [{ id: item.id, label: item.label, done: item.done, detail: item.detail, ...(item.deferred ? { deferred: true as const } : {}),
+      ...(item.verdict ? { verdict: item.verdict } : {}) }] : []);
+}
+
+/** A verdict as the ledger keeps it: the round that gave it and when. */
+export type StoredVerdict = ChecklistVerdict & { round: number; at: string };
+/**
+ * The latest verdict per item over every interview of the workspace (each session keeps its own in `coverage.checklist`): the newest one
+ * stands, so a line's own interview can settle that line's items as the main one can.
+ */
+export function readChecklistVerdicts(coverages: ReadonlyArray<unknown>): Record<string, ChecklistVerdict> {
+  const latest = new Map<string, StoredVerdict>();
+  for (const coverage of coverages) {
+    const kept = (coverage as { checklist?: Record<string, StoredVerdict> } | null | undefined)?.checklist;
+    if (!kept || typeof kept !== "object") continue;
+    for (const [id, verdict] of Object.entries(kept)) {
+      if (!verdict || !(CHECKLIST_STATUSES as readonly string[]).includes(verdict.status)) continue;
+      const before = latest.get(id);
+      if (!before || String(verdict.at ?? "") >= String(before.at ?? "")) latest.set(id, verdict);
+    }
+  }
+  return Object.fromEntries([...latest].map(([id, { round: _round, at: _at, ...verdict }]) => [id, verdict]));
+}
+
+/* i18n-ignore-start: problems sent back to the interview model */
+/**
+ * The round's checklist verdicts, checked as evidence (the one thing about them code judges): an id the snapshot listed, a status of the
+ * four, and for `answered` or `partial` at least one basis whose span is verbatim in the reply or file it names; `not_applicable` says why.
+ * Whether the words settle the item is the model's; that the words exist is the code's (a claim of the model, verified).
+ */
+export function checkChecklistVerdicts(verdicts: readonly ChecklistVerdict[], context: { ids: ReadonlySet<string>; texts: Readonly<Record<string, string>>;
+  /** Replies a disclosure sits in: never a basis, as they are never a card's. */
+  sensitive?: ReadonlySet<string> }): { accepted: ChecklistVerdict[]; problems: string[] } {
+  const accepted: ChecklistVerdict[] = [];
+  const problems: string[] = [];
+  for (const verdict of verdicts) {
+    const id = String(verdict?.id ?? "");
+    if (!context.ids.has(id)) { problems.push(`清单判定的 id「${id.slice(0, 60)}」不在快照的清单里；只用快照列出的 id。`); continue; }
+    if (!(CHECKLIST_STATUSES as readonly string[]).includes(verdict.status)) { problems.push(`清单项「${id}」的 status 只能是 answered、partial、missing、not_applicable。`); continue; }
+    const basis = Array.isArray(verdict.basis) ? verdict.basis : [];
+    const note = String(verdict.note ?? "").trim();
+    if (verdict.status === "not_applicable" && !note) { problems.push(`清单项「${id}」判为不适用：note 写为什么（本人说的或材料里的情况）。`); continue; }
+    if ((verdict.status === "answered" || verdict.status === "partial") && !basis.length) {
+      problems.push(`清单项「${id}」判为 ${verdict.status}：basis 至少引一处本人原话或文件（ref 写 reply-N 或 src-N，quote 逐字抄一段）。`); continue;
+    }
+    const bad = basis.find((item) => !(item.ref in context.texts) || context.sensitive?.has(item.ref) || !locateQuote(context.texts[item.ref]!, String(item.quote ?? "")));
+    if (bad) {
+      problems.push(context.sensitive?.has(bad.ref) ? `清单项「${id}」引了 ${bad.ref}：那条回答不作依据。`
+        : !(bad.ref in context.texts) ? `清单项「${id}」的依据 ${bad.ref} 不存在；用 reply-N 或 src-N。`
+        : `清单项「${id}」的依据「${String(bad.quote ?? "").slice(0, 40)}」不在 ${bad.ref} 里：逐字抄本人或文件的原话。`);
+      continue;
+    }
+    accepted.push({ id, status: verdict.status, basis: basis.map((item) => ({ ref: item.ref, quote: String(item.quote ?? "") })), note });
+  }
+  return { accepted, problems };
+}
+/* i18n-ignore-end */

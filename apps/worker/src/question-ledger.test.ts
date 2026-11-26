@@ -1,44 +1,39 @@
 import { afterEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { DISCLOSURE_PLACEHOLDER } from "@crossline/core";
-import { checklistAnswered, ledgerForModel, linesAnsweredUnread } from "./question-ledger";
+import { DISCLOSURE_PLACEHOLDER, ledgerLines } from "@crossline/core";
+import { answerMainQuestions, checklistAnswered, interviewLedger, linesAnsweredUnread, recordAsked, recordReplyAnswers } from "./question-ledger";
 
 const ws = "w";
 let store: CrosslineStore | undefined;
 afterEach(() => { store?.close(); store = undefined; });
 
-test("the app's own waiting questions take at most a third of what the dialogue is shown, so its own answered questions stay in view", () => {
+// 2026-11-25 (「访谈账本驱动」): the questions the reply itself asks go into the ledger with the round, and the next reply is their answer,
+// written before the next round's snapshot is read: the ledger, not the thread, remembers what was asked and said.
+test("a question the reply asked is in the ledger after its round, and the next reply is its answer before anything reads the ledger", () => {
   store = new CrosslineStore(":memory:");
-  const at = "2026-10-19T10:00:00Z";
-  // The owner's real interview: the dialogue's own questions, answered, then twenty of the app's file-belonging questions waiting.
-  for (let i = 1; i <= 8; i += 1) {
-    const id = store.recordQuestion(ws, { kind: "interview", key: `iq:s1:${i}:q`, text: `本人的问题 ${i}`, status: "open", at });
-    store.answerQuestion(ws, id, { text: `回答 ${i}`, at });
-  }
-  for (let i = 1; i <= 20; i += 1) store.recordQuestion(ws, { kind: "interview", key: `gap:file-${i}`, text: `文件 ${i} 属于哪个项目？`, status: "pending", at });
-  const shown = ledgerForModel(store, ws, "s1", 15);
-  expect(shown.length).toBe(13);
-  expect(shown.filter((line) => line.includes("文件")).length).toBe(5);
-  expect(shown.filter((line) => line.includes("[已答]")).length).toBe(8);
-  // Another session's questions are not this conversation's.
-  store.recordQuestion(ws, { kind: "interview", key: "iq:s2:1:q", text: "别的会话", status: "open", at });
-  expect(ledgerForModel(store, ws, "s1", 15).some((line) => line.includes("别的会话"))).toBe(false);
+  const at = "2026-11-25T10:00:00Z";
+  const [main] = recordAsked(store, ws, "s1", 4, [{ text: "最近一次接单影响更新时发生了什么？", gist: "接单挤占更新的一次经过", repeats: 0, followUp: false }], at);
+  expect(interviewLedger(store, ws, "s1").find((question) => question.id === main)).toMatchObject({ status: "open", key: "iq:s1:4:main-1" });
+  const reply = "上个月赶一个品牌稿，两周没发教程。\n【这件事有截止日期吗？】有，12月5日";
+  expect(answerMainQuestions(store, ws, "s1", reply, [], "2026-11-25T10:05:00Z")).toBe(1);
+  // The card's line answers the card, not the reply's question.
+  expect(interviewLedger(store, ws, "s1").find((question) => question.id === main)).toMatchObject({ status: "answered", answer: "上个月赶一个品牌稿，两周没发教程。" });
+  // Answered once: a later reply does not overwrite it, and another session's reply never answers it.
+  expect(answerMainQuestions(store, ws, "s1", "别的话", [], "2026-11-25T10:10:00Z")).toBe(0);
+  expect(answerMainQuestions(store, ws, "s2", "别的会话", [], "2026-11-25T10:10:00Z")).toBe(0);
 });
 
-test("older answered questions stay in view by their text alone, so a rewording of round 1's question is not asked in round 27 (W-239)", () => {
+test("the reply's own question takes the reply whole even where its words overlap a card's question", () => {
   store = new CrosslineStore(":memory:");
-  const at = "2026-11-06T09:00:00Z";
-  for (let i = 1; i <= 30; i += 1) {
-    const id = store.recordQuestion(ws, { kind: "interview", key: `iq:s1:${i}:q`, text: `本人的问题 ${i}`, status: "open", at });
-    store.answerQuestion(ws, id, { text: `回答 ${i}`, at });
-  }
-  store.answerQuestion(ws, store.recordQuestion(ws, { kind: "interview", key: "gap:old", text: "旧的应用问题", status: "pending", at }), { text: "", at });
-  const shown = ledgerForModel(store, ws, "s1", 15);
-  expect(shown.find((line) => line.endsWith("本人的问题 1"))).toMatch(/^#\d+ \[已答\] 本人的问题 1$/);
-  expect(shown.some((line) => line.includes("本人的问题 30 → 回答 30"))).toBe(true);
-  // The latest fifteen with their answers (the app's answered question among them), the sixteen before by text alone.
-  expect(shown.filter((line) => line.includes("→")).length).toBe(14);
-  expect(shown.length).toBe(31);
+  const at = "2026-11-25T10:00:00Z";
+  const [main] = recordAsked(store, ws, "s1", 2, [{ text: "每篇教程从选题到发布要多久？", gist: "一篇教程的制作时长", repeats: 0, followUp: false }], at);
+  const card = store.recordQuestion(ws, { kind: "interview", key: "iq:s1:2:q1", text: "你一周更新几篇？", options: ["一篇", "两篇"], status: "open", at });
+  const reply = "每篇教程大概要 4 小时。\n【你一周更新几篇？】两篇";
+  answerMainQuestions(store, ws, "s1", reply, [], at);
+  recordReplyAnswers(store, ws, "s1", reply, [], at);
+  const ledger = interviewLedger(store, ws, "s1");
+  expect(ledger.find((question) => question.id === main)?.answer).toBe("每篇教程大概要 4 小时。");
+  expect(ledger.find((question) => question.id === card)?.status).toBe("answered");
 });
 
 // 2026-11-01 run 8: a line answered about at round 11 was asked again at round 19, the extraction still three runs behind.
@@ -82,7 +77,7 @@ test("an answer given in a reply a disclosure sits in is shown as the placeholde
   store.appendOnboardingMessage({ sessionId: "s1", workspaceId, role: "assistant", content: { reply: "谢谢你说出来。", safety: true }, createdAt: hard });
   store.answerQuestion(workspaceId, ask("那段时间怎么样？"), { text: "大二自残过，没人可说。", at: hard });
   store.answerQuestion(workspaceId, ask("周末做什么？"), { text: "在家。", at: "2026-11-15T10:05:00.000Z" });
-  const shown = ledgerForModel(store, workspaceId, "s1", 15).join("\n");
+  const shown = ledgerLines(interviewLedger(store, workspaceId, "s1")).join("\n");
   expect(shown).not.toContain("自残过");
   expect(shown).toContain(DISCLOSURE_PLACEHOLDER);
   expect(shown).toContain("在家。");
