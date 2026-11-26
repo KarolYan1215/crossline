@@ -213,10 +213,10 @@
 ### 做了什么
 
 - **资格交给模型。** `crossline-opportunity-reader` 每条给 `fit`：`stageFit`（fits / stretch / wrong_stage）、`directionFit`（same / adjacent / unrelated）、`reachable`、`partialRequirements`、`agentCanPrepare`、`why`。判断标准写在 SKILL.md「How it fits the person」，是目标不是正则。输入 v4 带 `person`：确认过的资料事实（不含姓名、邮箱、电话、地址、证件号等标识，不含「假设」，≤30）和各条活跃监视项的「标题：判断」（`seeking`，≤12）。
-- **代码只验结构**（`fitOf`）并照判（`verdictFromFit`）：只有 `wrong_stage`、`unrelated`、`reachable: false` 不推；其余都是 eligible，fit 存在 verdict 上。没有 fit（列表里的 CFP、旧行）算 eligible，不再问。
+- **代码只验结构**（`fitOf`）并照判（`verdictFromFit`）：只有 `wrong_stage`、`unrelated` 不推；其余都是 eligible，fit 存在 verdict 上。没有 fit（列表里的 CFP、旧行）算 eligible，不再问。
 - **删掉的确定性规则**：`judgeEligibility`、`meets`、`applicantFrom`、`degreeStageOf`、`DEGREE_STAGES`、`FACT_HINTS`、欧盟/国家词表与 `countriesIn`/`countryMeets`、`STEM_FIELD`/`OPEN_TO_ALL`/`ANY_FIELD`/`broadMeets`、`eligibilityQuestion` 和维度标签、db 的 `rejudgeOpportunities` 与 worker 的 `rejudge`、条款里的 `accepts`。保留：`phishingSigns`（安全）、引文核验、`eligibilityAnswer`（只为旧卡片上的问题）。
 - **分歧只记不拦。** 代码看监视项全是找实习、模型却没判正职为 `wrong_stage`（`stageConflict`）时，照模型，写一行 `rule-fired`：核心的 `ruleFired("opportunity.stage-conflict", …)`（RULE_SPEC 登记，record 模式），写进 `<数据目录>/telemetry/rule-fired.jsonl`，不进账本。
-- **`reachable: false` 也不推**（国籍或绿卡、安全审查、年龄、别校成员）。按「有可能能够到」理解为够不到的不推；若本人要连这些也看，改 `verdictFromFit` 一行即可。**待本人确认。**
+- **`reachable: false` 照推，标「不满足」**（国籍或绿卡、安全审查、年龄、别校成员；本人 2026-11-26 确认）。卡片第一句是「不满足：<why>。」，`offerOrder` 把它排在所有够得到的之后；`why` 写明是哪道门槛（SKILL.md）。
 - **任务去重**：`task-merge.ts` 删掉「截止日相差 7 天以上」和「服务的里程碑截止相差 21 天以上」两条硬「不同」。同标题的这两种情况现在是「不确定」（score 1），交给已有的模型复核；相似度只挑候选。`partOf` 的数字检查保留：它只管代码自己合并部分任务，那一对仍会交给模型。
 
 ### 注意力

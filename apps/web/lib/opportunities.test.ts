@@ -55,6 +55,15 @@ test("a derived watch is kept at once and undoable in the bell, the undo remembe
   expect(store.listPreferences(ws).filter((pref) => pref.source === "correction")).toHaveLength(0);
 });
 
+test("an opening with a bar the person cannot clear is still pushed, its card saying 不满足 first", () => {
+  const store = setup();
+  const fit = { stageFit: "fits" as const, directionFit: "same" as const, reachable: false, partialRequirements: [], agentCanPrepare: [], why: "需美国公民身份。" };
+  store.saveOpportunity(ws, { opportunity: opportunity(), terms: [], verdict: { state: "eligible", basis: [], fit } });
+  const card = offer(opportunityOfferAsks(TEST_CTX, NOW), "opp:opp-1");
+  expect(card.why.startsWith("不满足：需美国公民身份。")).toBe(true);
+  expect(card.options.some((option) => option.id === "register")).toBe(true);
+});
+
 test("少来 takes a one-tap reason from a choice field, leaves the inbox, is listed for the review, and undo puts it back", async () => {
   const store = setup();
   saveWatchList(store, ws, [watch({ state: "active" })]);

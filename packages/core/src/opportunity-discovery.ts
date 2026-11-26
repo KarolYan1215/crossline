@@ -388,10 +388,11 @@ export function fitOf(value: unknown): OpportunityFit | undefined {
 }
 
 /**
- * The verdict on an opening, from the reader's fit (§7 as of 2026-11-25). The model decides; code only maps its fields: the wrong stage,
- * an unrelated direction or a bar the person cannot clear is ineligible, everything else — a partial match, a stretch, an adjacent
- * direction — is eligible and reaches the person with what is missing on the card. No fit (a listed call for papers, an older answer) is
- * eligible: when in doubt, more reaches the person, never less.
+ * The verdict on an opening, from the reader's fit (§7 as of 2026-11-25). The model decides; code only maps its fields: the wrong stage
+ * or an unrelated direction is ineligible, everything else — a partial match, a stretch, an adjacent direction — is eligible and reaches
+ * the person with what is missing on the card. A bar the person cannot clear (`reachable: false`: citizenship, clearance, age, another
+ * school's members) is eligible too and says 「不满足」 on its card, after the reachable ones (the owner, 2026-11-26: the person decides).
+ * No fit (a listed call for papers, an older answer) is eligible: when in doubt, more reaches the person, never less.
  */
 export function verdictFromFit(fit: OpportunityFit | undefined, locale?: Locale): EligibilityVerdict {
   if (!fit) return { state: "eligible", basis: [] };
@@ -399,7 +400,6 @@ export function verdictFromFit(fit: OpportunityFit | undefined, locale?: Locale)
   const why = fit.why || t("阅读器的判断");
   if (fit.stageFit === "wrong_stage") return { state: "ineligible", failed: [{ dim: "degree_stage", rule: t("阶段不对"), why }], fit };
   if (fit.directionFit === "unrelated") return { state: "ineligible", failed: [{ dim: "field", rule: t("方向无关"), why }], fit };
-  if (!fit.reachable) return { state: "ineligible", failed: [{ dim: "other", rule: t("有本人无法达到的硬门槛"), why }], fit };
   return { state: "eligible", basis: [], fit };
 }
 
@@ -459,7 +459,9 @@ export function offerOrder(today: string) {
     const fit = row.verdict && row.verdict.state !== "unknown" ? row.verdict.fit : undefined;
     return fit ? DIRECTION_RANK[fit.directionFit] ?? 0 : pushable(row) ? 2 : 1;
   };
-  return (a: Row, b: Row) => direction(b) - direction(a) || (nextDeadline(a, today) ?? "9999").localeCompare(nextDeadline(b, today) ?? "9999")
+  // One the person cannot clear (`reachable: false`, shown 「不满足」) comes after every one they can.
+  const reach = (row: Row) => row.verdict && row.verdict.state !== "unknown" && row.verdict.fit?.reachable === false ? 0 : 1;
+  return (a: Row, b: Row) => reach(b) - reach(a) || direction(b) - direction(a) || (nextDeadline(a, today) ?? "9999").localeCompare(nextDeadline(b, today) ?? "9999")
     || bestRelevance(b) - bestRelevance(a);
 }
 /** The latest day preparation can start, worked back from the deadline by the need's lead time; undefined without a deadline. */

@@ -8,10 +8,10 @@ import { emptyWorld, html, type Reading, type World } from "./world";
  * one opportunity (or one trap) and the addresses it can be reached at; the harness looks only at what reached the person.
  *
  * `expect` is what the person should get: `push` (an offer, eligible), `partial` (an offer saying what is still missing, 2026-11-25), `push_conflict`
- * (an offer that says what it clashes with, §17.7) or `no_push`. `requires` names what only tracks ① and ② build; a scenario whose
+ * (an offer that says what it clashes with, §17.7), `push_unmet` (an offer marked 「不满足」: a bar the person cannot clear, 2026-11-26) or `no_push`. `requires` names what only tracks ① and ② build; a scenario whose
  * engine lacks it is pending, not failed.
  */
-export type Expect = "push" | "partial" | "push_conflict" | "no_push";
+export type Expect = "push" | "partial" | "push_conflict" | "push_unmet" | "no_push";
 export type Capability = "watches" | "scout" | "feasibility" | "local_today";
 export type NoPushReason = InfeasibleCode | "ineligible" | "duplicate" | "unverifiable" | "injection" | "not_this_year";
 
@@ -335,7 +335,7 @@ const SEARCH: World["search"] = [
 export const SCENARIOS: Scenario[] = [
   { id: "internship-planted", lineId: "research", title: POSTING_101.title, covers: ["planted"], urls: [POSTING_101.url], expect: "push" },
   { id: "ineligible-stage", lineId: "research", title: POSTING_103.title, covers: ["ineligible:stage"], urls: [POSTING_103.url], expect: "no_push", because: "ineligible" },
-  { id: "ineligible-citizenship", lineId: "research", title: LEVER[0]!.text, covers: ["ineligible:citizenship"], urls: [leverUrl("na-1")], expect: "no_push", because: "ineligible" },
+  { id: "ineligible-citizenship", lineId: "research", title: LEVER[0]!.text, covers: ["ineligible:citizenship"], urls: [leverUrl("na-1")], expect: "push_unmet" },
   { id: "expired", lineId: "research", title: LEVER[1]!.text, covers: ["expired"], urls: [leverUrl("na-2")], expect: "no_push", because: "expired" },
   { id: "prep-too-late", lineId: "research", title: LEVER[2]!.text, covers: ["no_time_to_prepare"], urls: [leverUrl("na-3")], expect: "no_push",
     because: "no_time_to_prepare", requires: ["feasibility"] },
@@ -352,7 +352,7 @@ export const SCENARIOS: Scenario[] = [
   { id: "tbd-deadline", lineId: "research", title: "Visiting Student Program 2027", covers: ["planted", "tbd"], urls: ["https://lakeshore-ai-lab.example/visiting"],
     expect: "push", noDeadline: true },
   { id: "ineligible-region", lineId: "research", title: "European Systems Summer School 2027", covers: ["ineligible:region"], urls: ["https://ess-school.example/2027"],
-    expect: "no_push", because: "ineligible" },
+    expect: "push_unmet" },
   { id: "visa-too-late", lineId: "research", title: "Pacific Systems Student Conference 2026", covers: ["visa_too_late"], urls: ["https://pss-conf.example/2026"],
     expect: "no_push", because: "visa_too_late", requires: ["feasibility"] },
   { id: "clash-fixed", lineId: "research", title: "Lakeshore Systems Seminar: Dataflow Accelerators", covers: ["clash:fixed"], urls: ["https://lakeshore.example/ece/seminars/dataflow"],
@@ -381,7 +381,7 @@ export const SCENARIOS: Scenario[] = [
 
 export const COUNTERFACTUALS: Counterfactual[] = [
   { id: "cf-stage", scenario: "internship-planted", flip: { degreeStage: "Master's student (first year)" }, expectFlipped: "no_push", what: "博士 → 硕士" },
-  { id: "cf-age", scenario: "hackathon-dedupe", flip: { age: 17 }, expectFlipped: "no_push", what: "27 岁 → 17 岁" },
+  { id: "cf-age", scenario: "hackathon-dedupe", flip: { age: 17 }, expectFlipped: "push_unmet", what: "27 岁 → 17 岁" },
   { id: "cf-citizenship", scenario: "ineligible-citizenship", flip: { citizenship: "United States" }, expectFlipped: "push", what: "中国国籍 → 美国国籍" },
   { id: "cf-region", scenario: "ineligible-region", flip: { country: "Germany" }, expectFlipped: "push", what: "住在美国 → 住在德国" },
   { id: "cf-home", scenario: "local-meetup", flip: { residence: "Chicago, Illinois, United States" }, expectFlipped: "no_push", requires: ["feasibility"], what: "住麦迪逊 → 住芝加哥" },

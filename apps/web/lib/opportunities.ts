@@ -139,6 +139,8 @@ export function opportunityOfferAsks(ctx: AccessContext, now = new Date()): Ask[
     const facts = fit ? "" : row.verdict.state === "eligible" && row.terms.length ? t("资格：按记录全部符合。") : "";
     const sepList = locale === "en" ? "; " : "；";
     const gaps = fit?.partialRequirements.length ? t("还差：{{items}}。", { items: fit.partialRequirements.slice(0, 3).join(sepList) }) : "";
+    // A bar the reader judged the person cannot clear (the owner, 2026-11-26): shown, said first, and the person decides.
+    const unmet = fit && !fit.reachable ? t("不满足：{{why}}。", { why: (fit.why || t("有本人无法达到的硬门槛")).replace(/[。.！!？?；;，,\s]+$/u, "") }) : "";
     const prepare = fit?.agentCanPrepare.length ? t("可代为准备：{{items}}。", { items: fit.agentCanPrepare.slice(0, 3).join(sepList) }) : "";
     const questions = row.verdict.state === "unknown" ? row.verdict.questions : [];
     // News and a paper have no deadline, place or eligibility: the card says only why it is worth reading and where it came from.
@@ -148,6 +150,7 @@ export function opportunityOfferAsks(ctx: AccessContext, now = new Date()): Ask[
       reason ? t("为什么值得看：{{reason}}。", { reason: reason.replace(/[。.！!？?；;，,\s]+$/u, "") }) : "",
       watch ? t("来自监视项「{{title}}」。", { title: watch.title }) : isScoutFind(row) ? t("每周侦察发现。") : ""
     ].filter(Boolean) : [
+      unmet,
       row.reason ? t("为什么值得看：{{reason}}。", { reason: row.reason.replace(/[。.！!？?；;，,\s]+$/u, "") }) : "",
       watch ? t("来自监视项「{{title}}」。", { title: watch.title }) : isScoutFind(row) ? t("每周侦察发现。") : "",
       deadline ? t("截止 {{day}}（原文：{{quote}}）。", { day: deadline, quote: short(quote ?? "", 80) }) : t("页面没写截止。"),
