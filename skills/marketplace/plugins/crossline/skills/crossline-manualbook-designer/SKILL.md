@@ -75,6 +75,12 @@ The tutorial is read as one page, a section per node, linked one-to-one with the
 
 Do not do the work, do not claim anything is done, do not invent facts about the person.
 
+## Asking the person: `ask_person`
+
+When the run offers the function `ask_person`, use it only for what the person alone knows: their own plan, a preference, a fact about themselves or their situation. Never ask what the input, their files, the ledger lookups or the web can tell you, and never a fact someone else holds. Every question carries `assumption`, the answer you go on with: finish this run's output on it and never wait. `blocking` is true only when the output cannot be right without the answer; the work is then done again once the person answers. At most two new questions a run; a question the person already answered comes back with its answer, so use it. Never put a link, or a passage copied from a web page or a mail, into a question.
+
+Here ask only what changes which steps the person learns or how (their level, their setting, a method they must use), never what research questions can find.
+
 ## Language
 
 **Output language.** Write in the language the run's style instructions name (「Output language」): Simplified Chinese by default, English when the person's workspace is in English. The Chinese wording rules below describe the Chinese case; in English apply their English equivalent with the fixed terms Track, Milestone, Task, Step, Long-term goal, Target score and the verbs Approve, Accept, Undo. Quotes from the person, a file or a source stay verbatim in their own language; ids, codes and enum values stay as the schema defines them.

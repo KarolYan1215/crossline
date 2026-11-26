@@ -71,7 +71,12 @@ export type AskKind =
    * A model-judged execution gate the person is asked about (docs/plans/execution-gates-1124.md): the two runs disagreed, or being wrong
    * costs a deadline or goes outside. Options are the verdicts in question plus 「都不对」; the answer is a `gate.overridden` or a confirmation.
    */
-  | "gate_check";
+  | "gate_check"
+  /**
+   * A question a Skill put to the person mid-run with `ask_person` (2026-11-25, `info-request.ts`, `apps/worker/src/ask-tool.ts`): what only
+   * the person knows. Read from `person.question.asked`; answered, it becomes a confirmed fact and a blocking run is done again.
+   */
+  | "skill_question";
 
 export type AskField = { id: string; label: string; kind: "text" | "longtext" | "date" | "choice"; required: boolean;
   initial?: string; placeholder?: string;
@@ -180,7 +185,7 @@ export function askQuadrant(ask: Pick<Ask, "urgency" | "important" | "importance
  */
 export type AskNature = "record" | "decide";
 export const ASK_NATURE_LABEL: Record<AskNature, string> = { record: "待记录", decide: "待决" };
-const RECORD_KINDS: ReadonlySet<AskKind> = new Set<AskKind>(["waiting_due", "outcome_check", "progress_check", "prep_question", "step_question",
+const RECORD_KINDS: ReadonlySet<AskKind> = new Set<AskKind>(["waiting_due", "outcome_check", "progress_check", "prep_question", "step_question", "skill_question",
   "backplan_input", "source_project", "calendar_line_unclear", "interview_open", "interview_question", "exam_time", "travel_minutes",
   "wealth_balances", "opportunity_result"]);
 export const askNature = (kind: AskKind): AskNature => RECORD_KINDS.has(kind) ? "record" : "decide";

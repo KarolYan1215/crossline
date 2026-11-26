@@ -23,7 +23,10 @@ const INTERRUPT: ReadonlySet<string> = new Set([
   "reminder", "departure", "automation_remind",
   // A registration queued for the person's computer, still asleep with the deadline within 48 hours: only they can wake it or submit
   // themselves (docs/plans/harness-1125.md §9.4). Once per run; its home is the 小帮手 line the push opens, nothing on Today or the brief.
-  "form_computer"
+  "form_computer",
+  // A Skill's blocking question to the person whose task or milestone is due within 48 hours (`pushesPersonQuestion`, ask-tool.ts):
+  // only those are said at all; every other question only waits on 待确认.
+  "person_question"
 ]);
 const ALWAYS: ReadonlySet<string> = new Set(["mail_check"]);
 
@@ -38,7 +41,7 @@ export function pushPolicyOf(kind: string | undefined): PushPolicy {
  * The web's bell reads this set (`app/notice-kinds.ts`); the brief's collected line leaves these out.
  */
 export const INPUT_NUDGE_KINDS: ReadonlySet<string> = new Set([
-  "block_confirm", "day_wrap", "energy_check", "outcome_check", "progress_check", "agent_question", "opener"
+  "block_confirm", "day_wrap", "energy_check", "outcome_check", "progress_check", "agent_question", "person_question", "opener"
 ]);
 
 /**

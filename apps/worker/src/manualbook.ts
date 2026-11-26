@@ -24,6 +24,7 @@ export const MATERIAL_WRITER_SKILL = "crossline:crossline-material-writer";
 import { ownerOf } from "./owner";
 import { startingWithin } from "./schedule-window";
 import { planningContext } from "./step-planner";
+import { ASK_PERSON_INSTRUCTIONS, createAskTool } from "./ask-tool";
 
 // Short summaries of each scenario; each Skill carries the detail.
 const DESIGN_INSTRUCTIONS = "Design the tutorial for one task as a short flow of the steps the person learns from (planned steps are only those), left to right; a researcher then searches "
@@ -215,6 +216,12 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
     progress("designing", 0, 1);
     const designed = await runCodexSkill<ManualDesign>(client, context, {
       skillName: MANUAL_DESIGNER_SKILL, cwd, developerInstructions: DESIGN_INSTRUCTIONS, outputSchema: MANUAL_DESIGN_SCHEMA,
+      // ask_person (ask-tool.ts): the designer reads only the person's own files and facts, so its questions are not marked untrusted.
+      optionalTools: { tools: createAskTool({ store, workspaceId, skill: MANUAL_DESIGNER_SKILL, ref: { kind: mode === "tutorial" ? "tutorial" : "materials", id: workOrderId },
+        identityId: order.identityId, projectId: order.projectId, title: taskTitleOf(order),
+        dueBy: (order.payload as { dueDate?: string } | undefined)?.dueDate || context.workOrder.milestone?.deadline || "" }), withoutTools: (value) => value,
+        instructions: ASK_PERSON_INSTRUCTIONS + " Here: ask only what the person alone knows that changes which steps they learn or how (their "
+          + "level, their setting, the method they must use), never what research questions can find." },
       // The prompt cache (docs/token-economy.md §2.5): the person's and the line's, then the project's, then this task and the date.
       stableKeys: ["version", "setting", "profile", "constraints", "person", "localFiles"],
       prepareInput: () => context, validateOutput: (output) => validateManualDesign(output, context), onAudit: () => {}, timeoutMs: 60 * 60_000

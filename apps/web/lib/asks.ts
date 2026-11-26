@@ -28,6 +28,7 @@ import { unfiledFiles } from "./file-belonging";
 import { decideEvent, eventProposals } from "./fixed-events";
 import { answerMailEvent, mailEventCards } from "./mail-events";
 import { answerExamTime, examTimeAsks } from "./exam-times";
+import { answerSkillQuestion, skillQuestionAsks } from "./skill-questions";
 import { calendarWriteOn } from "./calendar-write";
 import { placesToAsk, setPlaceMinutes } from "./travel";
 import { decidePair, mergePairs, readMerges, timedItemOf } from "./event-merges";
@@ -1208,7 +1209,7 @@ function mergeAsks({ ctx, today, now, t, locale }: Source): Ask[] {
 export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
   const locale = localeFor(ctx);
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now, t: tFor(locale), locale };
-  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskDigestAsks, weeklyCommitAsks, overdueFoldAsks, missedAsks, ledgerDuplicateAsks, wealthBalanceAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, interviewSettingAsks, mergeAsks, eventAsks, mailEventCards, examTimeAsks, travelAsks, stepQuestionAsks,
+  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskDigestAsks, weeklyCommitAsks, overdueFoldAsks, missedAsks, ledgerDuplicateAsks, wealthBalanceAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, interviewSettingAsks, mergeAsks, eventAsks, mailEventCards, examTimeAsks, travelAsks, stepQuestionAsks, skillQuestionAsks,
     ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks, ({ ctx: context, now: at }: Source) => outcomeAsks(context, at), ({ ctx: context }: Source) => gapAsks(context),
     ({ ctx: context, now: at }: Source) => progressAsks(context, at),
     ({ ctx: context, now: at }: Source) => opportunityOfferAsks(context, at), ({ ctx: context, now: at }: Source) => opportunityApplyReadyAsks(context, at),
@@ -1681,6 +1682,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
     }
     case "mail_event": return answerMailEvent(ctx, ask.entityId, optionId);
     case "exam_time": return answerExamTime(ctx, ask.entityId, optionId, choice.note);
+    case "skill_question": return answerSkillQuestion(ctx, ask, choice, values, appNow());
     case "event_propose": {
       decideEvent(ctx, ask.entityId, optionId === "create" ? "create" : optionId === "exists" ? "exists" : "skip");
       // Written now rather than at the next ten-minute pass, so the person sees it on their calendar while they are here.
@@ -1768,7 +1770,8 @@ export async function answerAsk(ctx: AccessContext, askId: string, choice: strin
   const run = () => answerOne(ctx, ask, { optionIds: ids, note: checked.note }, checked.values);
   const result = options.undo === false ? await run() : await withUndo(ctx, t("{{label}}：{{title}}", { label, title: ask.title }), run);
   // The question ledger keeps the answer beside the question, numbered, for the models that read it.
-  if (result.ok && ask.kind !== "interview_question") {
+  // A Skill's question (`skill_question`) keeps the answer itself, in full: the label of the option alone would lose a typed date or text.
+  if (result.ok && ask.kind !== "interview_question" && ask.kind !== "skill_question") {
     const store = getStore();
     const id = store.questionByKey(ctx.workspaceId, `ask:${ask.id}`)?.id ?? recordAsk(ctx, ask, now.toISOString());
     /* i18n-ignore-start: the question ledger is read by models */
@@ -1787,7 +1790,7 @@ export async function answerAsk(ctx: AccessContext, askId: string, choice: strin
 }
 
 /** Asks whose answer itself carries the person's words somewhere they are read again (a capture's context, a step's answer, a report). */
-const NOTE_TAKEN_BY = new Set<string>(["capture_blocked", "prep_question", "agent_blocked", "step_question", "interview_question", "outcome_check", "progress_check"]);
+const NOTE_TAKEN_BY = new Set<string>(["capture_blocked", "prep_question", "agent_blocked", "step_question", "skill_question", "interview_question", "outcome_check", "progress_check"]);
 
 /** 「明天再问」/「下周再问」: hidden until then, back sooner if what it is about changes. */
 export function snoozeAsk(ctx: AccessContext, askId: string, choice: "tomorrow" | "week", now = appNow(), seconds?: number,

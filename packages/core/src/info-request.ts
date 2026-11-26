@@ -117,3 +117,95 @@ export function foldInfoRequests(steps: BackplanStep[]): { steps: Array<Backplan
   }
   return { steps: out, folded };
 }
+
+/**
+ * Asking the person (the owner's rule of 2026-11-25: 「模型如果有不确定的问题，给模型一个主动提问工具，允许其向用户提问获取信息（前提是用户
+ * 应该知道这个信息）」; docs/plans/harness-1125.md 「主动提问」). Where the request above is a fact *someone else* holds, this is one only
+ * the person holds — their plan, a preference, a fact about themselves, their situation. A Skill calls `ask_person` mid-run with the
+ * assumption it goes on with meanwhile; the question waits on 待确认 (ask kind `skill_question`), the answer becomes a confirmed fact
+ * (`sourceRef` `ask:pq:<id>`, 「本人回答」), and a `blocking` run is run again once it arrives. What code keeps is the attention budget:
+ * at most `PERSON_QUESTIONS_PER_RUN` new questions a run, a question already answered in the question ledger is answered from it, one
+ * already open is joined, and a run that read untrusted content may not pass a link to the person.
+ */
+export const PERSON_ANSWER_TYPES = ["text", "long_text", "date", "choice"] as const;
+export type PersonAnswerType = (typeof PERSON_ANSWER_TYPES)[number];
+export type PersonQuestionInput = {
+  question: string; why: string; knownBy: "person"; options: string[]; answerType: PersonAnswerType;
+  /** What the run goes on with until the answer comes: required, so no run ever waits on the person. */
+  assumption: string;
+  /** Only when the run's output cannot be right without it: the run is done again once the person answers. */
+  blocking: boolean;
+};
+/** What a blocking question's answer reruns: a task's steps, a milestone's backplan, a task's tutorial or its material preparation. */
+export type PersonQuestionRef = { kind: "task" | "milestone" | "tutorial" | "materials"; id: string };
+/** `untrusted`: asked by a run that had read someone else's words (a web page, a mail); the card says so and carries no link. */
+export type PersonQuestionOrigin = "own" | "untrusted";
+export type PersonQuestionAsked = PersonQuestionInput & {
+  id: string; skill: string; ref: PersonQuestionRef; identityId: string; projectId: string; dueBy: string; origin: PersonQuestionOrigin;
+};
+/** New questions one run may put to the person; joining one already open and reading one already answered do not count. */
+export const PERSON_QUESTIONS_PER_RUN = 2;
+/** Two questions this alike (`questionSimilarity`, 0–1) are one question: the second reads the first's answer or joins its wait. */
+export const SAME_QUESTION = 0.6;
+/** A blocking question is pushed only when what it bears on is due within this many hours; every other one only waits on 待确认. */
+export const PERSON_QUESTION_PUSH_HOURS = 48;
+/** The profile-fact slot an answer is kept under (`【question】answer`, like a step answer). */
+export const PERSON_ANSWER_SLOT = "person_answer_";
+export const personAnswerSlot = (question: string) =>
+  `${PERSON_ANSWER_SLOT}${[...question].reduce((hash, char) => (hash * 31 + char.codePointAt(0)!) >>> 0, 7).toString(36)}`;
+
+/** A link of any kind: a URL, a bare domain, a markdown link. A run that read untrusted content may not put one in front of the person. */
+export const hasLink = (text: string): boolean =>
+  /https?:\/\/|www\.|\]\(|\b[\w-]+\.(?:com|net|org|io|cn|lol|xyz|me|co|ai|edu|gov|info|app|dev|link|ly|top|site|online|shop|cc|tk|ru)\b/i.test(text);
+
+/* i18n-ignore-start: the tool's description and refusals are read by the model */
+export const ASK_PERSON_TOOL = {
+  name: "ask_person",
+  description: "Ask the person one question only they can answer: their own plan, preference, a fact about themselves or their situation. "
+    + "Never ask what the run's input, the person's files, the ledger lookups or the web can tell you, and never a fact someone else holds "
+    + "(that is a request: draft a message for the person to send). Give the assumption you go on with meanwhile; the question waits on the "
+    + "person's 待确认 page and you never wait for the answer. At most 2 new questions a run; a question the person already answered comes "
+    + "back with the answer.",
+  inputSchema: { type: "object", additionalProperties: false, required: ["question", "why", "knownBy", "answerType", "assumption", "blocking"], properties: {
+    question: { type: "string", description: "One question in the person's language, short, about one thing." },
+    why: { type: "string", description: "What in this run depends on the answer, in one sentence." },
+    knownBy: { type: "string", enum: ["person"], description: "Who holds the answer: only the person." },
+    options: { type: "array", items: { type: "string" }, maxItems: 6, description: "For answerType choice: 2–6 concrete answers, the likeliest first." },
+    answerType: { type: "string", enum: [...PERSON_ANSWER_TYPES] },
+    assumption: { type: "string", description: "The answer you go on with until the person answers." },
+    blocking: { type: "boolean", description: "true only when this run's output cannot be right without the answer; the run is done again once it comes." } } }
+};
+
+export const ASK_PERSON_INSTRUCTIONS = "`ask_person` puts one question to the person. Use it only for what the person alone knows (their plan, a "
+  + "preference, a fact about themselves or their situation) and nothing in the input, their files, the ledger or the web settles. Every "
+  + "question carries the assumption you continue with: finish this run's output on that assumption and never wait. blocking true only when "
+  + "the output cannot be right without the answer. Do not ask what someone else holds, and never put a link or a passage of a web page or a "
+  + "mail into a question.";
+
+/** A model's `ask_person` arguments made usable, or the reason they are refused (said back to the model). */
+export function readPersonQuestion(args: unknown, context: { untrusted?: boolean } = {}):
+  { ok: true; question: PersonQuestionInput } | { ok: false; reason: string } {
+  const raw = (args ?? {}) as Record<string, unknown>;
+  const text = (value: unknown, max: number) => typeof value === "string" ? value.trim().slice(0, max) : "";
+  const question = text(raw.question, 300), why = text(raw.why, 300), assumption = text(raw.assumption, 200);
+  if (raw.knownBy !== "person") return { ok: false, reason: "只能问本人才知道的信息（knownBy 必须是 person）；别人掌握的事实应写成请求，由本人发出。" };
+  if (!question) return { ok: false, reason: "question 不能为空。" };
+  if (!why) return { ok: false, reason: "why 不能为空：写明这次输出的哪一部分取决于答案。" };
+  if (!assumption) return { ok: false, reason: "assumption 不能为空：写明没有答案时按什么继续。" };
+  const answerType = PERSON_ANSWER_TYPES.find((type) => type === raw.answerType);
+  if (!answerType) return { ok: false, reason: `answerType 只能是 ${PERSON_ANSWER_TYPES.join("、")}。` };
+  const options = Array.isArray(raw.options) ? [...new Set(raw.options.map((option) => text(option, 80)).filter(Boolean))].slice(0, 6) : [];
+  if (answerType === "choice" && options.length < 2) return { ok: false, reason: "answerType 为 choice 时要给 2–6 个 options。" };
+  if (typeof raw.blocking !== "boolean") return { ok: false, reason: "blocking 必须是 true 或 false。" };
+  if (context.untrusted && [question, why, assumption, ...options].some(hasLink))
+    return { ok: false, reason: "这次运行读过外部内容，问题里不能带链接或网址；用自己的话问本人。" };
+  return { ok: true, question: { question, why, knownBy: "person", options: answerType === "choice" ? options : [], answerType, assumption, blocking: raw.blocking } };
+}
+/* i18n-ignore-end */
+
+/** Whether a question interrupts: blocking, and what it bears on is due within `PERSON_QUESTION_PUSH_HOURS` (`push-policy`: `person_question`). */
+export function pushesPersonQuestion(question: { blocking: boolean; dueBy: string }, now: Date): boolean {
+  if (!question.blocking || !/^\d{4}-\d{2}-\d{2}/.test(question.dueBy)) return false;
+  const due = Date.parse(question.dueBy.length === 10 ? `${question.dueBy}T23:59:59Z` : question.dueBy);
+  return Number.isFinite(due) && due - now.getTime() <= PERSON_QUESTION_PUSH_HOURS * 3_600_000;
+}

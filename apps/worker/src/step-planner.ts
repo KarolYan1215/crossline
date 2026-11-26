@@ -18,6 +18,7 @@ import { ORDER_STARTS_SETTING, startingWithin } from "./schedule-window";
 import { sayToPerson } from "./workflow-smith";
 import { factLedger, relevantFacts, selectMaterial } from "./material-context";
 import { mergeTools, READ_LEDGER_INSTRUCTIONS } from "./ledger-index";
+import { ASK_PERSON_INSTRUCTIONS, withAskTool } from "./ask-tool";
 
 import { libraryInstruction, librarySkillsFor } from "./skill-library";
 const PLANNER = "crossline:crossline-step-planner";
@@ -387,11 +388,17 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     const extraSkills = await librarySkillsFor(client, store, workspaceId, order.identityId, { cwd, task: order.intent, ...(options.libraryDir ? { dir: options.libraryDir } : {}) });
     let materialMode: "tools" | "fallback" = "fallback";
     const result = await runCodexSkill<StepPlan>(client, input, { skillName: PLANNER, cwd, ...(extraSkills.length ? { extraSkills } : {}), redoOnRepair: true,
-      optionalTools: { tools: mergeTools(grounding.material.tools, grounding.factIndex.tools), onMode: (mode) => { materialMode = mode; },
+      // ask_person (ask-tool.ts): what only the person knows and the plan cannot be right without; a run researching on the web has read
+      // pages, so its questions are marked and may carry no link.
+      optionalTools: { tools: withAskTool(mergeTools(grounding.material.tools, grounding.factIndex.tools), { store, workspaceId, skill: PLANNER,
+          ref: { kind: "task", id: workOrderId }, identityId: order.identityId, projectId: order.projectId, dueBy: window.dueBy, title: taskTitleOf(order),
+          untrusted: () => research }), onMode: (mode) => { materialMode = mode; },
         instructions: "`materials.passages` are the passages that matched this task, in full; `materials.candidates` are more, by their opening line; "
           + "`materials.files` are the files they come from. Read the candidates you need with read_chunk(id), and find what is missing (a lecture "
           + "list, the problem set, the rubric) with search_material before you count units. A unit quotes a passage you read, under that passage's doc id. "
-          + "`person.facts` is an index of the person's facts for this task: an id, the slot, the value's opening. " + READ_LEDGER_INSTRUCTIONS,
+          + "`person.facts` is an index of the person's facts for this task: an id, the slot, the value's opening. " + READ_LEDGER_INSTRUCTIONS
+          + " " + ASK_PERSON_INSTRUCTIONS + " Here ask_person is for a fact of the person's without which the steps themselves would be wrong now "
+          + "(blocking); a question the plan can carry on an assumption until the weekly review stays in questions, and is never asked both ways.",
         withoutTools: (value) => ({ ...(value as object), materials: grounding.material.fallback(),
           person: { ...(value as { person: object }).person, facts: grounding.person } }) },
       /* i18n-ignore-start: model instructions */

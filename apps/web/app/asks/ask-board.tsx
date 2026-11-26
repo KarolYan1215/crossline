@@ -15,7 +15,7 @@ export type AskGroup = "风险与逾期" | "等待到期" | "步骤与准备" | 
 const GROUP_OF: Partial<Record<AskKind, AskGroup>> = {
   milestone_risk: "风险与逾期", milestone_risk_review: "风险与逾期", risk_digest: "风险与逾期", milestone_overdue: "风险与逾期", overdue_task: "风险与逾期",
   waiting_due: "等待到期",
-  step_question: "步骤与准备", prep_question: "步骤与准备", backplan_input: "步骤与准备",
+  step_question: "步骤与准备", skill_question: "步骤与准备", prep_question: "步骤与准备", backplan_input: "步骤与准备",
   agent_blocked: "助手",
   gate_insufficient: "验收", gate_failed: "验收", acceptance_gap: "验收",
   missed_block: "日程与承诺", weekly_commit: "日程与承诺", event_propose: "日程与承诺", mail_event: "日程与承诺", exam_time: "日程与承诺", locked_conflict: "日程与承诺", travel_minutes: "日程与承诺",
