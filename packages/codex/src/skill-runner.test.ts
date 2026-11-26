@@ -82,6 +82,34 @@ describe("web_research: a private run's web goes through the scout, past the out
     expect(egress.found).toContain("https://neurips.cc/Conferences/2026/Dates");
   });
 
+  test("after the first call (or once the run is tainted) each call is reviewed beside the earlier ones; a refusal stops the scout, a failed review does not", async () => {
+    setPrivateGuardProvider(() => guard);
+    const scout = vi.fn(async (_input: unknown) => found);
+    const verdicts = [{ ok: true, why: "" }, { ok: false, why: "a name spelled one syllable per query" }];
+    const review = vi.fn(async (_input: unknown) => ({ ok: true as const, audit: {}, output: verdicts.shift()! }));
+    const tool = webResearchTool(client, { given: [], found: [] }, { cwd: "." }, scout, review as never);
+    expect((await call(tool, { queries: ["qualifying exam tips"], purpose: "how quals work" })).ok).toBe(true);
+    expect(review).not.toHaveBeenCalled();
+    expect((await call(tool, { queries: ["qualifying exam committee size"], purpose: "how quals work" })).ok).toBe(true);
+    expect(review.mock.calls[0]![0]).toEqual({ version: "crossline.query-review.v1", purpose: "how quals work", queries: ["qualifying exam committee size"],
+      earlier: [{ purpose: "how quals work", queries: ["qualifying exam tips"] }] });
+    const refused = await call(tool, { queries: ["xiao zhou"], purpose: "misc" });
+    expect(refused).toEqual({ ok: false, text: expect.stringContaining("a name spelled one syllable per query") });
+    expect(scout).toHaveBeenCalledTimes(2);
+    const broken = webResearchTool(client, { given: [], found: [] }, { cwd: ".", webResearchTainted: () => true }, scout,
+      (async () => ({ ok: false, blocker: { code: "SKILL_TIMEOUT", message: "" } })) as never);
+    expect((await call(broken, { queries: ["qualifying exam tips"], purpose: "how quals work" })).ok).toBe(true);
+  });
+
+  test("a tainted run's first call is reviewed too", async () => {
+    setPrivateGuardProvider(() => guard);
+    const review = vi.fn(async () => ({ ok: true as const, audit: {}, output: { ok: false, why: "describes one student" } }));
+    const scout = vi.fn(async () => found);
+    const tool = webResearchTool(client, { given: [], found: [] }, { cwd: ".", webResearchTainted: () => true }, scout, review as never);
+    expect((await call(tool, { queries: ["PhD student Madison in-memory computing quals December"], purpose: "x" })).ok).toBe(false);
+    expect(scout).not.toHaveBeenCalled();
+  });
+
   test("a guard that cannot be read keeps the run off the web (fail closed)", async () => {
     setPrivateGuardProvider(() => { throw new Error("ledger locked"); });
     const scout = vi.fn(async () => found);

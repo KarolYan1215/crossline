@@ -56,3 +56,6 @@ apps/assess/templates/candidates/
 apps/worker/src/testing/golden/*
 !apps/worker/src/testing/golden/README.md
 !apps/worker/src/testing/golden/example-*.json
+
+# Monthly review reports (scheduled task crossline-monthly-review); local only
+docs/maintenance/

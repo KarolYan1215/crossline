@@ -180,6 +180,6 @@ export function provenanceSaid(provenance: CaptureProvenance, locale?: Locale): 
   const t = tFor(locale);
   if (provenance.by === "mail_triage") return t("来自邮件分拣");
   const names = [...new Set(provenance.sources.map((source) => source === "mail" ? t("邮件") : source === "document" || source === "download" ? t("外部文件")
-    : source === "flow" ? t("工作流结果") : t("网页")))];
+    : source === "flow" ? t("工作流结果") : source === "connector" ? t("连接器里的内容") : t("网页")))];
   return t("来自助手读{{sources}}", { sources: (names.length ? names : [t("外部内容")]).join(t("、")) });
 }

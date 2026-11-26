@@ -27,7 +27,7 @@ import { ONBOARDING_RESEARCH_SCHEMA } from "./onboarding-research";
 import { DILIGENCE_OUTPUT_SCHEMA } from "./diligence-schema";
 import { ENERGY_ADVICE_REVIEW_SCHEMA } from "./energy-advice";
 import { METHOD_RESEARCH_SCHEMA } from "./method-research";
-import { WEB_SCOUT_SCHEMA } from "./web-egress";
+import { QUERY_REVIEW_SCHEMA, WEB_SCOUT_SCHEMA } from "./web-egress";
 import { FLYWHEEL_OUTPUT_SCHEMA } from "./flywheel-schema";
 import { GOAL_SPLIT_SCHEMA } from "./line-attributes";
 import { MANUAL_DESIGN_SCHEMA, MATERIAL_SEARCH_SCHEMA, NODE_WRITEUP_SCHEMA } from "./manualbook-schema";
@@ -152,6 +152,8 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-visa-finder": { label: "签证核实", schemas: ["VISA_READING_SCHEMA"], webSearch: true },
   // The search run behind `web_research` (docs/plans/harness-1125.md §10): given queries and a purpose only, nothing of the person's.
   "crossline-web-scout": { label: "联网检索", schemas: ["WEB_SCOUT_SCHEMA"], webSearch: true },
+  // Reads a tainted run's searches before the scout runs them (docs/plans/harness-1125.md §18): no web, nothing of the person's.
+  "crossline-query-review": { label: "检索复核", schemas: ["QUERY_REVIEW_SCHEMA"] },
   // Reads Longbridge through the ChatGPT connectors, which like web search exist only on a ChatGPT sign-in through Codex itself.
   "crossline-quote-reader": { label: "行情读取", schemas: ["QUOTE_READING_SCHEMA"], webSearch: true }
 };
@@ -232,7 +234,8 @@ const CONFORMANCE_SCHEMAS: Record<string, Record<string, unknown>> = {
   OPPORTUNITY_WATCHES_SCHEMA, OPPORTUNITY_READING_SCHEMA, VISA_READING_SCHEMA, QUOTE_READING_SCHEMA,
   FORM_FILL_SCHEMA, FORM_CHECK_SCHEMA, FORM_OBSERVE_SCHEMA, DICTATION_CORRECTION_SCHEMA, WORKFLOW_TURN_SCHEMA, TIME_ATTRIBUTION_SCHEMA,
   // Appended, not sorted in: a case's position is its id's order in the conformance run, which recorded fixtures index by.
-  METHOD_RESEARCH_SCHEMA, DELIVERABLE_CHECK_SCHEMA, SCALE_ANALYSIS_SCHEMA, FOLDER_SCREEN_SCHEMA, SOURCE_VERSIONS_SCHEMA, FILE_PROJECTS_SCHEMA, CHAT_DIGEST_SCHEMA, SKILL_INJECTION_CHECK_SCHEMA, WEB_SCOUT_SCHEMA
+  METHOD_RESEARCH_SCHEMA, DELIVERABLE_CHECK_SCHEMA, SCALE_ANALYSIS_SCHEMA, FOLDER_SCREEN_SCHEMA, SOURCE_VERSIONS_SCHEMA, FILE_PROJECTS_SCHEMA, CHAT_DIGEST_SCHEMA, SKILL_INJECTION_CHECK_SCHEMA, WEB_SCOUT_SCHEMA,
+  QUERY_REVIEW_SCHEMA
 } as unknown as Record<string, Record<string, unknown>>;
 
 /** How many times a critical Skill's schema is run: at 3 runs, "repair rate ≤ 5%" means no repair at all. */

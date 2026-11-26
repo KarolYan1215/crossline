@@ -152,6 +152,23 @@ export const WEB_SCOUT_SCHEMA = {
 } as const;
 
 /** The scout's answer kept only where each page is a public https address; anything else is dropped, not repaired. */
+/**
+ * The review of a `web_research` call made after the run has read someone else's words (a page, mail, a connector; the owner's decision of
+ * 2026-11-26, docs/plans/harness-1125.md §18): `crossline-query-review`, with no web and nothing of the person's, reads this call's queries
+ * beside the run's earlier ones and says whether together they carry something about a person or a private matter rather than a topic.
+ * A deterministic check cannot see a name or a fact paraphrased into searches a little at a time; a model reading the set can.
+ */
+export type QueryReview = { ok: boolean; why: string };
+export const QUERY_REVIEW_SCHEMA = {
+  type: "object", additionalProperties: false, required: ["ok", "why"],
+  properties: { ok: { type: "boolean" }, why: { type: "string", maxLength: 300 } }
+} as const;
+export function validateQueryReview(output: unknown): QueryReview {
+  const value = (output ?? {}) as Partial<QueryReview>;
+  if (typeof value.ok !== "boolean") throw new Error("QUERY_REVIEW_SHAPE: ok must be a boolean");
+  return { ok: value.ok, why: String(value.why ?? "").slice(0, 300) };
+}
+
 export function validateWebScout(output: unknown): WebScoutAnswer {
   const value = (output ?? {}) as Partial<WebScoutAnswer>;
   if (!Array.isArray(value.results)) throw new Error("WEB_SCOUT_SHAPE: results must be an array");

@@ -80,7 +80,8 @@ export const isSkillStorePath = (value: string): boolean => SKILL_STORE.some((pa
 /**
  * An 8.3 short name (`CROSSL~1`, `SKILL-~1`): a spelling of a protected folder the text patterns cannot see (review of 2026-11-25).
  * A command that writes is asked to name its paths in full; reading through one stays allowed. Text cannot follow a path built in a
- * variable: that is what the sandbox's own deny on these folders (`protectSkillFolders`) and the file-change check on real paths are for.
+ * variable: that is what the sandbox's own deny on these folders (`protectSkillFolders`) and the file-change check on real paths are for;
+ * without a sandbox, the worker puts back whatever the run changed there once it ends (`skill-store-guard.ts`).
  */
 // not-nl: a path spelling, not natural language
 const SHORT_NAME = /(^|[\\/\s=:])[^\\/\s=:]{1,6}~\d(?!\d)/;

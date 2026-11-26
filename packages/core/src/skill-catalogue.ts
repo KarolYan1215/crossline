@@ -55,6 +55,7 @@ export const SKILL_CATALOGUE: Record<string, string> = {
   "crossline-portrait-narrative": "访谈结束后写本人的个人模型叙事：一篇连贯的文字，先按时间讲本人的人生故事，再逐节写本人没说出口的规律、自述和行为之间的落差、看起来无关的事实之间的联系，最后用一条统领原则把各节接起来。只写论断，不印证据、置信度和引用；画像报告的图表部分再从这篇叙事里拆出来。",
   "crossline-portrait-writer": "根据 Crossline 访谈写本人的画像报告：具体、可画成图的一份说明，写本人现在是谁、面对的问题、指南针和精力、主线之间怎么互相喂养和长期目标、说与做的差距、假设日志、D0–D9 的个案概念化、有依据的职业方向和试做，以及排好优先级的具体建议。",
   "crossline-progress-judge": "Read a person's progress report on one task against its steps and its milestone's standards, and give each one the report speaks to a reading in quarters.",
+  "crossline-query-review": "Read the web searches another run wants to make, beside the ones it already made, and say whether together they carry something about a person or a private matter rather than a general topic.",
   "crossline-quote-reader": "Read the last price of each listed brokerage symbol with the Longbridge connector's quote tool and return the numbers exactly as the tool gave them — market data only, no other tool, no advice.",
   "crossline-recording-digest": "Read transcripts of the person's own phone recordings, decide which are worth keeping, and for those write a summary and pull out the person's commitments, facts about them and their work, and the days named — every item quoting the transcript.",
   "crossline-skill-scout": "Search the web for published Agent Skills (SKILL.md directories) that would help the person's lines and the tasks they are doing, and name each one by its GitHub repository and directory.",

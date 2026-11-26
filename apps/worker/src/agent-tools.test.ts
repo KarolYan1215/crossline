@@ -297,6 +297,31 @@ test("pages from web_research taint the run: its captures carry the page as thei
   } finally { setWebAvailableProvider(() => false); }
 });
 
+// Gap of 2026-11-25 (docs/plans/harness-1125.md §18): what a ChatGPT connector hands back never passes through Crossline, so the read
+// itself taints the run, and its next web_research call is reviewed before the scout runs it.
+test("a connector read taints the run, and the web_research call after it is reviewed first", async () => {
+  approveCategory(store, workspaceId, "read_research_organize");
+  setWebAvailableProvider(() => true);
+  try {
+    const summary = JSON.stringify({ summary: "看了日历邀请。", artifacts: [{ path: "invite.md", purpose: "记录" }],
+      verification: [{ check: "读回", result: "pass", evidence: "读回 invite.md" }], needsHuman: [], notDone: [], assumptions: [] });
+    const refused = JSON.stringify({ ok: false, why: "describes one student" });
+    let research: Record<string, unknown> = {};
+    const { rpc } = fakeRuntime([summary], [TOOLS_AGENT_SKILL, WEB_SCOUT_SKILL, "crossline:crossline-query-review"], {
+      routes: [{ match: "crossline-query-review", answers: [refused] }], script: async ({ ask, emit, threadId, turnId }) => {
+        emit({ method: "item/completed", params: { threadId, turnId, item: { type: "mcpToolCall", id: "m1", server: "codex_apps", tool: "gmail_read_email", status: "completed" } } });
+        research = await ask("item/tool/call", { callId: "s", tool: "web_research", arguments: { queries: ["PhD student Madison quals December"], purpose: "x" } });
+        await ask("item/tool/call", { callId: "w", tool: "write_file", arguments: { path: "invite.md", content: "邀请" } });
+        await ask("item/tool/call", { callId: "i", tool: "add_to_inbox", arguments: { text: "回复研讨会邀请" } });
+      } });
+    const run = createAgentRunner(store, workspaceId, "/repo", () => rpc, { outputRoot: path.join(root, "ai"), mode: "tools" });
+    await run({ taskId: "t-conn", title: "看邀请", what: "看看日历邀请", category: "read_research_organize", humanPart: "" });
+    expect(research.success).toBe(false);
+    const [capture] = store.listCaptures(workspaceId);
+    expect(store.captureProvenance(workspaceId, capture!.id)).toEqual({ run: "t-conn", by: "assistant", tainted: true, sources: ["connector"] });
+  } finally { setWebAvailableProvider(() => false); }
+});
+
 // Review of 2026-11-25: a sandboxed shell run offered the mailbox keeps neither the hosted search nor the connectors (Rule of Two);
 // one without a mailbox keeps the web it had.
 test("a sandboxed shell run offered the mailbox has no web search and no connectors", async () => {

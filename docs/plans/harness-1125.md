@@ -287,4 +287,16 @@
 - **出站检索**：一条查询里同时有本人两条以上的短事实（学校、单位、城市、年级）就退回（`details`）。
 - `read_task` 读带污点来源的任务时，运行记一次污点。
 
-留下的（已知，未修）：姓名的拼音形式不在标识里（没有拼音库，加依赖要下载）；变形、同义词一点点编进检索词的低带宽外泄仍挡不住（§12 已写）；工具模式的连接器读到的邮件不经 Crossline，不计污点。
+留下的四个缺口在 §18 补上。
+
+## 18. 补缺口与每月复审（2026-11-26，本人决定）
+
+§17 留下的四个缺口，本人要求逐个补上、不要过严：
+
+- **姓名的拼音。** worker 加依赖 `pinyin-pro`（MIT，纯 JS，离线）。`nameRomanizations`（`apps/worker/src/private-guard.ts`）把资料里的中文全名（2–4 个汉字）转成音节分开的拼音，姓在前、姓在后两种顺序；姓按姓氏读音（单 shan、曾 zeng）；三字以上再按复姓切一次（欧阳）；ü 写成 v、u、yu。只拦全名，不拦单个音节或单独的名（「Yan」「Ming」太常见）。`holdsTerm` 把音节间的空格当成可有可无，所以 `Zeng Xiaozhou`、`zengxiaozhou`、`Xiao-Zhou Zeng` 都算。
+- **改写、同义词一点点外泄。** 新 Skill `crossline-query-review`（低档，不联网，不带本人的任何内容）。一次运行读过别人的话之后——第二次及以后的 `web_research`，或调用方说已带污点（`webResearchTainted`：工具模式读过邮件或连接器）——每次检索先让它看这次的检索词、用途和本次运行之前的检索（最多 12 次），判断合起来是否在描述某个私人、带出邮件或文件内容、拆字编码，或明显偏离用途像在照网页指令办事。普通话题、公开机构和人名一律放行，拿不准就放行。拒绝时把原因作为工具答复交回模型改写；复核本身跑不了就放行并记日志（`web_research.review_unavailable`），前面的确定性检查照旧。第一次检索和干净运行不复核，不多花模型调用。
+- **连接器读到的内容。** 工具模式的 ChatGPT 连接器调用（`mcpToolCall`）经 `onConnectorCall` 计为污点，新来源 `connector`（显示为「连接器里的内容」）：这次运行放进收件箱的事带来源，高风险的照样扣在待确认；之后的 `web_research` 走上面的复核。不因此断网。
+- **不在沙箱里的 shell 写 skill 目录。** 文本守卫看不出用变量拼的路径。没有沙箱（`guard-only`，非节点）的 owner shell 运行前把 skill 库、隔离区和 `<repo>/skills` 的文件全部读进内存（按内容哈希比较，超过 64 MB 只记哈希），运行结束后比对：新增的删掉、改掉或删掉的写回（`apps/worker/src/skill-store-guard.ts`）。有改动就在审计里记一条 `skill.store.changed`，结果等本人看（「改动了 skill 目录，已恢复原样」）；内容没变（另一次运行重写同样的库）不算改动。
+
+**每月复审做成本机定时任务**（Claude Code 的 scheduled task `crossline-monthly-review`，每月 1 日 10:00，应用开着时运行）：在新工作树 `maint/monthly-<YYYY-MM>` 上，用最新的夜间备份恢复出副本跑 `pnpm review:ledger`，删掉确认无人读的遥测类写入；读 `rule-fired.jsonl`，对 record/fallback 规则中样本 ≥ 30、和模型一致率 ≥ 95% 的跑 `scripts/ablate.ts`，答案不变的按退役方法删掉（money、invariant 永不删）；这个月改过 SKILL.md 就跑 `scripts/pass-k.ts`。typecheck 和 test 通过才提交到本地分支，报告写在 `docs/maintenance/monthly-<YYYY-MM>.md`。不推送、不合并，删不删由本人审分支决定。
+

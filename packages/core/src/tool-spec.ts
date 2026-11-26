@@ -85,9 +85,9 @@ export function withheldByRuleOfTwo(offered: readonly string[], run: { tainted: 
  * work order as `payload.provenance`): which run (`run`, the assistant's task id or `mail-triage`), who (`by`), and what it read.
  * Read by `autoApprovalEligible`, which holds such work for the person when it is high-risk (`taintedRisk`).
  */
-export type TaintSource = "mail" | "page" | "site" | "document" | "download" | "flow";
+export type TaintSource = "mail" | "page" | "site" | "document" | "download" | "flow" | "connector";
 export type CaptureProvenance = { run: string; by: "assistant" | "mail_triage"; tainted: boolean; sources: TaintSource[] };
-const SOURCES: readonly TaintSource[] = ["mail", "page", "site", "document", "download", "flow"];
+const SOURCES: readonly TaintSource[] = ["mail", "page", "site", "document", "download", "flow", "connector"];
 export function readProvenance(value: unknown): CaptureProvenance | undefined {
   const raw = value as Partial<CaptureProvenance> | undefined;
   if (!raw || typeof raw !== "object" || typeof raw.tainted !== "boolean") return undefined;

@@ -107,6 +107,8 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-visa-finder": "low",
   // `web_research`'s search run: queries in, pages out, nothing to judge (docs/plans/harness-1125.md §10).
   "crossline-web-scout": "low",
+  // Whether a tainted run's searches carry something about a person (docs/plans/harness-1125.md §18): a short reading of a few lines.
+  "crossline-query-review": "low",
   // Brokerage quotes for the ledger's holdings (docs/ledger-wealth.md §2): one connector call per symbol, the number checked by code.
   "crossline-quote-reader": "low",
   "crossline-background-facts": "low",

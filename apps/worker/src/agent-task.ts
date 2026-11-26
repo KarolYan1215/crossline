@@ -11,6 +11,8 @@ import {
 import { readWindowsSandbox, runCodexSkill, SHELL_DENIED_IN_HOME, webResearchBlocker, type AgentItem, type CodexRpcBoundary, type PersonQuestion, type SkillTools } from "@crossline/codex";
 import { agentChainsFor, approveCategory, CLEAN_RUNS_TO_TRUST, listAgentTasks, readCategories, recordReview, type CategoryState, type CrosslineStore } from "@crossline/db";
 import { libraryInstruction, librarySkillsFor } from "./skill-library";
+import { skillStoreFolders } from "./skill-lock";
+import { restoreSkillStore, snapshotSkillStore } from "./skill-store-guard";
 import { localeOf, tOfWorkspace } from "./locale";
 import { applyToolboxActions, createAgentToolbox, type MailLookup, type RunTaint } from "./agent-tools";
 import { changedInputs, nodeTaskDir, pullResults, sendInputs, type NodeShellLink, type SentInputs } from "./node/task-sync";
@@ -385,6 +387,8 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
   confine?: InputConfinement;
   /** The platform the owner's shell runs on (tests); only on Windows is it put in Codex's sandbox (docs/plans/harness-1125.md §9). */
   platform?: string;
+  /** The folders a shell run without a sandbox is checked against afterwards (tests); by default the skill library, quarantine and `<repo>/skills`. */
+  skillFolders?: string[];
 }) {
   return async function run(given: AgentTaskInput): Promise<AgentOutcome> {
     // Every mode but the machine owner's own shell goes through here: tools, the sandbox and a node all read or copy what `inputs` names.
@@ -478,6 +482,9 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     const readerSpecs = input.reader?.tools.specs ?? [];
     const tools = boardSpecs.length || readerSpecs.length ? { specs: [...readerSpecs, ...boardSpecs],
       call: (name: string, args: unknown) => readerSpecs.some((spec) => spec.name === name) ? input.reader!.tools.call(name, args) : board!.call(name, args) } : undefined;
+    // No sandbox, so no deny on the skill folders: what the run did to them is put back after it (docs/plans/harness-1125.md §18).
+    const skillFolders = shellSandbox === "guard-only" && !link ? options.skillFolders ?? [...skillStoreFolders(), path.join(cwd, "skills")] : undefined;
+    const skillsBefore = skillFolders ? snapshotSkillStore(skillFolders) : undefined;
     const result = await runCodexSkill<AgentSummary>(client, task, {
       skillName: AGENT_SKILL, cwd, developerInstructions: AGENT_INSTRUCTIONS + (sandboxed ? SANDBOX_NOTE : "") + (isolation ? profileNote(isolation, windowsSandbox !== undefined) : ""), outputSchema: AGENT_SUMMARY_SCHEMA,
       // The library skills' note follows the line and the task: after the input, not in the instructions every run shares (the prompt cache).
@@ -503,6 +510,12 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
 
     await input.reader?.close().catch(() => undefined);
     await pull?.();
+    const skillStore = skillsBefore && skillFolders ? restoreSkillStore(skillsBefore, skillFolders) : undefined;
+    if (skillStore?.changed.length) {
+      audit.decisions.push({ decision: "deny", rule: "skill.store.changed", kind: "fileChange", subject: t("{{count}} 个文件", { count: skillStore.changed.length }), outcome: "declined",
+        reason: skillStore.restored ? t("改动了 skill 目录，已恢复原样") : t("改动了 skill 目录，没能全部恢复") });
+      console.warn(JSON.stringify({ type: "agent.skill_store_changed", taskId, changed: skillStore.changed.slice(0, 20), restored: skillStore.restored, at: new Date().toISOString() }));
+    }
     const after = fingerprint(inputs);
     const inputsModified = link && sent ? await changedInputs(link, taskId, sent).catch(() => [] as string[]) : changedFiles(before, after);
     if (!result.ok) {
@@ -536,6 +549,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
       ? await reproduceDeliverables(directory, artifacts, windowsSandbox ? { sandbox: { backend: windowsSandbox.backend, deny: windowsSandbox.deny } } : {}) : undefined;
     const held = reproduction ? reproductionReason(reproduction, locale) : undefined;
     if (held) reviewReasons.push(held);
+    if (skillStore?.changed.length) reviewReasons.push(skillStore.restored ? t("改动了 skill 目录，已恢复原样") : t("改动了 skill 目录，没能全部恢复"));
     const reviewRequired = reviewReasons.length > 0;
     const applied = board ? applyToolboxActions(store, workspaceId, ownerId, taskId, board.actions, mergedTaint(board.taint(), untrustedSourcesOf(input, inputs, options.outputRoot))) : { captures: [], told: [] };
     const record = { taskId, title: input.title, category: input.category, directory, durationMs: Date.now() - startedAt, summary: result.output.summary,
@@ -572,7 +586,7 @@ function untrustedOf(input: AgentTaskInput, inputs: string[], outputRoot: string
     ...(inputs.some((entry) => folder(entry).startsWith("flow-")) ? ["flow"] : [])];
 }
 
-const TAINT_SOURCES: readonly TaintSource[] = ["mail", "page", "site", "document", "download", "flow"];
+const TAINT_SOURCES: readonly TaintSource[] = ["mail", "page", "site", "document", "download", "flow", "connector"];
 /**
  * A path as the file system has it: short names expanded and junctions followed, through the nearest part that exists (a new file's
  * folder). What does not resolve stays as given.
@@ -799,11 +813,14 @@ async function runWithTools(store: CrosslineStore, workspaceId: string, cwd: str
       },
       // The web only through `web_research` (review of 2026-11-25): this thread holds the person's data, so never the hosted search on it;
       // the pages it hands back are someone else's words, and the run's captures say so.
-      ...(withheld.has("web_search") ? { allowWebSearch: false } : { onWebResearch: () => toolbox.noteTaint("page") }),
+      ...(withheld.has("web_search") ? { allowWebSearch: false } : { onWebResearch: () => toolbox.noteTaint("page"), webResearchTainted: () => toolbox.taint().tainted }),
       timeoutMs: 2 * 60 * 60_000, signal, tools, ...(resumeThreadId ? { resumeThreadId } : {}),
       // The runtime's own features (2026-10-19): JavaScript in its V8 isolate to compute and to call these functions, the person's ChatGPT
       // connectors read-only, and its plan tool, whose steps are shown while the run works. Code mode runs in codex-code-mode-host beside
       // the runtime; without it every call through code mode fails, so it is switched on only when the host is there.
+      // What a connector hands back (mail, a calendar invitation, a shared file) is someone else's words that never passed through
+      // Crossline (gap of 2026-11-25, docs/plans/harness-1125.md §18): the run is tainted by it like by mail it read itself.
+      ...(withheld.has("connectors") ? {} : { onConnectorCall: () => toolbox.noteTaint("connector") }),
       codeMode: !webResearchBlocker(), connectors: !withheld.has("connectors"), onPlan: (plan) => { audit.plan = plan; live(); writeProgress(directory, audit); },
       ...askOption(ask)
     });

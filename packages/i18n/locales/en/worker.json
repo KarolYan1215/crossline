@@ -929,5 +929,9 @@
   "skill 目录只由 Crossline 在扫描和审查之后写入，助手不能直接改": "Only Crossline writes skill folders, after scanning and review; the assistant cannot change them directly",
   "写入时请用完整路径，不用 8.3 短名": "Name the full path when writing, not an 8.3 short name",
   "联网检索": "Web search",
+  "检索复核": "Search review",
+  "{{count}} 个文件": "{{count}} files",
+  "改动了 skill 目录，已恢复原样": "Changed the skill folders; put back as they were",
+  "改动了 skill 目录，没能全部恢复": "Changed the skill folders; not everything could be put back",
   "「{{title}}」的网址不在检索结果里，没有打开。": "The address of “{{title}}” was not among the search results, so it was not opened."
 }
