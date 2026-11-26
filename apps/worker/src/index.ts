@@ -128,6 +128,7 @@ import { skillStoreFolders } from "./skill-lock";
 import { identityLines } from "./lines";
 import { createBackgroundSpend, nonCoreAllowed } from "./spend";
 import { telemetryPass } from "./telemetry";
+import { createWorkerTimers } from "./timers";
 import {
   buildSources, calendarLabel, listCatalogue, readSelection, saveSelection, seedNewAccounts, sourceKey, mayUseGraphLogin, withdrawForeignCalendar } from "./calendar-sources";
 import { createGraphAuthSession, GraphReadSource, loadVapidKeys, sendWebPush, type GraphCredentialProvider } from "@crossline/connectors";
@@ -1285,6 +1286,8 @@ if (workerMode(deviceLink) === "device" && deviceLink) {
 }
 // A workspace's own third-party model (R7): Codex reaches it through this local gateway, which adds the key (model-gateway.ts).
 const modelGateway = await startModelGateway({ resolve: (workspaceId, providerId) => modelProviders.upstream(workspaceId, providerId) });
+// Every repeating clock started before the one-shot exit below goes through this, so that exit can stop them before the ledger closes.
+const workerTimers = createWorkerTimers();
 // The developer's model for accounts that redeemed an invite code (sponsor.ts): only when the server has a key and candidates.
 let sponsorService: SponsorService | undefined;
 // The shell assistant for every account inside Codex's Linux sandbox, when the server turned it on and a sandbox really starts here.
@@ -1577,7 +1580,7 @@ const importService = createImportService({ store: analysisStore, secrets, dataD
 const dictationService = createDictationService({ store: analysisStore, dataDir, cwd: repoRoot, client: accountClient,
   mode: hostedBeta || process.env.CROSSLINE_SERVER_TRANSCRIBE === "1" ? "server" : "local",
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });
-setInterval(() => dictationService.sweep(), 60_000).unref();
+workerTimers.every(() => dictationService.sweep(), 60_000);
 // The person's Xiaohongshu favourites, read whole by a worker job in their own visible browser (favourites-reader.ts): pictures described
 // on the account's own Codex, videos heard by the recordings' transcriber (ffmpeg on the PATH, or CROSSLINE_FFMPEG).
 const classifyTopics = createTopicClassifier(analysisStore, repoRoot, (workspaceId) => accountClient(workspaceId));
@@ -1619,14 +1622,14 @@ const remoteBrowsers = loginMode() === "remote" ? createRemoteBrowsers({
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() }))
 }) : undefined;
 configureRemoteLogin(remoteBrowsers);
-if (remoteBrowsers) setInterval(() => { void remoteBrowsers.sweep().catch(() => undefined); }, 30_000).unref();
+if (remoteBrowsers) workerTimers.every(() => { void remoteBrowsers.sweep().catch(() => undefined); }, 30_000);
 // A form window waiting for the person is watched every half minute (their own submission, a closed window), not at the 15-minute tick.
-setInterval(() => {
+workerTimers.every(() => {
   const owner = runtimeOwner(analysisStore);
   for (const workspace of analysisStore.listWorkspaces()) {
     if (workspace.id === owner || nodeComputeOn(analysisStore, workspace.id)) void formService.pass(workspace.id).catch(() => undefined);
   }
-}, 30_000).unref();
+}, 30_000);
 const agentService = createAgentService({
   // The owner's assistant (tools mode on the hosted site) runs through the pool too: its nodes add room for more at once.
   concurrency: (workspaceId) => workspaceConcurrency(workspaceId),
@@ -2017,7 +2020,7 @@ const remoteService = createRemoteService({ store: analysisStore, hub: () => nod
   forms: { handle: formService.handle, pass: formService.pass }, log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });
 // Recordings uploaded from the phone go to the person's computer while it is online with 「替手机转写录音」 on (§6.4); the rest wait for the night.
 let transcribingOnComputers = false;
-setInterval(() => {
+workerTimers.every(() => {
   if (transcribingOnComputers || !nodeHub) return;
   transcribingOnComputers = true;
   void (async () => {
@@ -2032,7 +2035,7 @@ setInterval(() => {
       if (outcomes.length) console.info(JSON.stringify({ type: "remote.recordings", workspaceId: workspace.id, host: link.host, outcomes }));
     }
   })().finally(() => { transcribingOnComputers = false; });
-}, 3 * 60_000).unref();
+}, 3 * 60_000);
 const nodeHub: NodeHub | undefined = nodePort > 0 ? await createNodeHub({
   port: nodePort,
   // A linked device's token, or the standalone node's own (paired on the 「这台电脑」 card).
@@ -2270,15 +2273,15 @@ if (!capabilitySecret) {
     setTimeout(evaluateSponsor, 2 * 60_000).unref();
     // The periodic re-check of stale candidates runs in the cheaper hours (one of the four daily calls falls in them); the one after a
     // start runs at once, since a deploy is when the prompts or the code it measures changed.
-    setInterval(() => { if (sponsorOffPeak(new Date())) evaluateSponsor(); }, 6 * 60 * 60_000).unref();
+    workerTimers.every(() => { if (sponsorOffPeak(new Date())) evaluateSponsor(); }, 6 * 60 * 60_000);
     // A spent key, a measurement the runtime cut short, or nothing chosen at all: tried again every half hour (a spent key answers at once,
     // so a try costs nothing), and the measurement resumes as soon as the balance is topped up or the runtime is back.
-    setInterval(() => { if (spentKey || !sponsorService?.chosen()) evaluateSponsor(); }, 30 * 60_000).unref();
+    workerTimers.every(() => { if (spentKey || !sponsorService?.chosen()) evaluateSponsor(); }, 30 * 60_000);
   }
   // Other accounts' runtimes stop after a quiet spell (above), so an idle account holds no process.
-  setInterval(() => codexSupervisor?.runtimes?.stopIdle(), 60_000).unref();
+  workerTimers.every(() => codexSupervisor?.runtimes?.stopIdle(), 60_000);
   // Gateway-counted tokens of node runs that no run took within half an hour are billed as rows of their own (usage.ts).
-  setInterval(() => flushMeteredUsage(30 * 60_000), 5 * 60_000).unref();
+  workerTimers.every(() => flushMeteredUsage(30 * 60_000), 5 * 60_000);
   // One model run at a time on the hosted beta, and none started above the memory high-water mark (model-gate.ts).
   // The candidates' measurement is no person's account (one tenant, `sponsor-eval`): it may use every background slot nobody else wants.
   configureModelGate({ probe: () => containerMemory(), reserved: heldMemory,
@@ -2294,11 +2297,11 @@ if (!capabilitySecret) {
     reclaim: () => codexSupervisor?.runtimes?.reclaim(), tenantLimits: { "sponsor-eval": Number.POSITIVE_INFINITY } });
   // What the health check and the logs read: memory in use, its ceiling and peak, and the gate's line, every five minutes.
   const mb = (bytes: number | undefined) => bytes === undefined ? null : Math.round(bytes / 1048576);
-  setInterval(() => {
+  workerTimers.every(() => {
     const gate = modelGateStatus();
     console.info(JSON.stringify({ type: "worker.memory", usedMb: mb(gate.memory?.used), limitMb: mb(gate.memory?.limit), peakMb: mb(containerPeak()), heldMb: mb(heldMemory()),
       active: gate.active, queued: gate.queued }));
-  }, 5 * 60_000).unref();
+  }, 5 * 60_000);
 } catch {
   console.warn(JSON.stringify({ type: "worker.blocked", code: "CODEX_SUPERVISOR_START_FAILED" }));
 }
@@ -2309,7 +2312,13 @@ const releaseWorkerLock = (): void => {
 
 await tick({ waitForWorkspaces: process.env.CROSSLINE_RUN_ONCE === "1" });
 if (process.env.CROSSLINE_RUN_ONCE === "1") {
+  // Clocks first, then everything that listens, then the ledger: the gateway's open socket kept the process alive past the close, and
+  // the form watcher's next beat read a closed ledger (「The database connection is not open」, exit 1). With nothing left listening
+  // the process ends on its own.
+  workerTimers.stop();
   await codexSupervisor?.stop();
+  await modelGateway.close();
+  await nodeHub?.close();
   analysisStore.close();
   releaseWorkerLock();
 } else {
