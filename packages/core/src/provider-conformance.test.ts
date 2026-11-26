@@ -127,6 +127,24 @@ test("interview parity: a record from before the scout, the query review and the
     "crossline-onboarding", "crossline-onboarding-extract", "crossline-onboarding-research", "crossline-web-scout"]));
 });
 
+test("a record from before 2026-11-18 admits the Skills whose new schemas have a stand-in, and not method research, which has none", () => {
+  const later = new Set(["FOLDER_SCREEN_SCHEMA", "SOURCE_VERSIONS_SCHEMA", "FILE_PROJECTS_SCHEMA", "CHAT_DIGEST_SCHEMA", "DELIVERABLE_CHECK_SCHEMA",
+    "METHOD_RESEARCH_SCHEMA", "WEB_SCOUT_SCHEMA", "QUERY_REVIEW_SCHEMA", "SCALE_ANALYSIS_SCHEMA", "SKILL_INJECTION_CHECK_SCHEMA", "INTERVIEW_CARD_TOOLS"]);
+  const capabilities = { ...THIRD_PARTY_CAPABILITIES, webSearch: true };
+  const proxied = ["crossline-folder-classifier", "crossline-source-digest", "crossline-deliverable-check"];
+  expect(admittedSkills(summarizeConformance(base, allPassing()), capabilities)).toEqual(expect.arrayContaining([...proxied, "crossline-method-research"]));
+  const older = conformanceCases().filter((item) => !later.has(item.id)).flatMap((item) => Array.from({ length: item.runs }, () => run(item.id)));
+  const admitted = admittedSkills(summarizeConformance(base, older), capabilities);
+  expect(admitted).toEqual(expect.arrayContaining(proxied));
+  expect(admitted).not.toContain("crossline-method-research");
+  // The stand-in's failure withholds the Skill as its own would.
+  const gateFailed = older.map((item) => item.caseId === "MILESTONE_GATE_OUTPUT_SCHEMA" ? run(item.caseId, false) : item);
+  expect(admittedSkills(summarizeConformance(base, gateFailed), capabilities)).not.toContain("crossline-deliverable-check");
+  // A record that ran the schema itself is judged on that run, not the stand-in's.
+  const ownFailed = [...older, run("CHAT_DIGEST_SCHEMA", false)];
+  expect(admittedSkills(summarizeConformance(base, ownFailed), capabilities)).not.toContain("crossline-source-digest");
+});
+
 test("interview parity: the card-tools case checks a question card's real schema, and its failure keeps only the interview off functions", async () => {
   const { INTERVIEW_TOOLS_CASE_ID, callsFunctions, callsFunctionsFor, ONBOARDING_DIALOGUE_SCHEMA } = await import("./index");
   const item = conformanceCases().find((entry) => entry.id === INTERVIEW_TOOLS_CASE_ID)!;

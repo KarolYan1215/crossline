@@ -397,7 +397,24 @@ export const SCHEMA_PROXIES: Record<string, string> = { MAIL_TRIAGE_SCHEMA: "CAL
   // Without it a provider measured before 2026-11-25 had every `web_research` refused, the interview's research included.
   WEB_SCOUT_SCHEMA: "MATERIAL_SEARCH_SCHEMA",
   // A search's review (2026-11-26): a verdict and a short reason, like a review.
-  QUERY_REVIEW_SCHEMA: "VALIDATION_REVIEW_SCHEMA" };
+  QUERY_REVIEW_SCHEMA: "VALIDATION_REVIEW_SCHEMA",
+  // A folder's screening (2026-11-22): a bounded list of integers and a short reason; the date extraction's refs and weekdays are bounded
+  // integer lists inside a larger answer.
+  FOLDER_SCREEN_SCHEMA: "DATE_EXTRACTION_SCHEMA",
+  // Files filed under projects (2026-11-22): a list of id, project id and reason, like calendar filing's key, line id and reason.
+  FILE_PROJECTS_SCHEMA: "CALENDAR_CLASSIFICATION_SCHEMA",
+  // An AI-chat export digested (2026-11-22): up to 40 id-keyed summaries of 600 characters, like the research's up to 30 id-keyed findings
+  // with a 600-character claim.
+  CHAT_DIGEST_SCHEMA: "DILIGENCE_OUTPUT_SCHEMA",
+  // Older file versions compared (2026-11-22): up to 12 flat objects of seven fields, a boolean and two long texts (600, 1200), like a
+  // material search's up to 8 flat sources of eight fields with an 800-character summary.
+  SOURCE_VERSIONS_SCHEMA: "MATERIAL_SEARCH_SCHEMA",
+  // A deliverable's check (2026-11-21): per document two enums, a quote, a gap and a reason, like the milestone gate's per-criterion
+  // reading with an enum, a quote and a shortfall (a critical Skill's schema, run three times).
+  DELIVERABLE_CHECK_SCHEMA: "MILESTONE_GATE_OUTPUT_SCHEMA"
+  // METHOD_RESEARCH_SCHEMA (2026-11-18) has none: its ids carry a `pattern`, which no measured schema uses, so a provider that rejects or
+  // ignores the keyword would not show on any stand-in. It waits for a measurement that runs it.
+};
 /** A question card as the interview's `ask_question` takes it (the dialogue schema's own item). */
 function interviewQuestionSchema(): Record<string, unknown> {
   const schema = ONBOARDING_DIALOGUE_SCHEMA as unknown as { properties: { questions: { items: Record<string, unknown> } } };
