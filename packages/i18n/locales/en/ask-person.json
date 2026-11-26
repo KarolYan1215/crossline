@@ -1,0 +1,14 @@
+{
+  "回答记为本人确认的事实；问的工作若要等它，会按回答重做。": "The answer is kept as a fact the person confirmed; work that waits on it is redone with it.",
+  "按卡片上写的假设继续，之后不会重复问。": "Work goes on with the assumption on the card, and the question is not asked again.",
+  "就按「{{assumption}}」": "Go with “{{assumption}}”",
+  "填日期": "Enter a date",
+  "写回答": "Write an answer",
+  "来自读过外部内容的运行": "From a run that read outside content",
+  "例如：{{assumption}}，或用自己的话说": "For example: {{assumption}}, or in your own words",
+  "这个问题由读过网页或邮件的运行提出，回答前先核对它问的是不是本人的事。": "A run that read a web page or a mail asked this; check that it is really about the person before answering.",
+  "回答前按「{{assumption}}」做。": "Until answered, work goes on with “{{assumption}}”.",
+  "回答后，相关工作会按答案重做。": "Once answered, the work that asked is redone with the answer.",
+  "回答会记为本人确认的事实，以后不再问。": "The answer is kept as a fact the person confirmed and not asked again.",
+  "「{{title}}」需要本人回答：{{question}}（未回答前按「{{assumption}}」做）": "“{{title}}” needs the person's answer: {{question}} (until then it goes on with “{{assumption}}”)"
+}

@@ -14,6 +14,7 @@ import { identityLines } from "./lines";
 import { absorbParts, decideFold, existingTasksFor, openTasks, recentlyDoneTasks, recordFold, type Fold } from "./duplicate-guard";
 import { materialExcerpts, relevantFacts } from "./material-context";
 import { localeOf, tOfWorkspace } from "./locale";
+import { ASK_PERSON_INSTRUCTIONS, createAskTool } from "./ask-tool";
 const SKILL = "crossline:crossline-goal-backplanner";
 /**
  * How many items an automatic (rolling) backplan keeps when the answer has no core task of the person's. With one, a round keeps that
@@ -136,10 +137,18 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
         .slice(0, 20).map((task) => ({ id: task.id, title: task.title.slice(0, 120), intent: task.intent.slice(0, 160) })) };
     const rolling = options.rolling ? " Return only the person's next core task that can start now (existingWork shows what is already done or open), with the "
       + "assistant's items and questions it needs (prepares = its id); the rest is proposed after it is done." : "";
+    // ask_person (ask-tool.ts), one tool for both modes so the per-run cap covers the whole backplan. Approved insights are summaries of
+    // pages read on the web: a run given them asks as one that read untrusted content.
+    const askTool = createAskTool({ store, workspaceId, skill: SKILL, ref: { kind: "milestone", id: milestone.id }, identityId: milestone.identityId,
+      projectId: milestone.projectId ?? "", dueBy: milestoneDeadline, title: milestone.title, untrusted: () => approvedInsights.length > 0 });
     const run = (missingInputs: MissingInput[]) => {
       const input = { ...context, missingInputs };
       const runSources = [...sources, ...materials.map((item) => item.text), ...missingInputs.flatMap((item) => [item.message, item.what])];
       return runCodexSkill<Answer>(client, input, { skillName: SKILL, cwd, redoOnRepair: true,
+        optionalTools: { tools: askTool, withoutTools: (value) => value,
+          instructions: ASK_PERSON_INSTRUCTIONS + " Here: an input only the person knows (their plan, preference, a fact about themselves) is "
+            + "asked with ask_person and the milestone is split on the assumption; a blocker (what, whoHas) is for what someone else holds or "
+            + "must be obtained, never for what you just asked." },
         developerInstructions: "Work backwards from this approved milestone to the tasks that deliver it, as the crossline-goal-backplanner Skill describes, "
           + "and return only the requested JSON. Write the person's core tasks first (owner person: their practice, judgement, core output or own acts, "
           + "named by what they produce), then the preparation each needs as the assistant's items (owner assistant, prepares = that core item's id) "

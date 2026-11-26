@@ -88,3 +88,15 @@
 - shell 助手真实回合：今日输入框建任务（模型判 `external: false`），`/api/agent/dispatch` 交给助手；`agent.task.requested` 记 `isolation: "mxc"`、`profile: research`，`audit.json` 为 `egress: "packages"`、2 条命令、`reproduced: true`（worker 在沙箱里重跑 run.py，HTML 哈希一致），49 秒。测试任务已归档。
 - 本机是完整模式，敏感资料本来就在本机密钥库，服务器→电脑的迁移与 48 小时提醒在这台电脑上不适用（单元与真 Chrome 测试见 `form-vault.test.ts`）。
 - 打包时发现 `scripts/package-node.ts` 的白名单漏了 `apps/worker/src/browser-port.ts`（ffffbd2cbc 引入，只用 `node:net`），已补；独立节点安装包 1.2.2 能构建，但没发布。
+
+## 10. 主动提问（2026-11-25） ✅ 已实现
+
+本人原话：「模型如果有不确定的问题，给模型一个主动提问工具，允许其向用户提问获取信息（前提是用户应该知道这个信息）。」借鉴 LangGraph `interrupt`、MCP elicitation 与 Horvitz 混合主动（docs/competitors.md「主动询问的范式」）：有把握就做，只有本人知道的才问，问的时候先按假设往下做，不让运行停下来等人。
+
+- **工具**：`ask_person({question, why, knownBy: "person", options?, answerType: text|long_text|date|choice, assumption, blocking})`，规格与校验在 `packages/core/src/info-request.ts`（`ASK_PERSON_TOOL`、`readPersonQuestion`），运行时在 `apps/worker/src/ask-tool.ts`（`createAskTool`，可叠加的 `withAskTool(tools, ctx)`：只做数组拼接，不改运行的工具组装）。只问本人的计划、偏好、事实与处境；能在输入、本人文件、账本或网上查到的，以及别人掌握的事实（那是 `request`，起草消息由本人发出），一律不问。工具描述、各调用方的说明和三个 SKILL.md 都写明了。`assumption` 必填，运行按它完成本次输出；`blocking` 只用于缺了答案输出就不对的情况。
+- **注意力**（代码拦截，不靠模型自觉）：问题账本（`question_ledger`，访谈、待确认、拆步骤的问题都在里面）里已答过的相似问题（`questionSimilarity ≥ SAME_QUESTION` 0.6，同一项目内）直接把答案还给模型，本人不再被问；还开着的相似问题并入同一张卡（同 id 再记一条 `join`，答案到了按每个等待方各自重跑）；每次运行新问题最多 `PERSON_QUESTIONS_PER_RUN` 2 个，超出的调用被拒，模型按假设继续。问题的家是待确认，卡片 `skill_question`（`apps/web/lib/skill-questions.ts`）：不 blocking 且一周内不到期的进周复盘（`inReview`），不进角标。只有 blocking 且相关任务或里程碑 48 小时内到期才推送（`pushesPersonQuestion`，`push-policy` 新增 `person_question`，`interrupt`）。
+- **回答**：写成已确认的事实（`profile_facts`，slot `person_answer_<hash>`，`sourceRef` `ask:pq:<id>`，即「本人回答」），问题账本记 `answered`；选「就按假设」记 `assumed`，不重跑（运行早已按它做了）。blocking 的等待方在答案到达后重跑：任务 → `task.steps_replan_requested`（带回答）；里程碑 → `goal.backplan_rerun_requested`；教程 → `requestTutorial`；材料准备 → `retryMaterialPreparation`。都是已有的重跑入口。
+- **安全**：调用方告诉工具这次运行是否读过不可信内容（`untrusted`：拆步骤开了网页调研、倒推带了网上来的已批准洞见）。这样的运行提的问题不许带链接、网址或 markdown 链接（`hasLink`，拒绝并告诉模型用自己的话问），卡片上标「来自读过外部内容的运行」并提醒本人核对。并行会话 taint-tools 的污点标记合并后，可把 `untrusted` 改读它的标记。
+- **接入**：`step-planner`（与拆步骤计划里的 `questions` 分工：`ask_person` 只问「步骤现在就会错」的事实，能等周复盘的仍写进 `questions`，同一问题不两头问；拦截时也读得到已答的步骤问题）、`goal-backplanner`（只有本人知道的输入用 `ask_person` 并按假设拆分，`blockers` 的 `what`/`whoHas` 留给别人掌握或要去获取的东西）、`manualbook` 的设计器（只问会改变本人学哪几步、怎么学的事）。三处都经 `optionalTools` 提供：不能调用函数的路线不提供工具，运行照旧。
+- **Accretion 账**：新增一个事件类型 `person.question.asked`（读者：待确认卡片 `skill_question`；`ask-tool.ts` 找可并入的开放问题）和一个 ask kind `skill_question`（读者：`collectAsks`/`answerAsk`）。没有复用 `agent.question.*`：那条线是助手运行中等 10 分钟的同步提问，15 分钟后被自检过期，这里的问题要留到本人回答；状态和答案复用问题账本，答案复用 `profile_facts`，重跑复用现有事件，没有新设置项和环境变量。
+- 测试：`apps/worker/src/ask-tool.test.ts`（已答拦截、每次上限、同题并入与重跑对象、按假设不重跑、不可信运行禁链接、推送条件、工具拼接）、`apps/web/lib/skill-questions.test.ts`（卡片、回答成为事实、blocking 任务重排与里程碑重新倒推、周复盘、任务关闭后不再问）。
