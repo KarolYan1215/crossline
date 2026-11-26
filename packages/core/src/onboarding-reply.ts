@@ -33,6 +33,11 @@ const SET_FOR = /(?:定在|定于|安排在|放在|约在|就在|改到|挪到)\
 /** Dates as anyone writes them: 「11 月 24 日」, 「11/24」, 「2026-11-24」. */
 const DATE_WRITTEN = /(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]|(?<![\d/])(\d{1,2})\/(\d{1,2})(?![\d/])|\d{4}-(\d{2})-(\d{2})/gu;
 const WEEKDAY_CHAR = "日一二三四五六"; // i18n-ignore: matched against the reply, never shown
+/**
+ * The dates a text writes, as written (「11 月 20 日」, 「12/5」): what the ledger snapshot lists as the days the person gave (2026-11-25),
+ * so the dialogue sees which days it may name. The same pattern `inventedDates` records a reply against.
+ */
+export const datesWritten = (text: string): string[] => [...new Set([...text.matchAll(DATE_WRITTEN)].map((match) => match[0].replace(/\s+/gu, " ").trim()))];
 
 /**
  * Dates the reply says something is set for that nobody gave: not in the person's replies, the research, the files or the facts on

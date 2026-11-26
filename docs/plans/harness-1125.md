@@ -251,3 +251,24 @@
 - `travel-grant`：以前读取器给出自由文本条款时，卡片会问本人；现在不再问，卡片列出还差什么（`partial`）。
 
 真模型回放（`--live`）这次没有跑：需要 Codex 额度和独立的 Codex home。读取器的提示词与 schema 改了，下次真跑应先看 `fit` 的分布，特别是 `wrong_stage` 有没有判得过严。
+## 访谈账本驱动（2026-11-25）
+
+本人原话：访谈清单是模型对着账本确认，不是正则判断；账本是可信的、不会被上下文压缩的外部记忆，保证不重复追问、也不漏问。打回改为每轮更新账本、把最新的账本和规则写进 prompt，让模型自己避免复述经历和编造日期。出题检查同上：靠账本排除，模型按意思确认，不出看着不同、意思相同的题。
+
+**账本里写什么（每轮结束时写，下一轮开始前读）。**
+- 问过的题：问题卡照旧进 `question_ledger`；回复里的主问题经 `mark_round.asked`（原文、`gist`、`repeats`、`followUp`）记为 `iq:<会话>:<轮>:main-<n>`（`recordAsked`）。本人下一条回复（卡片行除外）在任何东西读账本之前写成它的回答（`answerMainQuestions`）。
+- 每道题的意思：`gist` 按账本编号存在会话的 `coverage.gists`（不加新设置键、不加新事件）。
+- 清单判定：`mark_round.checklist` 每项 `status`（answered / partial / missing / not_applicable）、`basis`（`reply-N`/`src-N` + 逐字引文）、`note`，存在会话的 `coverage.checklist`，带轮次和时间；`readChecklistVerdicts` 取全工作区各会话里最新的一条，`interviewChecklistFor` 读它。
+- 本人写过的日期（`datesWritten`，按回复编号）和披露所在：不另存，每轮从对话和披露记录里读。
+
+**快照。** `renderInterviewSnapshot`（`packages/core/src/interview-snapshot.ts`）把以上渲染成「〔账本快照 · 第 N 轮开始前〕」：一、清单（每项 id、名称、上次判定和依据，或「未判」「已由账本结构满足」）；二、已问过的题（编号、状态、意思、原题；最近 30 道带回答，最多列 120 道）；三、本人说过的日期；四、披露的说明。有工具的路线放在每轮消息的开头（线程的固定前缀之后，docs/token-economy.md：变的放后面），第一轮和不调函数的路线放在 JSON 的 `snapshot` 字段，取代原来的 `questionLedger`（`ledgerForModel` 删除）。
+
+**代码还判什么。**
+- 清单：只判结构——计数（主线、里程碑、文件归属）、本人的点选、账本里每周重复的日期、整理按句子编号写出的画像部分；凡是读字面判断「说没说清」的正则删掉（`statesSchedule`、`VAGUE_SCHEDULE`、`WEEKDAY`、`CLOCK`、`DESCRIBES_LINE`、画像部分的槽位名、`ASSUMPTION_PREFIX`、项目槽位名、`NO_DEADLINE` 在清单里的用法），这些项改看模型的判定。模型的判定只核对依据（`checkChecklistVerdicts`，IR-192）：id 在快照里、状态四选一、answered/partial 有逐字依据且所引回复不是披露、not_applicable 写理由。
+- 出题：只退回结构（重复 id、重复选项、两个以上日子选项、日期题缺 `about`、换说法问应用自己的待问题）和模型自己的判定（`repeats` 标了答过的题却不是 `followUp`，IR-047/IR-194 附本人的回答退回）。字面相似（IR-047）、同一件事第三次（IR-014）、一轮第六题（IR-051）、同一日期主题再问（IR-126）只记录。
+- 回复：只退回安全（本人回复有自伤字眼的确认 IR-046、回复和卡用自伤字眼 IR-123、自由文本不标 `mark_round` IR-181）。编造日期（IR-006）、披露独有原话（IR-123 的后半）、卡片写法（IR-190）、「还没答」（IR-191）、不该问的 askLesson（IR-124，应用照旧不出那道题）、开始标准没齐说可以开始和报分数（IR-165）只记录，回复不再删句。编造的日子进不了账本和日历：整理只能引 `reply-N`/`src-N`，日期要落在原话的窗口里（IR-005）。
+- 记录写到 `<CROSSLINE_DATA_DIR>/telemetry/rule-fired.jsonl`（`apps/worker/src/rule-fired.ts`，IR-196），不进账本、不加事件类型；`onboarding.round_edited` 不再带 `noted`。consistency-eval 分支有同形的 `ruleFired`，合并时改接它。
+
+**Skill。** 访谈 Skill 加「账本快照」一节（不加核心规则，仍是 15 条）：对着快照判清单（IR-197）、按意思对照已问题目并写 `gist`/`repeats`/`followUp`（IR-198）、一轮一个主问题最多五道、同一件事最多问两次再记成假设、回复里的日子只用快照/文件/调研里的（IR-199）；核心规则 6 的「在线程里找到那一问」改成在快照里找。
+
+**回放对比** 见 docs/claude/profile-first-loop.md 「访谈账本驱动的回放」：按意思重问 1→0，旧尺子清单 3/14→5/14，编造日期 0→0；第一次新回放 7/12 轮调完 `mark_round` 就收尾，`mark_round` 的回执改为提醒写正文后为 0；每轮约慢三分之一。没有规则需要恢复退回。

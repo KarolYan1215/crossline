@@ -9,7 +9,8 @@ import {
   mentionsSelfHarm, safetyRound, sensitiveReplies, withoutDisclosures, disclosureEchoes, disclosureWords, interviewerWords, lessonAnswer, LESSON_QUESTION, type LessonConsent, readTurnProgress, safetyReplyOnly,
   inventedDates, type KnownSources, type OnboardingDialogue, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, ONBOARDING_LAST_FAILURE, readPartialTurn, type OnboardingProgress, calendarWeek,
   tFor, flowOf, INTERVIEW_FLOW_STAGES, INTERVIEW_ROUND_LIMIT, ONBOARDING_STAGES, readCardAnswers, mergeInstrumentAnswers, readInstrumentAnswers,
-  PROFILE_INSTRUMENTS_SETTING, type InterviewFlow, type ProfileCard
+  PROFILE_INSTRUMENTS_SETTING, type InterviewFlow, type ProfileCard, checkChecklistVerdicts, judgedItems, renderInterviewSnapshot, datesWritten,
+  type StoredVerdict
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, steerTurn, type CodexRpcBoundary, type SkillProgress, type SkillTools } from "@crossline/codex";
 import {
@@ -19,12 +20,13 @@ import {
 import { sourceIds } from "./source-ids";
 import { localeOf } from "./locale";
 import { adoptLineGoal, identityLines } from "./lines";
-import { checklistAnswered, interviewLedger, ledgerForModel, linesAnsweredUnread, recordReplyAnswers, recordRound, syncGapQuestions } from "./question-ledger";
+import { answerMainQuestions, checklistAnswered, interviewLedger, linesAnsweredUnread, recordAsked, recordReplyAnswers, recordRound, syncGapQuestions } from "./question-ledger";
+import { ruleFired } from "./rule-fired";
 import { mergeTools } from "./ledger-index";
 import { PART_ROUNDS, SATURATED_RUNS, questionsAsked, roundsInPart, standingLines } from "./onboarding-standing";
 import { interviewReadTools, READ_TOOLS_INSTRUCTIONS } from "./onboarding-read-tools";
-import { CARD_TOOLS_INSTRUCTIONS, cardTools, checkInsights, checkOpenItems, checkQuestions, checkResearch, emptyDraft, withDraft,
-  type DateSubject } from "./onboarding-cards";
+import { CARD_TOOLS_INSTRUCTIONS, cardTools, checkAsked, checkInsights, checkOpenItems, checkQuestions, checkResearch, emptyDraft, withDraft,
+  type DateSubject, type Fired } from "./onboarding-cards";
 import { correctionUnread, createOnboardingExtractor, extractionReached, requestAllLanes, requestExtraction, type ExtractLane } from "./onboarding-extract";
 import { DATES_UNRECORDED_EVENT, ONBOARDING_UNRECORDED_EVENT, personTimeZone, readProfileModel } from "./onboarding-persist";
 import { paceContext, storedProgress } from "./onboarding-pace";
@@ -64,7 +66,6 @@ const FINISH_WAIT_MS = 90_000;
 /** Facts the extraction recorded since the last turn, at most this many lines in `recorded`. */
 const RECORDED_SHOWN = 40;
 /** Questions of the ledger shown to the model each round; a question like an older one is sent back to it with the answer (`checkQuestions`). */
-const LEDGER_SHOWN = 15;
 
 // The scenario in brief, and nothing more: every rule and example is in the Skill. A second copy of the rules here drifted from it twice
 // (2026-10-19; again by 2026-10-31, when it also still said 「in Chinese」 under an English interview), so this names none of them.
@@ -90,6 +91,12 @@ type Announced = { announcedSources?: string[]; calendarSent?: string; heardAt?:
   cardTools?: "tools" | "fallback";
   /** The round the start standard first stood in (the progress header's 「从第几轮起已齐」). */
   startMetRound?: number;
+  /**
+   * The ledger's own memory of the interview (2026-11-25, 「访谈账本驱动」), read by the next round's snapshot and by the checklist
+   * (`readChecklistVerdicts`): the model's latest verdict per checklist item, and each asked question's meaning by its ledger number.
+   */
+  checklist?: Record<string, StoredVerdict>;
+  gists?: Record<string, string>;
   /** The disclosures (`reply-N`) the thread was last rebuilt without: one not among them rebuilds it before the round (2026-11-15). */
   redacted?: string[];
   /** Whether the person was asked, and agreed, to talk about what a hard time taught them (`LESSON_QUESTION`). */
@@ -331,6 +338,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // 研究者？」 answered 「浮躁的」 as the line's goal (docs/onboarding-validation-audit.md §3.4).
     const asked = ([...messages].reverse().find((message) => message.role === "assistant")?.content as { questions?: TurnQuestion[] } | undefined)?.questions ?? [];
     // The question ledger: the answers this reply gives, then the app's own questions as of now (answered ones stay answered).
+    // The questions the last reply itself asked take this reply whole (`answerMainQuestions`); the cards' answers are read from their form.
+    answerMainQuestions(store, workspaceId, sessionId, replyText, replySentences, now);
     recordReplyAnswers(store, workspaceId, sessionId, replyText, replySentences, now);
     syncGapQuestions(store, workspaceId, currentGaps(), now);
     // The cards the last round offered: a tap is scored now, words wait for the extraction to map them, a card passed over is skipped.
@@ -481,13 +490,13 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // Compared by the person's own words where the disclosure is; the interviewer's words and the other replies are ordinary.
     const disclosedTexts = disclosureWords(messages, hidden);
     const ordinaryTexts = [...Object.entries(replies).filter(([id]) => !sensitive.has(id)).map(([, said]) => said), ...interviewerWords(messages)];
-    /** What in a piece of the round points back at a disclosure: a self-harm word, or words only the disclosure said (`disclosureEchoes`). */
-    const echoOf = (said: string): string => {
-      if (!hidden.size || !said) return "";
-      if (mentionsSelfHarm(said)) return "有自伤的字眼";
-      const spans = disclosureEchoes(said, disclosedTexts, ordinaryTexts);
-      return spans.length ? `用了本人谈那段艰难时期的原话（「${spans.join("」「")}」）` : "";
-    };
+    /**
+     * What in a piece of the round points back at a disclosure. A self-harm word is sent back (safety); words only the disclosure said
+     * (`disclosureEchoes`) are recorded (IR-123, 2026-11-25): the model never reads the disclosure (IR-121) and the snapshot tells it where
+     * it sits and what the person agreed to.
+     */
+    const echoOf = (said: string): string => (hidden.size && said && mentionsSelfHarm(said) ? "有自伤的字眼" : "");
+    const echoSpans = (said: string): string[] => (hidden.size && said ? disclosureEchoes(said, disclosedTexts, ordinaryTexts) : []);
     /** What the dialogue is told of a disclosure, by where the person's consent stands. */
     const disclosureNote = (): { disclosure?: string } => {
       if (!hidden.size || focusLine) return {};
@@ -497,14 +506,27 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         : "从中学到的东西（压力来之前的先兆、什么帮到了本人、怎么缓过来的）对以后的安排有用。要谈，先把 askLesson 设为 true，应用会出一道固定的题问本人愿不愿意；整场只问一次，挑本人状态平稳的时候。在那之前不提这段经历。";
       return { disclosure: `本人在 ${where} 谈到过一段艰难时期，原文已换成占位，不给你看。${note}` };
     };
-    const rules = !focusLine && pointsRules(session.coverage);
     /**
-     * What the round wrote that broke a rule the app no longer sends back (2026-11-22: only safety, made-up dates, verbatim quotes, real
-     * links and disclosures go back to the model): recorded on `onboarding.round_edited` for the replays, never edited out.
+     * The ledger snapshot for this round (`renderInterviewSnapshot`): the checklist with the model's last verdicts, the questions asked with
+     * their meaning and answers, the days the person wrote (a disclosure's reply left out), and the disclosure's note. Read from the ledger
+     * the last round wrote, after this reply's answers were recorded.
      */
-    const noted: string[] = [];
+    const snapshotNow = (): string => {
+      const gists = (store.getOnboardingSession(workspaceId, sessionId)?.coverage as Announced | undefined)?.gists ?? {};
+      return renderInterviewSnapshot({
+        round: messages.filter((message) => message.role === "user").length,
+        items: checklistNow(),
+        questions: interviewLedger(store, workspaceId, sessionId).map((question) => ({ ...question, ...(gists[String(question.id)] ? { gist: gists[String(question.id)]! } : {}) })),
+        datesSaid: Object.entries(replies).filter(([id]) => !sensitive.has(id)).map(([ref, said]) => ({ ref, dates: datesWritten(said) })),
+        disclosure: disclosureNote().disclosure
+      });
+    };
+    const rules = !focusLine && pointsRules(session.coverage);
+    /** What a checklist verdict may cite: every reply but a disclosure's, and every file by its `src-N`. */
+    const verdictTexts = () => ({ ...replies, ...Object.fromEntries([...docs].map(([ref, doc]) => [ref, doc.extractedText ?? ""])) });
     const deskCheck = (output: OnboardingDialogue) => {
-      const asked = checkQuestions(output.questions, { ledger: interviewLedger(store, workspaceId, sessionId), openItems: askable(), dates: dateSubjects(), today });
+      const ledger = interviewLedger(store, workspaceId, sessionId);
+      const asked = checkQuestions(output.questions, { ledger, openItems: askable(), dates: dateSubjects(), today });
       const items = checkOpenItems(output.openItems ?? [], askable(), asked.accepted);
       const cards = safetyRound(output) ? { accepted: [], problems: (output.insights ?? []).length ? ["安全这一轮不出观察卡，insights 写 []。"] : [] }
         : checkInsights(output.insights ?? [], { replies, sensitive, focusLine: Boolean(focusLine), stage: output.stage ?? "", rules,
@@ -513,18 +535,27 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       // A question or card that points back at a disclosure goes back to the model; the round answering one is the safety reply's to word.
       const echoes: string[] = [];
       const quiet = safetyRound(output);
+      const fired: Fired[] = [...(asked.fired ?? []), ...(items.fired ?? [])];
       const ownQuestions = asked.accepted.filter((question) => {
-        const echo = quiet ? "" : echoOf([question.text, ...question.options.map((option) => option.label)].join("\n"));
+        const said = [question.text, ...question.options.map((option) => option.label)].join("\n");
+        const echo = quiet ? "" : echoOf(said);
         if (echo) echoes.push(`问题「${question.text.slice(0, 30)}」${echo}：那段经历整场不复述，换个问法或不问。`);
+        else if (!quiet && echoSpans(said).length) fired.push({ rule: "IR-123", detail: "a question used words only the disclosure said" });
         return !echo;
       });
       const ownCards = cards.accepted.filter(({ card }) => {
-        const echo = echoOf(`${card.text}\n${card.falsifier}`);
+        const said = `${card.text}\n${card.falsifier}`;
+        const echo = echoOf(said);
         if (echo) echoes.push(`观察卡「${card.text.slice(0, 30)}」${echo}：那段经历不作观察卡的材料，换一张或不出。`);
+        else if (echoSpans(said).length) fired.push({ rule: "IR-123", detail: "a card used words only the disclosure said" });
         return !echo;
       });
-      return { questions: [...ownQuestions, ...items.accepted], cards: ownCards, research: research.accepted,
-        problems: [...asked.problems, ...items.problems, ...cards.problems, ...research.problems, ...echoes] };
+      // The model's checklist verdicts and the questions its reply asks (2026-11-25): their evidence and structure are checked; whether the
+      // words settle an item, or two questions mean the same, is the model's.
+      const verdicts = checkChecklistVerdicts(output.checklist ?? [], { ids: new Set(judgedItems(checklistNow()).map((item) => item.id)), texts: verdictTexts(), sensitive });
+      const inReply = checkAsked(output.asked ?? [], ledger);
+      return { questions: [...ownQuestions, ...items.accepted], cards: ownCards, research: research.accepted, checklist: verdicts.accepted, asked: inReply.accepted, fired,
+        problems: [...asked.problems, ...items.problems, ...cards.problems, ...research.problems, ...echoes, ...verdicts.problems, ...inReply.problems] };
     };
     /* i18n-ignore-end */
     // The schema survives only for a route that does not call functions (a provider not yet shown to): there the round's fields are
@@ -538,7 +569,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const itemSchema = (key: "questions" | "insights" | "research") => property(key).items as Record<string, unknown>;
     /** `mark_round`'s arguments: the round's own marks, each optional. */
     const roundSchema = { type: "object", additionalProperties: false, properties: { stage: property("stage"), safety: property("safety"),
-      askLesson: property("askLesson"), progress: property("progress"), ready: { type: "boolean" } } };
+      askLesson: property("askLesson"), progress: property("progress"), ready: { type: "boolean" }, checklist: property("checklist"), asked: property("asked") } };
     const stageNow = (session.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : INTERVIEW_FLOW_STAGES[flow][0]!);
     // On a fallback route the part's checklist goes with the round that starts in a part the thread has no checklist of, and with every
     // new thread; with tools the dialogue reads it when it wants (`read_interview_state` with `part`).
@@ -588,23 +619,13 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     let freeText = false;
     const validateOutput = (output: unknown) => {
       const valid = validateOnboardingDialogue(asRound(output), known);
-      const invented = setDates(valid.reply);
-      if (invented.length) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
-        detail: `reply 说事情定在 ${invented.join("、")}，可本人没说过这个日期。日期由本人定：回复里不写它，要定就问本人想放在什么时候。` }); // i18n-ignore: model-facing repair note
-      // The reply pointing back at a disclosure (2026-11-15): sent back, the safety round's own reply aside.
+      // A made-up date, the disclosure's words, the cards' notation and 「还没答」 in the reply are the model's to avoid from the snapshot and
+      // the Skill (2026-11-25); they are recorded after the round (`firedAfter`), never sent back. A date reaches the ledger or a calendar
+      // only through the extraction, which can cite only the person's words or a file (IR-005).
+      // The reply pointing back at a disclosure with a self-harm word: sent back, the safety round's own reply aside.
       const echo = safetyRound(valid) ? "" : echoOf(valid.reply);
       if (echo) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), {
         detail: `回复${echo}。那段经历整场不复述：去掉那句，接着说别的。` }); // i18n-ignore: model-facing repair note
-      const notation = valid.reply.match(CARD_NOTATION)?.[0];
-      if (notation) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { reply: true,
-        detail: `回复里有「${notation.trim()}」：这是应用给你看的卡片答案的写法，本人没写过它。去掉它，要提就用本人的话说。` }); // i18n-ignore: model-facing repair note
-      // Sent back once: whether that question was asked is for the model to find in the thread; its second answer stands.
-      const pending = pendingChecked ? null : PENDING_TALK.exec(valid.reply);
-      if (pending) {
-        pendingChecked = true;
-        throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { reply: true,
-          detail: `回复说「${pending[0]}」。在线程里找到那一问（哪一轮、原话）：本人确实还没答，保持原样；找不到，就去掉这个说法，当新问题问。` }); // i18n-ignore: model-facing repair note
-      }
       // A free-text round that never called `mark_round` keeps the part it started in (replay 2026-11-23: all 24 rounds stayed
       // `narrative` while the talk went through 处境, 指南针, 能量 and the lines, so the progress and the completeness never moved).
       // Sent back once; its second answer stands.
@@ -613,17 +634,11 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { reply: true,
           detail: "这一轮没有调用 `mark_round`。调用它：stage 写这一轮实际在谈的部分（话题已经换了，就写新的部分），progress 写这一部分已清楚的、还不清楚的和是否做完；回复照原样再写一遍。" }); // i18n-ignore: model-facing repair note
       }
-      const lessonWhy = lessonRefused(valid);
-      if (lessonWhy) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { detail: `askLesson 写 false：${lessonWhy}。` }); // i18n-ignore: model-facing repair note
       // Each question, waiting item, card and research question through its check (verbatim quotes, real links, the ledger's askings):
       // what fails comes back with why, the rest stands.
       const desk = deskCheck(valid);
       if (desk.problems.length) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { cards: true,
         detail: `这一轮有几项要改，其余照旧：\n- ${desk.problems.join("\n- ")}` }); // i18n-ignore: model-facing repair note
-      // Recorded, not sent back (2026-11-22): a reply saying the app can be used before the start standard stands (IR-035), or quoting the
-      // scale's scores (IR-136). The person decides when to start; the page shows the readings.
-      if (!focusLine && startOpenNow() && endHinted(valid.reply)) noteOnce("reply said the app can be used before the start standard stands");
-      if (SCORE_TALK.test(valid.reply)) noteOnce("reply quoted the scale's scores");
       // The person's reply names self-harm and the round is not the safety reply: sent back once, since the words may be about someone
       // else or a research topic, which the model can tell and the pattern cannot (2026-11-14 audit). Its second answer stands.
       if (mentionsSelfHarm(replyText) && !safetyRound(valid) && !safetyAsked) {
@@ -634,9 +649,26 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       return valid;
     };
     let safetyAsked = false;
-    let pendingChecked = false;
     let stageAsked = false;
-    const noteOnce = (what: string) => { if (!noted.includes(what)) noted.push(what); };
+    /**
+     * The record-only rules over the round as accepted (2026-11-25): each that fired is one line of `rule-fired.jsonl` (`ruleFired`) for the
+     * replays, the reply and the cards left as the model wrote them.
+     */
+    const firedAfter = (output: OnboardingDialogue, desk: { fired: Fired[] }): Fired[] => {
+      const fired = [...desk.fired];
+      const invented = setDates(output.reply);
+      if (invented.length) fired.push({ rule: "IR-006", detail: `reply set ${invented.join(", ")}` });
+      if (!safetyRound(output) && echoSpans(output.reply).length) fired.push({ rule: "IR-123", detail: "reply used words only the disclosure said" });
+      if (CARD_NOTATION.test(output.reply)) fired.push({ rule: "IR-190", detail: "reply copied the cards' notation" });
+      CARD_NOTATION.lastIndex = 0;
+      const pending = PENDING_TALK.exec(output.reply);
+      if (pending) fired.push({ rule: "IR-191", detail: `reply said ${pending[0]}` });
+      const lessonWhy = lessonRefused(output);
+      if (lessonWhy) fired.push({ rule: "IR-124", detail: "askLesson where the app does not ask it" });
+      if (!focusLine && startOpenNow() && endHinted(output.reply)) fired.push({ rule: "IR-165", detail: "reply said the app can be used before the start standard stands" });
+      if (SCORE_TALK.test(output.reply)) fired.push({ rule: "IR-165", detail: "reply quoted the scale's scores" });
+      return fired;
+    };
     /** The scale's readings in words (`instrumentReadings`), never the taps: what the dialogue reads of the cards (2026-11-15). */
     const scaleReadings = (): { scaleReadings?: string[] } => {
       if (focusLine) return {};
@@ -650,28 +682,23 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       if (lesson !== "unasked") return "这道题整场只问一次，已经问过了"; // i18n-ignore: model-facing
       return safetyRound(output) ? "安全这一轮不问它" : ""; // i18n-ignore: model-facing
     }
-    /** A reply past the repairs, without the sentences that still point back at a disclosure (interview-rules IR-121). */
+    /** A reply past the repairs, without the sentences that still name self-harm after a disclosure (interview-rules IR-121, IR-123). */
     const withoutEchoes = (said: string) => (said.match(/[^。！？!?\n]+[。！？!?]?|\n+/gu) ?? []).filter((sentence) => !echoOf(sentence)).join("").trim();
-    // A date nobody gave stays out of the reply even when the repairs ran out: the sentence that sets it is left out. The one silent edit
-    // kept on the reply (interview-rules IR-006), because a made-up date read as the person's own plan is worse than a shorter reply.
-    const withoutInventedDates = (reply: string) => (reply.match(/[^。！？!?\n]+[。！？!?]?|\n+/gu) ?? []).filter((sentence) => !setDates(sentence).length).join("").trim();
     const softAccept = (_rejection: Error, output: unknown) => {
       const kept = keepOnboardingDialogue(asRound(output), known);
       if (!kept) return kept;
-      const quiet = safetyRound(kept);
-      const reply = withoutInventedDates(quiet ? kept.reply : withoutEchoes(kept.reply)).replace(CARD_NOTATION, "").trim();
-      return { ...kept, reply, ...(lessonRefused(kept) ? { askLesson: false } : {}) };
+      return { ...kept, reply: safetyRound(kept) ? kept.reply : withoutEchoes(kept.reply), ...(lessonRefused(kept) ? { askLesson: false } : {}) };
     };
     // A turn that only needs one or two questions dropped is kept now instead of rewritten in full by a repair; one that lists the research is not.
     const keepEarly = (rejection: Error, output: unknown) => {
-      // The safety question, the items' own problems and the reply's own (a card's notation, a question said to be waiting) are the
-      // model's to answer, never settled by keeping the answer as it is.
+      // The safety question, the items' own problems and the reply's own (its part unmarked) are the model's to answer, never settled by
+      // keeping the answer as it is.
       const why = rejection as Error & { safety?: boolean; cards?: boolean; reply?: boolean };
       if (why.safety || why.cards || why.reply) return undefined;
       const merged = asRound(output);
       const kept = keepOnboardingDialogue(merged, known);
-      return kept && droppedOnboardingItems(merged, kept) <= ONBOARDING_KEEP_EARLY_MAX && !setDates(kept.reply).length
-        && (safetyRound(kept) || !echoOf(kept.reply)) && !lessonRefused(kept) ? kept : undefined;
+      return kept && droppedOnboardingItems(merged, kept) <= ONBOARDING_KEEP_EARLY_MAX
+        && (safetyRound(kept) || !echoOf(kept.reply)) ? kept : undefined;
     };
 
     // The public quick test's result, only when the person pressed 「使用该结果」 (apps/web/lib/assess-link.ts): corroboration for the
@@ -698,7 +725,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         today, timeZone, sources: clipDocuments(documents), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}), ...(history ? { history } : {}), ...disclosureNote(), ...scaleReadings(), reply: { id: replyId, text: withoutTaps(replyText) },
         focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : INTERVIEW_FLOW_STAGES[flow][0]!)),
         checklist: openChecklist(8, undefined, sessionId), ...startStandard(), ...openItems(),
-        questionLedger: ledgerForModel(store, workspaceId, sessionId, LEDGER_SHOWN), ...pace(), ...roundNotes(),
+        snapshot: snapshotNow(), ...pace(), ...roundNotes(),
         ...(workHistory().length ? { workHistory: workHistory() } : {}), ...(week.length ? { calendar: week } : {}),
         ...(publicAssessment ? { publicAssessment } : {}), research: researchNow(),
         lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard), goals: line.goals ?? [],
@@ -724,13 +751,15 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     }
     /** Everything a later round's input carried as JSON, now read through `read_interview_state` (and sent whole on a fallback route). */
     const roundState = () => ({ ...standing(), ...disclosureNote(), ...scaleReadings(), checklist: openChecklist(8, undefined, sessionId), ...startStandard(), ...openItems(),
-      questionLedger: ledgerForModel(store, workspaceId, sessionId, LEDGER_SHOWN), ...pace(), ...roundNotes(),
+      snapshot: snapshotNow(), ...pace(), ...roundNotes(),
       ...(week.length ? { calendar: week } : {}), ...(workHistory().length ? { workHistory: workHistory() } : {}),
       ...(publicAssessment ? { publicAssessment } : {}), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}), research: researchNow(),
       lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, goals: line.goals ?? [] })) });
     /**
-     * A later round's input on a route with tools (2026-11-22): the person's words, then one line saying what is new — the files that
-     * came (read with `read_file`), a calendar that changed — and where the rest is. A disclosure's note stays in it: it is a safety rule.
+     * A later round's input on a route with tools (2026-11-22): the ledger snapshot first (2026-11-25: written from the ledger after the last
+     * round, so the model judges against it and not against a thread that may have been compacted), then the person's words, then one line
+     * saying what is new — the files that came (read with `read_file`), a calendar that changed — and where the rest is. A disclosure's
+     * note is in the snapshot: it is a safety rule.
      */
     const roundLine = (newSources: Array<{ id: string; fileName: string }>) => {
       // Two facts said every round rather than left in `read_interview_state` (replay of 2026-11-23): a question the person put to the
@@ -744,8 +773,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         ...(waiting > 0 ? [`还有 ${waiting} 份文件排在后面`] : []),
         ...(calendarChanged ? ["日历本周有变化"] : []),
         "进度、开始标准、调研和其余状态用 read_interview_state 读"];
-      const note = disclosureNote().disclosure;
-      return `${withoutTaps(replyText)}\n\n〔${parts.join("｜")}〕${note ? `\n〔${note}〕` : ""}`; // i18n-ignore-end
+      return `${snapshotNow()}\n\n${withoutTaps(replyText)}\n\n〔${parts.join("｜")}〕`; // i18n-ignore-end
     };
 
     // The wait, made visible (docs/onboarding-v3.md 「等待」): what the model is reading and has written so far, polled by the page and
@@ -850,9 +878,10 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const output = { ...roundOut, reply: safetyRound(roundOut) ? safetyReplyOnly(roundOut.reply) : roundOut.reply };
     // What the person will not see of what the model wrote (only what still failed after the repairs), and what the app put beside it.
     const edits: RoundEdits = { removed: desk.problems.map((why) => ({ text: "", why: `not shown: ${why}` })), added: filing.map((question) => question.text) };
-    if (edits.removed.length || edits.added.length || noted.length) store.appendEvent({ ownerId, workspaceId,
+    if (edits.removed.length || edits.added.length) store.appendEvent({ ownerId, workspaceId,
       idempotencyKey: `onboarding:round-edited:${sessionId}:${replyId}:${heardAt}`, type: "onboarding.round_edited", entityId: sessionId,
-      payload: { replyId, ...edits, ...(noted.length ? { noted } : {}) } });
+      payload: { replyId, ...edits } });
+    for (const fired of firedAfter(result.output, desk)) ruleFired({ ...fired, workspaceId, sessionId, replyId });
     // Observation cards that passed their check (`checkInsights`). Under the points rules every card is one hypothesis of the log: one on
     // record by its id, or a new one added to the log here under the reply's number, so 准 / 不准 lands on what it rates. Cards ready together
     // come in one round and are answered one after another (the owner, 2026-11-14). Never beside the safety check.
@@ -884,7 +913,13 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       store.setSetting(workspaceId, "profile.model", JSON.stringify({ ...profile,
         hypotheses: profile.hypotheses.map((item) => (keys.has(item.id) && !item.cardKey ? { ...item, cardKey: keys.get(item.id)! } : item)) }));
     }
-    recordRound(store, workspaceId, sessionId, roundSeq, output.questions, new Date().toISOString());
+    // The ledger, written before the next round reads it (2026-11-25): the round's card questions and the questions its reply asked, each
+    // with its meaning, and the model's checklist verdicts. The next snapshot is rendered from these, never from the thread.
+    const recordedAt = new Date().toISOString();
+    const cardIds = recordRound(store, workspaceId, sessionId, roundSeq, output.questions, recordedAt);
+    const askedIds = recordAsked(store, workspaceId, sessionId, roundSeq, desk.asked, recordedAt);
+    const newGists = [...cardIds.map((id, index) => [id, (output.questions[index] as TurnQuestion | undefined)?.gist ?? ""] as const),
+      ...askedIds.map((id, index) => [id, desk.asked[index]!.gist] as const)].filter(([, gist]) => gist.trim());
     // A file the model opened itself this turn (`read_file`, `read_folder_file`) counts as shown: the next turn does not announce it as
     // new. One it had not been shown yet goes to the extraction as a shown file would (the next extraction run takes it).
     // Shown files are kept by their reference (`src-N`); a folder file read on demand got its row during the turn, so it is looked up now.
@@ -900,7 +935,10 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         announcedSources: [...announcedNow, ...sentIds, ...openedNew.map(([ref]) => ref)], heardAt, ...(week.length ? { calendarSent: weekSent } : {}), lastRound: edits,
         ...(cardMode ? { cardTools: cardMode } : {}), ...(startMetRound !== null ? { startMetRound } : {}),
         ...(hidden.size ? { redacted: [...hidden] } : {}), ...(lessonAsked ? { lesson: "asked" as const } : lesson !== "unasked" ? { lesson } : {}),
-        ...(guideNow ? { guide: stageNow } : {}) },
+        ...(guideNow ? { guide: stageNow } : {}),
+        ...(newGists.length ? { gists: { ...(current.coverage as Announced).gists, ...Object.fromEntries(newGists.map(([id, gist]) => [String(id), gist.trim()])) } } : {}),
+        ...(desk.checklist.length ? { checklist: { ...(current.coverage as Announced).checklist,
+          ...Object.fromEntries(desk.checklist.map((verdict) => [verdict.id, { ...verdict, round: roundSeq, at: recordedAt }])) } } : {}) },
       updatedAt: new Date().toISOString()
     });
     return { state: output.nextAction === "ready_for_milestones" ? "ready" : "asked", sessionId };
