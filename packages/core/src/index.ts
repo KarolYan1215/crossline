@@ -324,7 +324,7 @@ export type WorkOrder = {
   materialContract: Array<{ kind: Evidence["kind"]; description: string; why: string; required: boolean }>;
   evidenceContract: Array<{ kind: Evidence["kind"]; description: string; why: string; required: boolean }>;
   // Instantiated once, at `plan.approved`, from the bound milestone's own `evidenceQuestionBank` — see
-  // `packages/db/src/index.ts`'s `transitionWorkOrder`. Absent or empty is normal: a milestone with no
+  // `packages/db/src/store.ts`'s `transitionWorkOrder`. Absent or empty is normal: a milestone with no
   // template behind it, or no template-derived question bank, simply has nothing to pre-generate here,
   // and free-text/file evidence stays available regardless.
   evidenceChecklist?: EvidenceQuestionTemplate[];

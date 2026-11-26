@@ -10,7 +10,7 @@
  */
 import { existsSync } from "node:fs";
 import path from "node:path";
-// The same rows as `PERSON_ACTIVITY_SQL` in packages/db/src/index.ts (the person's own actions). Copied, not imported: this file is
+// The same rows as `PERSON_ACTIVITY_SQL` in packages/db/src/person-activity.ts (the person's own actions). Copied, not imported: this file is
 // also mounted into the server's app image, which may predate an export (deploy/server/ledger-sync.sh).
 const PERSON_EVENTS = ["ask.answered", "block.confirmed", "execution.confirmed", "execution.paused", "execution.resumed", "capture.created",
   "capture.discarded", "milestone.revised", "milestone.retrospective", "approval.revoked", "risk.accepted", "ask.snoozed", "return.answered",
