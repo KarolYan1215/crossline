@@ -57,6 +57,7 @@ export * from "./text-hygiene";
 export * from "./text-width";
 export * from "./backplan-schema";
 export * from "./external-action";
+export * from "./tool-spec";
 export * from "./settings-keys";
 export * from "./milestone-drafting";
 export * from "./auto-approval";

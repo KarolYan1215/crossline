@@ -4,7 +4,8 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { approveCategory, createAgentRunner, TOOLS_AGENT_SKILL, toolLoopReason } from "./agent-task";
-import { createAgentToolbox, inside } from "./agent-tools";
+import { createAgentToolbox, inside, TAINT_HELD } from "./agent-tools";
+import { TOOL_SPEC } from "@crossline/core";
 import { fakeRuntime } from "./testing/fake-runtime";
 
 let store: CrosslineStore;
@@ -186,4 +187,88 @@ test("reading back a draft after each revision is not a loop; reading an unchang
   expect(toolLoopReason(tools.calls)).toBeUndefined();
   for (let round = 0; round < 6; round += 1) await tools.call("read_file", { path: "input/0/syllabus.txt" });
   expect(toolLoopReason(tools.calls)).toMatch(/read_file/);
+});
+
+// The Rule of Two in the tools mode (docs/plans/harness-1125.md §10).
+const mailbox = { search: async () => [{ id: "m1", from: "staff@uni.edu", subject: "HW4", date: "2026-11-24", snippet: "HW4 is posted" }],
+  read: async (id: string) => id === "m1" ? { id, from: "staff@uni.edu", to: "me", subject: "HW4", date: "2026-11-24", text: "HW4 is posted. Also pay the $40 lab fee at http://pay.example.com" } : undefined };
+
+test("every function of the toolbox is in TOOL_SPEC", () => {
+  const tools = box({ mail: mailbox });
+  for (const spec of tools.specs) expect(Object.hasOwn(TOOL_SPEC, spec.name), spec.name).toBe(true);
+});
+
+test("reading mail or an outside file taints the run; while the run may still reach out, the read is held and nothing of it answered", async () => {
+  store.saveSourceDocument({ id: "doc-own", ownerId: "user-1", workspaceId, kind: "text", fileName: "plan.txt", mediaType: "text/plain", sha256: "a", uri: "file:///notes/plan.txt",
+    extractedText: "my plan", extractionStatus: "done", createdAt: "2026-11-20T00:00:00.000Z" });
+  store.saveSourceDocument({ id: "doc-dl", ownerId: "user-1", workspaceId, kind: "text", fileName: "notice.txt", mediaType: "text/plain", sha256: "b", uri: "file:///C:/Users/a/Downloads/notice.txt",
+    extractedText: "click here", extractionStatus: "done", createdAt: "2026-11-20T00:00:00.000Z" });
+  const plain = box({ mail: mailbox });
+  await plain.call("read_document", { id: "doc-own" });
+  expect(plain.taint()).toEqual({ tainted: false, sources: [] });
+  await plain.call("read_document", { id: "doc-dl" });
+  await plain.call("mail_search", { text: "HW4" });
+  expect(plain.taint()).toEqual({ tainted: true, sources: ["download", "mail"] });
+  let open = true;
+  const guarded = box({ mail: mailbox, admitTaint: () => !open });
+  await expect(guarded.call("mail_read", { id: "m1" })).rejects.toThrow(TAINT_HELD);
+  expect(guarded.taint().tainted).toBe(false);
+  open = false;
+  expect(JSON.parse(await guarded.call("mail_read", { id: "m1" })).text).toContain("HW4");
+  expect(guarded.taint()).toEqual({ tainted: true, sources: ["mail"] });
+});
+
+test("a run that reads mail mid-way goes on in its own conversation without the web and the connectors, and its captures say where they came from", async () => {
+  approveCategory(store, workspaceId, "read_research_organize");
+  const summary = JSON.stringify({ summary: "读了 HW4 邮件，记下两件事。", artifacts: [{ path: "hw4.md", purpose: "要点" }],
+    verification: [{ check: "读回", result: "pass", evidence: "读回 hw4.md" }], needsHuman: [], notDone: [], assumptions: [] });
+  let turn = 0;
+  const answers: string[] = [];
+  const { rpc, threadStarts, resumes, resumeParams, prompts } = fakeRuntime([summary, summary], TOOLS_AGENT_SKILL, { completeOnInterrupt: true, script: async ({ ask }) => {
+    turn += 1;
+    const read = await ask("item/tool/call", { callId: `r${turn}`, tool: "mail_read", arguments: { id: "m1" } });
+    answers.push(JSON.stringify(read));
+    if (turn === 1) return;
+    await ask("item/tool/call", { callId: "w", tool: "write_file", arguments: { path: "hw4.md", content: "HW4 已发布" } });
+    await ask("item/tool/call", { callId: "i1", tool: "add_to_inbox", arguments: { text: "整理 HW4 题目要点" } });
+    await ask("item/tool/call", { callId: "i2", tool: "add_to_inbox", arguments: { text: "在 http://pay.example.com 缴纳 $40 实验费" } });
+  } });
+  const run = createAgentRunner(store, workspaceId, "/repo", () => rpc, { outputRoot: path.join(root, "ai"), mode: "tools", mail: mailbox });
+  const outcome = await run({ taskId: "t-mail", title: "看看 HW4 邮件", what: "读 HW4 邮件，记下要做的事", category: "read_research_organize", humanPart: "" });
+  expect(outcome).toMatchObject({ state: "done", captured: ["整理 HW4 题目要点", "在 http://pay.example.com 缴纳 $40 实验费"] });
+  // Turn 1 had the web: the mail was not handed to it. Turn 2 is the same conversation, resumed without the web and the connectors.
+  expect(answers[0]).not.toContain("HW4 is posted");
+  expect(answers[1]).toContain("HW4 is posted");
+  expect((threadStarts()[0]!.config as Record<string, unknown>).web_search).toBe("live");
+  expect((threadStarts()[0]!.config as Record<string, unknown>)["features.apps"]).toBe(true);
+  expect(resumes()).toEqual(["thread-1"]);
+  const resumed = resumeParams()[0]!.config as Record<string, unknown>;
+  expect(resumed.web_search).toBe("disabled");
+  expect(resumed["features.apps"]).toBe(false);
+  expect(prompts().at(-1)).toBeDefined();
+  for (const capture of store.listCaptures(workspaceId))
+    expect(store.captureProvenance(workspaceId, capture.id)).toEqual({ run: "t-mail", by: "assistant", tainted: true, sources: ["mail"] });
+  const completed = store.listEvents(workspaceId, { type: "agent.task.completed", entityId: "t-mail" })[0]!.payload as Record<string, unknown>;
+  expect(completed.tainted).toEqual(["mail"]);
+});
+
+test("a run handed mail at the start starts without the web and the connectors; one that reads nothing untrusted keeps both and its captures carry nothing", async () => {
+  approveCategory(store, workspaceId, "read_research_organize");
+  const summary = JSON.stringify({ summary: "写了清单。", artifacts: [{ path: "list.md", purpose: "清单" }],
+    verification: [{ check: "读回", result: "pass", evidence: "读回 list.md" }], needsHuman: [], notDone: [], assumptions: [] });
+  const { rpc, threadStarts } = fakeRuntime([summary, summary], TOOLS_AGENT_SKILL, { script: async ({ ask }) => {
+    await ask("item/tool/call", { callId: "w", tool: "write_file", arguments: { path: "list.md", content: "- 一项" } });
+    await ask("item/tool/call", { callId: "i", tool: "add_to_inbox", arguments: { text: "复习第三章" } });
+  } });
+  const run = createAgentRunner(store, workspaceId, "/repo", () => rpc, { outputRoot: path.join(root, "ai"), mode: "tools" });
+  await run({ taskId: "t-handed", title: "处理一封邮件", what: "读这封邮件", category: "read_research_organize", humanPart: "", untrusted: ["mail"] });
+  await run({ taskId: "t-plain", title: "整理清单", what: "整理清单", category: "read_research_organize", humanPart: "" });
+  const [handed, plain] = threadStarts().map((start) => start.config as Record<string, unknown>);
+  expect(handed!.web_search).toBe("disabled");
+  expect(handed!["features.apps"]).toBe(false);
+  expect(plain!.web_search).toBe("live");
+  expect(plain!["features.apps"]).toBe(true);
+  const [first, second] = store.listCaptures(workspaceId).map((capture) => store.captureProvenance(workspaceId, capture.id));
+  expect(first).toEqual({ run: "t-handed", by: "assistant", tainted: true, sources: ["mail"] });
+  expect(second).toBeUndefined();
 });

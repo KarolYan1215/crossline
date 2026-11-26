@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { createHash, randomUUID } from "node:crypto";
 import { copyFileSync, existsSync } from "node:fs";
-import { mergeLineTags, migratedTags, tFor, chunkText, ftsMatchExpression, searchTerms, SEGMENTER_VERSION, segmentText, type LedgerQuestion, byproductArtifactId, advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria,
+import { type CaptureProvenance, readProvenance, mergeLineTags, migratedTags, tFor, chunkText, ftsMatchExpression, searchTerms, SEGMENTER_VERSION, segmentText, type LedgerQuestion, byproductArtifactId, advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria,
   currentMineVersion, mineSkillSettingKey, readMineSkill, acceptanceStandardLines,
   type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState,
   type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource,
@@ -1521,11 +1521,15 @@ export class CrosslineStore {
     return Number(this.#db.pragma("user_version", { simple: true }));
   }
 
-  /** `via`: the outside agent that wrote it through the MCP server (docs/mcp-server.md), kept on the ledger event as its source. */
-  capture(input: Omit<StoredCapture, "state" | "audit" | "attempt">, idempotencyKey: string, via?: string): string {
+  /**
+   * `via`: the outside agent that wrote it through the MCP server (docs/mcp-server.md), kept on the ledger event as its source.
+   * `provenance`: a model wrote it after reading someone else's words (the assistant's tools, the mail triage; docs/plans/harness-1125.md
+   * §10). The analysis copies it onto the work order, where `autoApprovalEligible` reads it.
+   */
+  capture(input: Omit<StoredCapture, "state" | "audit" | "attempt">, idempotencyKey: string, via?: string, provenance?: CaptureProvenance): string {
     return this.#db.transaction(() => {
       const event = this.appendEvent({ ...input, idempotencyKey, type: "capture.created", entityId: input.id,
-        payload: { title: input.title, context: input.context, mode: "manual", ...(via ? { via: "mcp", agent: via } : {}) } });
+        payload: { title: input.title, context: input.context, mode: "manual", ...(via ? { via: "mcp", agent: via } : {}), ...(provenance ? { provenance } : {}) } });
       if (event.inserted) this.#prepare(
         "INSERT INTO captures (id, owner_id, workspace_id, title, context, state, audit_json, attempt) VALUES (?, ?, ?, ?, ?, 'captured', '{}', 0)"
       ).run(input.id, input.ownerId, input.workspaceId, input.title, input.context);
@@ -1541,6 +1545,11 @@ export class CrosslineStore {
    * a real Codex turn and leaves a work order to discard afterwards. A capture already promoted is out
    * of scope — the WorkOrder is the live thing then, and it has its own 丢弃.
    */
+  /** What `capture` recorded about where a capture came from, when a model wrote it after reading someone else's words. */
+  captureProvenance(workspaceId: string, id: string): CaptureProvenance | undefined {
+    return readProvenance((this.listEvents(workspaceId, { type: "capture.created", entityId: id })[0]?.payload as { provenance?: unknown } | undefined)?.provenance);
+  }
+
   discardCapture(workspaceId: string, id: string, reason: string): { changed: boolean } {
     return this.#db.transaction(() => {
       const capture = this.listCaptures(workspaceId).find((item) => item.id === id);

@@ -1,0 +1,15 @@
+{
+  "{{from}}，涉及{{risks}}，需本人确认": "{{from}}; it involves {{risks}}, so it needs your confirmation",
+  "{{from}}，低风险，默认生效": "{{from}}; low risk, so it takes effect by default",
+  "对外动作或承诺": "an outward act or a commitment",
+  "金额或付款": "an amount or a payment",
+  "登录、账号或证件": "a sign-in, an account or an ID",
+  "来自邮件分拣": "From the mail triage",
+  "来自助手读{{sources}}": "From the assistant reading {{sources}}",
+  "外部文件": "outside files",
+  "工作流结果": "workflow results",
+  "网页": "web pages",
+  "外部内容": "outside content",
+  "{{title}}{{from}}。": "{{title}}: {{from}}. ",
+  "助手读了别人写的内容后在「{{task}}」中记下": "Noted by the assistant in \"{{task}}\" after reading someone else's words"
+}

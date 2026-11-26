@@ -1,4 +1,6 @@
 import { tFor, type Locale } from "./i18n";
+import { externalOf, mentionsExternalAction } from "./external-action";
+import { readProvenance, type CaptureProvenance } from "./tool-spec";
 import { workOwner } from "./work-owner";
 
 /** Captures made from what a recording's digest heard the person promise (`apps/worker/src/recording-digest.ts`) carry this id prefix. */
@@ -74,6 +76,19 @@ export function needsPersonProblem(value: unknown, texts: readonly string[]): st
  * Every automated part is local by schema. Seeded example work never takes effect by itself (a demo order once reached a real calendar).
  */
 export function autoApprovalEligible(order: Candidate & { id?: string }, options: { revoked?: boolean; locale?: Locale } = {}): { eligible: boolean; reason: string } {
+  const verdict = eligibility(order, options);
+  // Work a model wrote after reading someone else's words (docs/plans/harness-1125.md §10): high-risk waits on 待确认 as a proposal,
+  // low-risk takes effect as any other and says where it came from.
+  const provenance = readProvenance((order.payload as { provenance?: unknown } | undefined)?.provenance);
+  if (!verdict.eligible || !provenance?.tainted) return verdict;
+  const t = tFor(options.locale);
+  const from = provenanceSaid(provenance, options.locale);
+  const risks = taintedRisk(order);
+  if (risks.length) return { eligible: false, reason: t("{{from}}，涉及{{risks}}，需本人确认", { from, risks: risks.map((risk) => riskSaid(risk, options.locale)).join(t("、")) }) };
+  return { eligible: true, reason: t("{{from}}，低风险，默认生效", { from }) };
+}
+
+function eligibility(order: Candidate & { id?: string }, options: { revoked?: boolean; locale?: Locale }): { eligible: boolean; reason: string } {
   // The reason is stored on `work_order.auto_approved` and shown on the approvals page, so it is written in the person's language.
   const t = tFor(options.locale);
   if (order.state !== "awaiting_plan_approval") return { eligible: false, reason: t("不在待批准状态") };
@@ -112,4 +127,45 @@ export function proposalReady(order: { state: string; payload?: unknown }, stepP
   if (order.state !== "awaiting_plan_approval") return true;
   if ((order.payload as { seeded?: boolean } | undefined)?.seeded || options.exempt || options.planBlocked) return true;
   return Boolean(stepPlan?.steps.length);
+}
+
+/**
+ * Why work written after reading someone else's words must wait for the person (the owner's decision of 2026-11-25): text in a mail or a
+ * page can ask for anything, and the step from capture to calendar is otherwise automatic.
+ * - `external`: it leaves the machine or commits the person to someone — the model's `external`, or the one word list (either suffices);
+ * - `money`, `link`, `login`: an amount or a payment, a web address, a sign-in, a password or an identity document — read by rule, since
+ *   these are what a phishing mail asks for and a model reading that mail is the thing being fooled (CLAUDE.md 「Accretion」: a security
+ *   boundary).
+ */
+export type TaintRisk = "external" | "money" | "link" | "login";
+/* i18n-ignore-start: patterns read against what a model wrote from someone else's text */
+const MONEY = /[¥$€£]\s*\d|\d\s*(?:元|块钱|美元|美金|欧元|英镑|刀\b|usd|rmb|cny|eur|gbp)|付款|支付|缴费|缴纳|交费|汇款|转账|打款|退款|账单|发票|学费|罚款|押金|订金|定金|充值|\b(?:pay|payment|payments|paid|invoice|invoices|billing|bill|refund|wire|deposit|tuition|fee|fees|charge|charges)\b/i;
+const LINK = /https?:\/\/|\bwww\.|\b[a-z0-9-]+\.(?:com|net|org|edu|gov|io|cn|ly|me|co|app|xyz|info|link|top|site|online)\b/i;
+const LOGIN = /登录|登陆|登入|密码|口令|验证码|动态码|账号|帐号|账户|帐户|用户名|身份证|护照|证件|社保号|学号|银行卡|卡号|\b(?:log ?in|sign ?in|password|passcode|verification code|otp|2fa|credentials?|account|username|ssn|passport|social security|id card)\b/i;
+/* i18n-ignore-end */
+export function taintedRisk(order: { intent: string; payload?: unknown }): TaintRisk[] {
+  const payload = (order.payload ?? {}) as { title?: unknown; humanCore?: unknown; automationParts?: unknown; description?: unknown };
+  const texts = [order.intent, payload.title, payload.humanCore, payload.description, ...(Array.isArray(payload.automationParts) ? payload.automationParts : [])]
+    .filter((text): text is string => typeof text === "string" && Boolean(text.trim()));
+  const all = texts.join("\n");
+  const risks: TaintRisk[] = [];
+  if (externalOf(order) === true || mentionsExternalAction(...texts)) risks.push("external");
+  if (MONEY.test(all)) risks.push("money");
+  if (LINK.test(all)) risks.push("link");
+  if (LOGIN.test(all)) risks.push("login");
+  return risks;
+}
+
+function riskSaid(risk: TaintRisk, locale?: Locale): string {
+  const t = tFor(locale);
+  return risk === "external" ? t("对外动作或承诺") : risk === "money" ? t("金额或付款") : risk === "link" ? t("链接") : t("登录、账号或证件");
+}
+
+/** Where tainted work came from, as the person reads it: 「来自助手读邮件」, 「来自邮件分拣」. */
+export function provenanceSaid(provenance: CaptureProvenance, locale?: Locale): string {
+  const t = tFor(locale);
+  if (provenance.by === "mail_triage") return t("来自邮件分拣");
+  const names = [...new Set(provenance.sources.map((source) => source === "mail" ? t("邮件") : source === "document" || source === "download" ? t("外部文件")
+    : source === "flow" ? t("工作流结果") : t("网页")))];
+  return t("来自助手读{{sources}}", { sources: (names.length ? names : [t("外部内容")]).join(t("、")) });
 }

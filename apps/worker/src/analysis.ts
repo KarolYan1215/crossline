@@ -4,7 +4,7 @@ import { ownerOf } from "./owner";
 import { recordOwnerDisputes } from "./owner-disputes";
 import type { AnalysisDate, AnalysisWaitingOn } from "@crossline/core";
 import { runCodexAnalysis, type CodexRpcBoundary } from "@crossline/codex";
-import { ANALYSIS_CONTEXT_VERSION, APPROVED_MILESTONES_LIMIT, TASK_INDEX_SEPARATOR, validateAnalysisContext, type AnalysisContext } from "@crossline/core";
+import { ANALYSIS_CONTEXT_VERSION, APPROVED_MILESTONES_LIMIT, TASK_INDEX_SEPARATOR, taintedRisk, validateAnalysisContext, type AnalysisContext } from "@crossline/core";
 import { CrosslineStore, createRefBook, withRef, type RefBook, type StoredCapture } from "@crossline/db";
 import { identityLines } from "./lines";
 import { tOfWorkspace } from "./locale";
@@ -204,14 +204,22 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
         });
         // What the proposal cited, resolved now while the ids still mean something; `plan.approved` counts it (store) once it takes effect.
         const usedRefKeys = book.resolve(result.proposal.usedRefs);
-        const promoted = usedRefKeys.length ? store.listWorkOrders(workspaceId).find((item) => item.id === id) : undefined;
-        if (promoted) store.saveWorkOrder({ ...promoted, payload: { ...(promoted.payload as object), usedRefKeys } });
+        // Written by a model after reading someone else's words (docs/plans/harness-1125.md §10): the work order carries where it came
+        // from, so the approval rule (and the web's permission mode, which reads the same rule) can hold it when it is high-risk.
+        const provenance = store.captureProvenance(workspaceId, id);
+        const promoted = usedRefKeys.length || provenance ? store.listWorkOrders(workspaceId).find((item) => item.id === id) : undefined;
+        const promotedPayload = promoted ? { ...(promoted.payload as object), ...(usedRefKeys.length ? { usedRefKeys } : {}), ...(provenance ? { provenance } : {}) } : undefined;
+        if (promoted) store.saveWorkOrder({ ...promoted, payload: promotedPayload });
+        // High-risk tainted work is neither folded into a task the person already approved (it would reach their week through that task's
+        // steps) nor made to absorb their open tasks as its parts: it waits alone on 待确认 until they decide.
+        const held = Boolean(promoted && provenance?.tainted && taintedRisk({ intent: promoted.intent, payload: promotedPayload }).length);
         recordWaitingAndDates(store, workspaceId, id);
         // The model said the task is not external and the word list says it is: the model stands, the disagreement is logged.
         recordOwnerDisputes(workspaceId, "crossline:crossline-automation-stripper", [{ id, title: result.proposal.title, intent: result.proposal.intent,
           ...(typeof result.proposal.external === "boolean" ? { external: result.proposal.external } : {}) }]);
         // Work the board already has is folded into that task instead of standing beside it (after the dates, so the earlier due day carries).
-        if (!foldNewTask(store, workspaceId, id, result.proposal.extendsTaskId ?? "")) { absorbParts(store, workspaceId, id); autoApproveEligible(store, workspaceId, [id]); }
+        if (held) autoApproveEligible(store, workspaceId, [id]);
+        else if (!foldNewTask(store, workspaceId, id, result.proposal.extendsTaskId ?? "")) { absorbParts(store, workspaceId, id); autoApproveEligible(store, workspaceId, [id]); }
         // A quality problem the repairs did not fix was corrected in the smallest way and kept; the reviewer looks at it next.
         if (result.audit.warnings?.length) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
           idempotencyKey: `validation.warned:analysis:${id}:${attempt}`, type: "validation.warned", entityId: `analysis:${id}`,

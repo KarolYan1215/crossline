@@ -361,7 +361,8 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
         context: (serves ? `${t("关系到里程碑：{{title}}", { title: serves })}\n` : "") + (message.snippet
           ? tOfWorkspace(deps.store, workspaceId)("来自邮件：{{from}}「{{subject}}」（{{date}}）\n开头：{{snippet}}", { from: message.from, subject: message.subject, date: message.date.slice(0, 10), snippet: message.snippet.slice(0, 200) })
           : tOfWorkspace(deps.store, workspaceId)("来自邮件：{{from}}「{{subject}}」（{{date}}）", { from: message.from, subject: message.subject, date: message.date.slice(0, 10) })) },
-      `mail:capture:${mailKey(message)}`);
+      // Written by the triage model from a mail's text (docs/plans/harness-1125.md §10): high-risk work waits on 待确认, the rest says where it came from.
+      `mail:capture:${mailKey(message)}`, undefined, { run: "mail-triage", by: "mail_triage", tainted: true, sources: ["mail"] });
       captured += 1;
     } else if (kind === "todo" || kind === "date") kind = "info";
     // A payment mail is a record only when code finds what the model read in the mail itself (`book`): the model sorts, it never supplies a number.
