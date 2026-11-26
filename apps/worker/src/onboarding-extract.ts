@@ -162,7 +162,10 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     const due = (id: string) => { const retryAt = state(id).retryAt; return !retryAt || Date.parse(retryAt) <= Date.now(); };
     // An interview the dialogue ended whose synthesis is not written yet still owes a run, even with nothing new to read. The sections'
     // lane writes it; the ledger and the inferences owe nothing past the last reply.
-    const finishing = (id: string) => { const mark = readFinishing(store, workspaceId, id); return (lane === "all" || lane === "sections") && Boolean(mark && mark.runs < FINISH_RUNS_MAX && !synthesized()); };
+    // Under the points rules an ended interview owes no run of its own: the report writes the synthesis (`portraitTask`).
+    const finishing = (id: string) => { const mark = readFinishing(store, workspaceId, id);
+      return (lane === "all" || lane === "sections") && !pointsRules(sessions.find((session) => session.id === id)?.coverage)
+        && Boolean(mark && mark.runs < FINISH_RUNS_MAX && !synthesized()); };
     const filesFor = (id: string) => !portraitLane(lane) && pendingExtractDocs(store, workspaceId).length > 0 && docsSession(id) === id;
     const asked = preferred.find((id) => (!portraitLane(lane) || ours.has(id)) && (waiting(id) || filesFor(id) || finishing(id)));
     if (asked) return asked;
@@ -284,7 +287,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     const finishing = readFinishing(store, workspaceId, sessionId);
     const rules = pointsRules(session?.coverage) && !sessionId.startsWith("line-") && sessionId !== NOTES_SESSION;
     const split = rules && writes("sections") ? readPointsSplit(store, workspaceId) : [];
-    if (!replies.length && !sources.length && !(finishing && finishing.runs < FINISH_RUNS_MAX) && !split.length) return { state: "idle" };
+    if (!replies.length && !sources.length && !(finishing && finishing.runs < FINISH_RUNS_MAX && !rules) && !split.length) return { state: "idle" };
 
     // Everything the run may look up: this conversation's replies and every file read, as numbered sentences in order.
     const corpus = (): Array<StoredSentence & { ref: string; label: string }> => [
@@ -310,7 +313,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     // A split run writes points only: the paragraphs on record stay as they are (the owner's decision, 2026-11-12), so it is asked for
     // no section even when the interview is over and every open section would otherwise be finalized.
     const profileTask = focus || notes || !writes("sections") || split.length ? undefined
-      : portraitTask(stage, session?.state === "complete" || Boolean(finishing), readSectionRecords(store, workspaceId), flow);
+      : portraitTask(stage, session?.state === "complete" || Boolean(finishing), readSectionRecords(store, workspaceId), flow, rules);
     // Card items the person answered in words: the run reads them off the replies (`itemScores`).
     const cardItems = focus || notes || !writes("ledger") ? [] : pendingItems(readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING)));
     // The portrait, the person's 准/不准 and the research are what the portrait's lanes reason from; the ledger lane records facts.
@@ -453,10 +456,15 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
  * and are rewritten as new evidence comes, so a stage left early is not frozen. `stage` is kept for the callers.
  */
 export function portraitTask(_stage: OnboardingStage, complete: boolean, records: Partial<Record<ProfileSection, SectionRecord>>,
-  flow: InterviewFlow = "v1"): { finalize: ProfileSection[]; synthesize: boolean } {
+  flow: InterviewFlow = "v1", rules = false): { finalize: ProfileSection[]; synthesize: boolean } {
+  // Under the points rules the report is the one whole write (the owner, 2026-11-26: 「只跑增量和完整撰写的报告」): the sections' lane reads
+  // only the new replies, also at the end, and the portrait's sections are taken from the report the writer wrote (`projectReport`).
+  // Rewriting every section and the synthesis whole after 「结束并出报告」 cost a 217 s run the report then wrote again. A synthesis owed
+  // because every section closed on its own during the interview is still written, from the new replies.
+  const closing = complete && !rules;
   // A flow's synthesis waits only for the sections it writes.
   const sections = deepSectionsOf(flow);
-  const finalize = sections.filter((section) => !sectionClosed(records[section]) && complete);
+  const finalize = sections.filter((section) => !sectionClosed(records[section]) && closing);
   const allFinal = sections.every((section) => sectionClosed(records[section]) || finalize.includes(section));
   return { finalize, synthesize: allFinal && (finalize.length > 0 || !sectionClosed(records.synthesis)) };
 }

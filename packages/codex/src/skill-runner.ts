@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { agentLanguageLine, runLocale, schemaForLocale, styleInstructions } from "./style";
 import { join } from "node:path";
-import { looksLooping, repairJsonBrackets } from "./json-repair";
+import { looksLooping, mergeSplitObjects, repairJsonBrackets } from "./json-repair";
 import { cleanAnswerStrings, designNoteText, instructionsText, privateLeak, skillKey, tFor, UNTRUSTED_WEB_INSTRUCTION, untrustedWebBlock, urlKnown, urlsIn, validateWebScout,
   WEB_RESEARCH_LIMITS, WEB_SCOUT_SCHEMA, QUERY_REVIEW_SCHEMA, validateQueryReview, webQueryProblem, type Locale, type PrivateGuard, type QueryReview,
   type WebScoutAnswer } from "@crossline/core";
@@ -1454,6 +1454,12 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
           return cleanAnswerStrings(value);
         }
       }
+      // One answer written as two objects with no key in common is put in one (json-repair.ts, replay 2026-11-26).
+      const joined = mergeSplitObjects(body, run.outputSchema);
+      if (joined !== undefined) {
+        console.log(JSON.stringify({ type: "skill.json_mended", skill: run.skillName, length: body.length, split: true }));
+        return cleanAnswerStrings(JSON.parse(joined));
+      }
       // One bracket wrong in a long answer is mended rather than regenerated (json-repair.ts); the content is still validated.
       const mended = repairJsonBrackets(body, run.outputSchema);
       if (mended !== undefined) {
@@ -1506,6 +1512,7 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
 
   const maxRepairs = context.route?.maxRepairs ?? DEFAULT_MAX_REPAIRS;
   let rejection: Error | undefined;
+  let unparsedBefore: string | undefined;
   try {
     for (let attempt = 0; ; attempt += 1) {
       const answer = await runTurnOrRetryStall(attempt === 0 ? run.firstPrompt
@@ -1522,6 +1529,13 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
         return run.validate(parsed);
       } catch (error) {
         rejection = error instanceof Error ? error : new Error(String(error));
+        // The same unparseable answer back byte for byte (replay 2026-11-26: twice, 99 s each): another repair turn would draw it again.
+        const repeated = parsed === undefined && answer === unparsedBefore;
+        unparsedBefore = parsed === undefined ? answer : undefined;
+        if (repeated) {
+          console.log(JSON.stringify({ type: "skill.repair_repeated", skill: run.skillName, attempt }));
+          throw rejection;
+        }
         const detail = (rejection as Detailed).detail ?? "";
         // What the receiving layer refused, so the cause of slow turns can be read from the log (codes and a short detail, never the answer).
         console.log(JSON.stringify({ type: "skill.rejected", skill: run.skillName, attempt, code: rejection.message.slice(0, 80), detail: detail.slice(0, 240) }));

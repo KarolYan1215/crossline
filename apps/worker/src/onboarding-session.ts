@@ -29,7 +29,7 @@ import { CARD_TOOLS_INSTRUCTIONS, cardTools, checkAsked, checkInsights, checkOpe
 import { correctionUnread, createOnboardingExtractor, extractionReached, requestAllLanes, requestExtraction, type ExtractLane } from "./onboarding-extract";
 import { DATES_UNRECORDED_EVENT, ONBOARDING_UNRECORDED_EVENT, personTimeZone, readProfileModel } from "./onboarding-persist";
 import { paceContext, storedProgress } from "./onboarding-pace";
-import { hypothesisFromCard, instrumentReadings, ONBOARDING_INSIGHTS, POINTS_RULES, pointsRules, readInsightRatings, withProfileFramework, type Hypothesis, type TurnInsight } from "@crossline/core";
+import { hypothesisFromCard, instrumentReadings, ONBOARDING_INSIGHTS, POINTS_RULES, pointsRules, readInsightRatings, unsaidCounts, withProfileFramework, type Hypothesis, type TurnInsight } from "@crossline/core";
 import { readResearch, researchForDialogue, researchRunnerFor } from "./onboarding-research";
 import { DOMAIN_PACKS, domainGuides } from "@crossline/identity-packs";
 
@@ -469,7 +469,16 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     };
     // The app's own questions still waiting, put to the person only when the dialogue names them (`openItems`). Whether the portrait fits
     // is asked on the portrait page; which project a file belongs to is the app's bookkeeping, put beside the round (`filing` below).
-    const askable = () => currentGaps().filter((gap) => gap.code !== "PORTRAIT_UNCONFIRMED" && gap.code !== "FILE_UNFILED" && !(focusLine && gap.code === "LINE_GOAL"));
+    // A waiting question the person answered in words the code did not read (replay 2026-11-26: 「十一月中旬，已经过了」 under 「我来写
+    // 日期」, asked again the next round) waits for the extraction to read that answer; only if it still leaves the gap open is it asked again.
+    const answeredUnread = () => {
+      const readAt = readExtractState(store, workspaceId, sessionId).readAt ?? "";
+      return new Set(store.listQuestions(workspaceId, { kind: "interview", keyPrefix: "gap:", statuses: ["answered", "assumed"] })
+        .filter((question) => (question.answeredAt ?? "") > readAt).map((question) => question.key.slice("gap:".length)));
+    };
+    const askable = () => { const waiting = answeredUnread();
+      return currentGaps().filter((gap) => gap.code !== "PORTRAIT_UNCONFIRMED" && gap.code !== "FILE_UNFILED" && !(focusLine && gap.code === "LINE_GOAL")
+        && !waiting.has(gap.question.id)); };
     const openItems = () => {
       const items = askable().map((gap) => ({ id: gap.question.id, text: gap.question.text, ...(gap.blocking ? { start: true } : {}) }));
       return items.length ? { openItems: items } : {};
@@ -598,6 +607,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const givenTexts = () => [...messages.filter((message) => message.role === "user").map((message) => String((message.content as { text?: string }).text ?? "")),
       ...findings(), ...[...docs.values()].map((doc) => doc.extractedText), ...store.listProfileFacts(workspaceId).map((fact) => fact.value ?? "")];
     const setDates = (reply: string) => inventedDates(reply, givenTexts(), replyText, today);
+    /** The interview's own earlier replies: a count it already used is not named again (`unsaidCounts`). */
+    const earlierReplies = () => messages.filter((message) => message.role === "assistant").map((message) => String((message.content as { reply?: string }).reply ?? ""));
     /**
      * The final message as a round: free text is the reply itself, with the round's marks and cards from the tools (`withDraft`); a JSON
      * answer with a `reply` (the fallback route, or a model that still answers that way) is taken as the round's fields.
@@ -638,6 +649,14 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       const desk = deskCheck(valid);
       if (desk.problems.length) throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { cards: true,
         detail: `这一轮有几项要改，其余照旧：\n- ${desk.problems.join("\n- ")}` }); // i18n-ignore: model-facing repair note
+      // A count stated about the person that nobody said (IR-200, replay 2026-11-26: 「七张画完」 for a set of four, which the portrait then
+      // wrote as 「一套九张」): sent back once naming it; the model decides, and its second answer stands.
+      const unsaid = countsAsked ? [] : unsaidCounts(valid.reply, [...givenTexts(), ...earlierReplies()]);
+      if (unsaid.length) {
+        countsAsked = true;
+        throw Object.assign(new Error("SKILL_SCHEMA_INVALID"), { reply: true,
+          detail: `回复里的「${unsaid.join("」「")}」本人、文件和之前的回复都没说过。复述只用本人说过的数；不知道的数改成问（「一共几张？」）。如果这个数不是在复述本人的事，照原样再写一遍。` }); // i18n-ignore: model-facing repair note
+      }
       // The person's reply names self-harm and the round is not the safety reply: sent back once, since the words may be about someone
       // else or a research topic, which the model can tell and the pattern cannot (2026-11-14 audit). Its second answer stands.
       if (mentionsSelfHarm(replyText) && !safetyRound(valid) && !safetyAsked) {
@@ -649,6 +668,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     };
     let safetyAsked = false;
     let stageAsked = false;
+    let countsAsked = false;
     /**
      * The record-only rules over the round as accepted (2026-11-25): each that fired is one line of `rule-fired.jsonl` (`ruleFired`) for the
      * replays, the reply and the cards left as the model wrote them.

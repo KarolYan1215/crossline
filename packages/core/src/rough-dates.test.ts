@@ -23,6 +23,13 @@ test("rough words name a window of days from today; exact days and words with no
   expect(roughWindow("10 月底前", "2026-12-05")).toBeUndefined();
 });
 
+test("a window already over names none, unless the caller asks for one in the past (an overdue deadline)", () => {
+  expect(roughWindow("11 月上旬", "2026-11-26")).toBeUndefined();
+  expect(roughWindow("十一月中旬，已经过了", "2026-11-26", { past: true })).toEqual({ from: "2026-11-11", to: "2026-11-20", precision: "part" });
+  // A window still to come is the same either way.
+  expect(roughWindow("12 月中", "2026-11-26", { past: true })).toEqual(roughWindow("12 月中", "2026-11-26"));
+});
+
 test("quarters, halves, seasons and next year are windows too", () => {
   expect(roughWindow("明年一季度", today)).toEqual({ from: "2027-01-01", to: "2027-03-31", precision: "quarter" });
   expect(roughWindow("Q4", today)).toEqual({ from: "2026-11-14", to: "2026-12-31", precision: "quarter" });

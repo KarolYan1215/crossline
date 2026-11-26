@@ -32,13 +32,14 @@ function amount(text: string): number | undefined {
  * than two is next year's (「1 月」 said in November); a window that starts before today starts today.
  */
 // rule: rough.window
-export function roughWindow(text: string, today: string): RoughWindow | undefined {
+export function roughWindow(text: string, today: string, options: { past?: boolean } = {}): RoughWindow | undefined {
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(today)) return undefined;
   const [year, month, date] = today.split("-").map(Number) as [number, number, number];
   const now = utc(year, month, date);
   const q = text.replace(/\s+/gu, "").replace(/([一二三四五六七八九十]{1,3})(?=月)/gu, (match) => String(amount(match) ?? match)); // i18n-ignore: Chinese month numerals
+  // `past`: a window already over is still a window (「十一月中旬，已经过了」 answers when a deadline was, replay 2026-11-26).
   const window = (from: number, to: number, precision: RoughWindow["precision"]): RoughWindow | undefined =>
-    to < now ? undefined : { from: iso(Math.max(from, now)), to: iso(to), precision };
+    to < now ? (options.past ? { from: iso(from), to: iso(to), precision } : undefined) : { from: iso(Math.max(from, now)), to: iso(to), precision };
   // 「明年」 moves every month, quarter, half and season it names to next year (「明年 11 月」 said in November is not this month).
   const nextYear = /明年|下一年/u.test(q); // i18n-ignore
   const yearOf = (target: number) => nextYear ? year + 1 : target + 2 < month ? year + 1 : year;

@@ -3,6 +3,7 @@
  * Claims for the profile report (docs/profile-and-agent-kit.md §五–§六): what the cards measured, computed here and never by a model, and
  * what the portrait writer said, each kept only with a quote that is really in the person's replies.
  */
+import { countsIn } from "./said-counts";
 import { administrationNote, instrumentScores, PROFILE_ITEMS, type DimensionScore, type InstrumentAnswers, type InstrumentId } from "./profile-instruments";
 import {
   DEFAULT_SECTION_PRIVACY, REPORT_SECTIONS, REPORT_SECTION_LABEL, WRITER_SECTIONS, claimPrivacy, visibleClaims,
@@ -40,7 +41,9 @@ const addDays = (at: string, days: number) => new Date(Date.parse(at) + days * 8
  * claim the person rejected before is not written again. `sentenceOf` finds the numbered sentence the quote sits in, when there is one.
  */
 export function resolveWrittenClaims(written: readonly WrittenClaim[] | undefined, replies: readonly string[],
-  options: { at: string; rejected?: ReadonlySet<string>; sentenceOf?: (quote: string) => number | undefined }): ProfileClaim[] {
+  options: { at: string; rejected?: ReadonlySet<string>; sentenceOf?: (quote: string) => number | undefined;
+    /** Counts the interviewer said first (`countsFirstSaidByInterviewer`): a quote repeating one is not the person's own report. */
+    echoedCounts?: ReadonlySet<string> }): ProfileClaim[] {
   const corpus = replies.map(squash);
   const seen = new Set<string>();
   return (written ?? []).flatMap((claim) => {
@@ -51,7 +54,8 @@ export function resolveWrittenClaims(written: readonly WrittenClaim[] | undefine
     const key = squash(quote);
     if (key.length < 2 || !corpus.some((reply) => reply.includes(key))) return [];
     seen.add(id);
-    return [{ id, section: claim.section, statement, kind: claim.kind === "self_reported" ? "self_reported" : "inferred",
+    const echoed = countsIn(quote).some((count) => options.echoedCounts?.has(count.key));
+    return [{ id, section: claim.section, statement, kind: claim.kind === "self_reported" && !echoed ? "self_reported" : "inferred",
       confidence: Math.max(0, Math.min(1, claim.confidence)), basis: [sentenceOf(quote, options.sentenceOf)],
       reviewBy: addDays(options.at, 90) } satisfies ProfileClaim];
   });

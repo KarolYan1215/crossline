@@ -248,6 +248,10 @@ test("an interview the dialogue ended owes a run until the synthesis is written,
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   await run({ sessionId: "s", text: "能量部分答完了。" });
   await extractionSettled(workspaceId);
+  // An interview begun before the points rules: its finishing run still writes the sections whole.
+  const legacy = store.getOnboardingSession(workspaceId, "s")!;
+  const { rules: _rules, ...before } = legacy.coverage as Record<string, unknown>;
+  store.saveOnboardingSession({ ...legacy, coverage: { ...before, flow: "v1" } });
   const extractor = createOnboardingExtractor(store, workspaceId, "C:\\repo", () => rpc);
   expect(extractor.nextSession()).toBeUndefined();
   markFinishing(store, workspaceId, "s");
@@ -259,6 +263,30 @@ test("an interview the dialogue ended owes a run until the synthesis is written,
   expect(last).toContain('"synthesize":true');
   markFinishing(store, workspaceId, "s", FINISH_RUNS_MAX);
   expect(extractor.nextSession()).toBeUndefined();
+});
+
+// The owner, 2026-11-26: 「只跑增量和完整撰写的报告」. The replay's finishing run rewrote every section and the synthesis whole (217 s) right
+// before the report wrote them again.
+test("under the points rules an ended interview owes no whole rewrite: only new replies are read, and the report writes the sections", async () => {
+  const { markFinishing } = await import("@crossline/db");
+  const { portraitTask } = await import("./onboarding-extract");
+  expect(portraitTask("energy", true, {}, "v1", true)).toEqual({ finalize: [], synthesize: false });
+  // Every section closed on its own during the interview: the synthesis they owe is still written.
+  const closed = { sentences: [1], final: true, at: "2026-10-19T00:00:00.000Z" };
+  expect(portraitTask("energy", true, { situation: closed, compass: closed, energy: closed }, "v1", true)).toEqual({ finalize: [], synthesize: true });
+  const { prompts, rpc } = runtime([round], [facts()]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
+  await run({ sessionId: "s", text: "能量部分答完了。" });
+  await extractionSettled(workspaceId);
+  const session = store.getOnboardingSession(workspaceId, "s")!;
+  expect(session.coverage).toMatchObject({ rules: "points" });
+  store.saveOnboardingSession({ ...session, state: "complete" });
+  markFinishing(store, workspaceId, "s");
+  const extractor = createOnboardingExtractor(store, workspaceId, "C:\\repo", () => rpc);
+  const before = prompts().length;
+  expect(extractor.nextSession()).toBeUndefined();
+  expect(await extractor.runOnce([], "sections")).toEqual({ state: "idle" });
+  expect(prompts().length).toBe(before);
 });
 
 test("the extraction is shown the hours on record, so sending them again keeps what the new reply does not change", async () => {
@@ -462,7 +490,9 @@ test("by default every lane reads a reply as it comes (2026-11-17); a batch set 
 // thinking, then `</think>`, then the whole object; their thinking is rewritten, its shape kept). Each is taken in the run it came
 // in: no second turn, no failure counted, the facts stored.
 test.each(["extract-r17-sentence-before-object", "extract-r17-root-brace-missing", "extract-r17-root-closed-early",
-  "extract-r17-thinking-before-ledger", "extract-r17-thinking-before-insights"])(
+  "extract-r17-thinking-before-ledger", "extract-r17-thinking-before-insights",
+  // Replay 2026-11-26: the sections lane's answer as two objects in a row (its last field on the next line), refused twice there.
+  "extract-r26-split-objects"])(
   "a recorded extraction answer that needed mending (%s) is kept in the same run", async (fixture) => {
     const answer = recordedAnswer(fixture);
     expect(() => JSON.parse(answer)).toThrow();

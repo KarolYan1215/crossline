@@ -394,7 +394,8 @@ const sameOption = (label: string, picked: string) => {
  * typed under 「我来写日期」 was recorded as a confirmed deadline and closed the start item (2026-11-14 audit).
  */
 function statesDay(text: string): boolean {
-  return NO_DEADLINE.test(text) || DAY_WRITTEN.test(text) || RELATIVE_DAY_WORDS.test(text) || Boolean(roughWindow(text, new Date().toISOString().slice(0, 10)));
+  // A day already past is an answer too: the person said when it was (an overdue deadline), the question is settled.
+  return NO_DEADLINE.test(text) || DAY_WRITTEN.test(text) || RELATIVE_DAY_WORDS.test(text) || Boolean(roughWindow(text, new Date().toISOString().slice(0, 10), { past: true }));
 }
 // rule: profile-gaps.states-day
 const DAY_WRITTEN = /\d{4}-\d{1,2}-\d{1,2}|\d{1,2}\s*月\s*\d{1,2}|(?<![\d/])\d{1,2}\/\d{1,2}(?![\d/])|(周|星期|礼拜)[一二三四五六日天]|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}\b|\b(mon|tues?|wed(nes)?|thu(rs)?|fri|sat(ur)?|sun)(day)?\b/iu;

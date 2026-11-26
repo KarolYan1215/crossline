@@ -445,6 +445,8 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     text: { file: INTERVIEW_SKILL, anchor: "**出题前对着快照里的已问题目判意思，不看字面。**" } },
   { id: "IR-199", layer: "L2", verdict: "model", status: "active", rule: "一轮一个主问题、最多五道；同一件事最多问两次，再不清就记成假设；回复里的日子只用快照、文件或调研里的",
     text: { file: INTERVIEW_SKILL, anchor: "**一轮的题量和同一件事的问法有上限。**" } },
+  { id: "IR-200", layer: "L0", verdict: "return", status: "active", rule: "回复的陈述句里有本人、文件和之前回复都没说过的数量（「七张」）：退回一次点名这个数，要么改成问，要么不是在复述本人就照原样；第二次的回答照用（2026-11-26 回放）",
+    code: { file: `${CORE}/said-counts.ts`, symbol: "unsaidCounts", test: `${CORE}/said-counts.test.ts` } },
   { id: "IR-189", layer: "L2", verdict: "model", status: "active", rule: "项目要不要每周固定到场由访谈判断，没人说过时间的问一次，只问时间",
     text: { file: INTERVIEW_SKILL, anchor: "**一个项目要不要每周固定到场，由你判断。**" } },
 ];

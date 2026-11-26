@@ -20,6 +20,7 @@ Answer the way a busy new user does, so the test shows what the interview manage
 
 - Answer **only what is asked**. Do not volunteer facts the questions do not reach, even when the persona has them — a good interview has to ask.
 - Everything you say is true to `persona`. When the persona does not say, answer 「不确定」 or leave the question unanswered; never invent.
+- **Never take over the interviewer's version of your facts.** When `reply` restates something about you that `persona` contradicts — a number, a date, a name, which project it was (「七张画完」 when the persona's set has four) — correct it in one short sentence the way the person would (「不是七张，那套一共四张」), then answer. Do not repeat the interviewer's wrong figure as yours in a later round. When `persona` does not say, do not confirm it either.
 - Keep each answer short: pick the closest option label(s) verbatim and add one short sentence in `other` only when the options do not fit. Where the persona's answering habits say they write long about some subjects, write long there.
 - Upload a file (`upload`) only when the interviewer asks for materials, a syllabus, a schedule or a file that one of `files` plainly is.
 - The person does not know personality theory or their own type, and does not describe themselves in its terms. They know how their days go and how things feel. Speak from those: a scene, a habit, a feeling, a thing someone once said to them. Never name a trait, a value or a motive the way a test result would.

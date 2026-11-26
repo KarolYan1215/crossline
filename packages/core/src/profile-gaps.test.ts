@@ -118,6 +118,11 @@ test("一个非默认项目没有截止时，问「有截止日期吗」，答�
   expect(answeredGapFacts(`【${gap.question.text}】选择：没有截止`, gaps)).toEqual([expect.objectContaining({ slot: "no_deadline", value: "没有截止" })]);
   expect(answeredGapFacts(`【${gap.question.text}】选择：我来写日期。补充：2026-12-15`, gaps)).toEqual([expect.objectContaining({ slot: "deadline", value: "2026-12-15" })]);
   expect(answeredGapFacts(`【${gap.question.text}】选择：我来写日期。补充：12 月中`, gaps)).toEqual([expect.objectContaining({ slot: "deadline", value: "12 月中" })]);
+  // A deadline already past is when it was: replay 2026-11-26 dropped 「十一月中旬，已经过了」 and asked the same card the next round.
+  const lastMonth = ((new Date().getUTCMonth() + 11) % 12) + 1;
+  const overdue = `${["一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "十一", "十二"][lastMonth - 1]}月中旬，已经过了`;
+  expect(answeredGapFacts(`【${gap.question.text}】选择：我来写日期。补充：${lastMonth}月中旬，已经过了`, gaps)).toEqual([expect.objectContaining({ slot: "deadline" })]);
+  expect(answeredGapFacts(`【${gap.question.text}】选择：我来写日期。补充：${overdue}`, gaps)).toEqual([expect.objectContaining({ slot: "deadline" })]);
   // Words that say no day are not a deadline: 「还不知道」 closed the start item as a confirmed deadline (2026-11-14 audit). They stay in
   // the reply for the extraction to read.
   expect(answeredGapFacts(`【${gap.question.text}】选择：我来写日期。补充：还不知道`, gaps)).toEqual([]);

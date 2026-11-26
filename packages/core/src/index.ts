@@ -42,6 +42,7 @@ export * from "./agent-failure";
 export * from "./source-kinds";
 export * from "./date-schema";
 export * from "./rough-dates";
+export * from "./said-counts";
 export * from "./date-advance";
 export * from "./diligence-schema";
 export * from "./manualbook-schema";

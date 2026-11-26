@@ -128,6 +128,11 @@ export const RULE_SPEC = {
     what: "The interview's record-only checks (verdict \"record\" in INTERVIEW_RULES: IR-006, IR-014, IR-047, IR-051, IR-123's disclosure half, IR-124, IR-126's repeat, IR-165, IR-190, IR-191); the line's `rule` names which.",
     readers: "None at run time; the interview replays count them (docs/claude/profile-first-loop.md).",
     retire: "Each IR rule retires on its own status in INTERVIEW_RULES; this entry goes when no record-only IR rule is left." },
+  // ── said-counts.ts ───────────────────────────────────────────────────────────────────────────────────────────────────
+  "interview.unsaid-count": { file: `${CORE}/said-counts.ts`, kind: "evidence", mode: "enforce",
+    what: "unsaidCounts: a count (「七张」「3 篇」) the interview's reply states about the person that no reply, file or earlier reply of its own said (IR-200).",
+    readers: "The interview round's check: sent back once naming the count; the model's second answer stands.",
+    retire: "Replays show the interviewer no longer introduces counts (no IR-200 send-back for 30 days of replays), or the dialogue cites a sentence for every restated figure." },
   // ── profile-gaps.ts ──────────────────────────────────────────────────────────────────────────────────────────────────
   "profile-gaps.weekly-skip": { file: `${CORE}/profile-gaps.ts`, kind: "semantic", mode: "enforce",
     what: "An undated item titled 每周/weekly recurs, so no 「大致日期」 question.",

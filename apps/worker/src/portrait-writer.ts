@@ -1,13 +1,14 @@
 import { folderDocuments } from "./source-folders";
 import { PORTRAIT_GAP_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_SCHEMA_VERSION, typeSummaryProblem, validatePortrait, type PortraitReport, AGENT_HISTORY_SUMMARY, agentHistoryLines, tFor, type AgentHistorySummary, ACTIVITY_HOURLY, atComputerLines, type ActivityHour,
-  PROFILE_CLAIMS_SETTING, PROFILE_CLAIM_STATUS_SETTING, PROFILE_INSTRUMENTS_SETTING, instrumentReadings, readClaimStatus, sensitiveReplies, withoutDisclosures, readInstrumentAnswers, resolveWrittenClaims, withProfileFramework,
-  PORTRAIT_NARRATIVE_SETTING, narrativeProblems, parseNarrative, ratingPattern, ratingRows, readPoints, levelOf, type Hypothesis, type SavedNarrative } from "@crossline/core";
+  PROFILE_CLAIMS_SETTING, PROFILE_CLAIM_STATUS_SETTING, PROFILE_INSTRUMENTS_SETTING, instrumentReadings, readClaimStatus, sensitiveReplies, withoutDisclosures, readInstrumentAnswers, resolveWrittenClaims, countsFirstSaidByInterviewer, withProfileFramework,
+  PORTRAIT_NARRATIVE_SETTING, narrativeProblems, parseNarrative, ratingPattern, ratingRows, readPoints, levelOf, type Hypothesis, type SavedNarrative, pointsRules, type ProfileModel } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { interviewLocale, sayDoFor, type CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
 import { ownerOf } from "./owner";
 import { readResearch, researchFindings } from "./onboarding-research";
 import { localeOf } from "./locale";
+import { readProfileModel } from "./onboarding-persist";
 
 export const PORTRAIT_WRITER = "crossline:crossline-portrait-writer";
 export const PORTRAIT_NARRATIVE = "crossline:crossline-portrait-narrative";
@@ -192,11 +193,16 @@ export function createPortraitWriter(store: CrosslineStore, workspaceId: string,
     const version = store.listEvents(workspaceId, { type: "portrait.written" }).length + 1;
     const at = new Date().toISOString();
     store.setSetting(workspaceId, "portrait.report", JSON.stringify({ version, at, schema: PORTRAIT_SCHEMA_VERSION, report: result.output }));
+    // Under the points rules the extraction no longer rewrites the portrait's sections when the interview ends: they are this report's.
+    if (session && pointsRules(session.coverage)) store.setSetting(workspaceId, "profile.model", JSON.stringify(projectReport(readProfileModel(store, workspaceId), result.output)));
     if (narrative) store.setSetting(workspaceId, PORTRAIT_NARRATIVE_SETTING, JSON.stringify({ version, at, ...narrative, ratings: {} } satisfies SavedNarrative));
     // The report's claims, each kept only with a quote really in the person's replies, pointing at the numbered sentence it sits in.
     const sentences = session ? userMessages.flatMap((message) => store.sentencesOf(workspaceId, "reply", `${session.id}#${message.seq}`)) : [];
     const squash = (text: string) => text.replace(/[\s\p{P}\p{S}]/gu, "").toLowerCase();
-    const claims = resolveWrittenClaims(result.output.claims, allReplies, { at, rejected: new Set(rejected.map(([id]) => id)),
+    // A count the interviewer said first and the person then repeated is going along, not their report (replay 2026-11-26).
+    const echoedCounts = countsFirstSaidByInterviewer(conversation.map((message) => ({ role: message.role === "user" ? "user" as const : "assistant" as const,
+      text: String((message.content as { text?: string; reply?: string }).text ?? (message.content as { reply?: string }).reply ?? "") })));
+    const claims = resolveWrittenClaims(result.output.claims, allReplies, { at, rejected: new Set(rejected.map(([id]) => id)), echoedCounts,
       sentenceOf: (quote) => sentences.find((sentence) => squash(sentence.text).includes(squash(quote)))?.id });
     store.setSetting(workspaceId, PROFILE_CLAIMS_SETTING, JSON.stringify({ version, at, claims }));
     // Written against a record long enough to draw: the say–do part is current, and the monthly rewrite counts from now.
@@ -205,4 +211,28 @@ export function createPortraitWriter(store: CrosslineStore, workspaceId: string,
       entityId: workspaceId, payload: { version, report: result.output } });
     return { state: "written", version };
   };
+}
+
+/**
+ * The portrait's sections as the report wrote them (2026-11-26): under the points rules the extraction no longer rewrites them whole when
+ * the interview ends, so the working profile — what planning reads (`planningProfile`: the energy map, what they do, the allocation, the
+ * core conflict, the values, the direction) and the checklist's 「画像各部分已写出」 — takes them from the report, copied field by field.
+ * The life story's fields (`careerTheme`…) have no counterpart in the report and stay as they are; the points and the log are untouched.
+ */
+export function projectReport(profile: ProfileModel, report: PortraitReport): ProfileModel {
+  // A field the report left empty (an older report's) keeps what the profile had.
+  const text = (next: string | undefined, kept: string) => next?.trim() ? next : kept;
+  const list = <T,>(next: T[] | undefined, kept: T[]) => next?.length ? next : kept;
+  return { ...profile,
+    portrait: text(report.cover.portrait, profile.portrait), coreConflict: text(report.cover.coreConflict, profile.coreConflict),
+    allocation: text(report.lines.allocation, profile.allocation),
+    problem: text(report.problem.statement, profile.problem), gravity: list(report.problem.gravity, profile.gravity),
+    designable: list(report.problem.designable, profile.designable), reframes: list(report.problem.reframes, profile.reframes),
+    workView: text(report.compass.workView, profile.workView), lifeView: text(report.compass.lifeView, profile.lifeView),
+    consistency: text(report.compass.consistency, profile.consistency), trueNorth: text(report.compass.trueNorth, profile.trueNorth),
+    values: list(report.compass.values?.map((item) => ({ value: item.name, score: item.score })), profile.values),
+    energyMap: list(report.energy.map.map(({ activity, skill, love, charge }) => ({ activity, skill, love, charge })), profile.energyMap),
+    flow: list(report.energy.flow, profile.flow),
+    says: text(report.gap.says, profile.says), does: text(report.gap.does, profile.does),
+    anchor: text(report.gap.anchor, profile.anchor), realWant: text(report.gap.realWant, profile.realWant) };
 }

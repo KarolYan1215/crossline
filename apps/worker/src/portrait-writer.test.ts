@@ -151,3 +151,17 @@ test("the portrait reads the files the person uploaded about themselves, not the
   expect(runtime.prompts()[0]).toContain("本人自述");
   expect(runtime.prompts()[0]).not.toContain("下载的讲义正文");
 });
+
+// The owner, 2026-11-26: under the points rules the interview's end no longer rewrites the sections whole; the report written then is
+// what the profile's sections read, and what the report left empty keeps the profile's.
+test("the report written at the end is projected into the profile; a field it left empty keeps the profile's", async () => {
+  const { EMPTY_PROFILE_MODEL } = await import("@crossline/core");
+  const { projectReport } = await import("./portrait-writer");
+  const before = { ...EMPTY_PROFILE_MODEL, portrait: "旧的肖像", allocation: "旧的分配", careerTheme: "旧的主题", flow: ["旧的心流"] };
+  const after = projectReport(before, report());
+  expect(after).toMatchObject({ portrait: "一名研究者。", coreConflict: "精力分散", problem: "s", workView: "w", trueNorth: "n", says: "说", does: "做", anchor: "a", realWant: "w" });
+  expect(after.energyMap).toEqual([{ activity: "写代码", skill: "high", love: "high", charge: "charge" }]);
+  expect(after.values[0]).toEqual({ value: SCHWARTZ_VALUES[0]!.name, score: 30 });
+  // Left empty by the report: kept. Fields the report has no place for are not touched.
+  expect(after).toMatchObject({ allocation: "旧的分配", flow: ["旧的心流"], careerTheme: "旧的主题" });
+});

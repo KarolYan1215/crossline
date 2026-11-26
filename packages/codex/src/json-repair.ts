@@ -205,3 +205,36 @@ export function looksLooping(text: string): boolean {
   for (let at = window.indexOf(probe); at >= 0; at = window.indexOf(probe, at + 1)) count += 1;
   return count >= 2;
 }
+
+/**
+ * One answer written as two objects in a row (replay 2026-11-26, the extraction's sections lane: `{profileSections, flywheelCandidates}`
+ * closed, then `{pointChanges}` on the next line; the repair turn came back byte for byte the same, twice). When every part is a whole
+ * object, no key appears in two of them and each key is the schema's own, they are the fields of one answer and are put in one object,
+ * nothing else changed. Two parts that share a key are two attempts at the same answer: never glued (see `repairJsonBrackets`).
+ */
+export function mergeSplitObjects(text: string, schema: unknown): string | undefined {
+  const parts: string[] = [];
+  let depth = 0, start = -1, inString = false, escaped = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]!;
+    if (inString) { if (escaped) escaped = false; else if (char === "\\") escaped = true; else if (char === "\"") inString = false; continue; }
+    if (char === "\"") { if (depth === 0) return undefined; inString = true; continue; }
+    if (char === "{" || char === "[") { if (depth === 0) { if (char === "[") return undefined; start = index; } depth += 1; continue; }
+    if (char === "}" || char === "]") { depth -= 1; if (depth < 0) return undefined; if (depth === 0) parts.push(text.slice(start, index + 1)); continue; }
+    // Between the objects only whitespace or a comma.
+    if (depth === 0 && !/[\s,]/u.test(char)) return undefined;
+  }
+  if (depth !== 0 || parts.length < 2) return undefined;
+  const known = propertiesOf(asNode(schema));
+  const merged: Record<string, unknown> = {};
+  for (const part of parts) {
+    let value: unknown;
+    try { value = JSON.parse(part); } catch { return undefined; }
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    for (const [key, field] of Object.entries(value)) {
+      if (key in merged || (known && !(key in known))) return undefined;
+      merged[key] = field;
+    }
+  }
+  return JSON.stringify(merged);
+}

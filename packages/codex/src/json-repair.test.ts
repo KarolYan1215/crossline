@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import * as codex from "./index";
-import { looksLooping, repairJsonBrackets } from "./json-repair";
+import { looksLooping, mergeSplitObjects, repairJsonBrackets } from "./json-repair";
 
 // The shape of the portrait writer's answer, cut down: nested objects, arrays of objects, keys that recur at different depths.
 const obj = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
@@ -124,8 +124,22 @@ test("the runner takes a mended answer in the same turn and still validates it; 
   const cut = await run(JSON.stringify(WHOLE).slice(0, 40));
   log.mockRestore();
   expect(!cut.result.ok && cut.result.blocker.code).toBe("SKILL_SCHEMA_INVALID");
+  // The same broken answer back byte for byte ends the repairs: a third turn would draw it again (replay 2026-11-26).
+  expect(cut.turns).toBe(2);
+  expect(logged.some((line) => line.includes("skill.repair_repeated"))).toBe(true);
   // What is logged says where it broke and how long it was, never the text of the answer.
   const unparsed = logged.map((line) => { try { return JSON.parse(line) as Record<string, unknown>; } catch { return {}; } }).find((entry) => entry.type === "skill.json_unparsed");
   expect(unparsed).toMatchObject({ skill: "crossline:crossline-portrait-writer", length: 40, closed: false, looping: false });
   expect(logged.join("\n")).not.toContain("她");
+});
+
+// Replay 2026-11-26: the extraction's answer closed its root and wrote its last field as a second object on the next line.
+test("an answer split into objects with no key in common is one answer; parts sharing a key are two attempts and stay refused", () => {
+  const schema = { type: "object", properties: { profileSections: {}, flywheelCandidates: {}, pointChanges: {} } };
+  const split = `{"profileSections":{"narrative":{"x":"a}b"}},"flywheelCandidates":[]}\n{"pointChanges":[{"op":"add"}]}`;
+  expect(JSON.parse(mergeSplitObjects(split, schema)!)).toEqual({ profileSections: { narrative: { x: "a}b" } }, flywheelCandidates: [], pointChanges: [{ op: "add" }] });
+  expect(mergeSplitObjects(`{"pointChanges":[]}\n{"pointChanges":[{"op":"add"}]}`, schema)).toBeUndefined();
+  expect(mergeSplitObjects(`{"pointChanges":[]}\n{"other":1}`, schema)).toBeUndefined();
+  expect(mergeSplitObjects(`{"pointChanges":[]}`, schema)).toBeUndefined();
+  expect(mergeSplitObjects(`{"pointChanges":[]} and then {"flywheelCandidates":[]}`, schema)).toBeUndefined();
 });

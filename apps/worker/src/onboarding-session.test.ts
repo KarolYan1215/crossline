@@ -410,6 +410,27 @@ test("a line resting only on its own guesses reaches the dialogue as the app's o
   expect(store.listProfileFacts(workspaceId).find((fact) => fact.slot === "skipped")).toMatchObject({ identityId: "startup", status: "confirmed", sourceRef: "reply-5" });
 });
 
+// Replay 2026-11-26: 「十一月中旬，已经过了」 typed under a deadline card was not read by the code, and the same card went out the next round.
+test("an app question answered in words the code did not read is not offered again before the extraction has read that answer", async () => {
+  const { rpc, prompts } = fakeRuntime([guessOnly, turn({ questions: [], openItems: ["gap-line-startup"] }), turn(), turn()]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
+  await run({ sessionId: "s", text: "随便聊聊" });
+  await run({ sessionId: "s", text: "还有吗" });
+  const asked = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { questions: Array<{ id: string; text: string }> };
+  await run({ sessionId: "s", text: `【${asked.questions[0]!.text}】选择：其他。补充：在做一个记账的小程序，还没上线` });
+  expect(store.listProfileFacts(workspaceId).some((fact) => fact.slot === "skipped")).toBe(false);
+  expect(dialogue(prompts).at(-1)).not.toContain('"id":"gap-line-startup"');
+});
+
+// IR-200, replay 2026-11-26: 「七张画完」 for a set of four the person had only called 「还剩两张没画」.
+test("a count stated about the person that nobody said is sent back once; the second answer stands", async () => {
+  const { rpc, prompts } = fakeRuntime([turn({ reply: "七张画完，两张没动，整批没交。" }), turn({ reply: "还剩两张没画。这套一共几张？" })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
+  await run({ sessionId: "s", text: "咖啡品牌那套节日插画，还剩两张没画。" });
+  expect(dialogue(prompts).some((prompt) => prompt.includes("「七张」本人、文件和之前的回复都没说过"))).toBe(true);
+  expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string }).reply).toBe("还剩两张没画。这套一共几张？");
+});
+
 test("with the completion list on, a 「ready」 goes back to asking, and the checklist's labels never reach the person", async () => {
   const { rpc } = fakeRuntime([turn({ questions: [], nextAction: "ready_for_milestones" })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
