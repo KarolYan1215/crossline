@@ -1,0 +1,15 @@
+{
+ "about": "Made up: the shape scripts/golden-from-corrections.ts writes (one file per kind), for scripts/ablate.ts and its test. Real golden files hold the person's own words and are gitignored.",
+ "workspaceId": "example",
+ "extractedAt": "2026-11-25T00:00:00.000Z",
+ "cases": [
+  { "id": "completion:wo-1", "kind": "completion", "source": "payload.completionMode", "at": "", "entityId": "wo-1",
+    "context": { "title": "示例课程期中考试", "intent": "示例课程期中考试" }, "modelSaid": null, "personSaid": "needs_assessment" },
+  { "id": "completion:wo-2", "kind": "completion", "source": "payload.completionMode", "at": "", "entityId": "wo-2",
+    "context": { "title": "整理示例项目的参考文献", "intent": "整理示例项目的参考文献" }, "modelSaid": null, "personSaid": "self_evident" },
+  { "id": "completion:wo-3", "kind": "completion", "source": "payload.completionMode", "at": "", "entityId": "wo-3",
+    "context": { "title": "起草示例报告第二节", "intent": "起草示例报告第二节" }, "modelSaid": null, "personSaid": "self_evident" },
+  { "id": "completion:wo-4", "kind": "completion", "source": "payload.completionMode", "at": "", "entityId": "wo-4",
+    "context": { "title": "提交示例作业 3", "intent": "提交示例作业 3" }, "modelSaid": "needs_assessment", "personSaid": "self_evident" }
+ ]
+}

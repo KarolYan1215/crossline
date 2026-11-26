@@ -1,5 +1,6 @@
 import type { AskProgress } from "./asks";
 import { joinList, tFor, type Locale } from "./i18n";
+import { ruleFired } from "./rule-spec";
 
 /**
  * Why the assistant did not finish something, and what follows from it (the owner's item 10, 2026-10-15).
@@ -48,6 +49,7 @@ const EXTERNAL_RULES = new Set(["send.mail", "send.webhook", "publish.package", 
 const ASK_RULES: Record<string, string> = {
   "install.global": "允许在系统里安装软件", "delete.recursive": "允许批量删除文件", "move.bulk": "允许批量移动文件"
 };
+// rule: agent-failure.external-words
 const EXTERNAL_WORDS: Array<[RegExp, string, string]> = [
   [/安全验证|验证码|滑块|captcha|unusual traffic|访问异常|请求过于频繁|security check|verify (that )?you are (a )?human|too many requests|rate limited/i, "网站出现了安全验证", "再次尝试可能反复触发安全验证，账号可能因此受限"],
   [/需要登录|要求登录|未登录.*网站|登录已失效|(login|log in|sign in|sign-in) (is )?required|please (log|sign) in|not (logged|signed) in|session expired/i, "要读的网站需要本人登录", "登录只能由本人完成；未登录时反复读取可能触发网站的风控"],
@@ -79,6 +81,7 @@ const INTERRUPTED_WORDS: Record<string, string> = {
   SKILL_UNAUTHENTICATED: "Codex 未登录或登录已失效，重新登录后再接着做",
   CODEX_SUPERVISOR_UNAVAILABLE: "Codex 运行时暂时不可用"
 };
+// rule: agent-failure.needs-input
 const NEEDS_INPUT = /缺少|缺乏|需要本人|请本人|没有提供|未提供|请提供|找不到.{0,12}(文件|资料|材料)|无法确定|需要选择|需要决定|\bmissing\b|\black(s|ing)?\b|needs? (the person|you|the user)|please provide|not provided|could not find .{0,20}(file|material|document|source)|cannot determine|can't determine|needs? (a )?(choice|decision)/i;
 const clause = (text: string) => text.trim().replace(/[。．.；;，,\s]+$/u, "");
 
@@ -93,8 +96,10 @@ export function classifyAgentFailure(run: StoppedRun, locale?: Locale): AgentFai
     needs: [t("决定接下来怎么做：按补充的要求重试、本人接手，或不做了")] };
   const external = (stuckAt: string, why: string): AgentFailure => ({ kind: "external", retry: false, external: true, stuckAt, noRetryWhy: t(why),
     needs: [t("本人先处理好这一步（例如登录、完成验证、自己发出），再决定是否让助手接着做")] });
-  if (run.siteStopped || (code === "AGENT_LOOP_STOPPED" && /网站|读取|\b(site|website|page|reading)\b/i.test(message)))
+  if (run.siteStopped || (code === "AGENT_LOOP_STOPPED" && /网站|读取|\b(site|website|page|reading)\b/i.test(message))) { // rule: agent-failure.external-words
+    if (!run.siteStopped) ruleFired("agent-failure.external-words", { key: message, verdict: "site", sample: message });
     return external(said("读取网站时被拦下"), "再次尝试可能反复触发网站的安全验证，账号可能因此受限");
+  }
   const outward = denied.find((rule) => EXTERNAL_RULES.has(rule));
   if (outward) return external(t("护栏拦下了一个对外的动作（{{action}}）", { action: t(outward.startsWith("send") || outward === "mcp.send" ? "发送"
     : outward.startsWith("publish") ? "发布" : outward === "money" ? "付款" : outward === "git.remote" ? "推送到远端" : "上传", { context: "act" }) }),
@@ -102,12 +107,17 @@ export function classifyAgentFailure(run: StoppedRun, locale?: Locale): AgentFai
   if (run.status === "stale") return { kind: "interrupted", retry: true, external: false, stuckAt: t("运行超过 8 小时没有结果，进程大概已经中断"), needs: [] };
   if (INTERRUPTED_WORDS[code] || /^(SKILL_|CODEX_)/.test(code))
     return { kind: "interrupted", retry: true, external: false, stuckAt: INTERRUPTED_WORDS[code] ? t(INTERRUPTED_WORDS[code]) : said("Codex 运行时出错"), needs: [] };
-  for (const [pattern, stuckAt, why] of EXTERNAL_WORDS) if (pattern.test(message)) return external(said(stuckAt), why);
+  for (const [pattern, stuckAt, why] of EXTERNAL_WORDS) if (pattern.test(message)) {
+    ruleFired("agent-failure.external-words", { key: message, verdict: stuckAt, sample: message });
+    return external(said(stuckAt), why);
+  }
   const asked = denied.find((rule) => ASK_RULES[rule]);
   if (asked) return { kind: "needs_input", retry: false, external: false, stuckAt: t("助手需要本人{{what}}，没人回答，已拒绝", { what: t(ASK_RULES[asked]!) }),
     needs: [t("是否{{what}}；或者告诉助手不这样做时该怎么办", { what: t(ASK_RULES[asked]!) })] };
-  if (code === "CATEGORY_REQUIRED" || NEEDS_INPUT.test(message))
+  if (code === "CATEGORY_REQUIRED" || NEEDS_INPUT.test(message)) {
+    if (code !== "CATEGORY_REQUIRED") ruleFired("agent-failure.needs-input", { key: message, verdict: "needs_input", sample: message });
     return { kind: "needs_input", retry: false, external: false, stuckAt: said("缺少只有本人知道的信息"), needs: [said("补充助手缺的信息或做出选择")] };
+  }
   if (AGENT_REFUSAL_WORDS[code]) return { kind: "hard", retry: false, external: false, stuckAt: t("{{what}}，结果没有被采纳", { what: t(AGENT_REFUSAL_WORDS[code]) }), needs: [],
     workaround: t("只要求一份 Markdown 文件，每一条写明出处，写完自己读一遍再交") };
   if (code === "AGENT_LOOP_STOPPED") return { kind: "hard", retry: false, external: false, stuckAt: said("同一个做法反复失败，已自动停下"), needs: [],
@@ -216,8 +226,12 @@ export function resultNeedsPerson(result: {
   locale?: Locale;
 }): string[] {
   const t = tFor(result.locale);
-  const keepWorkflow = (what: string) => /保留.{0,8}工作流|工作流.{0,8}保留|\bkeep\b.{0,20}\bworkflow|\bworkflow\b.{0,20}\bkeep/i.test(what);
-  const needs = result.needsHuman.filter((item) => !(result.growing && keepWorkflow(item.what)));
+  const keepWorkflow = (what: string) => /保留.{0,8}工作流|工作流.{0,8}保留|\bkeep\b.{0,20}\bworkflow|\bworkflow\b.{0,20}\bkeep/i.test(what); // rule: agent-failure.keep-workflow
+  const needs = result.needsHuman.filter((item) => {
+    const kept = Boolean(result.growing && keepWorkflow(item.what));
+    if (kept) ruleFired("agent-failure.keep-workflow", { key: item.what, verdict: "not_a_reason", sample: item.what });
+    return !kept;
+  });
   return [
     ...(needs.length ? [t("留了 {{count}} 件事给本人：{{items}}", { count: needs.length,
       items: needs.slice(0, 3).map((item) => clause(item.what)).join(result.locale === "en" ? "; " : "；") })] : []),

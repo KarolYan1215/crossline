@@ -5,6 +5,7 @@ import { RELATIVE_DAY_WORDS, RELATIVE_NOTE } from "./date-schema";
 import { NO_DEADLINE } from "./interview-checklist";
 import { roughWindow } from "./rough-dates";
 import { tFor, type Locale } from "./i18n";
+import { ruleFired } from "./rule-spec";
 
 /**
  * What the profile still has to learn from the person before milestones are designed from it.
@@ -149,7 +150,7 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
     if (/-default$/.test(project.id) || knowsDeadline(project)) continue;
     // A deadline the interview worked out from the person's rough words or the files: one tap makes it theirs.
     const inferred = input.facts.find((fact) => fact.projectId === project.id && fact.status === "inferred" && fact.slot === "deadline" && fact.value.trim());
-    const guess = inferred?.value.replace(/^(推断|假设|inferred|assumption|assumed)[：:]\s*/i, "").trim().slice(0, 40);
+    const guess = inferred?.value.replace(/^(推断|假设|inferred|assumption|assumed)[：:]\s*/i, "").trim().slice(0, 40); // rule: profile-gaps.inferred-prefix
     gaps.push({
       code: "PROJECT_DEADLINE", identityId: project.identityId, projectId: project.id, blocking: !lineKnows.has(project.identityId),
       // i18n-ignore: for the model
@@ -199,7 +200,10 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
     }
     if (!GRADED_KINDS.has(item.kind) && item.kind !== "deadline") continue;
     // 「每周作业截止」 recurs on a weekday; asking for 「大致日期」 of it made no sense (2026-10-15 walkthrough).
-    if (/每周|每星期|weekly|every week/i.test(item.title)) continue;
+    if (/每周|每星期|weekly|every week/i.test(item.title)) { // rule: profile-gaps.weekly-skip
+      ruleFired("profile-gaps.weekly-skip", { key: item.title, verdict: "recurring", sample: item.title });
+      continue;
+    }
     const project = input.projects.find((entry) => entry.id === item.project);
     if (!project) continue;
     // The project's own deadline question asks the same thing: the 2026-11-01 rerun put 「「申请材料」有截止日期吗？」 and 「「申请材料」的
@@ -325,6 +329,7 @@ const squashCode = (text: string) => text.replace(/\s+/g, "").toLowerCase();
  * An undated item's identity across wordings — course codes, the verbs around it (提交, 截止, due) and punctuation removed — so 「期末课程项目
  * 报告截止」, 「提交 ECE 555 期末课程项目报告」 and 「ECE 555 期末课程项目报告截止」 are one item, asked about once.
  */
+// rule: profile-gaps.undated-key
 export function undatedKey(title: string): string {
   return title.replace(/提交|上交|交付|截止|due|submit(?:ted|sion)?|hand[- ]?in|turn[- ]?in|deadline|\b(?:the|a|an)\b/giu, "")
     .replace(/(?<![A-Za-z])[A-Za-z]{2,5}\s?\d{3,4}[A-Za-z]?(?![\dA-Za-z])/gu, "")
@@ -334,7 +339,7 @@ export function undatedKey(title: string): string {
 
 const MEETING_SLOT = /^(meeting|class)_?times?$|^no_meetings$/;
 /** A course's class times the person said are not fixed: 「不固定」「没有固定时间」「看情况」. */
-const VARIES = /不固定|没有固定|没固定|看情况|随机|not fixed|varies/iu; // i18n-ignore: matched against the person's words
+const VARIES = /不固定|没有固定|没固定|看情况|随机|not fixed|varies/iu; // i18n-ignore: matched against the person's words; rule: profile-gaps.varies
 const saysVaries = (fact: { slot: string; value: string }) => VARIES.test(fact.value)
   && (/time|schedule|class|meeting|hour/iu.test(fact.slot) || /\d{1,2}\s*[:：点]/u.test(fact.value)); // i18n-ignore: a clock in the person's words
 
@@ -385,6 +390,7 @@ const sameOption = (label: string, picked: string) => {
 function statesDay(text: string): boolean {
   return NO_DEADLINE.test(text) || DAY_WRITTEN.test(text) || RELATIVE_DAY_WORDS.test(text) || Boolean(roughWindow(text, new Date().toISOString().slice(0, 10)));
 }
+// rule: profile-gaps.states-day
 const DAY_WRITTEN = /\d{4}-\d{1,2}-\d{1,2}|\d{1,2}\s*月\s*\d{1,2}|(?<![\d/])\d{1,2}\/\d{1,2}(?![\d/])|(周|星期|礼拜)[一二三四五六日天]|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}\b|\b(mon|tues?|wed(nes)?|thu(rs)?|fri|sat(ur)?|sun)(day)?\b/iu;
 /** Whether words typed for when something meets say a day or a time; 「不固定」 is an answer too. */
 const statesTime = (text: string) => statesDay(text) || /\d{1,2}\s*[:：点]|[上下]午|早上|晚上|不固定|没有固定|\b\d{1,2}\s?(am|pm)\b/iu.test(text);

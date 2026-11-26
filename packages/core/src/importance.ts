@@ -11,6 +11,7 @@ export function presetFromReading(reading: { weight: number; weightWhy: string }
   return reading ? { weight: reading.weight, why: reading.weightWhy, by: "model" } : { weight: NEUTRAL_WEIGHT, why: "", by: "none" };
 }
 
+// rule: importance.hours-from-text
 /** A stated weekly figure such as 「每周约 12 小时」 or 「10–20 小时」 as hours (the upper end of a range); course numbers are ignored. */
 export function hoursFromText(text: string): number | null {
   const match = /(\d+(?:\.\d+)?)\s*(?:[–\-~至到]\s*(\d+(?:\.\d+)?))?\s*(?:个)?\s*(?:小时|hours?\b|h\b)/i.exec(text);

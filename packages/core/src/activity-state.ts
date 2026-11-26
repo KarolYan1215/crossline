@@ -121,6 +121,7 @@ export const ACTIVITY_RULES = "activity.rules";
 // ---------------------------------------------------------------------------------------------------------------------
 // What is never recorded
 
+// rule: activity.private-window
 const PRIVATE_APPS = /^(1password|bitwarden|keepass|keepassxc|lastpass|dashlane|enpass|authy|nordpass)(\.exe)?$/i;
 const PRIVATE_TITLE = /inprivate|incognito|private browsing|private window|无痕|隐私浏览|隐身|隐私窗口|password|密码|keychain|钱包|\bbank(ing)?\b|银行|paypal|alipay|支付宝|wells fargo|chase\b|credit card|信用卡|\bssn\b|social security|\b2fa\b|verification code|验证码/i;
 
@@ -151,6 +152,7 @@ const BY_APP: Array<[RegExp, ActivityCategory]> = [
   [/^(chrome|msedge|firefox|brave|opera|vivaldi|arc|safari|iexplore)(\.exe)?$/i, "browsing"]
 ];
 /** Titles that say more than the app does, mostly for the browser. */
+// rule: activity.category
 const BY_TITLE: Array<[RegExp, ActivityCategory]> = [
   [/youtube|bilibili|哔哩|netflix|twitch|抖音|tiktok|instagram|reddit|9gag|知乎想法|微博|weibo|斗鱼|虎牙|prime video|disney\+/i, "leisure"],
   [/overleaf|google docs|notion|\.docx?\b|word\b|writing|草稿|论文写作|博客|公众号|编辑器/i, "writing"],

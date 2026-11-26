@@ -9,7 +9,7 @@ import { containerMemory, containerPeak, createCollectMemory, heldMemory } from 
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
 import { createSponsorService, sponsorFromEnv, type SponsorService } from "./sponsor";
-import { CrosslineStore, aiToolsFor, currentInstructionsOf, designSkillNote, readLocale, settleLinkNeeds, recordGrownLogin, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions, opportunityCosts, retireQuietWatches, settleOpportunityOutcomes, nodeComputeOn } from "@crossline/db";
+import { CrosslineStore, aiToolsFor, currentInstructionsOf, designSkillNote, readLocale, settleLinkNeeds, recordGrownLogin, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions, installRuleTelemetry, opportunityCosts, retireQuietWatches, settleOpportunityOutcomes, nodeComputeOn } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { closeInterruptedCollections, createFavouritesTopicsService, createTopicClassifier, favouritesTopicPass, refreshFavouritesTopicsText } from "./favourites-topics";
 import { workflowImprovePass } from "./workflow-improver";
@@ -1240,6 +1240,8 @@ if (!claimWorkerLock()) {
 // A provider closing a stream mid-response can make undici assert from a socket event, outside every request's promise; that one
 // assertion is logged and the worker stays up instead of taking every account's model runs with it (packages/codex/src/undici-guard.ts).
 installUndiciAssertionGuard();
+// Rule firings (packages/core/src/rule-spec.ts) go to `<data dir>/telemetry/rule-fired.jsonl`, never the ledger.
+installRuleTelemetry(dataDir);
 const analysisStore = new CrosslineStore(path.join(dataDir, "crossline.db"));
 // Keys and links that are credentials (a model provider's key, a calendar's private link): DPAPI files, never the ledger.
 const secrets = createDpapiSecretStore(dataDir);

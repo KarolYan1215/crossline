@@ -1,3 +1,5 @@
+import { ruleFired } from "./rule-spec";
+
 /**
  * Rough days (2026-11-14, the owner): some days cannot be set yet, and the person answers 「下周」「11 月底前」「12 月中」「这学期内」
  * 「两周内」. That is an answer, not a gap: the app turns it into a window of days on its own and never asks the person for the exact day.
@@ -29,6 +31,7 @@ function amount(text: string): number | undefined {
  * The window of days rough words name, said on `today` (YYYY-MM-DD); undefined when they name none. A month earlier than this one by more
  * than two is next year's (「1 月」 said in November); a window that starts before today starts today.
  */
+// rule: rough.window
 export function roughWindow(text: string, today: string): RoughWindow | undefined {
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(today)) return undefined;
   const [year, month, date] = today.split("-").map(Number) as [number, number, number];
@@ -105,7 +108,7 @@ export function roughWindow(text: string, today: string): RoughWindow | undefine
 }
 
 /** Words that make what a clause dates a start, not a deadline: 「下周开始投」 begins in that week, it is not due at its end. */
-export const STARTS_WORDS = /开始|开工|动手|着手|启动|起步|开投|恢复|\bstart|\bbegin|kick ?off/iu; // i18n-ignore: matched against the reply
+export const STARTS_WORDS = /开始|开工|动手|着手|启动|起步|开投|恢复|\bstart|\bbegin|kick ?off/iu; // i18n-ignore: matched against the reply; rule: rough.starts-words
 
 /**
  * The one day rough words stand for (W-268, 2026-11-14 walkthrough: 「下周开始投递」 was kept as that week's Saturday and 「年前」 as 12-31,
@@ -119,7 +122,9 @@ export function settleRoughDay(date: string, text: string, today: string, role?:
   const holding = parts.flatMap((part) => { const found = roughWindow(part, today); return found && date >= found.from && date <= found.to ? [{ part, found }] : []; })
     .sort((a, b) => span(a.found) - span(b.found))[0];
   if (!holding) return undefined;
-  return (role ?? (STARTS_WORDS.test(holding.part) ? "start" : "end")) === "start" ? holding.found.from : holding.found.to;
+  const read = role ?? (STARTS_WORDS.test(holding.part) ? "start" : "end");
+  if (!role && read === "start") ruleFired("rough.starts-words", { key: holding.part, verdict: "start", sample: holding.part });
+  return read === "start" ? holding.found.from : holding.found.to;
 }
 
 /**
