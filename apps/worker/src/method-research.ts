@@ -10,6 +10,7 @@ import { identityLines } from "./lines";
 import { localeOf } from "./locale";
 import { ownerOf } from "./owner";
 import { defaultSafeGetDeps, htmlToText, safeGet, type SafeGetDeps } from "./safe-fetch";
+import { citable, citableUrls } from "./cited-urls";
 
 const INSTRUCTIONS = "Do the crossline-method-research Skill and return only the requested JSON: the person's habits from their own facts, "
   + "then for each recurring kind of work in their lines the current best way to do it with AI tools, from their own files first and the web second, "
@@ -30,10 +31,12 @@ export function methodResearchInput(store: CrosslineStore, workspaceId: string, 
 }
 
 /** Each web page opened (public https on every hop) and its title matched; a method resting only on dropped pages goes too. */
-export async function verifyMethodSources(research: MethodResearch, deps: SafeGetDeps): Promise<{ research: MethodResearch; dropped: number }> {
+/** `known`: where pages may be opened (`citableUrls`); a cited address outside it is dropped unopened. */
+export async function verifyMethodSources(research: MethodResearch, deps: SafeGetDeps, known?: readonly string[]): Promise<{ research: MethodResearch; dropped: number }> {
   const kept = new Set<string>();
   for (const source of research.sources) {
     if (source.local) { kept.add(source.id); continue; }
+    if (!citable(source.url, known)) continue;
     const page = await safeGet(source.url, deps, { maxBytes: 3_000_000, timeoutMs: 20_000 }).catch(() => undefined);
     if (!page?.ok) continue;
     if (page.contentType === "application/pdf" || claimedTitleMatches(source.title, htmlToText(new TextDecoder().decode(page.bytes)).slice(0, 20_000))) kept.add(source.id);
@@ -67,7 +70,7 @@ export async function runMethodResearch(store: CrosslineStore, workspaceId: stri
   const now = deps.now ?? new Date();
   const input = methodResearchInput(store, workspaceId, now.toISOString().slice(0, 10));
   const result = await runCodexSkill<MethodResearch>(deps.client, input, { skillName: METHOD_RESEARCH_SKILL, cwd, developerInstructions: INSTRUCTIONS,
-    outputSchema: METHOD_RESEARCH_SCHEMA, prepareInput: () => input, allowWebSearch: true, onAudit: () => {}, timeoutMs: 60 * 60_000,
+    outputSchema: METHOD_RESEARCH_SCHEMA, prepareInput: () => input, webResearch: true, onAudit: () => {}, timeoutMs: 60 * 60_000,
     stableKeys: ["facts", "aiTools", "lines"], ...(deps.signal ? { signal: deps.signal } : {}),
     validateOutput: (output) => validateMethodResearch(output, { factIds: input.facts.map((fact) => fact.id), lineIds: input.lines.map((line) => line.id) }) });
   if (!result.ok) {
@@ -75,7 +78,7 @@ export async function runMethodResearch(store: CrosslineStore, workspaceId: stri
       type: "method.research_blocked", entityId: workspaceId, payload: { code: result.blocker.code } });
     return { blocked: result.blocker.code };
   }
-  const verified = await verifyMethodSources(result.output, deps.safeGet ?? defaultSafeGetDeps());
+  const verified = await verifyMethodSources(result.output, deps.safeGet ?? defaultSafeGetDeps(), citableUrls(result.audit, input));
   const screened = screenMethodResearch(verified.research, drillBackingFor(store, workspaceId).backing);
   const stored: StoredMethodResearch = { ...screened, at: now.toISOString(), droppedSources: verified.dropped };
   store.setSetting(workspaceId, METHOD_RESEARCH_SETTING, JSON.stringify(stored));

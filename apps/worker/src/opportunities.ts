@@ -20,6 +20,7 @@ import { identityLines } from "./lines";
 import { localeOf } from "./locale";
 import { ownerOf, runtimeOwner } from "./owner";
 import { defaultSafeGetDeps, htmlToText, safeGet, type SafeGetDeps } from "./safe-fetch";
+import { citable, citableUrls } from "./cited-urls";
 
 /**
  * The opportunity agent's watches on the worker (docs/opportunity-agent.md §17.2, track ①; first built as needs in §5–7). Skill
@@ -215,16 +216,18 @@ export async function deriveWatches(store: CrosslineStore, workspaceId: string, 
   const context: WatchesContext = { lineId, factIds: input.facts.map((fact) => fact.id), milestoneIds: input.milestones.map((item) => item.id) };
   const result = await withUsagePurpose(derivePurpose(lineId), () => runCodexSkill<WatchesAnswer>(client, input, {
     skillName: OPPORTUNITY_NEEDS, cwd: deps.cwd, developerInstructions: WATCHES_INSTRUCTIONS, outputSchema: OPPORTUNITY_WATCHES_SCHEMA, prepareInput: () => input,
-    allowWebSearch: true, validateOutput: (output) => validateWatchProposals(output, context), softAccept: (_rejection, output) => keepWatchProposals(output as WatchesAnswer, context),
+    webResearch: true, validateOutput: (output) => validateWatchProposals(output, context), softAccept: (_rejection, output) => keepWatchProposals(output as WatchesAnswer, context),
     onAudit: () => {}, timeoutMs: 60 * 60_000
   }));
   if (!result.ok) { record(result.blocker.code); return { blocked: result.blocker.code }; }
   const http = deps.http ?? defaultSafeGetDeps();
   const t = tFor(localeOf(store, workspaceId));
   const fresh: StoredWatch[] = [];
+  const known = citableUrls(result.audit, input);
   for (const proposal of result.output.watches) {
     let cycle = proposal.cycle;
     // The page a cycle's months rest on is opened; one that does not open leaves the months as an unverified guess, said so.
+    if (cycle.sourceUrl && !citable(cycle.sourceUrl, known)) cycle = { ...cycle, sourceUrl: "", basis: t("未能自动核实：{{basis}}", { basis: cycle.basis }) };
     if (cycle.sourceUrl) {
       const page = await safeGet(cycle.sourceUrl, http, { maxBytes: 3_000_000, timeoutMs: 20_000 }).catch(() => undefined);
       if (!page?.ok) cycle = { ...cycle, sourceUrl: "", basis: t("未能自动核实：{{basis}}", { basis: cycle.basis }) };

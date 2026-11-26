@@ -105,6 +105,8 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-opportunity-reader": "mid",
   // Finding the official visa page and copying its sentences: a lookup; code checks every quote and reads the days itself.
   "crossline-visa-finder": "low",
+  // `web_research`'s search run: queries in, pages out, nothing to judge (docs/plans/harness-1125.md §10).
+  "crossline-web-scout": "low",
   // Brokerage quotes for the ledger's holdings (docs/ledger-wealth.md §2): one connector call per symbol, the number checked by code.
   "crossline-quote-reader": "low",
   "crossline-background-facts": "low",

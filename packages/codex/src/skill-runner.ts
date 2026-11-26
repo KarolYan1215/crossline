@@ -1,11 +1,13 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { agentLanguageLine, runLocale, schemaForLocale, styleInstructions } from "./style";
 import { join } from "node:path";
 import { looksLooping, repairJsonBrackets } from "./json-repair";
-import { cleanAnswerStrings, designNoteText, instructionsText, tFor, type Locale } from "@crossline/core";
+import { cleanAnswerStrings, designNoteText, instructionsText, privateLeak, tFor, UNTRUSTED_WEB_INSTRUCTION, untrustedWebBlock, urlKnown, urlsIn, validateWebScout,
+  WEB_RESEARCH_LIMITS, WEB_SCOUT_SCHEMA, webQueryProblem, type Locale, type PrivateGuard, type WebScoutAnswer } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
 import { routeForSkill, shiftEffort, tierForSkill, tierRoutes, type ModelRoute, type RouteTier, type SpendMode } from "./model-policy";
-import { createUsageCollector, currentCodexChoice, currentEffortPreference, currentSpendMode, currentUsageWorkspace, reportUsage, sponsorChosen, takeMeteredUsage, type UsageCollector } from "./usage";
+import { createUsageCollector, currentCodexChoice, currentEffortPreference, currentSpendMode, currentUsageWorkspace, reportUsage, sponsorChosen, takeMeteredUsage, withUsageWorkspace, type UsageCollector } from "./usage";
 import { currentProviderRouting, decideRoute, noteChatgptUsageLimit, type RouteDecision, type ThreadProvider } from "./providers";
 import { markClientBusy, priorityForSkill, withModelSlot, type ModelPriority } from "./model-gate";
 import { bindForRun } from "./runtime-pool";
@@ -30,7 +32,12 @@ export type AnalysisAudit = { threadId?: string; turnId?: string;
   /** Set when the answer is a second run on the provider's own model (`redoOnRepair`): the repairs the first one needed. */
   redone?: { repairs: number };
   /** With `resumeThreadId`: whether the run went on in that thread (true) or the runtime no longer had it and a new one was opened. */
-  resumed?: boolean };
+  resumed?: boolean;
+  /**
+   * The pages `web_research` (or the stand-in `web_search`) returned during the run, verbatim. Code that later opens an address the
+   * model cited opens it only if it is here or was the person's own (`urlKnown`): a composed address could carry private data out.
+   */
+  webUrls?: string[] };
 /**
  * What a running turn has done so far, for a screen that shows the wait (docs/onboarding-v3.md 「等待」): `thinking` until the first
  * word, `writing` with the answer streamed so far (unvalidated — never stored, only counted and previewed), `checking` once it is in.
@@ -142,8 +149,20 @@ export type SkillRunOptions<T> = {
    * long answer is a full regeneration — a real interview turn spent 174 s, two thirds of it on two repairs (2026-10-16).
    */
   keepEarly?: (rejection: Error, output: unknown, prepared: unknown) => T | undefined;
-  /** Only a Skill that must reach outside gets this; it is off for every other run. */
+  /**
+   * `true`: the runtime's hosted live search on this thread itself — only for a run whose input carries no private context worth the
+   * name (docs/plans/harness-1125.md §10: the visa finder, the energy review, the opportunity reader, the need check and the scout);
+   * its queries are checked against the person's private strings as they appear (`privateLeak`) and a leaking one ends the run.
+   * `false`: no web at all. Unset: the web only through `web_research` (`webResearch`), where the route can search and call functions.
+   */
   allowWebSearch?: boolean;
+  /**
+   * The web through the function `web_research(queries, purpose)` instead of a search on this thread: each call is a separate run of
+   * `crossline-web-scout` that sees only those queries and that purpose, checked first by `webQueryProblem`; what it found comes back
+   * fenced as untrusted data (`untrustedWebBlock`). Set by `withSourceDefaults` for every run that leaves `allowWebSearch` unset;
+   * `false` keeps a run off it.
+   */
+  webResearch?: boolean;
   /**
    * Only the portrait illustrator gets this: the runtime's own image tool, on the person's ChatGPT sign-in like every other call. Each
    * finished image is handed to `onImage` (base64 PNG) as it arrives; nothing is written by the runner itself.
@@ -429,28 +448,80 @@ function mergedTools(own: SkillTools | undefined, extra: SkillTools): SkillTools
 }
 
 const WEB_TOOLS_INSTRUCTION = "Web access in this run is through the functions `web_search` (results: title, url, snippet) and `web_fetch` "
-  + "(the page's text). Search, then fetch every page you rely on before citing it; cite only pages you fetched, by their exact url.";
+  + "(the page's text). Search, then fetch every page you rely on before citing it; cite only pages you fetched, by their exact url. "
+  + "`web_fetch` opens only an address the input gave or one that appeared verbatim in a search result or a page you fetched.";
+
+/**
+ * What one run let out and took in (docs/plans/harness-1125.md §10): the addresses its input gave (the person's own) and the addresses the
+ * web returned to it. Only these may be opened or sent; `found` ends up in `audit.webUrls`.
+ */
+export type Egress = { given: string[]; found: string[] };
+const newEgress = (): Egress => ({ given: [], found: [] });
+const knownOf = (egress: Egress) => [...egress.given, ...egress.found];
+/** The audit with the addresses the web returned to this run, when it returned any. */
+const withWebUrls = (audit: AnalysisAudit, egress: Egress): AnalysisAudit => {
+  if (egress.found.length) audit.webUrls = [...new Set(egress.found)];
+  return audit;
+};
+/**
+ * The guard for a run with the hosted search on its own thread. Unreadable, the run still goes (the hosted search cannot be stopped
+ * before it sends anyway; these runs were chosen for holding nothing private) and the gap is logged.
+ */
+async function hostedSearchGuard(skillName: string): Promise<PrivateGuard | undefined> {
+  const guard = await privateGuardOf(currentUsageWorkspace());
+  if (guard !== GUARD_UNREADABLE) return guard;
+  console.info(JSON.stringify({ type: "skill.web_guard_unreadable", skill: skillName, at: new Date().toISOString() }));
+  return undefined;
+}
 
 /**
  * A run's options as the thread sees them: on a provider, a Skill granted the web gets Crossline's search functions instead of the
- * hosted tool (which only exists on OpenAI), merged with any tools of its own.
+ * hosted tool (which only exists on OpenAI), merged with any tools of its own — behind the same outbound checks as `web_research`.
  */
-function withWebTools<T>(options: SkillRunOptions<T>, context: RunContext): SkillRunOptions<T> {
+function withWebTools<T>(options: SkillRunOptions<T>, context: RunContext, egress: Egress = newEgress()): SkillRunOptions<T> {
   // The assistant always has the web on Codex (`startAgentThread`), so on a provider it always gets the stand-in.
   if (!context.provider || !(options.allowWebSearch || options.agent)) return options;
   const { allowWebSearch: _hosted, ...rest } = options;
   const web = context.webTools;
   if (!web) return rest;
-  const own = options.tools;
   return { ...rest, developerInstructions: `${options.developerInstructions}\n\n${WEB_TOOLS_INSTRUCTION}`,
-    tools: { specs: [...(own?.specs ?? []), ...web.specs.filter((spec) => !own?.specs.some((mine) => mine.name === spec.name))],
-      call: (name, args) => own?.specs.some((spec) => spec.name === name) ? own.call(name, args) : web.call(name, args) } };
+    tools: mergedTools(options.tools, gatedWebTools(web, egress)) };
 }
+
+/**
+ * The stand-in `web_search`/`web_fetch` with the outbound checks in front: a query goes out only past `webQueryProblem`, a page is
+ * opened only at an address the run's input gave or the web returned verbatim (a search result, a link on a page already fetched). An
+ * address the model composed — a query string being the obvious carrier — is refused, never shortened or rewritten.
+ */
+export function gatedWebTools(web: SkillTools, egress: Egress = newEgress()): SkillTools {
+  const workspace = currentUsageWorkspace();
+  return { specs: web.specs,
+    // i18n-ignore-start: answers to the model
+    async call(name, args) {
+      const input = (args ?? {}) as { query?: unknown; url?: unknown };
+      if (name === "web_search") {
+        const guard = await privateGuardOf(workspace);
+        if (guard === GUARD_UNREADABLE) throw new Error(GUARD_UNREADABLE_ANSWER);
+        const problem = webQueryProblem(String(input.query ?? ""), { guard, knownUrls: knownOf(egress) });
+        if (problem) throw new Error(problem);
+      } else if (name === "web_fetch" && !urlKnown(String(input.url ?? ""), knownOf(egress))) {
+        throw new Error("这个网址既不在本次输入里，也没在检索结果或已打开的页面里原样出现过，不能打开。先用 web_search 找到它，再原样打开结果里的网址。");
+      }
+      const text = await web.call(name, args);
+      egress.found.push(...urlsIn(text));
+      return text;
+    }
+    // i18n-ignore-end
+  };
+}
+
 /**
  * Every model has the web and the person's own files, used as needed (the owner, 2026-11-18: 「给所有模型都配上网络搜索工具，按需使用，但是
  * 优先检索本地的文件，没找到相关资源再搜索网络」). A run that says nothing about the web gets it whenever the route can search (Codex with its
- * search host, a provider with Crossline's stand-in); `allowWebSearch: false` still keeps a run off it. Where the route calls functions, the
- * person's files are offered as lookups (`setLocalLookupProvider`). Neither is ever a blocker: a route without them runs as before.
+ * search host, a provider with Crossline's stand-in) and call functions — since 2026-11-25 as `web_research`, never as a search on its own
+ * thread (docs/plans/harness-1125.md §10); `allowWebSearch: true` keeps the hosted search for the few runs without private context, and
+ * `false` keeps a run off the web. Where the route calls functions, the person's files are offered as lookups (`setLocalLookupProvider`).
+ * Neither is ever a blocker: a route without them runs as before.
  */
 let webAvailable: () => boolean = () => false;
 /** Whether the account's own Codex can search now (the worker: `webResearchBlocker()` finds the search host). */
@@ -459,26 +530,120 @@ let localLookupProvider: ((workspaceId: string | undefined, skillName: string) =
 /** The person's own files as lookups for any run (the worker: their documents' passages), read per run. */
 export function setLocalLookupProvider(provider: typeof localLookupProvider): void { localLookupProvider = provider; }
 
+type GuardProvider = (workspaceId: string | undefined) => PrivateGuard | undefined | Promise<PrivateGuard | undefined>;
+let privateGuardProvider: GuardProvider | undefined;
+/**
+ * The person's private strings for the outbound checks (the worker: names, emails, the profile card's items, the portrait and the facts),
+ * read per check and never kept or logged here.
+ */
+export function setPrivateGuardProvider(provider: GuardProvider | undefined): void { privateGuardProvider = provider; }
+const GUARD_UNREADABLE = Symbol("guard-unreadable");
+// i18n-ignore: an answer to the model
+const GUARD_UNREADABLE_ANSWER = "现在核对不了检索词是否含本人的私人信息，这次不联网。用已有材料作答，缺的写明。";
+/** The guard for a workspace; a provider that fails makes the check fail closed (`GUARD_UNREADABLE`): nothing goes out unchecked. */
+async function privateGuardOf(workspaceId: string | undefined): Promise<PrivateGuard | undefined | typeof GUARD_UNREADABLE> {
+  try { return await privateGuardProvider?.(workspaceId); } catch { return GUARD_UNREADABLE; }
+}
+
+/** The scout: the one run that searches for a run holding private context. Low tier; it is given nothing but the queries and a purpose. */
+export const WEB_SCOUT_SKILL = "crossline:crossline-web-scout";
+const isScout = (skillName: string) => skillName.replace(/^crossline:/, "") === "crossline-web-scout";
+/** A loop guard, far above any real run's need (a diligence report searched 12 times): past it a run is taken to be stuck. */
+export const WEB_RESEARCH_CALLS_PER_RUN = 30;
+const WEB_SCOUT_INSTRUCTIONS = "Search the public web for each query and report what you found, for a caller that will read it later. "
+  + "You know nothing about who asked and need nothing more: never guess at a person behind the queries. Return only the requested JSON.";
+type ScoutInput = { version: string; today: string; purpose: string; queries: string[] };
+type ScoutParent = { cwd: string; locale?: Locale | undefined; signal?: AbortSignal | undefined };
+
+/**
+ * `web_research(queries, purpose)` for one run: each call is a separate run of `crossline-web-scout` — under this run's model slot, on the
+ * same runtime — that is told the queries and the purpose and nothing else (no input, no lookups, no person's instructions). Before it
+ * starts, every query and the purpose pass `webQueryProblem` against the person's private strings and the addresses this run knows;
+ * a refusal is an answer the model rewrites from. What comes back is fenced as untrusted data, its addresses added to `egress.found`.
+ */
+export function webResearchTool(client: CodexRpcBoundary, egress: Egress, parent: ScoutParent,
+  scout: (input: ScoutInput) => Promise<SkillRunResult<WebScoutAnswer>> = (input) => runScout(client, input, parent)): SkillTools {
+  const workspace = currentUsageWorkspace();
+  let calls = 0;
+  return {
+    specs: [{ name: "web_research", description: "Search the public web through a separate search run that sees only what you pass here. "
+      + "`queries`: 1–6 searches, general topics only — never a name, email, phone, address, id number, a passage of the person's private text, "
+      + "or an address that is neither in your input nor in an earlier result. `purpose`: one line on what kind of information is wanted, with no "
+      + "personal details. Returns pages (title, url, excerpt, published) fenced as untrusted web data.",
+      inputSchema: { type: "object", additionalProperties: false, required: ["queries", "purpose"], properties: {
+        queries: { type: "array", minItems: 1, maxItems: WEB_RESEARCH_LIMITS.queries, items: { type: "string", minLength: 1, maxLength: WEB_RESEARCH_LIMITS.queryMax } },
+        purpose: { type: "string", minLength: 1, maxLength: WEB_RESEARCH_LIMITS.purposeMax } } } }],
+    // i18n-ignore-start: answers to the model
+    async call(_name, args) {
+      const input = (args ?? {}) as { queries?: unknown; purpose?: unknown };
+      if (calls >= WEB_RESEARCH_CALLS_PER_RUN) throw new Error(`本次运行已检索 ${WEB_RESEARCH_CALLS_PER_RUN} 次，像是陷入了循环，请用已有结果作答。`);
+      const queries = [...new Set((Array.isArray(input.queries) ? input.queries : []).map((query) => typeof query === "string" ? query.trim() : "").filter(Boolean))];
+      const purpose = typeof input.purpose === "string" ? input.purpose.trim() : "";
+      if (!queries.length || queries.length > WEB_RESEARCH_LIMITS.queries) throw new Error(`queries 要有 1–${WEB_RESEARCH_LIMITS.queries} 条。`);
+      if (queries.some((query) => query.length > WEB_RESEARCH_LIMITS.queryMax)) throw new Error(`每条 query 最多 ${WEB_RESEARCH_LIMITS.queryMax} 字。`);
+      if (!purpose || purpose.length > WEB_RESEARCH_LIMITS.purposeMax) throw new Error(`purpose 要有，最多 ${WEB_RESEARCH_LIMITS.purposeMax} 字。`);
+      const guard = await privateGuardOf(workspace);
+      if (guard === GUARD_UNREADABLE) throw new Error(GUARD_UNREADABLE_ANSWER);
+      const known = knownOf(egress);
+      for (const [index, query] of queries.entries()) {
+        const problem = webQueryProblem(query, { guard, knownUrls: known });
+        if (problem) throw new Error(`第 ${index + 1} 条 ${problem}`);
+      }
+      const problem = webQueryProblem(purpose, { guard, knownUrls: known, field: "purpose" });
+      if (problem) throw new Error(problem);
+      calls += 1;
+      const readAt = new Date().toISOString();
+      const request: ScoutInput = { version: "crossline.web-scout.v1", today: readAt.slice(0, 10), purpose, queries };
+      const result = await (workspace ? withUsageWorkspace(workspace, () => scout(request)) : scout(request));
+      if (!result.ok) throw new Error(`这次检索没有完成（${result.blocker.code}）。用已有材料作答，或稍后换个查询再试。`);
+      const output = validateWebScout(result.output);
+      egress.found.push(...output.results.flatMap((item) => [item.url, ...urlsIn(`${item.title}\n${item.excerpt}`)]), ...urlsIn(output.notes));
+      return untrustedWebBlock({ readAt, results: output.results, notes: output.notes }, randomUUID().replace(/-/g, "").slice(0, 12));
+    }
+    // i18n-ignore-end
+  };
+}
+
+/** One scout run, nested in the run that called `web_research`: it holds no model slot of its own (the caller's is held for it). */
+function runScout(client: CodexRpcBoundary, input: ScoutInput, parent: ScoutParent): Promise<SkillRunResult<WebScoutAnswer>> {
+  const options: SkillRunOptions<WebScoutAnswer> = { skillName: WEB_SCOUT_SKILL, cwd: parent.cwd, developerInstructions: WEB_SCOUT_INSTRUCTIONS,
+    outputSchema: WEB_SCOUT_SCHEMA, prepareInput: () => input, allowWebSearch: true, validateOutput: (output) => validateWebScout(output),
+    onAudit: () => {}, timeoutMs: 15 * 60_000, ...(parent.locale ? { locale: parent.locale } : {}), ...(parent.signal ? { signal: parent.signal } : {}) };
+  return executeSkill(client, { ...options, nested: true }, (context) => runSkillTurn(context.client, input, options, context));
+}
+
 export const SOURCE_ORDER_INSTRUCTION = "Sources, in this order, each only when the work needs it: (1) this run's input and the person's own "
   + "material — call the lookup functions that read their files, ledger or documents (search_my_files, search_material, read_document, read_file, "
   + "read_ledger, whichever this run has) before anything else; (2) the web, only when their material does not have what the work needs and the "
   + "answer depends on an outside fact you do not reliably know or that may have changed (current methods, tools, prices, rules, dates). Never search "
   + "for what the input already says. A search query carries only the general topic: never a person's name, email, phone, address, account number "
   + "or a passage of their private text.";
+/** The same order where the web is `web_research`, with the rule that what it returns is data. */
+export const RESEARCH_SOURCE_INSTRUCTION = `${SOURCE_ORDER_INSTRUCTION.replace("(2) the web,", "(2) the web through `web_research`,")}\n\n${UNTRUSTED_WEB_INSTRUCTION}`;
+/** Where the run has the person's files but no web. */
+const LOCAL_SOURCE_INSTRUCTION = "Sources: this run's input and the person's own material first — call the lookup functions that read their files "
+  + "(search_my_files, read_my_file_passage) before answering from general knowledge. This run has no web access.";
 
 const lookupNames = (tools: SkillTools | undefined) => new Set((tools?.specs ?? []).map((spec) => spec.name));
 
-/** The web by default where the route has it; the person's files as lookups where the route calls functions. */
-type SourceOptions = Pick<SkillRunOptions<unknown>, "skillName" | "agent" | "tools" | "allowWebSearch" | "developerInstructions">;
+/**
+ * The web by default where the route has it — as `web_research`, unless the run asked for the hosted search (`allowWebSearch: true`) — and
+ * the person's files as lookups where the route calls functions. The scout gets neither lookups nor research: it must hold nothing private.
+ */
+type SourceOptions = Pick<SkillRunOptions<unknown>, "skillName" | "agent" | "tools" | "allowWebSearch" | "webResearch" | "developerInstructions">;
 export function withSourceDefaults<O extends SourceOptions>(options: O, context: Pick<RunContext, "provider" | "webTools" | "functionCalls">): O {
   if (options.agent) return options;
-  const web = options.allowWebSearch ?? (context.provider ? Boolean(context.webTools) : webAvailable());
+  const scout = isScout(options.skillName);
+  const can = context.provider ? Boolean(context.webTools) : webAvailable();
+  const live = options.allowWebSearch === true;
+  const research = !live && !scout && options.allowWebSearch !== false && options.webResearch !== false && can && context.functionCalls;
   const own = lookupNames(options.tools);
   // A run that already reads the person's material its own way (the step planner's search_material) keeps only that.
-  const local = context.functionCalls && !own.has("search_material") ? localLookupProvider?.(currentUsageWorkspace(), options.skillName) : undefined;
-  if (!web && !local) return options.allowWebSearch === undefined ? { ...options, allowWebSearch: false } : options;
-  return { ...options, allowWebSearch: web, ...(local ? { tools: mergedTools(options.tools, local) } : {}),
-    developerInstructions: `${options.developerInstructions}\n\n${SOURCE_ORDER_INSTRUCTION}` };
+  const local = !scout && context.functionCalls && !own.has("search_material") ? localLookupProvider?.(currentUsageWorkspace(), options.skillName) : undefined;
+  const settled = { ...options, allowWebSearch: live, webResearch: research };
+  if (scout || (!live && !research && !local)) return settled;
+  return { ...settled, ...(local ? { tools: mergedTools(options.tools, local) } : {}),
+    developerInstructions: `${options.developerInstructions}\n\n${live ? SOURCE_ORDER_INSTRUCTION : research ? RESEARCH_SOURCE_INSTRUCTION : LOCAL_SOURCE_INSTRUCTION}` };
 }
 
 const DEFAULT_MAX_REPAIRS = 2;
@@ -491,7 +656,10 @@ const MAX_STALL_RETRIES = 2;
  * it back off, and reporting what the run used.
  */
 async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; mainModel?: boolean; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools;
-  onQueued?: (ahead: number) => void; priority?: ModelPriority; signal?: AbortSignal; agent?: AgentMode; tenant?: string; threadId?: string; thinkingBudget?: number },
+  onQueued?: (ahead: number) => void; priority?: ModelPriority; signal?: AbortSignal; agent?: AgentMode; tenant?: string; threadId?: string; thinkingBudget?: number;
+  /** A run made by a tool of a running Skill (`web_research`'s scout): it runs under that run's model slot, since waiting for a second
+   *  one while holding the first could deadlock an account whose slots are all held by runs waiting for their scouts. */
+  nested?: boolean },
   body: (context: RunContext) => Promise<SkillRunResult<T>>): Promise<SkillRunResult<T>> {
   const queuedAt = Date.now();
   const timing: RunTiming = { laneMs: 0, gateMs: 0, tenant: options.tenant ?? tenantOf(currentUsageWorkspace()) ?? "-" };
@@ -499,7 +667,7 @@ async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: s
     timing.laneMs = Date.now() - queuedAt;
     // The assistant (owner's machine only, never on the hosted beta) runs for up to an hour; holding a gate slot that long would stop
     // every interview behind it. A sandboxed assistant (any account, on a shared server) waits for a model slot like any background run.
-    if (/crossline-agent$/.test(options.skillName) && !options.agent?.sandbox) return runGated(client, options, body, timing);
+    if ((/crossline-agent$/.test(options.skillName) && !options.agent?.sandbox) || options.nested) return runGated(client, options, body, timing);
     // The assistant's own runs count apart from the account's two background slots (the owner's decision of 2026-10-19).
     const tenant = isAssistant(options.skillName) ? `${timing.tenant}#assistant` : timing.tenant;
     const result = await withModelSlot({ skill: options.skillName, tenant, onGranted: (waited) => { timing.gateMs = waited; },
@@ -1045,6 +1213,15 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
  * because asking again cannot fix any of them. `audit.repairs` records how often it happened: a schema that needs repair every
  * time is a schema problem, not a cost of doing business.
  */
+/** Whether a hosted `webSearch` item's query, queries or page carries a private string; the kind, never the string. */
+function hostedSearchLeak(item: Record<string, unknown>, guard: PrivateGuard): "identifier" | "passage" | undefined {
+  const action = record(item.action);
+  const texts = [item.query, action?.query, ...(Array.isArray(action?.queries) ? action.queries : []), action?.url, action?.pattern]
+    .filter((text): text is string => typeof text === "string" && text.length > 0);
+  for (const text of texts) { const leak = privateLeak(text, guard); if (leak) return leak; }
+  return undefined;
+}
+
 async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, context: RunContext, audit: AnalysisAudit, run: {
   skillName: string; threadId: string; outputSchema: unknown; allowedItemTypes: string[];
   /** One text, or several sent as the parts of one message in this order (`firstPromptTexts`). */
@@ -1055,6 +1232,8 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
   validate: (output: unknown) => T; onAudit: (audit: AnalysisAudit) => void; idleMs?: number; agent?: AgentMode;
   onConnectorCall?: (item: Record<string, unknown>) => void;
   connectorAllowed?: SkillRunOptions<unknown>["connectorAllowed"];
+  /** With the hosted search on this thread: the person's private strings; a search whose query or page carries one ends the run. */
+  webGuard?: PrivateGuard;
   soften?: (rejection: Error, output: unknown) => T | undefined;
   keepEarly?: (rejection: Error, output: unknown) => T | undefined;
   onImage?: (image: { base64: string; revisedPrompt: string }) => void;
@@ -1128,6 +1307,11 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
       } else if (item?.type === "mcpToolCall" && RUNTIME_RESOURCE_TOOLS.has(String(item.tool ?? ""))) {
         if (message.method === "item/completed") console.info(JSON.stringify({ type: "skill.resource_tool_used", skill: run.skillName,
           tool: String(item.tool), at: new Date().toISOString() }));
+      } else if (item?.type === "webSearch" && run.webGuard && hostedSearchLeak(item, run.webGuard)) {
+        // The hosted search has already sent this query (the runtime reports it as it runs): what can still be done is stop the run
+        // before it searches again or writes an answer built on it. Only the kind is logged, never the string.
+        console.info(JSON.stringify({ type: "skill.web_query_refused", skill: run.skillName, kind: hostedSearchLeak(item, run.webGuard), at: new Date().toISOString() }));
+        settle?.reject(withDetail(new Error("SKILL_TOOL_FORBIDDEN"), "web_search:private"));
       } else if (item && !run.allowedItemTypes.includes(String(item.type)) && !HARMLESS_ITEM_TYPES.has(String(item.type))) {
         console.info(JSON.stringify({ type: "skill.item_forbidden", skill: run.skillName, item: String(item.type),
           ...(item.type === "mcpToolCall" ? { server: String(item.server ?? ""), tool: String(item.tool ?? "") } : {}), at: new Date().toISOString() }));
@@ -1386,8 +1570,13 @@ function continueOnThread<T>(client: CodexRpcBoundary, threadId: string, message
     const defaults = withSourceDefaults<SourceOptions>({ skillName: options.skillName, ...(options.tools ? { tools: options.tools } : {}),
       ...(options.allowWebSearch !== undefined ? { allowWebSearch: options.allowWebSearch } : {}), developerInstructions: "" }, context);
     const allowWeb = Boolean(defaults.allowWebSearch);
-    const web = allowWeb && context.provider ? context.webTools : undefined;
-    const tools = web ? mergedTools(defaults.tools, web) : defaults.tools;
+    // The person's line is what this turn was given: an address in it is theirs.
+    const egress = newEgress();
+    egress.given.push(...urlsIn(message));
+    const web = allowWeb && context.provider ? gatedWebTools(context.webTools ?? { specs: [], call: () => "" }, egress) : undefined;
+    const researched = defaults.webResearch ? mergedTools(defaults.tools, webResearchTool(client, egress, { cwd: options.cwd, locale: options.locale, signal: options.signal })) : defaults.tools;
+    const tools = web && context.webTools ? mergedTools(researched, web) : researched;
+    const webGuard = allowWeb && !context.provider ? await hostedSearchGuard(options.skillName) : undefined;
     const unregister = tools ? registerAgentThread(client, threadId, toolAnswerer(tools)) : undefined;
     try {
       if (threadRouteMoved(client, threadId, context)) fail("SKILL_THREAD_LOST");
@@ -1397,14 +1586,15 @@ function continueOnThread<T>(client: CodexRpcBoundary, threadId: string, message
         skillName: options.skillName, threadId, outputSchema: schemaForLocale(options.outputSchema, runLocale(options.locale, currentUsageWorkspace())),
         allowedItemTypes: ["agentMessage", "reasoning", "userMessage", ...(tools ? ["dynamicToolCall"] : []),
           ...(allowWeb && !context.provider ? ["webSearch", "webSearchCall"] : [])],
+        ...(webGuard ? { webGuard } : {}),
         firstPrompt: message, ...(options.images?.length ? { images: options.images } : {}),
         validate: options.validateOutput, onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),
         ...(options.onProgress ? { onProgress: options.onProgress } : {}),
         ...(options.softAccept ? { soften: options.softAccept } : {}),
         ...(options.keepEarly ? { keepEarly: options.keepEarly } : {})
       });
-      return { ok: true, output, audit };
-    } catch (error) { return failureResult<T>(client, error, audit, options.locale); }
+      return { ok: true, output, audit: withWebUrls(audit, egress) };
+    } catch (error) { return failureResult<T>(client, error, withWebUrls(audit, egress), options.locale); }
     finally { unregister?.(); scope.dispose(); releaseThread(client, threadId, threadKeepMs(options.skillName)); queueCompaction(client, threadId, options.skillName); }
   }));
 }
@@ -1535,6 +1725,8 @@ let instructionsProvider: ((workspaceId: string | undefined) => string | undefin
 /** The person's 「给 Crossline 的话」 (packages/core/src/instructions.ts), set by the worker; appended after the Skill's own note. */
 export function setInstructionsProvider(provider: typeof instructionsProvider): void { instructionsProvider = provider; }
 export function withDesignNote(runNote: string | undefined, skillName: string): string | undefined {
+  // The scout holds nothing of the person's: not their standing notes, not their words to Crossline.
+  if (isScout(skillName)) return runNote;
   const workspace = currentUsageWorkspace();
   const note = designNoteProvider?.(workspace, skillName)?.trim();
   const words = instructionsProvider?.(workspace)?.trim();
@@ -1563,7 +1755,9 @@ export function firstPromptTexts(skillName: string, extraSkills: readonly string
 
 async function runSkillTurn<T>(client: CodexRpcBoundary, given: unknown, wanted: SkillRunOptions<T>, context: RunContext): Promise<SkillRunResult<T>> {
   const { options: requested, input } = withOptionalTools(wanted, given, context);
-  const options = withWebTools(withSourceDefaults(requested, context), context);
+  const egress = newEgress();
+  const sourced = withSourceDefaults(requested, context);
+  const options = withWebTools(sourced.webResearch ? { ...sourced, tools: mergedTools(sourced.tools, webResearchTool(client, egress, sourced)) } : sourced, context, egress);
   const audit: AnalysisAudit = {};
   // Web search (by default where the route has it, `withSourceDefaults`), images and the run's own lookups are the only tools a Skill may use.
   const allowedItemTypes = ["agentMessage", "reasoning", "userMessage",
@@ -1573,6 +1767,8 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, given: unknown, wanted:
   let unregister: (() => void) | undefined;
   try {
     const prepared = options.prepareInput(input);
+    egress.given.push(...urlsIn(typeof prepared === "string" ? prepared : JSON.stringify(prepared) ?? ""));
+    const webGuard = options.allowWebSearch && !context.provider ? await hostedSearchGuard(options.skillName) : undefined;
     scope = openScope(client, options);
     await requireLogin(scope, context);
     const threadId = await openRunThread(client, scope, options, context, audit);
@@ -1595,6 +1791,7 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, given: unknown, wanted:
       ...(options.agent ? { agent: options.agent } : {}),
       ...(options.onConnectorCall ? { onConnectorCall: options.onConnectorCall } : {}),
       ...(options.connectorAllowed ? { connectorAllowed: options.connectorAllowed } : {}),
+      ...(webGuard ? { webGuard } : {}),
       firstPrompt: firstPromptTexts(options.skillName, context.extraSkills, prepared, { ...options, runNote: withDesignNote(options.runNote, options.skillName) }),
       ...(options.images?.length ? { images: options.images } : {}),
       validate: (answer) => options.validateOutput(answer, prepared), onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),
@@ -1602,8 +1799,8 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, given: unknown, wanted:
       ...(options.softAccept ? { soften: (rejection: Error, answer: unknown) => options.softAccept!(rejection, answer, prepared) } : {}),
       ...(options.keepEarly ? { keepEarly: (rejection: Error, answer: unknown) => options.keepEarly!(rejection, answer, prepared) } : {})
     });
-    return { ok: true, output, audit };
-  } catch (error) { return failureResult<T>(client, error, audit, options.locale); }
+    return { ok: true, output, audit: withWebUrls(audit, egress) };
+  } catch (error) { return failureResult<T>(client, error, withWebUrls(audit, egress), options.locale); }
   finally {
     unregister?.(); scope?.dispose();
     if (audit.threadId) releaseThread(client, audit.threadId, options.keepThread ? threadKeepMs(options.skillName) : 0);

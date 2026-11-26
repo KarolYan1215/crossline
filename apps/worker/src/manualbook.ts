@@ -14,6 +14,7 @@ import { aiToolBrief, FAMILIARITY_INSTRUCTIONS, onPersonsBoard, requiredApproval
 import { localeOf } from "./locale";
 import { claimedTitleMatches } from "./diligence";
 import { arxivPdfAddress, defaultSafeGetDeps, htmlToText, safeGet, type SafeGetDeps } from "./safe-fetch";
+import { citable, citableUrls } from "./cited-urls";
 import { extractText } from "./extract";
 
 export const MANUAL_DESIGNER_SKILL = "crossline:crossline-manualbook-designer";
@@ -250,7 +251,7 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
             researchQuestions: node.researchQuestions.length ? node.researchQuestions : [`${node.title}：${node.goal}`] /* i18n-ignore: model-facing */ },
           localFiles: context.localFiles, constraints: context.constraints, ...(context.setting?.length ? { setting: context.setting } : {}) };
         const found = await runCodexSkill<MaterialSearch>(client, searchContext, {
-          skillName: MATERIAL_RESEARCHER_SKILL, cwd, developerInstructions: SEARCH_INSTRUCTIONS, outputSchema: MATERIAL_SEARCH_SCHEMA, allowWebSearch: true,
+          skillName: MATERIAL_RESEARCHER_SKILL, cwd, developerInstructions: SEARCH_INSTRUCTIONS, outputSchema: MATERIAL_SEARCH_SCHEMA, webResearch: true,
           stableKeys: ["version", "setting", "constraints", "localFiles", "task"],
           prepareInput: () => searchContext, validateOutput: (output) => validateMaterialSearch(output), onAudit: () => {}, timeoutMs: 60 * 60_000
         });
@@ -258,7 +259,7 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
         else {
           result.gaps.push(...found.output.gaps);
           // Ids made unique across the book (`n2-s1`): the writer answers every step in one conversation and must not mix two steps' `s1`.
-          result.sources = (await keepSources(found.output.sources, all, today, result.gaps, locale)).map((source) => ({ ...source, id: `n${index + 1}-${source.id}` }));
+          result.sources = (await keepSources(found.output.sources, all, today, result.gaps, locale, citableUrls(found.audit, searchContext))).map((source) => ({ ...source, id: `n${index + 1}-${source.id}` }));
           noteResearch(materialsDir, workOrderId, node.title, result.sources);
         }
       }
@@ -360,11 +361,13 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
  * title, is dropped. An open-access page on a known host is downloaded in full (capped, typed, checksummed); everything
  * else keeps its link and the model's summary and nothing of the page itself.
  */
-export async function keepSources(found: FoundSource[], deps: ManualbookDeps, today: string, gaps: string[], locale?: Locale): Promise<KeptSource[]> {
+/** `known`: where pages may be opened (`citableUrls`), for a researcher that held the person's context; a cited address outside it is dropped unopened. */
+export async function keepSources(found: FoundSource[], deps: ManualbookDeps, today: string, gaps: string[], locale?: Locale, known?: readonly string[]): Promise<KeptSource[]> {
   const t = tFor(locale);
   const kept: KeptSource[] = [];
   let downloads = 0;
   for (const source of found.slice(0, 6)) {
+    if (!citable(source.url, known)) { gaps.push(t("「{{title}}」的网址不在检索结果里，没有打开。", { title: source.title })); continue; }
     const raw = openAccessVerdict(source, locale);
     // Whether downloading is allowed at all is the approval policy's word, checked here rather than assumed.
     const verdict = raw.download && requiredApproval("download_open_access") !== "automatic" ? { download: false as const, why: t("当前策略不允许自动下载") } : raw;

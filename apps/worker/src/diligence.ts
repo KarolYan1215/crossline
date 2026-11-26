@@ -14,6 +14,7 @@ import { ownerOf } from "./owner";
 import { localeOf } from "./locale";
 import { identityLines } from "./lines";
 import { opportunityAgentOn } from "./opportunities";
+import { citable, citableUrls } from "./cited-urls";
 /**
  * The line's own description (`lines.profiles`, what the interview wrote of who the person is on this line) as one more fact. The
  * person's schooling is often only there: the 2026-11-06 walkthrough's student line read 「UW-Madison ECE 博士一年级」 on its card while
@@ -240,7 +241,7 @@ export function createDiligenceRunner(store: CrosslineStore, workspaceId: string
 
     const result = await runCodexSkill<DiligenceOutput>(client, context, {
       skillName: DILIGENCE_SKILL, cwd, developerInstructions: INSTRUCTIONS, outputSchema: DILIGENCE_OUTPUT_SCHEMA,
-      allowWebSearch: true, prepareInput: () => context, validateOutput: (output) => validateDiligence(output, context),
+      webResearch: true, prepareInput: () => context, validateOutput: (output) => validateDiligence(output, context),
       // A gap that calls a stated fact unknown is dropped at once (no second web-research run); a proposal that judged eligibility on it
       // is redone, and once the repairs are spent the proposals still ignoring a fact are dropped and the rest kept (W-250).
       keepEarly: (rejection, output) => rejection.message === "DILIGENCE_GAP_FACT_IGNORED" ? keptWithoutIgnored(output, context) : undefined,
@@ -254,7 +255,10 @@ export function createDiligenceRunner(store: CrosslineStore, workspaceId: string
     }
 
     // The model's word about its sources is not enough: each one is opened here.
-    const checks = await Promise.all(result.output.sources.map(async (source) => [source, await verifySource(source, all)] as const));
+    // Only at an address the research returned or the input gave: one the model composed is not opened (docs/plans/harness-1125.md §10).
+    const known = citableUrls(result.audit, context);
+    const checks = await Promise.all(result.output.sources.map(async (source) => [source, citable(source.url, known) ? await verifySource(source, all)
+      : { ok: false as const, reason: "不在检索结果里" /* i18n-ignore: counted, never shown */ }] as const));
     const good = new Map(checks.flatMap(([source, check]) => check.ok ? [[source.id, { source, check }] as const] : []));
     const droppedSources = checks.length - good.size;
     // A source stays on a finding only if the page opened AND says what the finding claims.

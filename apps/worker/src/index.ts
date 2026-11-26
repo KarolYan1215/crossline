@@ -4,7 +4,7 @@ import { get } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { accountConcurrency, breakdownOfResponsesUsage, codexProcessEnvironment, flushMeteredUsage, recordMeteredUsage, configureModelGate, enterUsageWorkspace, protectSkillFolders, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, installUndiciAssertionGuard, modelGateStatus, setDesignNoteProvider, setInstructionsProvider, setLocalLookupProvider, setWebAvailableProvider, webResearchBlocker, setEffortPreferenceProvider, setModelChoiceProvider, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
+import { accountConcurrency, breakdownOfResponsesUsage, codexProcessEnvironment, flushMeteredUsage, recordMeteredUsage, configureModelGate, enterUsageWorkspace, protectSkillFolders, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, installUndiciAssertionGuard, modelGateStatus, setDesignNoteProvider, setInstructionsProvider, setLocalLookupProvider, setPrivateGuardProvider, setWebAvailableProvider, webResearchBlocker, setEffortPreferenceProvider, setModelChoiceProvider, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
 import { containerMemory, containerPeak, createCollectMemory, heldMemory } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
@@ -114,6 +114,7 @@ import { createFolderClassifier, createFolderScreener, screenListedWith } from "
 import { homedir, tmpdir } from "node:os";
 import { defaultSafeGetDeps } from "./safe-fetch";
 import { REQUIRED_SKILLS } from "./required-skills";
+import { privateGuardFor } from "./private-guard";
 import { createMailService } from "./mailbox";
 import { createImportService } from "./importer";
 import { createDictationService } from "./dictation";
@@ -1342,6 +1343,8 @@ setInstructionsProvider((workspaceId) => workspaceId ? currentInstructionsOf(ana
 // Every model has the web as needed and the person's own files first (2026-11-18, `withSourceDefaults` in skill-runner).
 setWebAvailableProvider(() => !webResearchBlocker());
 setLocalLookupProvider((workspaceId) => workspaceId ? localLookupsFor(analysisStore, workspaceId) : undefined);
+// What a search may not carry out (docs/plans/harness-1125.md §10): the person's identifiers and private text, read per check, kept nowhere.
+setPrivateGuardProvider((workspaceId) => workspaceId ? privateGuardFor(analysisStore, secrets, workspaceId) : undefined);
 // The person's 模型强度 (Settings → 模型连接), read per run; only runs on the account's own Codex take it (skill-runner).
 setEffortPreferenceProvider((workspaceId) => effortPreferenceOf(workspaceId ? analysisStore.getSetting(workspaceId, MODEL_EFFORT_SETTING) : null));
 // The person's own model and effort per Skill (D19: the interview's picker, Settings → 模型), read per run; it wins over the route table.

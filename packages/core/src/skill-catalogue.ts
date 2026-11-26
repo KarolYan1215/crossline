@@ -64,6 +64,7 @@ export const SKILL_CATALOGUE: Record<string, string> = {
   "crossline-time-attributor": "Say which of the person's open Crossline tasks (and step) each stretch of untimed screen work was for, from its app and window titles, or none.",
   "crossline-validation-reviewer": "Second check on a mechanical warning — decide whether the flagged output is fine as it is or needs to be redone, and say what to change.",
   "crossline-visa-finder": "Find the official government page that says whether a citizen of one country needs a visa to visit another for a short event, and copy its sentences verbatim, including the one stating the processing time.",
+  "crossline-web-scout": "Search the public web for a few general queries and return the pages found, each with its exact address, title and a faithful excerpt, for another run that will read them as untrusted data.",
   "crossline-weekly-insight": "Read one week of the person's Crossline execution record and propose the few patterns the data supports, each with its supporting and contrary events and one suggestion the person can act on.",
 };
 /* i18n-ignore-end */

@@ -33,7 +33,7 @@ test("the expansion Skill is the only one granted web search, and findings are s
     };
     const expand = createFlywheelExpander(store, "w", "C:\repo", () => ({}) as never);
     expect(await expand()).toBe(1);
-    expect(skillCalls.at(-1)).toMatchObject({ allowWebSearch: true, skillName: "crossline:crossline-flywheel-scout" });
+    expect(skillCalls.at(-1)).toMatchObject({ webResearch: true, skillName: "crossline:crossline-flywheel-scout" });
 
     const event = store.listEvents("w").at(-1)!;
     expect(event.type).toBe("flywheel.finding");

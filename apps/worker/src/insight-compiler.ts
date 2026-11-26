@@ -9,6 +9,7 @@ import { identityLines } from "./lines";
 import { tOfWorkspace } from "./locale";
 import { ownerOf } from "./owner";
 import { defaultSafeGetDeps, safeGet, type SafeGetDeps } from "./safe-fetch";
+import { citable as mayOpen, citableUrls } from "./cited-urls";
 
 export const INSIGHT_COMPILER = "crossline:crossline-insight-compiler";
 
@@ -161,6 +162,7 @@ export function createInsightCompiler(store: CrosslineStore, workspaceId: string
       line: { id: line.id, label: line.label, goals: line.goals ?? [] }, materials: shown, previousRules };
 
     let answer: MineSkillCompilation = { summary: "", rules: [], blockers: [] };
+    let known: string[] = [];
     // Nothing new or changed (a material was only removed): no model run; the rules that rested on it go.
     if (shown.length) {
       // Web search finds a platform's written red lines; without the runtime's search host the run still compiles the person's own rules.
@@ -170,21 +172,23 @@ export function createInsightCompiler(store: CrosslineStore, workspaceId: string
         // The prompt cache (docs/token-economy.md §2.5): the line and its material before the previous rules and the date.
         stableKeys: ["version", "line", "materials", "previousRules"],
         ...(web ? {} : { runNote: "Web search is unavailable: write no url-only red line." }),
-        outputSchema: MINE_SKILL_SCHEMA, prepareInput: () => context, ...(web ? { allowWebSearch: true } : {}),
+        outputSchema: MINE_SKILL_SCHEMA, prepareInput: () => context, ...(web ? { webResearch: true } : { allowWebSearch: false }),
         validateOutput: (output) => validateMineSkill(output, context, citable),
         softAccept: (_rejection, output) => keepMineSkill(output, context, citable),
         onAudit: () => {}, timeoutMs: 60 * 60_000
       });
       if (!result.ok) return blocked(result.blocker.code, result.blocker.message);
       answer = result.output;
+      known = citableUrls(result.audit, context);
     }
     const applied = applyMineChanges(answer, context, citable);
     const dropped = [...applied.dropped];
     const rules: MineRule[] = [];
-    const known = new Set((previous?.rules ?? []).filter((rule) => !rule.sources.length).map((rule) => rule.url));
+    const opened = new Set((previous?.rules ?? []).filter((rule) => !rule.sources.length).map((rule) => rule.url));
     for (const rule of applied.rules) {
       // A url-only red line's page is opened once, when it is first written; one carried over has been.
-      if (!rule.sources.length && !known.has(rule.url)) {
+      if (!rule.sources.length && !opened.has(rule.url)) {
+        if (!mayOpen(rule.url, known)) { dropped.push(`${rule.text.slice(0, 40)}：来源不在检索结果里`); continue; } // i18n-ignore: logged only
         const page = await safeGet(rule.url, deps.safeGet ?? defaultSafeGetDeps(), { maxBytes: 2_000_000, timeoutMs: 20_000 }).catch(() => undefined);
         if (!page?.ok) { dropped.push(`${rule.text.slice(0, 40)}：来源页面无法打开`); continue; } // i18n-ignore: logged only
       }
