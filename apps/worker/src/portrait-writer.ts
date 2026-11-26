@@ -125,7 +125,9 @@ export function createPortraitWriter(store: CrosslineStore, workspaceId: string,
     const userMessages = withoutDisclosures(conversation, sensitiveReplies(conversation)).filter((message) => message.role === "user");
     const allReplies = userMessages.map((message) => String((message.content as { text?: string }).text ?? ""));
     const replies = userMessages.map((message, index) => ({ id: `reply-${message.seq}`, text: allReplies[index]! }));
-    const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.status === "confirmed" || fact.slot.startsWith("flywheel_")).slice(0, 120)
+    // Every confirmed fact (the owner, 2026-11-26: the report is the one run that reads the whole ledger). A cap of 120 over facts sorted by
+    // line, project and slot dropped whole lines, the last in that order.
+    const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.status === "confirmed" || fact.slot.startsWith("flywheel_"))
       .map(({ identityId, projectId, slot, value, status }) => ({ identityId, projectId, slot, value, status }));
     // What the person handed over about themselves (a profile, a CV, notes) — files they uploaded themselves and filed under no project —
     // read whole. Files read from an authorized folder are left out: on the owner's ledger the unfiled set was sixty files, downloaded

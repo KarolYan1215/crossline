@@ -165,3 +165,11 @@ test("the report written at the end is projected into the profile; a field it le
   // Left empty by the report: kept. Fields the report has no place for are not touched.
   expect(after).toMatchObject({ allocation: "旧的分配", flow: ["旧的心流"], careerTheme: "旧的主题" });
 });
+
+test("the report reads every confirmed fact, not the first 120 by line and slot", async () => {
+  for (let index = 0; index < 150; index++) store.upsertProfileFact({ workspaceId, identityId: "research", projectId: "", slot: `note_${String(index).padStart(3, "0")}`,
+    value: `事实 ${index}`, status: "confirmed", sourceRef: "reply-1", sourceQuote: "", updatedAt: "2026-10-01T00:00:00Z" });
+  const runtime = fakeRuntime([JSON.stringify(report())], PORTRAIT_WRITER);
+  expect(await createPortraitWriter(store, workspaceId, "C:\repo", () => runtime.rpc)()).toMatchObject({ state: "written" });
+  expect(runtime.prompts()[0]).toContain("note_149");
+});
