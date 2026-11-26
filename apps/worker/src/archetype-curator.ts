@@ -2,6 +2,7 @@ import { ARCHETYPES, ARCHETYPE_CURATION_SCHEMA, archetypeBrief, validateCuratedA
 import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
 import { defaultSafeGetDeps, safeGet, type SafeGetDeps } from "./safe-fetch";
+import { citable, citableUrls } from "./cited-urls";
 import { ownerOf } from "./owner";
 
 export const ARCHETYPE_CURATOR = "crossline:crossline-archetype-curator";
@@ -59,13 +60,13 @@ export function createArchetypeCurator(store: CrosslineStore, workspaceId: strin
       preferences: store.preferenceLines(workspaceId, [...new Set([...orders.values()].map((order) => order.identityId))], 30)
     };
     const result = await runCodexSkill(client, input, { skillName: ARCHETYPE_CURATOR, cwd, developerInstructions: INSTRUCTIONS,
-      outputSchema: ARCHETYPE_CURATION_SCHEMA, prepareInput: () => input, allowWebSearch: true, onAudit: () => {}, timeoutMs: 60 * 60_000,
+      outputSchema: ARCHETYPE_CURATION_SCHEMA, prepareInput: () => input, webResearch: true, onAudit: () => {}, timeoutMs: 60 * 60_000,
       validateOutput: (output) => validateCuratedArchetypes(output, { existingIds: learned.map((item) => item.id), taskIds: input.tasks.map((task) => task.id) }) });
     if (!result.ok) return undefined;
     const added: string[] = [];
     const dropped = [...result.output.dropped];
     for (const archetype of result.output.kept) {
-      const opened = await firstSourceThatOpens(archetype, deps.safeGet ?? defaultSafeGetDeps());
+      const opened = await firstSourceThatOpens(archetype, deps.safeGet ?? defaultSafeGetDeps(), citableUrls(result.audit, input));
       if (!opened) { dropped.push(`${archetype.id}：来源无法打开`); continue; } // i18n-ignore: recorded on the event, not shown
       const { basedOnTaskIds, sources, why, ...shape } = archetype;
       store.saveLearnedArchetype(workspaceId, shape, { basedOnTaskIds, sources, why, verifiedSource: opened });
@@ -77,8 +78,9 @@ export function createArchetypeCurator(store: CrosslineStore, workspaceId: strin
   };
 }
 
-async function firstSourceThatOpens(archetype: CuratedArchetype, deps: SafeGetDeps): Promise<string | undefined> {
+async function firstSourceThatOpens(archetype: CuratedArchetype, deps: SafeGetDeps, known: readonly string[]): Promise<string | undefined> {
   for (const source of archetype.sources.slice(0, 3)) {
+    if (!citable(source.url, known)) continue;
     const page = await safeGet(source.url, deps, { maxBytes: 2_000_000, timeoutMs: 20_000 }).catch(() => undefined);
     if (page?.ok) return page.finalUrl;
   }

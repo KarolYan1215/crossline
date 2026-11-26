@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { setWebAvailableProvider, WEB_SCOUT_SKILL } from "@crossline/codex";
 import { CrosslineStore } from "@crossline/db";
 import type { CostSignal } from "@crossline/core";
 import {
@@ -17,15 +18,16 @@ let dir: string;
 
 beforeEach(() => {
   store = new CrosslineStore(":memory:");
+  setWebAvailableProvider(() => true);
   dir = mkdtempSync(path.join(tmpdir(), "crossline-manual-"));
   store.saveWorkOrder({ id: "w1", ownerId: "o", workspaceId: WS, identityId: "research", projectId: "p", milestoneId: "", intent: "熟悉 Cadence 并画 6T SRAM 单元",
     state: "preparing", riskTier: "milestone", estimate: { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior", observationCount: 0, confidence: "low" },
     payload: { materialContract: [{ id: "c1", description: "Cadence 入门教程", required: true }], evidenceContract: [{ kind: "record", description: "一张 6T SRAM 原理图", required: true }] } });
 });
-afterEach(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => { setWebAvailableProvider(() => false); store.close(); rmSync(dir, { recursive: true, force: true }); });
 
 const healthy: CostSignal = { available: true, limitReached: false, short: { usedPercent: 10, windowDurationMins: 300, resetsAt: null }, long: { usedPercent: 10, windowDurationMins: 10080, resetsAt: null } };
-const SKILLS = [MANUAL_DESIGNER_SKILL, MATERIAL_RESEARCHER_SKILL, MATERIAL_WRITER_SKILL];
+const SKILLS = [MANUAL_DESIGNER_SKILL, MATERIAL_RESEARCHER_SKILL, MATERIAL_WRITER_SKILL, WEB_SCOUT_SKILL];
 
 const design = {
   overview: "先学工具，再画图。",
@@ -54,6 +56,15 @@ void pdfBytes;
 const deps = (over: Partial<ManualbookDeps> = {}) => ({ readCost: async () => healthy, webBlocker: () => undefined, now: () => new Date("2026-10-02T12:00:00.000Z"),
   safeGet: { fetchImpl, isPublicHost: async () => true }, ...over });
 
+// The researcher finds its pages through `web_research` (docs/plans/harness-1125.md §10): only a page a search returned is opened, so
+// each search turn first calls it, and the scout answers with the pages the researcher then cites.
+const scoutAnswer = JSON.stringify({ notes: "", results: search.sources.map((source) => ({ query: "cadence tutorial", title: source.title, url: source.url, excerpt: "", published: "" })) });
+const runtime = (answer: (prompt: string, turn: number) => string) => scriptedRuntime(SKILLS,
+  (prompt, turn) => prompt.includes("crossline.web-scout.v1") ? scoutAnswer : answer(prompt, turn),
+  { script: async ({ prompt, ask }) => {
+    if (prompt.includes("crossline.manualbook.search.v1")) await ask("item/tool/call", { callId: "r1", tool: "web_research", arguments: { queries: ["Cadence Virtuoso tutorial"], purpose: "learning material" } });
+  } });
+
 // Source ids are made unique per step (`n1-s1`, `n2-s1`): the writer answers every step in one conversation.
 const respond = (writeCites?: string[]) => (prompt: string) => {
   if (prompt.includes("crossline.manualbook.design.v1")) return JSON.stringify(design);
@@ -62,7 +73,7 @@ const respond = (writeCites?: string[]) => (prompt: string) => {
 };
 
 test("a task becomes a manualbook: a flow, per-step files, downloaded open-access text, and a manifest whose checksums match", async () => {
-  const { rpc } = scriptedRuntime(SKILLS, respond());
+  const { rpc } = runtime(respond());
   const build = createManualbookBuilder(store, WS, dir, "C:\\repo", () => rpc, deps());
   const outcome = await build("w1");
   // Both steps are marked as needing research, and each keeps the two sources that open.
@@ -94,7 +105,7 @@ test("a task becomes a manualbook: a flow, per-step files, downloaded open-acces
 
 test("a flow with a loop, or one that leaves a required item unserved, is sent back and nothing is written", async () => {
   const loop = { ...design, edges: [{ from: "learn", to: "draw" }, { from: "draw", to: "learn" }] };
-  const { rpc } = scriptedRuntime(SKILLS, () => JSON.stringify(loop));
+  const { rpc } = runtime(() => JSON.stringify(loop));
   const outcome = await createManualbookBuilder(store, WS, dir, "C:\\repo", () => rpc, deps())("w1");
   expect(outcome).toMatchObject({ state: "blocked", code: "MANUAL_FLOW_HAS_LOOP" });
   expect(existsSync(path.join(dir, "w1"))).toBe(false);
@@ -105,7 +116,7 @@ test("a flow with a loop, or one that leaves a required item unserved, is sent b
 
 test("a write-up that cites a source it was never given is refused for that step; the rest of the manualbook still builds", async () => {
   let writes = 0;
-  const { rpc } = scriptedRuntime(SKILLS, (prompt) => {
+  const { rpc } = runtime((prompt) => {
     if (prompt.includes("crossline.manualbook.design.v1")) return JSON.stringify(design);
     if (prompt.includes("crossline.manualbook.search.v1")) return JSON.stringify(search);
     writes += 1;
@@ -121,7 +132,7 @@ test("a write-up that cites a source it was never given is refused for that step
 
 test("only steps marked as needing outside material are researched, and a step another tutorial of the project researched reuses its sources", async () => {
   const marked = { ...design, nodes: [design.nodes[0]!, { ...design.nodes[1]!, needsResearch: false, researchQuestions: [] }] };
-  const { rpc, prompts } = scriptedRuntime(SKILLS, (prompt) => {
+  const { rpc, prompts } = runtime((prompt) => {
     if (prompt.includes("crossline.manualbook.design.v1")) return JSON.stringify(marked);
     if (prompt.includes("crossline.manualbook.search.v1")) return JSON.stringify(search);
     return JSON.stringify(writeup(prompt.includes("放 6 个晶体管") ? [] : ["n1-s1"]));
@@ -135,7 +146,7 @@ test("only steps marked as needing outside material are researched, and a step a
   store.saveWorkOrder({ id: "w3", ownerId: "o", workspaceId: WS, identityId: "research", projectId: "p", milestoneId: "", intent: "画 8T SRAM 单元",
     state: "preparing", riskTier: "milestone", estimate: { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior", observationCount: 0, confidence: "low" },
     payload: { materialContract: [{ id: "c1", description: "Cadence 入门教程", required: true }], evidenceContract: [{ kind: "record", description: "一张 8T 原理图", required: true }] } });
-  const again = scriptedRuntime(SKILLS, (prompt) => {
+  const again = runtime((prompt) => {
     if (prompt.includes("crossline.manualbook.design.v1")) return JSON.stringify({ ...marked, nodes: [marked.nodes[0]!, { ...marked.nodes[1]!, serves: ["w3-evidence-0"] }] });
     if (prompt.includes("crossline.manualbook.search.v1")) return JSON.stringify(search);
     return JSON.stringify(writeup(prompt.includes("放 6 个晶体管") ? [] : ["n1-s1"]));
@@ -146,20 +157,20 @@ test("only steps marked as needing outside material are researched, and a step a
 });
 
 test("a build that stops after its research does not search the same steps again on the next try", async () => {
-  const first = scriptedRuntime(SKILLS, (prompt) => {
+  const first = runtime((prompt) => {
     if (prompt.includes("crossline.manualbook.design.v1")) return JSON.stringify(design);
     if (prompt.includes("crossline.manualbook.search.v1")) return JSON.stringify(search);
     return JSON.stringify(writeup(["nope"]));
   });
   expect(await createManualbookBuilder(store, WS, dir, "C:\\repo", () => first.rpc, deps())("w1")).toMatchObject({ state: "blocked", code: "MANUALBOOK_NOTHING_WRITTEN" });
-  const second = scriptedRuntime(SKILLS, respond());
+  const second = runtime(respond());
   expect(await createManualbookBuilder(store, WS, dir, "C:\\repo", () => second.rpc, deps())("w1")).toMatchObject({ state: "ready", sources: 4 });
   expect(second.prompts().some((prompt) => prompt.includes("crossline.manualbook.search.v1"))).toBe(false);
   expect(existsSync(path.join(dir, "w1", ".research-draft.json"))).toBe(false);
 });
 
 test("without web research the manualbook is still built, with the gap stated", async () => {
-  const { rpc, prompts } = scriptedRuntime(SKILLS, respond([]));
+  const { rpc, prompts } = runtime(respond([]));
   const outcome = await createManualbookBuilder(store, WS, dir, "C:\\repo", () => rpc, deps({ webBlocker: () => ({ code: "WEB_RESEARCH_HOST_MISSING", message: "缺少 host" }) }))("w1");
   expect(outcome).toMatchObject({ state: "ready", sources: 0 });
   expect(prompts().some((prompt) => prompt.includes("crossline.manualbook.search.v1"))).toBe(false);
@@ -167,7 +178,7 @@ test("without web research the manualbook is still built, with the gap stated", 
 });
 
 test("no quota means the person prepares it, and a missing contract means there is nothing to build", async () => {
-  const { rpc, prompts } = scriptedRuntime(SKILLS, respond());
+  const { rpc, prompts } = runtime(respond());
   const exhausted: CostSignal = { available: true, limitReached: true, short: { usedPercent: 100, windowDurationMins: 300, resetsAt: null }, long: { usedPercent: 100, windowDurationMins: 10080, resetsAt: null } };
   expect(await createManualbookBuilder(store, WS, dir, "C:\\repo", () => rpc, deps({ readCost: async () => exhausted }))("w1")).toMatchObject({ state: "blocked", code: "MATERIAL_BUDGET_EXHAUSTED" });
   expect(prompts()).toEqual([]);
@@ -177,7 +188,7 @@ test("no quota means the person prepares it, and a missing contract means there 
 });
 
 test("a work order that is not being prepared, or a path-shaped id, is refused", async () => {
-  const { rpc } = scriptedRuntime(SKILLS, respond());
+  const { rpc } = runtime(respond());
   const build = createManualbookBuilder(store, WS, dir, "C:\\repo", () => rpc, deps());
   expect(await build("../escape")).toMatchObject({ state: "blocked", code: "MATERIAL_PATH_OUTSIDE_ROOT" });
   expect(await build("nope")).toMatchObject({ state: "blocked", code: "WORK_ORDER_NOT_FOUND" });
@@ -204,7 +215,7 @@ test("a tutorial is built for committed work without moving it, from its steps a
     { id: "solve", title: "解题", kind: "do", goal: "解题", steps: ["逐题求解"], acceptance: "全部完成", serves: [context.contract[1]!.id], needsResearch: true, researchQuestions: ["教程", "示例"] }
   ], edges: [{ from: "split", to: "solve" }], assumptions: [], blockers: [] };
   const prompts: string[] = [];
-  const { rpc } = scriptedRuntime(SKILLS, (prompt: string) => {
+  const { rpc } = runtime((prompt: string) => {
     prompts.push(prompt);
     if (prompt.includes("crossline.manualbook.design.v1")) return JSON.stringify(steps);
     return JSON.stringify({ analysis: "据 [upload-1]…", tutorial: "1. 读第 1 题", citations: ["upload-1"], sourceNotes: [{ sourceId: "upload-1", note: "第 1 题要求反相器 VTC" }], blockers: [] });
@@ -289,7 +300,7 @@ test("a page that refuses automated readers (403/429) keeps its link and summary
     if (url === "https://ghost.example.org/none") return new Response("forbidden", { status: 403, headers: { "content-type": "text/html" } });
     return fetchImpl(input);
   }) as typeof fetch;
-  const { rpc } = scriptedRuntime(SKILLS, respond());
+  const { rpc } = runtime(respond());
   const outcome = await createManualbookBuilder(store, WS, dir, "C:\repo", () => rpc, deps({ safeGet: { fetchImpl: blocking, isPublicHost: async () => true } }))("w1");
   expect(outcome).toMatchObject({ state: "ready", sources: 6 });
   const task = readFileSync(path.join(dir, "w1", "nodes/learn/task.md"), "utf8");

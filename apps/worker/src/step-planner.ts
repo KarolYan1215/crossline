@@ -421,7 +421,7 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
       runNote: (libraryInstruction(extraSkills)
         + (feedback ? " Apply the feedback: it is what the reviewer or the person asked to change; earlierFeedback still holds unless it contradicts it." : "")
         + (research ? " research is true: search the web for this task's background and the best known way to do it before planning, as the Skill's research section says." : "")).trim(),
-      ...(research ? { allowWebSearch: true } : {}),
+      ...(research ? { webResearch: true } : {}),
       outputSchema: stepPlanSchema(learned.map((archetype) => archetype.id)), prepareInput: (value) => value,
       validateOutput: (output) => {
         const shaped = validateStepPlanShape(output, learned);

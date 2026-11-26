@@ -237,11 +237,18 @@ export function scriptedRuntime(skillNames: string[], respond: (prompt: string, 
   failWith?: (prompt: string, turn: number) => string | undefined;
   /** Whether the runtime answers `skills/list` with an error, as one that is going away does (a runtime replaced mid-measurement). */
   listFails?: () => boolean;
+  /** What the model does before it answers a turn (a function call, as `fakeRuntime`'s `script`); it also sees the turn's prompt. */
+  script?: (tools: Parameters<AgentScript>[0] & { prompt: string }) => Promise<void>;
 } = {}): { rpc: JsonLineRpcClient; prompts: () => string[] } {
-  let turns = 0, threads = 0, latestThread = "";
+  let turns = 0, threads = 0, latestThread = "", askId = 0;
   const prompts: string[] = [];
+  const pendingAsks = new Map<string, (value: Record<string, unknown>) => void>();
   const rpc = new JsonLineRpcClient((line) => {
-    const request = JSON.parse(line) as { id?: number; method: string; params?: Record<string, unknown> };
+    const request = JSON.parse(line) as { id?: number | string; method: string; params?: Record<string, unknown>; result?: Record<string, unknown>; error?: unknown };
+    if (request.method === undefined && request.id !== undefined) {
+      pendingAsks.get(String(request.id))?.((request.result ?? { error: request.error }) as Record<string, unknown>);
+      return;
+    }
     if (request.method === "skills/list" && options.listFails?.()) {
       queueMicrotask(() => rpc.receiveLine(JSON.stringify({ id: request.id, error: { code: -32000, message: "runtime is shutting down" } })));
       return;
@@ -265,7 +272,15 @@ export function scriptedRuntime(skillNames: string[], respond: (prompt: string, 
       prompts.push(prompt);
       const failure = options.failWith?.(prompt, turns);
       const text = failure ? "" : respond(prompt, turns);
-      setTimeout(() => {
+      setTimeout(async () => {
+        if (!failure && options.script) {
+          await options.script({ threadId, turnId, prompt, emit: (message) => rpc.receiveLine(JSON.stringify(message)),
+            ask: (method, params) => new Promise((resolve) => {
+              const id = `ask-${(askId += 1)}`;
+              pendingAsks.set(id, resolve);
+              rpc.receiveLine(JSON.stringify({ id, method, params: { threadId, turnId, ...params } }));
+            }) });
+        }
         if (failure) {
           rpc.receiveLine(JSON.stringify({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "failed", error: { message: failure, codexErrorInfo: failure } } } }));
           return;

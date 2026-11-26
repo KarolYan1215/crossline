@@ -1,10 +1,22 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
+import { setWebAvailableProvider, WEB_SCOUT_SKILL } from "@crossline/codex";
 import { CrosslineStore } from "@crossline/db";
 import { RUNTIME_OWNER_SETTING } from "@crossline/core";
 import { DILIGENCE_SKILL, createDiligenceRunner, lineDescriptionFact, isPrivateAddress, linesDueForDiligence, pageSupports, verifySource } from "./diligence";
 import { fakeRuntime as sharedRuntime } from "./testing/fake-runtime";
 
 const fakeRuntime = (answers: string[]) => sharedRuntime(answers, DILIGENCE_SKILL);
+/**
+ * A run whose model first calls `web_research` once and gets `urls` back from the scout: only a page a search returned is opened to
+ * verify a source (docs/plans/harness-1125.md §10), so a test that wants sources verified has its fake model search for them.
+ */
+const researchedRuntime = (answers: string[], urls: string[]) => {
+  const scout = JSON.stringify({ notes: "", results: urls.map((url) => ({ query: "student accelerator", title: "page", url, excerpt: "", published: "" })) });
+  return sharedRuntime(answers, [DILIGENCE_SKILL, WEB_SCOUT_SKILL], { routes: [{ match: "$crossline:crossline-web-scout", answers: [scout] }],
+    script: async ({ threadId, ask }) => {
+      if (threadId === "thread-1") await ask("item/tool/call", { callId: "r1", tool: "web_research", arguments: { queries: ["student accelerator programmes"], purpose: "openings" } });
+    } });
+};
 let store: CrosslineStore;
 let workspaceId: string;
 const NOW = () => new Date("2026-10-02T12:00:00.000Z");
@@ -12,12 +24,13 @@ const cost = async () => ({ available: true as const, short: { usedPercent: 10 }
 
 beforeEach(() => {
   store = new CrosslineStore(":memory:");
+  setWebAvailableProvider(() => true);
   workspaceId = store.createPrincipalWithWorkspace("u", "w").workspace.id;
   for (const [slot, value] of [["stage", "只有自己在用"], ["constraint", "学生身份暂时无法全职创业"]] as const) {
     store.upsertProfileFact({ workspaceId, identityId: "startup", projectId: "crossline", slot, value, status: "confirmed", sourceRef: "reply-1", sourceQuote: value, updatedAt: "2026-10-02T00:00:00.000Z" });
   }
 });
-afterEach(() => store.close());
+afterEach(() => { setWebAvailableProvider(() => false); store.close(); });
 
 const page = (title: string, body = "") => new Response(`<html><head><title>${title}</title></head><body>${body}</body></html>`, { status: 200 });
 const publicHost = async () => true;
@@ -75,7 +88,7 @@ test("a host that resolves to a private address, or a redirect into one, is neve
 });
 
 test("unverifiable sources are dropped with everything that depended only on them", async () => {
-  const { rpc } = fakeRuntime([answer()]);
+  const { rpc } = researchedRuntime([answer()], ["https://example.edu/accelerator", "https://made-up.example.org/page"]);
   const fetchImpl = fetchByUrl({ "https://example.edu/accelerator": () => page("Student Accelerator Program — apply by Nov 15") });
   const run = createDiligenceRunner(store, workspaceId, "C:\\repo", () => rpc, { fetchImpl, isPublicHost: publicHost, readCost: cost, now: NOW, webBlocker: () => undefined });
   const outcome = await run("startup");
@@ -121,6 +134,15 @@ test("every line's description goes to the research, the line's own first, so sc
   expect(facts[1]?.value).toContain("博士一年级");
 });
 
+test("a cited page no search returned is not opened: the model may have composed its address", async () => {
+  const { rpc } = fakeRuntime([answer()]);
+  let requested = 0;
+  const fetchImpl = (async () => { requested += 1; return page("Student Accelerator Program"); }) as typeof fetch;
+  const run = createDiligenceRunner(store, workspaceId, "C:\repo", () => rpc, { fetchImpl, isPublicHost: publicHost, readCost: cost, now: NOW, webBlocker: () => undefined });
+  expect(await run("startup")).toMatchObject({ state: "blocked", code: "DILIGENCE_NO_VERIFIED_SOURCE" });
+  expect(requested).toBe(0);
+});
+
 test("a report in which no source can be opened is a failure, and writes no conclusions", async () => {
   const { rpc } = fakeRuntime([answer()]);
   const run = createDiligenceRunner(store, workspaceId, "C:\\repo", () => rpc, { fetchImpl: fetchByUrl({}), isPublicHost: publicHost, readCost: cost, now: NOW, webBlocker: () => undefined });
@@ -129,13 +151,14 @@ test("a report in which no source can be opened is a failure, and writes no conc
 });
 
 test("a line is researched once a week, and not at all without a profile or without budget", async () => {
-  const { rpc, turns } = fakeRuntime([answer()]);
+  const { rpc, turns } = researchedRuntime([answer()], ["https://example.edu/accelerator"]);
   const fetchImpl = fetchByUrl({ "https://example.edu/accelerator": () => page("Student Accelerator Program") });
   const run = createDiligenceRunner(store, workspaceId, "C:\\repo", () => rpc, { fetchImpl, isPublicHost: publicHost, readCost: cost, now: NOW, webBlocker: () => undefined });
   expect(await run("media")).toEqual({ state: "skipped", reason: "no_profile" });
   expect((await run("startup")).state).toBe("done");
   expect(await run("startup")).toEqual({ state: "skipped", reason: "recent_report" });
-  expect(turns()).toBe(1);
+  // One research run: its own turn and the scout's.
+  expect(turns()).toBe(2);
   expect(linesDueForDiligence(store, workspaceId, NOW(), { CROSSLINE_PUBLIC_BETA: "1" })).toEqual([]);
   // A guest's line is due again a week on; on the machine owner's own workspace (hosted too) the opportunity agent watches the
   // startup line's openings instead.
@@ -182,7 +205,7 @@ test("a claim must be about the page it cites: the names in it have to appear th
 });
 
 test("a finding filed under a page that does not say it loses that source, and goes if it has no other", async () => {
-  const { rpc } = fakeRuntime([answer({
+  const { rpc } = researchedRuntime([answer({
     sources: [
       { id: "s1", url: "https://example.edu/accelerator", title: "Student Accelerator Program", publisher: "Example University", accessedOn: "2026-10-02" },
       { id: "s2", url: "https://example.org/other", title: "Other Programme Page", publisher: "Other", accessedOn: "2026-10-02" }
@@ -195,7 +218,7 @@ test("a finding filed under a page that does not say it loses that source, and g
       { id: "p1", title: "11/15 前提交学生孵化器申请", why: "符合在读学生身份", kind: "milestone", dueDate: "2026-11-15", basedOnFacts: [], findingIds: ["f1"] },
       { id: "p2", title: "按另一页的说法安排申请", why: "来自另一个页面", kind: "task", dueDate: "", basedOnFacts: [], findingIds: ["f2"] }
     ]
-  })]);
+  })], ["https://example.edu/accelerator", "https://example.org/other"]);
   const fetchImpl = fetchByUrl({
     "https://example.edu/accelerator": () => page("Student Accelerator Program", "Open to enrolled students. Deadline 2026-11-15."),
     "https://example.org/other": () => page("Other Programme Page", "Nothing about that programme here at all.")

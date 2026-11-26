@@ -268,7 +268,7 @@ export function createSkillScout(store: CrosslineStore, workspaceId: string, cwd
     };
     const result = await runCodexSkill<SkillScoutAnswer>(client, context, {
       skillName: SKILL_SCOUT, cwd, developerInstructions: SCOUT_INSTRUCTIONS, outputSchema: SKILL_SCOUT_SCHEMA, prepareInput: () => context,
-      allowWebSearch: true, validateOutput: (output) => validateSkillScout(output, context), softAccept: (_rejection, output) => keepSkillScout(output, context),
+      webResearch: true, validateOutput: (output) => validateSkillScout(output, context), softAccept: (_rejection, output) => keepSkillScout(output, context),
       onAudit: () => {}, timeoutMs: 60 * 60_000
     });
     const prepared: Prepared[] = [];

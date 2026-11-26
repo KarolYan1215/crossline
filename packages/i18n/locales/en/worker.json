@@ -917,5 +917,7 @@
   "重新运行 run 脚本生成的 {{files}} 与交付的不一致": "Running the run script again made {{files}} differently from what was delivered",
   "仅本地：内容不读，只记修改时间 {{at}}、大小 {{size}} 字节": "Local only: content not read; only the modified time {{at}} and size {{size}} bytes are kept",
   "这是仅本地的文件夹或文件，内容不读。": "This folder or file is local only; its content is not read.",
-  "这台电脑上没有可用的沙箱（MXC 不可用，也没有设置好的 elevated 沙箱），这件事要读别人写的内容，所以没有运行；本人可以自己处理，或在有沙箱的电脑上再交给助手。": "This computer has no sandbox available (MXC is unavailable and no elevated sandbox is set up), and this errand reads content someone else wrote, so it did not run; handle it yourself, or hand it to the assistant on a computer that has a sandbox."
+  "这台电脑上没有可用的沙箱（MXC 不可用，也没有设置好的 elevated 沙箱），这件事要读别人写的内容，所以没有运行；本人可以自己处理，或在有沙箱的电脑上再交给助手。": "This computer has no sandbox available (MXC is unavailable and no elevated sandbox is set up), and this errand reads content someone else wrote, so it did not run; handle it yourself, or hand it to the assistant on a computer that has a sandbox.",
+  "联网检索": "Web search",
+  "「{{title}}」的网址不在检索结果里，没有打开。": "The address of “{{title}}” was not among the search results, so it was not opened."
 }

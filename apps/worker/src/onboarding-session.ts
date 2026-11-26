@@ -708,7 +708,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
           return guides.length ? { domainGuides: guides } : {}; })()
       };
       return runCodexSkill<OnboardingDialogue>(client, context, {
-        skillName: ONBOARDING_SKILL, cwd, developerInstructions: withProfileFramework(INSTRUCTIONS), outputSchema, keepThread: true, locale, secondPerson: SECOND_PERSON, allowWebSearch: true,
+        skillName: ONBOARDING_SKILL, cwd, developerInstructions: withProfileFramework(INSTRUCTIONS), outputSchema, keepThread: true, locale, secondPerson: SECOND_PERSON, webResearch: true,
         prepareInput: () => context, validateOutput, softAccept, keepEarly,
         optionalTools: { tools, instructions: `${CARD_TOOLS_INSTRUCTIONS}\n${READ_TOOLS_INSTRUCTIONS}`, withoutTools: (input) => input, onMode: (mode) => { cardMode = mode; }, freeText: true },
         compactPrompt: COMPACT_PROMPT,
@@ -802,7 +802,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
           : JSON.stringify({ ...guideFor(false), ...roundState(), reply: { id: replyId, text: withoutTaps(replyText) },
             ...(fresh.length ? { newSources: clipDocuments(fresh) } : {}), ...(calendarChanged ? { calendar: week } : {}) });
         result = await continueSkillTurn<OnboardingDialogue>(client, session.codexThreadId, message, {
-          skillName: ONBOARDING_SKILL, cwd, locale, outputSchema: withTools ? undefined : outputSchema, validateOutput, softAccept, keepEarly, allowWebSearch: true,
+          skillName: ONBOARDING_SKILL, cwd, locale, outputSchema: withTools ? undefined : outputSchema, validateOutput, softAccept, keepEarly,
           ...(withTools ? { tools } : {}),
           onAudit, onProgress, onQueued, timeoutMs: 60 * 60_000
         });
@@ -810,7 +810,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         // it reasoned; only one whose rollout is gone is rebuilt from the ledger, which tells a new thread what was said.
         if (!result.ok && result.blocker.code === "SKILL_THREAD_LOST" && withTools) result = await runCodexSkill<OnboardingDialogue>(client, message, {
           skillName: ONBOARDING_SKILL, cwd, developerInstructions: withProfileFramework(INSTRUCTIONS), outputSchema: undefined, keepThread: true, locale,
-          secondPerson: SECOND_PERSON, allowWebSearch: true, prepareInput: (value) => value, validateOutput, softAccept, keepEarly, tools,
+          secondPerson: SECOND_PERSON, webResearch: true, prepareInput: (value) => value, validateOutput, softAccept, keepEarly, tools,
           resumeThreadId: session.codexThreadId, resumeOnly: true, compactPrompt: COMPACT_PROMPT, onAudit, onProgress, onQueued, timeoutMs: 60 * 60_000 });
         if (!result.ok && result.blocker.code === "SKILL_THREAD_LOST") result = await rebuild();
       }

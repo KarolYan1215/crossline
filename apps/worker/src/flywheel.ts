@@ -49,8 +49,8 @@ export function createFlywheelExpander(store: CrosslineStore, workspaceId: strin
       cwd,
       developerInstructions: INSTRUCTIONS,
       outputSchema: FLYWHEEL_OUTPUT_SCHEMA,
-      // Reaching the public web is the whole point of this Skill, and the only one that gets it.
-      allowWebSearch: true,
+      // Reaching the public web is the whole point of this Skill; its input is the person's milestones, so through `web_research`.
+      webResearch: true,
       prepareInput: () => context,
       validateOutput: (output) => validateFlywheelExpansion(output, context),
       softAccept: (rejection, output) => keepFlywheelExpansion(output, context, rejection.message),

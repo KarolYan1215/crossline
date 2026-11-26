@@ -106,7 +106,7 @@ export function createResearchRunner(store: CrosslineStore, workspaceId: string,
       saveThread(store, workspaceId, sessionId, thread);
       const locale = interviewLocale(store, workspaceId);
       const common = { skillName: RESEARCH_SKILL, cwd, outputSchema: ONBOARDING_RESEARCH_SCHEMA, validateOutput: validateResearchTurn,
-        allowWebSearch: true, ...(locale ? { locale } : {}), timeoutMs: 60 * 60_000 };
+        webResearch: true, ...(locale ? { locale } : {}), timeoutMs: 60 * 60_000 };
       let codexThread = thread.threadId;
       // The run after one that found nothing new is the last.
       let lastRun = false;
