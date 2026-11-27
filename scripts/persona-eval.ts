@@ -15,8 +15,8 @@
  * extraction in the background as the app runs it), the screen's own filtering of the round's questions (what 待决事项 owns, what the
  * ledger already answers) and the app's held questions, the cards and the observation's 准/不准, dates adopted as the page adopts them,
  * the long-term goal adopted from the first two attribute chips; then the extraction's finishing runs and the portrait writer. The
- * interview runs until the model has settled every item of the checklist (`interviewComplete`, 2026-11-27: no round limit; `--turns` is
- * only a safety cap) or the spend limit. The people
+ * interview runs until the model has settled every item of the checklist the interview owns (`interviewOwnedOpen`, 2026-11-27: no round
+ * limit; `--turns` is only a safety cap; the portrait's fields and the person's confirmation come after the report) or the spend limit. The people
  * run side by side in one process (one Codex app-server in a throwaway home); the web library's store is swapped around each of its
  * synchronous calls, so no call reads another person's ledger. Everything goes through the model gateway on the developer's key
  * (`CROSSLINE_SPONSOR_*`): the interview on `--model` (default the main model), the player on `--player-model` (default the same).
@@ -32,7 +32,7 @@ import { configureModelGate, runCodexSkill, setProviderResolver, setUsageSink, s
   installUndiciAssertionGuard, threadProvider, withUsageWorkspace, type ProviderRouting, type SkillUsage } from "../packages/codex/src/index";
 import {
   ONBOARDING_INSIGHTS, PROFILE_CLAIMS_SETTING, PROFILE_INSTRUMENTS_SETTING, THIRD_PARTY_CAPABILITIES, cardWordsHead,
-  composeGoal, instrumentClaims, interviewCompleteness, instrumentReadings, interviewComplete, parseSponsorModels, readInsightRatings, readInstrumentAnswers, readyToStart,
+  composeGoal, instrumentClaims, interviewCompleteness, instrumentReadings, interviewComplete, interviewOwnedOpen, parseSponsorModels, readInsightRatings, readInstrumentAnswers, readyToStart,
   scaleAnswerLine, sponsorSpend, type AccessContext, type ProfileCard, type StoredLineProfile
 } from "../packages/core/src/index";
 import { CrosslineStore, interviewChecklistFor, rateInsight } from "../packages/db/src/index";
@@ -288,7 +288,7 @@ async function runPerson(name: string, opening: Opening) {
         metrics: interviewMetrics(store, workspaceId, "eval"), cost: { interview: cost(interviewKey), player: cost(playerKey) } }, null, 2), "utf8");
       if (outcome.state === "ready") break;
       // Complete as the model judged the checklist (2026-11-27): the end of the replay, not the player's press.
-      if (interviewComplete(items)) { transcript.push(`**访谈完整**：清单各项都已判定（第 ${turns} 轮）`, ""); log({ turn: turns, complete: true }); break; }
+      if (!interviewOwnedOpen(items).length) { transcript.push(`**访谈完整**：清单各项都已判定（第 ${turns} 轮）`, ""); log({ turn: turns, complete: true }); break; }
       const spent = cost(interviewKey).yuan + cost(playerKey).yuan;
       if (spent >= spendLimit) {
         transcript.push(`**预算用完**：访谈轮已花 ¥${spent.toFixed(2)}（上限 ¥${spendLimit}），停在第 ${turns} 轮。`, "");

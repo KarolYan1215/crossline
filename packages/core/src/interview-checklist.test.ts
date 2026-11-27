@@ -44,7 +44,9 @@ test("a portrait written only from inferences is not finished, and what is missi
   const items = interviewChecklist({ ...full, groundedSections: [], verdicts: {}, profile: { ...full.profile, trueNorth: "", energyMap: [] } });
   expect(items.find((item) => item.id === "portrait_grounded")).toMatchObject({ done: false, detail: "尚无本人依据：现状与真问题、工作观与人生观、精力：充电与耗电、擅长与喜欢、做事方法、各主线现在的注意力占比、说与做五项各有多重要" });
   expect(items.find((item) => item.id === "portrait_fields")?.detail).toContain("正北");
-  expect(interviewOwnedOpen(items).map((item) => item.id)).toEqual(["portrait_fields", "portrait_grounded"]);
+  // The fields are the report's to write (deferred); the parts, each with its own question, are the interview's.
+  expect(interviewOwnedOpen(items).map((item) => item.id)).toEqual(["portrait_grounded"]);
+  expect(judgedItems(items).find((item) => item.id === "portrait:energy")?.detail).toBe("最近哪几件事做完更有劲，哪几件做完很累？其中哪些是你擅长的，哪些是你喜欢的？");
 });
 
 test("what only the person can settle is theirs, and does not count as the interview's", () => {

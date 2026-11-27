@@ -398,3 +398,12 @@
 | `workflow.requested` | `skill.changed` | change=`workflow_requested` |
 
 </details>
+
+## 回放 2026-11-27（ChatGPT 路线，人物 a）的发现与修正
+
+48 轮后因 Codex 额度用完中断（`SKILL_USAGE_LIMIT`），访谈没有结束。原因不在抽取：要点规则下各部分的散文本来就只由最后的报告写（`portraitTask`，2026-11-26），所以 sections 通道的 `profileSections` 全为 null 是设计如此。
+
+- **`portrait_fields` 在访谈中无法完成。** 它读的画像字段只在本人按「结束并出报告」后由报告写入（`projectReport`），访谈期间没有任何一问能让它完成；回放以「清单完整」为终点，所以永远停不下来。改为延后项（`deferred`），同 `portrait_synthesis`。每部分有没有本人依据仍由 `portrait_grounded` 判。
+- **模型不回头判已收尾部分的项。** 第 19–23 题已答齐精力（充电、耗电、擅长与喜欢、时段），`portrait:energy` 和 `portrait:method` 40 轮里一直「未判」。两处：快照里每个部分的「缺」都重复整项的说明（六个标签全列），看不出哪一部分缺；SKILL 只要求写「有变化的项」。现在每部分带自己的问题（`PORTRAIT_PARTS[].ask`），SKILL 要求每轮把「未判」和 `partial` 的项都过一遍，不论哪一部分、是否已收尾；收尾一部分时它的每一项都要有判定。
+- **回放的终点** 改为访谈自己的项都已判定（`interviewOwnedOpen` 为空）；画像字段和本人的「符合」在报告之后。
+- **额度。** 对话线程每轮带着之前所有轮的账本快照，到第 48 轮单次调用约 30 万 token，全程约 2060 万输入 token（98% 命中缓存），三条抽取通道另计。2026-11-17 的决定是访谈线程只在接近运行时上限时压缩；是否提前压缩，待本人决定。

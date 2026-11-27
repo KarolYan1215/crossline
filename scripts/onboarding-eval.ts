@@ -39,7 +39,7 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { enterUsageWorkspace, runCodexSkill, setUsageSink, startCodexSupervisor } from "../packages/codex/src/index";
-import { AVAILABILITY_PROPOSED_SETTING, EVAL_HOLD_FILE, INTERVIEW_SETTINGS, PROFILE_CONFIRMED, readInterviewSettings, composeGoal, interviewComplete, portraitFingerprint, readyToStart, type ProfileModel, type StoredLineProfile } from "../packages/core/src/index";
+import { AVAILABILITY_PROPOSED_SETTING, EVAL_HOLD_FILE, INTERVIEW_SETTINGS, PROFILE_CONFIRMED, readInterviewSettings, composeGoal, interviewComplete, interviewOwnedOpen, portraitFingerprint, readyToStart, type ProfileModel, type StoredLineProfile } from "../packages/core/src/index";
 import { CrosslineStore, interviewChecklistFor } from "../packages/db/src/index";
 import { domainGuides } from "../packages/identity-packs/src/index";
 import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY, composeAnswers, type Question } from "../apps/web/app/onboarding/onboarding-types";
@@ -338,7 +338,7 @@ try {
     const items = checklistNow();
     const minutesNow = Math.round(attentionSeconds / 6) / 10;
     if (!readyAt && readyToStart(items)) readyAt = { rounds: turns, minutes: minutesNow };
-    if (!completeAt && interviewComplete(items)) completeAt = { rounds: turns, minutes: minutesNow };
+    if (!completeAt && !interviewOwnedOpen(items).length) completeAt = { rounds: turns, minutes: minutesNow };
     transcript.push(`### 第 ${turns} 轮（${turn.stage ?? ""}）\n\n${turn.reply}\n\n${turn.questions.map((question, index) => `${index + 1}. ${question.text}`).join("\n")}`);
     console.info(JSON.stringify({ turn: turns, stage: turn.stage, questions: turn.questions.length, clicks, next: turn.nextAction,
       attentionMinutes: minutesNow, modelSeconds: Math.round(modelSeconds.at(-1)!), ready: Boolean(readyAt), complete: Boolean(completeAt) }));

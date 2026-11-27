@@ -54,7 +54,7 @@ export type ChecklistItem = {
   byModel?: true;
   verdict?: ChecklistVerdict;
   /** `portrait_grounded` only: each part as the model judges it (`portrait:<section>`), with its verdict. */
-  parts?: Array<{ id: string; label: string; done: boolean; verdict?: ChecklistVerdict }>;
+  parts?: Array<{ id: string; label: string; done: boolean; detail: string; verdict?: ChecklistVerdict }>;
 };
 
 export type ChecklistInput = {
@@ -135,8 +135,11 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
   if (!String(profile.anchor ?? "").trim() && !String(profile.realWant ?? "").trim()) missingFields.push("锚与真正想要的");
   const energy = profile.energyMap ?? [];
   if (energy.length < 3 || !energy.some((item) => item.charge === "charge") || !energy.some((item) => item.charge === "drain")) missingFields.push("能量地图（至少 3 项，含充电与耗电）");
+  // Deferred: the report writes these fields after the person ends the interview (the points rules, 2026-11-26: `projectReport`), so no
+  // question can settle them during it; held open, the replay of 2026-11-27 never ended. Whether each part rests on the person's words is
+  // `portrait_grounded` below.
   items.push({ id: "portrait_fields", group: "画像", label: t("画像各部分已写出"), done: !missingFields.length,
-    detail: missingFields.length ? t("缺：{{items}}", { items: list(missingFields) }) : "", owner: "interview" });
+    detail: missingFields.length ? t("缺：{{items}}", { items: list(missingFields) }) : "", owner: "interview", deferred: true });
   const missingSynthesis = SYNTHESIS_FIELDS.filter(([key]) => !String(profile[key] ?? "").trim()).map(([, label]) => label);
   items.push({ id: "portrait_synthesis", group: "画像", label: t("画像综合段已写出"), done: !missingSynthesis.length,
     detail: missingSynthesis.length ? t("整理中：{{items}}", { items: list(missingSynthesis) }) : "", owner: "interview", deferred: true });
@@ -148,7 +151,9 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
   items.push({ id: "portrait_grounded", group: "画像", label: t("画像每部分都有本人原话或文件为据"), done: !unbacked.length, sections: unbacked.map((part) => part.section),
     detail: unbacked.length ? t("尚无本人依据：{{items}}", { items: list(unbacked.map((part) => part.label)) }) : "", owner: "interview",
     ...(unbacked.length ? { ask: t(unbacked[0]!.ask) } : {}),
-    parts: PORTRAIT_PARTS.map((part) => ({ id: `portrait:${part.section}`, label: t(part.label), done: grounded(part.section),
+    // Each part carries its own question: with the whole item's detail repeated under every part (all six labels), the model never told
+    // which one was open (2026-11-27 replay: portrait:energy unjudged for 40 rounds with its answers on record).
+    parts: PORTRAIT_PARTS.map((part) => ({ id: `portrait:${part.section}`, label: t(part.label), done: grounded(part.section), detail: t(part.ask),
       ...(verdicts[`portrait:${part.section}`] ? { verdict: verdicts[`portrait:${part.section}`]! } : {}) })) });
   items.push({ id: "portrait_confirmed", group: "画像", label: t("本人确认画像符合自己"), done: input.portraitConfirmed,
     detail: input.portraitConfirmed ? "" : t("在画像页读完后选「符合」，或说明哪里不对"), owner: "person" });
@@ -316,7 +321,7 @@ export type JudgedItem = { id: string; label: string; done: boolean; detail: str
 /** The items whose `done` rests on the model's verdict, in checklist order. */
 export function judgedItems(items: readonly ChecklistItem[]): JudgedItem[] {
   return items.flatMap((item): JudgedItem[] => item.parts
-    ? item.parts.map((part) => ({ id: part.id, label: part.label, done: part.done, detail: part.done ? "" : item.detail, ...(part.verdict ? { verdict: part.verdict } : {}) }))
+    ? item.parts.map((part) => ({ id: part.id, label: part.label, done: part.done, detail: part.done ? "" : part.detail, ...(part.verdict ? { verdict: part.verdict } : {}) }))
     : item.byModel ? [{ id: item.id, label: item.label, done: item.done, detail: item.detail, ...(item.deferred ? { deferred: true as const } : {}),
       ...(item.verdict ? { verdict: item.verdict } : {}) }] : []);
 }
