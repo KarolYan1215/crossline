@@ -38,7 +38,7 @@ test("five foreground minutes approve one version; background and offline gaps d
   expect(store.listWorkOrders(TEST_CTX.workspaceId).find((item) => item.id === "local")?.state).toBe("awaiting_plan_approval");
   permissionHeartbeat(TEST_CTX, [key], true, 450_000);
   expect(store.listWorkOrders(TEST_CTX.workspaceId).find((item) => item.id === "local")?.state).toBe("approved");
-  expect(store.listEvents(TEST_CTX.workspaceId, { type: "permission.auto_approved" })).toHaveLength(1);
+  expect(store.listEvents(TEST_CTX.workspaceId, { type: "insight.changed", change: "auto_approved" })).toHaveLength(1);
 });
 
 test("editing a proposal starts a new foreground approval window", () => {
@@ -83,20 +83,20 @@ test("rejection blocks the candidate and high risk never auto approves", () => {
     permissionHeartbeat(TEST_CTX, candidates.map((item) => item.key), true, t);
   expect(store.listWorkOrders(TEST_CTX.workspaceId).find((item) => item.id === "property")?.state).toBe("awaiting_plan_approval");
   expect(store.listWorkOrders(TEST_CTX.workspaceId).find((item) => item.id === "reject")?.state).toBe("blocked");
-  expect(store.listEvents(TEST_CTX.workspaceId, { type: "permission.rejected" })).toHaveLength(1);
+  expect(store.listEvents(TEST_CTX.workspaceId, { type: "person.decided", subject: "permission", decision: "rejected" })).toHaveLength(1);
 });
 
 test("sourced insight becomes usable after foreground approval and can be revoked", () => {
   const { store } = setup();
   const finding = store.appendEvent({ ownerId, workspaceId: TEST_CTX.workspaceId,
-    idempotencyKey: "finding-1", type: "flywheel.finding", entityId: "research-starter",
+    idempotencyKey: "finding-1", type: "insight.changed", entityId: "research-starter",
     payload: { milestoneId: "research-starter", summary: "可复用的实验记录模板",
-      sourceUrl: "https://example.org/source", staleWhen: "方法变更" } });
+      sourceUrl: "https://example.org/source", staleWhen: "方法变更", change: "found" } });
   const candidate = permissionCandidates(TEST_CTX).find((item) => item.kind === "insight")!;
   expect(candidate.eligible).toBe(true);
   setPermissionMode(TEST_CTX, true);
   for (let t = 0; t <= 300_000; t += 10_000) permissionHeartbeat(TEST_CTX, [candidate.key], true, t);
-  expect(store.listEvents(TEST_CTX.workspaceId, { type: "insight.approved", entityId: finding.eventId })).toHaveLength(1);
+  expect(store.listEvents(TEST_CTX.workspaceId, { type: "insight.changed", change: "approved", entityId: finding.eventId })).toHaveLength(1);
   expect(permissionCandidates(TEST_CTX).some((item) => item.key === candidate.key)).toBe(false);
   expect(revokeInsight(TEST_CTX, finding.eventId)).toEqual({ ok: true });
   expect(revokeInsight(TEST_CTX, finding.eventId)).toEqual({ ok: false, code: "INSIGHT_NOT_ACTIVE" });

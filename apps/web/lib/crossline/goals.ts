@@ -64,9 +64,9 @@ export function saveGoalSettings(ctx: AccessContext, id: string, input: { import
   if (JSON.stringify(previous) === JSON.stringify(next)) return { ok: true };
   store.setSetting(ctx.workspaceId, goalKey(id), JSON.stringify(next));
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
-    idempotencyKey: `goal:settings:${id}:${randomUUID()}`, type: "goal.settings_confirmed", entityId: id,
+    idempotencyKey: `goal:settings:${id}:${randomUUID()}`, type: "goal.changed", entityId: id,
     payload: { milestoneVersion: milestone.version, previous, next,
-      ...(typeof input.weight === "number" ? { presetWeight: importancePresets(ctx).get(id)?.weight ?? null } : {}) } });
+      ...(typeof input.weight === "number" ? { presetWeight: importancePresets(ctx).get(id)?.weight ?? null } : {}), change: "settings_confirmed" } });
   return { ok: true };
 }
 

@@ -49,6 +49,7 @@ import { WEEKLY_INSIGHT_OUTPUT_SCHEMA } from "./weekly-insight-schema";
 import { VISA_READING_SCHEMA } from "./visa";
 import { QUOTE_READING_SCHEMA } from "./wealth";
 import { tFor, type Locale } from "./i18n";
+import { currentSkillKeys, skillKey } from "./skill-modes";
 
 /**
  * What a model provider other than the person's own Codex sign-in may be trusted with (R7, docs/review-2026-10-13.md §7, decided
@@ -90,72 +91,75 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   // Reads earlier sentences through its lookups (`search_evidence`, `read_sentences`).
   "crossline-onboarding-extract": { label: "访谈整理", schemas: ["ONBOARDING_EXTRACT_SCHEMA", "SCALE_ANALYSIS_SCHEMA"], tools: true },
   // A research thread of the interview (contract C): looks things up on the web and reads the person's own material through the lookups.
-  "crossline-onboarding-research": { label: "访谈调研", schemas: ["ONBOARDING_RESEARCH_SCHEMA"], tools: true, webSearch: true },
-  "crossline-milestone-architect": { label: "里程碑设计", schemas: ["MILESTONE_PROPOSAL_SCHEMA"] },
-  "crossline-milestone-risk-reviewer": { label: "里程碑风险审查", schemas: ["MILESTONE_RISK_SCHEMA"] },
-  "crossline-artifact-planner": { label: "跨主线产出规划", schemas: ["ARTIFACT_PLAN_SCHEMA"] },
-  "crossline-goal-backplanner": { label: "任务倒推", schemas: ["BACKPLAN_SCHEMA"] },
-  "crossline-flywheel-scout": { label: "跨主线扩展", schemas: ["FLYWHEEL_OUTPUT_SCHEMA"], webSearch: true },
+  "crossline-research:onboarding": { label: "访谈调研", schemas: ["ONBOARDING_RESEARCH_SCHEMA"], tools: true, webSearch: true },
+  "crossline-milestone-architect:design": { label: "里程碑设计", schemas: ["MILESTONE_PROPOSAL_SCHEMA"] },
+  "crossline-milestone-review:risk": { label: "里程碑风险审查", schemas: ["MILESTONE_RISK_SCHEMA"] },
+  "crossline-cross-line-planner:artifacts": { label: "跨主线产出规划", schemas: ["ARTIFACT_PLAN_SCHEMA"] },
+  "crossline-goal-backplanner:backplan": { label: "任务倒推", schemas: ["BACKPLAN_SCHEMA"] },
+  "crossline-cross-line-planner:flywheel": { label: "跨主线扩展", schemas: ["FLYWHEEL_OUTPUT_SCHEMA"], webSearch: true },
   "crossline-automation-stripper": { label: "收集分析", schemas: ["ANALYSIS_OUTPUT_SCHEMA"], critical: true },
-  "crossline-manualbook-designer": { label: "教程设计", schemas: ["MANUAL_DESIGN_SCHEMA"] },
-  "crossline-material-researcher": { label: "资料检索", schemas: ["MATERIAL_SEARCH_SCHEMA"], webSearch: true },
+  "crossline-task-planner:manual": { label: "教程设计", schemas: ["MANUAL_DESIGN_SCHEMA"] },
+  "crossline-research:material": { label: "资料检索", schemas: ["MATERIAL_SEARCH_SCHEMA"], webSearch: true },
   "crossline-material-writer": { label: "教程写作", schemas: ["NODE_WRITEUP_SCHEMA"] },
-  "crossline-step-planner": { label: "步骤拆分", schemas: ["STEP_PLAN_SCHEMA"] },
-  "crossline-archetype-curator": { label: "任务类型整理", schemas: ["ARCHETYPE_CURATION_SCHEMA"], webSearch: true },
+  "crossline-task-planner:steps": { label: "步骤拆分", schemas: ["STEP_PLAN_SCHEMA"] },
+  "crossline-task-planner:archetype": { label: "任务类型整理", schemas: ["ARCHETYPE_CURATION_SCHEMA"], webSearch: true },
   "crossline-validation-reviewer": { label: "复核", schemas: ["VALIDATION_REVIEW_SCHEMA", "PUBLIC_SKILL_REVIEW_SCHEMA", "PUBLIC_SKILL_BATCH_REVIEW_SCHEMA", "TASK_MERGE_REVIEW_SCHEMA", "SKILL_INJECTION_CHECK_SCHEMA"] },
-  "crossline-progress-judge": { label: "进度判断", schemas: ["PROGRESS_ASSESSMENT_SCHEMA"] },
-  "crossline-deliverable-check": { label: "交付物验收", schemas: ["DELIVERABLE_CHECK_SCHEMA"] },
+  "crossline-evidence-judge:progress": { label: "进度判断", schemas: ["PROGRESS_ASSESSMENT_SCHEMA"] },
+  "crossline-evidence-judge:deliverable": { label: "交付物验收", schemas: ["DELIVERABLE_CHECK_SCHEMA"] },
   // The execution gates (docs/plans/execution-gates-1124.md): each builds its schema per run from its verdict list (`gateBatchSchema`), so no
   // exported schema names them; they run on the account's own Codex until a fixed case measures a provider on them.
-  "crossline-gate-completion": { label: "完成判定", schemas: [] },
-  "crossline-gate-priority": { label: "P1 标注", schemas: [] },
-  "crossline-gate-front": { label: "外部小关口", schemas: [] },
-  "crossline-gate-admission": { label: "里程碑准入", schemas: [] },
-  "crossline-gate-setback": { label: "挫折分类", schemas: [] },
-  "crossline-gate-attention": { label: "注意力审计", schemas: [] },
-  "crossline-gate-night": { label: "深夜操作", schemas: [] },
+  "crossline-evidence-judge:completion": { label: "完成判定", schemas: [] },
+  "crossline-focus:priority": { label: "P1 标注", schemas: [] },
+  "crossline-focus:front": { label: "外部小关口", schemas: [] },
+  "crossline-milestone-review:admission": { label: "里程碑准入", schemas: [] },
+  "crossline-weekly-review:setback": { label: "挫折分类", schemas: [] },
+  "crossline-weekly-review:attention": { label: "注意力审计", schemas: [] },
+  "crossline-outward-check:pending": { label: "深夜操作", schemas: [] },
+  "crossline-outward-check:week": { label: "深夜操作回看", schemas: [] },
   "crossline-gate-drill": { label: "找错练习", schemas: [] },
   "crossline-concierge": { label: "输入框", schemas: ["CONCIERGE_SCHEMA"], tools: true },
-  "crossline-task-titler": { label: "任务命名", schemas: ["TASK_TITLES_SCHEMA"] },
+  "crossline-goal-backplanner:title": { label: "任务命名", schemas: ["TASK_TITLES_SCHEMA"] },
   "crossline-dictation-corrector": { label: "语音输入纠错", schemas: ["DICTATION_CORRECTION_SCHEMA"] },
-  "crossline-calendar-classifier": { label: "日历归类", schemas: ["CALENDAR_CLASSIFICATION_SCHEMA"] },
-  "crossline-folder-classifier": { label: "文件夹归类", schemas: ["FOLDER_LINES_SCHEMA", "FOLDER_SCREEN_SCHEMA", "FILE_PROJECTS_SCHEMA"] },
-  "crossline-source-digest": { label: "旧版文件对照", schemas: ["SOURCE_VERSIONS_SCHEMA", "CHAT_DIGEST_SCHEMA"] },
-  "crossline-time-attributor": { label: "拟计时归属", schemas: ["TIME_ATTRIBUTION_SCHEMA"] },
-  "crossline-recording-digest": { label: "录音整理", schemas: ["RECORDING_DIGEST_SCHEMA"] },
+  "crossline-line-filer:calendar": { label: "日历归类", schemas: ["CALENDAR_CLASSIFICATION_SCHEMA"] },
+  "crossline-line-filer:folder": { label: "文件夹归类", schemas: ["FOLDER_LINES_SCHEMA", "FOLDER_SCREEN_SCHEMA", "FILE_PROJECTS_SCHEMA"] },
+  "crossline-capture-digest:source": { label: "旧版文件对照", schemas: ["SOURCE_VERSIONS_SCHEMA", "CHAT_DIGEST_SCHEMA"] },
+  "crossline-line-filer:time": { label: "拟计时归属", schemas: ["TIME_ATTRIBUTION_SCHEMA"] },
+  "crossline-capture-digest:recording": { label: "录音整理", schemas: ["RECORDING_DIGEST_SCHEMA"] },
   "crossline-media-describer": { label: "图片读取", schemas: ["MEDIA_DESCRIPTION_SCHEMA"], vision: true },
   "crossline-favourite-topics": { label: "收藏分话题", schemas: ["FAVOURITE_TOPICS_SCHEMA"] },
-  "crossline-goal-splitter": { label: "目标拆分", schemas: ["GOAL_SPLIT_SCHEMA"] },
-  "crossline-insight-compiler": { label: "主线 skill 整理", schemas: ["MINE_SKILL_SCHEMA"], webSearch: true },
-  "crossline-skill-scout": { label: "公开 skill 检索", schemas: ["SKILL_SCOUT_SCHEMA"], webSearch: true },
-  "crossline-portrait-writer": { label: "画像", schemas: ["PORTRAIT_SCHEMA", "PORTRAIT_GAP_SCHEMA"] },
-  "crossline-portrait-narrative": { label: "画像叙事", schemas: [], freeText: true },
-  "crossline-portrait-illustrator": { label: "画像插图", schemas: [], image: true },
+  "crossline-milestone-architect:split": { label: "目标拆分", schemas: ["GOAL_SPLIT_SCHEMA"] },
+  "crossline-line-method:rules": { label: "主线 skill 整理", schemas: ["MINE_SKILL_SCHEMA"], webSearch: true },
+  "crossline-research:skills": { label: "公开 skill 检索", schemas: ["SKILL_SCOUT_SCHEMA"], webSearch: true },
+  // The report and its say–do rewrite were one Skill until 2026-11-27: both modes still need both schemas, as that Skill did.
+  "crossline-portrait:report": { label: "画像", schemas: ["PORTRAIT_SCHEMA", "PORTRAIT_GAP_SCHEMA"] },
+  "crossline-portrait:gap": { label: "画像言行对照", schemas: ["PORTRAIT_SCHEMA", "PORTRAIT_GAP_SCHEMA"] },
+  "crossline-portrait:narrative": { label: "画像叙事", schemas: [], freeText: true },
+  "crossline-portrait:figure": { label: "画像插图", schemas: [], image: true },
   "crossline-eval-persona": { label: "访谈评测", schemas: [], testOnly: true },
   "crossline-conformance": { label: "模型检验", schemas: [], testOnly: true },
-  "crossline-form-filler": { label: "报名代填", schemas: ["FORM_FILL_SCHEMA"] },
-  "crossline-form-checker": { label: "报名提交前总核", schemas: ["FORM_CHECK_SCHEMA"], critical: true },
-  "crossline-form-observer": { label: "报名代填补位", schemas: ["FORM_OBSERVE_SCHEMA"] },
+  "crossline-form-page:fill": { label: "报名代填", schemas: ["FORM_FILL_SCHEMA"] },
+  "crossline-outward-check:form": { label: "报名提交前总核", schemas: ["FORM_CHECK_SCHEMA"], critical: true },
+  "crossline-form-page:observe": { label: "报名代填补位", schemas: ["FORM_OBSERVE_SCHEMA"] },
   // browser-use asks for its own schema each step, so no fixed case measures it: it runs on the account's own Codex only.
-  "crossline-form-browser-agent": { label: "报名代填补位二", schemas: [] },
-  "crossline-milestone-gate": { label: "验收判定", schemas: ["MILESTONE_GATE_OUTPUT_SCHEMA"], critical: true },
-  "crossline-weekly-insight": { label: "每周洞察", schemas: ["WEEKLY_INSIGHT_OUTPUT_SCHEMA"] },
-  "crossline-due-diligence": { label: "网上查证", schemas: ["DILIGENCE_OUTPUT_SCHEMA"], webSearch: true },
+  "crossline-form-page:browser": { label: "报名代填补位二", schemas: [] },
+  "crossline-evidence-judge:milestone": { label: "验收判定", schemas: ["MILESTONE_GATE_OUTPUT_SCHEMA"], critical: true },
+  "crossline-weekly-review:insight": { label: "每周洞察", schemas: ["WEEKLY_INSIGHT_OUTPUT_SCHEMA"] },
+  "crossline-research:diligence": { label: "网上查证", schemas: ["DILIGENCE_OUTPUT_SCHEMA"], webSearch: true },
   // After the interview: the person's habits and researched ways of doing their kinds of work (method-research.ts); web is its point.
-  "crossline-method-research": { label: "做事方法研究", schemas: ["METHOD_RESEARCH_SCHEMA"], tools: true },
-  "crossline-energy-advisor": { label: "精力时段复核", schemas: ["ENERGY_ADVICE_REVIEW_SCHEMA"], webSearch: true },
-  "crossline-background-facts": { label: "背景整理", schemas: ["BACKGROUND_FACTS_OUTPUT_SCHEMA"] },
-  "crossline-plan-explainer": { label: "排程说明", schemas: ["PLAN_EXPLAINER_OUTPUT_SCHEMA"] },
-  "crossline-agent": { label: "电脑上的助手", schemas: ["AGENT_SUMMARY_SCHEMA"], shell: true },
+  "crossline-line-method:research": { label: "做事方法研究", schemas: ["METHOD_RESEARCH_SCHEMA"], tools: true },
+  "crossline-schedule-advisor:energy": { label: "精力时段复核", schemas: ["ENERGY_ADVICE_REVIEW_SCHEMA"], webSearch: true },
+  "crossline-capture-digest:background": { label: "背景整理", schemas: ["BACKGROUND_FACTS_OUTPUT_SCHEMA"] },
+  "crossline-schedule-advisor:explain": { label: "排程说明", schemas: ["PLAN_EXPLAINER_OUTPUT_SCHEMA"] },
+  "crossline-agent:shell": { label: "电脑上的助手", schemas: ["AGENT_SUMMARY_SCHEMA"], shell: true },
   // The assistant without a shell (docs/personal-agent.md): Crossline's own functions, on any model that can call them.
-  "crossline-agent-tools": { label: "助手", schemas: ["AGENT_SUMMARY_SCHEMA"], tools: true },
-  "crossline-mail-triage": { label: "邮件整理", schemas: ["MAIL_TRIAGE_SCHEMA"] },
+  "crossline-agent:functions": { label: "助手", schemas: ["AGENT_SUMMARY_SCHEMA"], tools: true },
+  "crossline-inbox-triage:mail": { label: "邮件整理", schemas: ["MAIL_TRIAGE_SCHEMA"] },
   "crossline-mail-reply-drafter": { label: "邮件回复草稿", schemas: ["MAIL_REPLY_DRAFT_SCHEMA"] },
-  "crossline-import-triage": { label: "导入清单整理", schemas: ["IMPORT_TRIAGE_SCHEMA"] },
+  "crossline-inbox-triage:import": { label: "导入清单整理", schemas: ["IMPORT_TRIAGE_SCHEMA"] },
   "crossline-automation-designer": { label: "自动化设计", schemas: ["AUTOMATION_PLAN_SCHEMA", "WORKFLOW_TURN_SCHEMA"], tools: true },
-  "crossline-opportunity-needs": { label: "机会监视项推导", schemas: ["OPPORTUNITY_WATCHES_SCHEMA"], webSearch: true },
-  "crossline-opportunity-reader": { label: "机会页面解读", schemas: ["OPPORTUNITY_READING_SCHEMA"] },
-  "crossline-visa-finder": { label: "签证核实", schemas: ["VISA_READING_SCHEMA"], webSearch: true },
+  "crossline-research:needs": { label: "机会监视项推导", schemas: ["OPPORTUNITY_WATCHES_SCHEMA"], webSearch: true },
+  "crossline-page-reader:opportunity": { label: "机会页面解读", schemas: ["OPPORTUNITY_READING_SCHEMA"] },
+  "crossline-page-reader:visa": { label: "签证核实", schemas: ["VISA_READING_SCHEMA"], webSearch: true },
   // The search run behind `web_research` (docs/plans/harness-1125.md §10): given queries and a purpose only, nothing of the person's.
   "crossline-web-scout": { label: "联网检索", schemas: ["WEB_SCOUT_SCHEMA"], webSearch: true },
   // Reads a tainted run's searches before the scout runs them (docs/plans/harness-1125.md §18): no web, nothing of the person's.
@@ -164,7 +168,11 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-quote-reader": { label: "行情读取", schemas: ["QUOTE_READING_SCHEMA"], webSearch: true }
 };
 
-export const skillKey = (skill: string) => skill.replace(/^crossline:/, "");
+/**
+ * A Skill's needs by any name it is run or stored under: `crossline:crossline-portrait:report`, the key itself, or a name from before the
+ * merge of 2026-11-27 (`crossline-portrait-writer`), read as the mode it became; no provider is measured again for the merge.
+ */
+export const skillNeedsOf = (skill: string): SkillNeeds | undefined => SKILL_NEEDS[skillKey(skill)] ?? SKILL_NEEDS[currentSkillKeys(skill)[0]!];
 
 /**
  * The interview is its dialogue and its extraction (`onboarding-extract.ts`), which records what was said: the start standard, the
@@ -184,7 +192,7 @@ export const THIRD_PARTY_CAPABILITIES: ProviderCapabilities = { webSearch: false
 /** Why a provider cannot serve a Skill whatever its conformance, in words the person reads; undefined when it can. */
 export function capabilityGap(skill: string, capabilities: ProviderCapabilities = THIRD_PARTY_CAPABILITIES, locale?: Locale): string | undefined {
   const t = tFor(locale);
-  const needs = SKILL_NEEDS[skillKey(skill)];
+  const needs = skillNeedsOf(skill);
   if (!needs) return t("这项功能还没有登记它需要什么，暂不交给其他模型。");
   if (needs.testOnly) return t("测试用功能，不交给其他模型。");
   const label = t(needs.label);
@@ -429,7 +437,7 @@ const caseRuns = (record: ConformanceRecord) => {
 
 /** The share of this Skill's schema runs that needed a repair, on this record; undefined when none of its schemas ran. */
 export function skillRepairRate(record: ConformanceRecord, skill: string): number | undefined {
-  const schemas = SKILL_NEEDS[skill]?.schemas ?? [];
+  const schemas = skillNeedsOf(skill)?.schemas ?? [];
   const runs = caseRuns(record).filter((run) => schemas.includes(run.caseId));
   return runs.length ? runs.filter((run) => run.repairs > 0).length / runs.length : undefined;
 }

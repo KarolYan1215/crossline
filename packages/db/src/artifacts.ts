@@ -86,13 +86,13 @@ export function approveArtifactRelationsFor(store: CrosslineStore, workspaceId: 
   const ids = store.listMilestoneRelations(workspaceId).filter((relation) => relation.status === "candidate" && relation.artifactId
     && (relation.toMilestoneId === milestoneId || (relation.fromMilestoneId === milestoneId && approved.has(relation.toMilestoneId)))).map((relation) => relation.id);
   if (!ids.length) return [];
-  const round = store.listEvents(workspaceId, { type: "milestone_relations.decided", entityId: ids[0]! }).length;
+  const round = store.listEvents(workspaceId, { type: "milestone_relation.changed", change: "decided", entityId: ids[0]! }).length;
   return store.decideMilestoneRelations(workspaceId, ownerId, ids, "approved", `milestone_relations:with_milestone:${milestoneId}:${ids.join(",")}:${round}`).decided;
 }
 
 /** Undoing a downstream milestone's approval: the relations approved with it, not yet checked, are candidates again. */
 export function withdrawArtifactRelationsFor(store: CrosslineStore, workspaceId: string, milestoneId: string): string[] {
-  const checked = new Set(store.listEvents(workspaceId, { type: "milestone_relation.checked" }).map((event) => event.entityId));
+  const checked = new Set(store.listEvents(workspaceId, { type: "milestone_relation.changed", change: "checked" }).map((event) => event.entityId));
   const withdrawn = store.listMilestoneRelations(workspaceId).filter((relation) => relation.status === "approved" && relation.artifactId
     && relation.toMilestoneId === milestoneId && !checked.has(relation.id));
   for (const relation of withdrawn) store.saveMilestoneRelation({ ...relation, status: "candidate" });
@@ -108,9 +108,9 @@ export function removeArtifactRelation(store: CrosslineStore, workspaceId: strin
   if (!relation) return { ok: false, code: "RELATION_NOT_FOUND" };
   if (relation.status !== "candidate") return { ok: false, code: "RELATION_NOT_CANDIDATE" };
   store.saveMilestoneRelation({ ...relation, status: "archived" });
-  const round = store.listEvents(workspaceId, { type: "milestone_relation.removed", entityId: relationId }).length;
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `milestone_relation.removed:${relationId}:${round}`, type: "milestone_relation.removed",
-    entityId: relationId, payload: { artifactId: relation.artifactId, fromMilestoneId: relation.fromMilestoneId, toMilestoneId: relation.toMilestoneId } });
+  const round = store.listEvents(workspaceId, { type: "milestone_relation.changed", change: "removed", entityId: relationId }).length;
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `milestone_relation.removed:${relationId}:${round}`, type: "milestone_relation.changed",
+    entityId: relationId, payload: { artifactId: relation.artifactId, fromMilestoneId: relation.fromMilestoneId, toMilestoneId: relation.toMilestoneId, change: "removed" } });
   const milestones = new Map(store.listMilestones(workspaceId).map((milestone) => [milestone.id, milestone]));
   const from = milestones.get(relation.fromMilestoneId), to = milestones.get(relation.toMilestoneId);
   if (from && to) store.addPreference({ workspaceId, source: "relation_rejected", scope: from.identityId, weight: 1, refId: relationId,
@@ -138,15 +138,15 @@ export function recordRelationCheck(store: CrosslineStore, workspaceId: string, 
   } else {
     store.saveMilestoneRelation({ ...relation, transfer: { ...relation.transfer, measured: value }, lastValidatedAt: at });
   }
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `milestone_relation.checked:${relationId}`, type: "milestone_relation.checked", entityId: relationId,
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `milestone_relation.checked:${relationId}`, type: "milestone_relation.changed", entityId: relationId,
     payload: { outcome, measured: value, expected: relation.transfer.expected, unit: relation.transfer.unit, metric: relation.transfer.metric,
-      artifactId: relation.artifactId, kind, note: note.trim().slice(0, 300) } });
+      artifactId: relation.artifactId, kind, note: note.trim().slice(0, 300), change: "checked" } });
   return { ok: true };
 }
 
 /** Every relation check answered so far, with the artifact kind it was about (for the fulfilment rate and the next plan's hint). */
 export function relationChecks(store: CrosslineStore, workspaceId: string): Array<{ outcome: RelationCheckOutcome; kind: string; relationId: string; at: string }> {
-  return store.listEvents(workspaceId, { type: "milestone_relation.checked" }).flatMap((event) => {
+  return store.listEvents(workspaceId, { type: "milestone_relation.changed", change: "checked" }).flatMap((event) => {
     const payload = event.payload as { outcome?: string; kind?: string };
     return payload.outcome === "fulfilled" || payload.outcome === "partial" || payload.outcome === "none"
       ? [{ outcome: payload.outcome, kind: String(payload.kind ?? "其他"), relationId: event.entityId, at: event.createdAt }] : [];
@@ -155,7 +155,7 @@ export function relationChecks(store: CrosslineStore, workspaceId: string): Arra
 
 /** Approved artifact relations whose check day has come and that nobody has answered for. */
 export function relationsDueForCheck(store: CrosslineStore, workspaceId: string, today: string): StoredMilestoneRelation[] {
-  const answered = new Set(store.listEvents(workspaceId, { type: "milestone_relation.checked" }).map((event) => event.entityId));
+  const answered = new Set(store.listEvents(workspaceId, { type: "milestone_relation.changed", change: "checked" }).map((event) => event.entityId));
   // Both ends still live: a relation whose upstream draft was replaced by a redesign is answered by the relation derived from the new one.
   const live = new Set(liveMilestones(store, workspaceId).map((milestone) => milestone.id));
   return store.listMilestoneRelations(workspaceId).filter((relation) => relation.status === "approved" && relation.artifactId && relation.transfer
@@ -214,23 +214,23 @@ export function handOffArtifacts(store: CrosslineStore, workspaceId: string, pro
     for (const artifactId of producedArtifacts(producer)) {
       for (const user of orders.filter((order) => order.id !== producer.id && !["archived", "accepted"].includes(order.state) && usedArtifacts(order).includes(artifactId))) {
         const key = `artifact.handed_off:${artifactId}:${producer.id}:${user.id}`;
-        if (store.listEvents(workspaceId, { type: "artifact.handed_off", entityId: user.id }).some((event) => event.idempotencyKey === key)) continue;
+        if (store.listEvents(workspaceId, { type: "artifact.changed", change: "handed_off", entityId: user.id }).some((event) => event.idempotencyKey === key)) continue;
         const documentIds = files.flatMap((claim) => {
           const doc = handOffFile(store, workspaceId, producer, user, claim.uri, existing);
           return doc ? [doc.id] : [];
         });
         const names = files.map((claim) => path.basename(safePath(claim.uri) ?? claim.uri)).slice(0, 5).join("》《");
-        store.appendEvent({ ownerId: user.ownerId, workspaceId, idempotencyKey: `task.note:handoff:${artifactId}:${producer.id}:${user.id}`, type: "task.note", entityId: user.id,
+        store.appendEvent({ ownerId: user.ownerId, workspaceId, idempotencyKey: `task.note:handoff:${artifactId}:${producer.id}:${user.id}`, type: "task.changed", entityId: user.id,
           payload: { text: names ? tOf(store, workspaceId)("收到上游任务「{{title}}」的产出《{{names}}》，已归入本任务的材料", { title: titleOf(producer),
               names: readLocale(store, workspaceId) === "en" ? names.split("》《").join(", ") : names })
-            : tOf(store, workspaceId)("收到上游任务「{{title}}」的产出，已归入本任务的材料", { title: titleOf(producer) }), kind: "material", ...(documentIds[0] ? { documentId: documentIds[0] } : {}) } });
+            : tOf(store, workspaceId)("收到上游任务「{{title}}」的产出，已归入本任务的材料", { title: titleOf(producer) }), kind: "material", ...(documentIds[0] ? { documentId: documentIds[0] } : {}), change: "note" } });
         if (documentIds.length && store.getStepPlan(workspaceId, user.id)) {
-          store.appendEvent({ ownerId: user.ownerId, workspaceId, idempotencyKey: `task.steps_replan_requested:handoff:${artifactId}:${user.id}`, type: "task.steps_replan_requested",
+          store.appendEvent({ ownerId: user.ownerId, workspaceId, idempotencyKey: `task.steps_replan_requested:handoff:${artifactId}:${user.id}`, type: "task.changed",
             // i18n-ignore: the brief for the next plan (model-facing)
-            entityId: user.id, payload: { feedback: `上游产出已到（${names}），按其内容核对并调整步骤：已有的部分不再重复做` } });
+            entityId: user.id, payload: { feedback: `上游产出已到（${names}），按其内容核对并调整步骤：已有的部分不再重复做`, change: "steps_replan_requested" } });
         }
-        store.appendEvent({ ownerId: user.ownerId, workspaceId, idempotencyKey: key, type: "artifact.handed_off", entityId: user.id,
-          payload: { artifactId, from: producer.id, to: user.id, documentIds } });
+        store.appendEvent({ ownerId: user.ownerId, workspaceId, idempotencyKey: key, type: "artifact.changed", entityId: user.id,
+          payload: { artifactId, from: producer.id, to: user.id, documentIds, change: "handed_off" } });
         handed.push({ artifactId, from: producer.id, to: user.id, documentIds });
       }
     }

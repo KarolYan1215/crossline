@@ -239,7 +239,7 @@ export function validateValidationReview(value: unknown): ValidationReview {
 }
 
 /**
- * A progress report read against the task's steps and standards (Skill `crossline-progress-judge`): the person says in their own words
+ * A progress report read against the task's steps and standards (Skill `crossline-evidence-judge:progress`): the person says in their own words
  * how far they are, and each step and standard gets a reading in quarters. Only what the report or its files support moves.
  */
 export type ProgressAssessment = {

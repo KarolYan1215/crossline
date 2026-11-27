@@ -65,7 +65,7 @@ export type DeviceCommit = { repo: string; sha: string; at: string; subject: str
 export type DeviceCommitsPayload = { commits: DeviceCommit[] };
 
 /** The ledger event for one commit seen, the same whether a device sent it or this computer's own worker read it. */
-export function gitCommitEvent(commit: DeviceCommit): { type: string; entityId: string; idempotencyKey: string; payload: DeviceCommit } {
+export function gitCommitEvent(commit: DeviceCommit): { type: typeof GIT_COMMIT_SEEN_EVENT; entityId: string; idempotencyKey: string; payload: DeviceCommit } {
   return { type: GIT_COMMIT_SEEN_EVENT, entityId: commit.sha, idempotencyKey: `${GIT_COMMIT_SEEN_EVENT}:${commit.repo}:${commit.sha}`,
     payload: { repo: commit.repo, sha: commit.sha, at: commit.at, subject: commit.subject, files: commit.files, onDefaultBranch: commit.onDefaultBranch } };
 }

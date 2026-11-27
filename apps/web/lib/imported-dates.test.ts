@@ -115,8 +115,8 @@ test("a quiz in the class's slot replaces the class's block even when the class 
 test("what readings could not record is listed with why, from every reading, and no longer once it was recorded (W-228)", () => {
   extract();
   decideDateBatch(TEST_CTX, "b1", ["exam", "class"]);
-  store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId, idempotencyKey: "u1", type: "dates.unrecorded", entityId: "s1",
-    payload: { dropped: [{ title: "周四组会", code: "DATE_TIME_INVALID" }, { title: "ECE 555 上课", code: "DATE_INVALID" }, { title: "重复", code: "DATE_DUPLICATE_ID" }] } });
+  store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId, idempotencyKey: "u1", type: "onboarding.changed", entityId: "s1",
+    payload: { dropped: [{ title: "周四组会", code: "DATE_TIME_INVALID" }, { title: "ECE 555 上课", code: "DATE_INVALID" }, { title: "重复", code: "DATE_DUPLICATE_ID" }], change: "dates_unrecorded" } });
   expect(loadAdoptedDates(TEST_CTX).dropped).toEqual(["周四组会（时间不完整：没有结束时间，或结束不晚于开始）", "（未命名的一项）", "Quiz 4"]);
 });
 

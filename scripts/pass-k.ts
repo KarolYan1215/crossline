@@ -6,10 +6,10 @@
  *   pnpm exec tsx scripts/pass-k.ts [--suite mail|gate|steps|all] [--k 3] [--limit 2] [--cases a,b] [--out <dir>] [--dry]
  *
  * Suites:
- *   mail   crossline-mail-triage on testing/fixtures/mail-intake-1120.json; a run passes when the captures and the mail log are the case's
+ *   mail   crossline-inbox-triage:mail on testing/fixtures/mail-intake-1120.json; a run passes when the captures and the mail log are the case's
  *          `expect` (the same check the replay test makes with recorded answers). Decision: the log kinds and the capture count.
- *   gate   crossline-milestone-gate on hand-written evidence (no personal data); passes when the verdict is one the case allows.
- *   steps  crossline-step-planner (and its validation reviewer) on a task with no method on record; passes when a plan is stored and none
+ *   gate   crossline-evidence-judge:milestone on hand-written evidence (no personal data); passes when the verdict is one the case allows.
+ *   steps  crossline-task-planner:steps (and its validation reviewer) on a task with no method on record; passes when a plan is stored and none
  *          of its steps is a drill form the person never described (訂正/错题, the owner's rule of 2026-11-10). Decision: the archetype,
  *          the step count and which steps are external.
  *
@@ -139,7 +139,7 @@ const STEP_CASES: Record<string, StepCase> = {
 const DRILL = /订正|错题/u;
 
 const stepsSuite: Suite = {
-  name: "steps", skills: ["crossline:crossline-step-planner", "crossline:crossline-validation-reviewer"], cases: () => Object.keys(STEP_CASES),
+  name: "steps", skills: ["crossline:crossline-task-planner:steps", "crossline:crossline-validation-reviewer"], cases: () => Object.keys(STEP_CASES),
   async run(name, client) {
     const item = STEP_CASES[name]!;
     const store = new CrosslineStore(":memory:");

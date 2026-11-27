@@ -1,6 +1,6 @@
 import "server-only";
 import { onPersonsBoard, taskTitleOf, type AccessContext, type ProgressLevelId } from "@crossline/core";
-import { listAgentTasks } from "@crossline/db";
+import { listAgentTasks, type EventFilter } from "@crossline/db";
 import { archiveWorkOrder, completeWorkOrderExecution, effectiveSchedulePreferences, getStore, planToday, startWorkOrderExecution, toZonedInstant } from "./crossline";
 import { rejectMilestoneDrafts } from "./approvals";
 import { readScheduledDay } from "./schedule-memory";
@@ -91,12 +91,12 @@ function stepBlockStart(ctx: AccessContext, orderId: string, stepId: string, now
 function staleItems(ctx: AccessContext, now: Date): ReturnView["stale"] {
   const store = getStore();
   const cutoff = new Date(now.getTime() - STALE_DAYS * DAY).toISOString();
-  const lastAt = (type: string) => {
+  const lastAt = (filter: EventFilter) => {
     const out = new Map<string, string>();
-    for (const event of store.listEvents(ctx.workspaceId, { type })) if ((out.get(event.entityId) ?? "") < event.createdAt) out.set(event.entityId, event.createdAt);
+    for (const event of store.listEvents(ctx.workspaceId, filter)) if ((out.get(event.entityId) ?? "") < event.createdAt) out.set(event.entityId, event.createdAt);
     return out;
   };
-  const transitioned = lastAt("work_order.transitioned"), proposed = lastAt("milestone.proposed"), revised = lastAt("milestone.revised");
+  const transitioned = lastAt({ type: "work_order.transitioned" }), proposed = lastAt({ type: "milestone.proposed" }), revised = lastAt({ type: "milestone.changed", change: "revised" });
   const orders = store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "awaiting_plan_approval"
     && (transitioned.get(order.id) ?? "") !== "" && transitioned.get(order.id)! <= cutoff)
     .map((order) => ({ id: order.id, title: taskTitleOf(order) }));
@@ -126,7 +126,7 @@ export function returnView(ctx: AccessContext, since: string, now: Date, until?:
   const labels = lineLabels(ctx);
   const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
   // An answer settles its step; one recorded before answers named a step settles the whole task.
-  const answers = store.listEvents(ctx.workspaceId, { type: "return.answered" }).filter((event) => event.createdAt >= since)
+  const answers = store.listEvents(ctx.workspaceId, { type: "ask.changed", change: "return_answered" }).filter((event) => event.createdAt >= since)
     .map((event) => ({ orderId: event.entityId, stepId: (event.payload as { stepId?: string }).stepId ?? "" }));
   const answeredOrders = new Set(answers.filter((answer) => !answer.stepId).map((answer) => answer.orderId));
   const answeredSteps = new Set(answers.filter((answer) => answer.stepId).map((answer) => `${answer.orderId}#${answer.stepId}`));
@@ -170,7 +170,7 @@ export function returnView(ctx: AccessContext, since: string, now: Date, until?:
     happened: {
       assistantDone: listAgentTasks(store, ctx.workspaceId).filter((task) => ["needs_review", "accepted"].includes(task.status) && finishedAt(task) >= since).length,
       proposals: store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "awaiting_plan_approval" && onPersonsBoard(order)).length,
-      calendarChanges: store.listEvents(ctx.workspaceId, { type: "plan.reality_changed" }).filter((event) => event.createdAt >= since).length,
+      calendarChanges: store.listEvents(ctx.workspaceId, { type: "plan.changed", change: "reality_changed" }).filter((event) => event.createdAt >= since).length,
       deadlinesSoon: approvedDeadlines,
       rolled: new Set(all.filter((item) => !matters(item)).map((item) => item.orderId)).size
     },
@@ -202,7 +202,7 @@ export function answerReturn(ctx: AccessContext, orderId: string, verdict: Retur
   if (!order) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   const plan = store.getStepPlan(ctx.workspaceId, orderId);
   const stepId = detail.stepId && plan?.steps.some((step) => step.id === detail.stepId) ? detail.stepId : "";
-  const attempt = store.listEvents(ctx.workspaceId, { type: "return.answered", entityId: orderId }).length;
+  const attempt = store.listEvents(ctx.workspaceId, { type: "ask.changed", change: "return_answered", entityId: orderId }).length;
   if (verdict === "done") {
     const minutes = detail.minutes && detail.minutes > 0 ? Math.round(detail.minutes) : undefined;
     const last = !stepId || plan!.steps.every((step) => step.id === stepId || step.status === "done" || step.status === "skipped");
@@ -230,10 +230,10 @@ export function answerReturn(ctx: AccessContext, orderId: string, verdict: Retur
     const archived = archiveWorkOrder(ctx, orderId, tOf(ctx)("回来时标为不做了"));
     if (!archived.ok) return archived;
   }
-  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `return.answered:${orderId}:${attempt}`, type: "return.answered",
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `return.answered:${orderId}:${attempt}`, type: "ask.changed",
     entityId: orderId, payload: { verdict, ...(stepId ? { stepId } : {}), ...(detail.minutes ? { minutes: detail.minutes } : {}),
       ...(detail.stepIds?.length ? { stepIds: detail.stepIds } : {}), ...(verdict === "partial" && detail.level ? { level: detail.level } : {}),
-      ...(verdict === "partial" && detail.note?.trim() ? { note: detail.note.trim().slice(0, 300) } : {}), ...(unclear ? { unclear: true } : {}) } });
+      ...(verdict === "partial" && detail.note?.trim() ? { note: detail.note.trim().slice(0, 300) } : {}), ...(unclear ? { unclear: true } : {}), change: "return_answered" } });
   if (verdict === "partial" && detail.note?.trim()) {
     const order = store.getWorkOrder(ctx.workspaceId, orderId);
     keepNote(ctx, detail.note, { kind: "return", id: `${orderId}:${attempt}` }, `离开期间「${order ? taskTitleOf(order) : orderId}」做了一部分`); // i18n-ignore: context for the extraction model

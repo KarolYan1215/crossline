@@ -6,6 +6,8 @@
  *   output contract still win: the note is read as a preference, never as permission.
  * Ordinary settings (shares, quiet hours, consents) stay in `SETTING_CATALOG`; this is only what used to be a constant in the code.
  */
+import { currentSkillKeys, skillKey } from "./skill-modes";
+
 export const PERSONAL_DESIGN_SETTING = "design.personal";
 
 export type DesignKnob = { label: string; unit: string; min: number; max: number; default: number; consequence: string };
@@ -49,10 +51,13 @@ export function knobValue(design: PersonalDesign, id: DesignKnobId): number {
   return entry?.kind === "knob" ? entry.value : DESIGN_KNOBS[id].default;
 }
 
-/** The person's live note for one Skill (matched with or without the `crossline:` plugin prefix). */
+/**
+ * The person's live note for one Skill (matched with or without the `crossline:` plugin prefix). A note written for a Skill before the
+ * merge of 2026-11-27 holds for the mode that Skill became (`currentSkillKeys`).
+ */
 export function skillNote(design: PersonalDesign, skill: string): string | undefined {
-  const bare = skill.replace(/^crossline:/, "");
-  const entry = design.entries.find((item) => item.kind === "skill" && item.id.replace(/^crossline:/, "") === bare && !item.paused);
+  const bare = skillKey(skill);
+  const entry = design.entries.find((item) => item.kind === "skill" && currentSkillKeys(item.id).includes(bare) && !item.paused);
   return entry?.kind === "skill" ? entry.text : undefined;
 }
 

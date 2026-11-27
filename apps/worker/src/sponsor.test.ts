@@ -183,7 +183,7 @@ test("a measurement the runtime cut short is not a record: it stops there, and a
   try {
     // Neither broken record counts: the last choice serves and the planning model is not used on a record that says nothing.
     expect(sponsor.chosen()?.model).toBe(MODEL);
-    expect(sponsor.modelFor("crossline-step-planner")).toBe(MODEL);
+    expect(sponsor.modelFor("crossline-task-planner:steps")).toBe(MODEL);
     // Measured again while the runtime is still down: stopped without writing anything over the records, and to be tried again.
     const stopped = await sponsor.evaluate();
     expect(stopped).toMatchObject({ interrupted: true, tested: [] });
@@ -223,7 +223,7 @@ test("a candidate off the frontier is neither measured again nor used, for the c
     // The new candidate the key does not list is skipped; the dominated one is not measured again.
     expect(result).toMatchObject({ tested: [], skipped: ["org/New"], chosen: MODEL });
     expect(measured).toEqual([]);
-    expect(sponsor.modelFor("crossline-task-titler")).toBe(MODEL);
+    expect(sponsor.modelFor("crossline-goal-backplanner:title")).toBe(MODEL);
     // Written down for good: with the record that beat it gone (a later measuring version), it is still not measured.
     const saved = JSON.parse(readFileSync(path.join(dataDir, "sponsor.json"), "utf8")) as { evaluations: Array<{ model: string }>; pruned: Record<string, { by: string }> };
     expect(saved.pruned["org/Dear"]?.by).toBe(MODEL);
@@ -259,13 +259,13 @@ test("the owner's main and planning models are held whatever the automatic choic
   // Left to the automatic choice, the cheapest that passed serves; the old prunings no longer stand, so nothing is pruned.
   const automatic = service({});
   expect(automatic.chosen()?.model).toBe("org/Cheap");
-  expect(automatic.modelFor("crossline-step-planner")).toBe("org/Cheap");
+  expect(automatic.modelFor("crossline-task-planner:steps")).toBe("org/Cheap");
   // The owner's main model serves the main Skills, the planning model the planning Skills.
   const pinned = service({ CROSSLINE_SPONSOR_MAIN_MODEL: MODEL, CROSSLINE_SPONSOR_PLANNING_MODEL: "org/Glm" });
   expect(pinned.chosen()?.model).toBe(MODEL);
   expect(pinned.modelFor("crossline-automation-stripper")).toBe(MODEL);
-  expect(pinned.modelFor("crossline-step-planner")).toBe("org/Glm");
-  expect(pinned.modelFor("crossline-goal-backplanner")).toBe("org/Glm");
+  expect(pinned.modelFor("crossline-task-planner:steps")).toBe("org/Glm");
+  expect(pinned.modelFor("crossline-goal-backplanner:backplan")).toBe("org/Glm");
   // A run of the evaluation measures nothing (every record is current), keeps the main model as the last choice and drops the old prunings.
   const result = await pinned.evaluate();
   expect(result).toMatchObject({ tested: [], chosen: MODEL });
@@ -295,6 +295,6 @@ test("a model the owner named for a use is never pruned, even by a candidate tha
   await sponsor.evaluate();
   const saved = JSON.parse(readFileSync(path.join(dataDir, "sponsor.json"), "utf8")) as { pruned?: Record<string, unknown> };
   expect(saved.pruned?.["org/Glm"]).toBeUndefined();
-  expect(sponsor.modelFor("crossline-step-planner")).toBe("org/Glm");
+  expect(sponsor.modelFor("crossline-task-planner:steps")).toBe("org/Glm");
   expect(sponsor.chosen()?.model).toBe(MODEL);
 }, 60_000);

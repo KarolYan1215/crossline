@@ -2,8 +2,7 @@ import { createHash, createHmac, randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
-  ACTIVITY_HOURLY, ACTIVITY_LAST_ACTIVE, ACTIVITY_LONG_GAPS, AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, DEVICE_LIMITS, INPUT_RHYTHM_BUCKETS, INPUT_RHYTHM_CONSENT,
-  RECORDING_SILENT_EVENT, RECORDING_TRANSCRIBED_EVENT, SLEEP_TRACKING_CONSENT, SOURCE_FOLDERS_SETTING, DEVICE_TITLE_DAYS, maskPrivate, readSourceFolders,
+  ACTIVITY_HOURLY, ACTIVITY_LAST_ACTIVE, ACTIVITY_LONG_GAPS, AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, DEVICE_LIMITS, INPUT_RHYTHM_BUCKETS, INPUT_RHYTHM_CONSENT, SLEEP_TRACKING_CONSENT, SOURCE_FOLDERS_SETTING, DEVICE_TITLE_DAYS, maskPrivate, readSourceFolders,
   type ActivityHour, type AgentHistorySummary, type DeviceActivityPayload, type DeviceCommit, type DeviceDocument, type DeviceFolder, type DeviceSilent, type DeviceTranscript,
   type InputRhythmBucket
 } from "@crossline/core";
@@ -117,7 +116,7 @@ export function activityItem(store: CrosslineStore, workspaceId: string, state: 
 
 /** Local documents that are a recording's transcript (they go as recordings, not as folder files). */
 function transcriptDocuments(store: CrosslineStore, workspaceId: string): Set<string> {
-  return new Set(store.listEvents(workspaceId, { type: RECORDING_TRANSCRIBED_EVENT })
+  return new Set(store.listEvents(workspaceId, { type: "recording.changed", change: "transcribed" })
     .map((event) => String((event.payload as { documentId?: unknown }).documentId ?? "")).filter(Boolean));
 }
 
@@ -207,13 +206,13 @@ export function recordingItems(store: CrosslineStore, workspaceId: string, state
   const docs = new Map(store.listSourceDocuments(workspaceId).map((doc) => [doc.id, doc]));
   const transcripts: DeviceTranscript[] = [];
   const silent: DeviceSilent[] = [];
-  for (const event of store.listEvents(workspaceId, { type: [RECORDING_TRANSCRIBED_EVENT, RECORDING_SILENT_EVENT] })) {
+  for (const event of store.listEvents(workspaceId, { type: "recording.changed", change: ["transcribed", "silent"] })) {
     const audioSha = event.entityId;
     const payload = event.payload as { fileName?: string; seconds?: number; speechSeconds?: number; workMs?: number; wallMs?: number; documentId?: string; folderId?: string; where?: string };
     if (sent.has(audioSha) || !/^[a-f0-9]{64}$/.test(audioSha) || payload.where === "device") continue;
     const base = { audioSha, fileName: String(payload.fileName ?? "录音"), folderId: String(payload.folderId ?? ""), seconds: Number(payload.seconds ?? 0),
       speechSeconds: Number(payload.speechSeconds ?? 0), workMs: Number(payload.workMs ?? 0) };
-    if (event.type === RECORDING_SILENT_EVENT) silent.push(base);
+    if ((event.type === "recording.changed" && (event.payload as { change?: string }).change === "silent")) silent.push(base);
     else {
       const doc = docs.get(String(payload.documentId ?? ""));
       if (!doc?.extractedText) continue;

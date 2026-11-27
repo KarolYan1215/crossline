@@ -22,7 +22,7 @@ export function adoptLineGoal(store: CrosslineStore, workspaceId: string, ownerI
   const goal = composeGoal(checked.parts, line.label, locale);
   if (!goal) return false;
   store.setSetting(workspaceId, LINE_SETTING, JSON.stringify(specs.map((item) => item.id === lineId ? { ...item, goal, goals: [goal], goalParts: checked.parts } : item)));
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `line.updated:${lineId}:goal:${Date.now()}`, type: "line.updated", entityId: lineId,
-    payload: { goalParts: checked.parts, via: "interview" } });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `line.updated:${lineId}:goal:${Date.now()}`, type: "line.changed", entityId: lineId,
+    payload: { goalParts: checked.parts, via: "interview", change: "updated" } });
   return true;
 }

@@ -6,7 +6,7 @@ import { tFor, type Locale } from "../../lib/i18n";
 const SLOT_NOTE: Record<string, string> = {
   "crossline-onboarding": "访谈输入框旁也能改，从下一轮生效",
   "crossline-onboarding-extract": "把访谈里说过的整理进账本",
-  "crossline-onboarding-research": "访谈中的核实与后台调研",
+  "crossline-research:onboarding": "访谈中的核实与后台调研",
   "*": "上面没单独设的其余工作"
 };
 

@@ -35,12 +35,12 @@ const owner = () => store.getWorkspaceOwnerId(ws)!;
 function acceptedTask(id: string, title: string, workOrderId = `wo-${id}`) {
   store.saveWorkOrder({ id: workOrderId, ownerId: "o", workspaceId: ws, identityId: "media", projectId: "p", milestoneId: "", intent: title, state: "accepted",
     riskTier: "routine", estimate, payload: {} });
-  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `req-${id}`, type: "agent.task.requested", entityId: id,
-    payload: { taskId: id, title, category: "media_edit", workOrderId } });
-  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `done-${id}`, type: "agent.task.completed", entityId: id,
-    payload: { taskId: id, directory: path.join(root, id), artifacts: [], checksPassed: true, reviewRequired: true } });
-  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `rev-${id}`, type: "agent.task.reviewed", entityId: id,
-    payload: { taskId: id, decision: "accepted", note: "", category: "media_edit" } });
+  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `req-${id}`, type: "agent.changed", entityId: id,
+    payload: { taskId: id, title, category: "media_edit", workOrderId, change: "task_requested" } });
+  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `done-${id}`, type: "agent.changed", entityId: id,
+    payload: { taskId: id, directory: path.join(root, id), artifacts: [], checksPassed: true, reviewRequired: true, change: "task_completed" } });
+  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `rev-${id}`, type: "agent.changed", entityId: id,
+    payload: { taskId: id, decision: "accepted", note: "", category: "media_edit", change: "task_reviewed" } });
 }
 
 const workflowJson = {
@@ -68,7 +68,7 @@ test("two accepted edits of the same kind on a line, or the person's words, beco
   expect(input).toMatchObject({ category: "media_edit", prep: true, extraSkills: [SKILL_CREATOR], inputs: [path.join(root, "a2"), path.join(root, "a1")] });
   expect(input.what).toContain("$skill-creator");
   expect(input.what).toContain("by 为 \"person\"、external 为 true");
-  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: "tried", type: "skill.grown.attempted", entityId: "media", payload: { taskIds: ["a1", "a2"] } });
+  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: "tried", type: "skill.changed", entityId: "media", payload: { taskIds: ["a1", "a2"], change: "grown_attempted" } });
   expect(growCandidates(store, ws)).toEqual([]);
   const requestId = requestWorkflow(store, ws, "每周五下午六点提醒我发小红书", "media", owner());
   expect(growCandidates(store, ws)).toEqual([expect.objectContaining({ origin: { kind: "asked", text: "每周五下午六点提醒我发小红书", requestId } })]);
@@ -274,7 +274,7 @@ test("a grown workflow serves only the line it grew on, and a run growing anothe
   expect(grownHomeLine(store, ws, readGrownSkills(store, ws)[0]!)).toBe("media");
   const dir = mkdtempSync(path.join(tmpdir(), "crossline-lib-"));
   try {
-    const run = fakeRuntime(["{}"], "crossline:crossline-agent", { library: ["crossline-grown:flow-xhs-note"] });
+    const run = fakeRuntime(["{}"], "crossline:crossline-agent:shell", { library: ["crossline-grown:flow-xhs-note"] });
     expect(await librarySkillsFor(run.rpc, store, ws, "research", { cwd: "C:\repo", dir, task: "汇集课程讲义并整理公开来源" })).toEqual([]);
     expect(await librarySkillsFor(run.rpc, store, ws, "media", { cwd: "C:\repo", dir, task: "为小红书整理公开来源" })).toEqual(["crossline-grown:flow-xhs-note"]);
     expect(await librarySkillsFor(run.rpc, store, ws, "media", { cwd: "C:\repo", dir, task: "为小红书整理公开来源", grown: false })).toEqual([]);
@@ -307,10 +307,10 @@ test("reading a page is not leaving the machine: the first account-reading workf
 test("a request whose growing run was lost to a restart is grown again, up to three runs; one that ended on its own is not", () => {
   const id = requestWorkflow(store, ws, "定期整理小红书收藏夹", "media", owner());
   const attempt = (taskId: string, lost: boolean) => {
-    store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `req-${taskId}`, type: "agent.task.requested", entityId: taskId,
-      payload: { taskId, title: "把这类事固化成工作流：定期整理小红书收藏夹", category: "files_calendar_prep", workOrderId: "" } });
-    store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `att-${taskId}`, type: "skill.grown.attempted", entityId: "media", payload: { taskId, state: "started", requestId: id } });
-    if (lost) store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `lost-${taskId}`, type: "agent.task.blocked", entityId: taskId, payload: { taskId, code: "AGENT_RUN_LOST" } });
+    store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `req-${taskId}`, type: "agent.changed", entityId: taskId,
+      payload: { taskId, title: "把这类事固化成工作流：定期整理小红书收藏夹", category: "files_calendar_prep", workOrderId: "", change: "task_requested" } });
+    store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `att-${taskId}`, type: "skill.changed", entityId: "media", payload: { taskId, state: "started", requestId: id, change: "grown_attempted" } });
+    if (lost) store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `lost-${taskId}`, type: "agent.changed", entityId: taskId, payload: { taskId, code: "AGENT_RUN_LOST", change: "task_blocked" } });
   };
   attempt("g1", true);
   // Not at once: the next run waits out its backoff (five minutes after the first interruption).
@@ -322,7 +322,7 @@ test("a request whose growing run was lost to a restart is grown again, up to th
   attempt("g3", true);
   expect(growCandidates(store, ws, new Date(Date.now() + 3_600_000))).toEqual([]);
   const other = requestWorkflow(store, ws, "每周剪 vlog", "media", owner());
-  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: "att-g4", type: "skill.grown.attempted", entityId: "media", payload: { taskId: "g4", state: "started", requestId: other } });
+  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: "att-g4", type: "skill.changed", entityId: "media", payload: { taskId: "g4", state: "started", requestId: other, change: "grown_attempted" } });
   expect(growCandidates(store, ws, new Date(Date.now() + 3_600_000))).toEqual([]);
 });
 
@@ -427,7 +427,7 @@ test("a run whose pages listed nothing is partial and points at the login; one t
   expect(card.clarify.options).toContainEqual(expect.objectContaining({ label: "去登录", href: "/automation/flow-xhs?login=1" }));
   // The baseline stays the last run that read something.
   expect(readGrownSkills(store, ws)[0]!.lastRead).toMatchObject({ taskId: "flow-1", items: 2 });
-  expect(store.listEvents(ws, { type: "skill.grown.result" }).map((event) => (event.payload as { outcome: string }).outcome)).toEqual(["done", "partial"]);
+  expect(store.listEvents(ws, { type: "job.ran", job: "skill.grown.run", state: "result" }).map((event) => (event.payload as { outcome: string }).outcome)).toEqual(["done", "partial"]);
 });
 
 test("a scheduled run that finds the assistant busy is not marked as run: later ticks that day try again, past the usual three hours", () => {
@@ -452,10 +452,10 @@ test("a run stopped part way offers what it had made for review, unchecked; its 
   const { salvageStoppedRun } = await import("./agent-task");
   const { listAgentTasks } = await import("@crossline/db");
   const out = path.join(root, "out");
-  const request = (taskId: string) => store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `rq-${taskId}`, type: "agent.task.requested", entityId: taskId,
-    payload: { taskId, title: "整理小红书收藏夹", category: "read_research_organize", workOrderId: "" } });
-  const stop = (taskId: string, code: string) => store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `st-${taskId}`, type: "agent.task.blocked", entityId: taskId,
-    payload: { taskId, code, message: "本人中止了这次运行。" } });
+  const request = (taskId: string) => store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `rq-${taskId}`, type: "agent.changed", entityId: taskId,
+    payload: { taskId, title: "整理小红书收藏夹", category: "read_research_organize", workOrderId: "", change: "task_requested" } });
+  const stop = (taskId: string, code: string) => store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `st-${taskId}`, type: "agent.changed", entityId: taskId,
+    payload: { taskId, code, message: "本人中止了这次运行。", change: "task_blocked" } });
   request("t1"); stop("t1", "AGENT_CANCELLED");
   mkdirSync(path.join(out, "t1", "__pycache__"), { recursive: true });
   writeFileSync(path.join(out, "t1", "media_action_plan.md"), "# 本期创作者行动报告");
@@ -476,11 +476,11 @@ test("a stopped growing run is not offered for review, and one offered before is
   const { salvageStoppedRun } = await import("./agent-task");
   const { listAgentTasks } = await import("@crossline/db");
   const out = path.join(root, "out-grow");
-  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: "rq-g", type: "agent.task.requested", entityId: "grow-1", payload: { taskId: "grow-1", title: "把这类事固化成工作流", category: "read_research_organize" } });
-  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: "st-g", type: "agent.task.blocked", entityId: "grow-1", payload: { taskId: "grow-1", code: "AGENT_RUN_LOST" } });
+  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: "rq-g", type: "agent.changed", entityId: "grow-1", payload: { taskId: "grow-1", title: "把这类事固化成工作流", category: "read_research_organize", change: "task_requested" } });
+  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: "st-g", type: "agent.changed", entityId: "grow-1", payload: { taskId: "grow-1", code: "AGENT_RUN_LOST", change: "task_blocked" } });
   mkdirSync(path.join(out, "grow-1"), { recursive: true }); writeFileSync(path.join(out, "grow-1", "SKILL.md"), "x");
   expect(salvageStoppedRun(store, ws, "grow-1", out)).toBe(false);
-  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: "old-salvage", type: "agent.task.completed", entityId: "grow-1", payload: { taskId: "grow-1", partial: true, reviewRequired: true } });
+  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: "old-salvage", type: "agent.changed", entityId: "grow-1", payload: { taskId: "grow-1", partial: true, reviewRequired: true, change: "task_completed" } });
   expect(listAgentTasks(store, ws).find((task) => task.taskId === "grow-1")?.status).toBe("blocked");
 });
 
@@ -494,7 +494,7 @@ test("a skill naming another library skill of its line switches that one on too,
     scan: { risk: "low", injection: false, findings: [] }, review: { verdict: "usable", reasons: [], final: "usable" }, status: "active", pinned: false, createdAt: "", updatedAt: "", lastUsedAt: "" };
   store.setSetting(ws, "skills.grown", JSON.stringify([flow]));
   store.setSetting(ws, "skills.grown.files.flow-xhs-note", JSON.stringify({ files: [{ path: "SKILL.md", text: "开头按 $crossline-public:pub-hooks 写；文献用 $crossline-public:pub-papers。" }] }));
-  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: "req-ref", type: "workflow.requested", entityId: "r-ref", payload: { text: "t", lineId: "media" } });
+  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: "req-ref", type: "skill.changed", entityId: "r-ref", payload: { text: "t", lineId: "media", change: "workflow_requested" } });
   const available = ["crossline-grown:flow-xhs-note", "crossline-public:pub-hooks", "crossline-public:pub-papers"];
   expect(referencedSkills(store, ws, "media", ["crossline-grown:flow-xhs-note"], available)).toEqual(["crossline-public:pub-hooks"]);
   expect(referencedSkills(store, ws, "media", ["crossline-grown:flow-xhs-note"], ["crossline-grown:flow-xhs-note"])).toEqual([]);
@@ -563,7 +563,7 @@ test("with no room for the browser the collection opens nothing, holds nothing, 
     await collectionDone(ws, "flow-xhs");
     expect(opened).toBe(0);
     expect(released).toBeGreaterThan(0);
-    expect(store.listEvents(ws, { type: "collect.ran" }).at(-1)!.payload).toMatchObject({ state: "memory" });
+    expect(store.listEvents(ws, { type: "job.ran", job: "collect", state: "done" }).at(-1)!.payload).toMatchObject({ result: "memory" });
     expect(siteHold(store, ws, "xiaohongshu.com")).toBeUndefined();
     expect(said().at(-1)).toContain("服务器内存不够打开浏览器（1100 / 1350 MB）");
   } finally { configureFavouritesCollector(undefined); }
@@ -678,7 +678,7 @@ test("favourites by topic: the list read for its titles, sorted into topics, the
     expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, soon, { manual: true })).not.toMatchObject({ code: "SITE_PAUSED" });
     await collectionDone(ws, record.id);
     // A collection a restart cut off is closed at the next start, without holding the next run.
-    store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "started-x", type: "collect.started", entityId: record.id, payload: { taskId: "collect-x" } });
+    store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "started-x", type: "job.ran", entityId: record.id, payload: { taskId: "collect-x", job: "collect", state: "started" } });
     expect(closeInterruptedCollections(store, ws)).toEqual(["collect-x"]);
     expect(closeInterruptedCollections(store, ws)).toEqual([]);
     expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, soon)).not.toMatchObject({ code: "SITE_PAUSED" });
@@ -743,8 +743,8 @@ test("a favourites reading that started on the server moves to the person's comp
     expect(onServer).toEqual([id(1), id(2)]);
     expect(onNode).toEqual([id(3), id(4), id(5), id(6)]);
     expect(Object.values(readCollectLedger(store, ws, record.id).read).map((entry) => entry.state)).toEqual(Array(6).fill("read"));
-    expect(store.listEvents(ws, { type: "collect.handover" }).map((event) => event.payload)).toEqual([expect.objectContaining({ to: "Karols_Laptop", read: 2 })]);
-    expect(store.listEvents(ws, { type: "collect.ran" }).at(-1)!.payload).toMatchObject({ state: "done", read: 6, pending: 0 });
+    expect(store.listEvents(ws, { type: "job.ran", job: "collect", state: "handover" }).map((event) => event.payload)).toEqual([expect.objectContaining({ to: "Karols_Laptop", read: 2 })]);
+    expect(store.listEvents(ws, { type: "job.ran", job: "collect", state: "done" }).at(-1)!.payload).toMatchObject({ result: "done", read: 6, pending: 0 });
     expect(logged.some((event) => event.type === "collect.on_node" && event.host === "Karols_Laptop")).toBe(true);
     // The assistant is given all six notes, not only the last stretch.
     for (let n = 1; n <= 6; n += 1) expect(runs.at(-1)!.what).toContain(`note-${id(n)}.md`);
@@ -765,7 +765,7 @@ test("on the hosted server the favourites are never logged in to or read there: 
       .toMatchObject({ state: "blocked", code: "NEEDS_OWN_COMPUTER" });
     expect(openWorkflowLogin(store, ws, record.id, "小红书", path.join(root, "p"))).toMatchObject({ ok: false, code: "NEEDS_OWN_COMPUTER" });
     expect(opened).toBe(0);
-    expect(store.listEvents(ws, { type: "collect.started" })).toEqual([]);
+    expect(store.listEvents(ws, { type: "job.ran", job: "collect", state: "started" })).toEqual([]);
   } finally { configureFavouritesCollector(undefined); rmSync(root, { recursive: true, force: true }); }
 });
 

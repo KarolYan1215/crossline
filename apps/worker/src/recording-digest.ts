@@ -3,8 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
-  DIGEST_CAPTURES_PER_RECORDING, DIGEST_MIN_CHARS, DIGEST_WAIT_DEFAULT_DAYS, DIGEST_WAITS_PER_RECORDING, DISCARDED_KINDS, RECORDING_CAPTURE_PREFIX,
-  RECORDING_DIGESTED_EVENT, RECORDING_DIGEST_SCHEMA, RECORDING_TRANSCRIBED_EVENT, digestDocument, digestOmitted, digestText, spokenText, validateRecordingDigest,
+  DIGEST_CAPTURES_PER_RECORDING, DIGEST_MIN_CHARS, DIGEST_WAIT_DEFAULT_DAYS, DIGEST_WAITS_PER_RECORDING, DISCARDED_KINDS, RECORDING_CAPTURE_PREFIX, RECORDING_DIGEST_SCHEMA, digestDocument, digestOmitted, digestText, spokenText, validateRecordingDigest,
   type RecordingDigestAnswer, type RecordingTranscribed
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
@@ -16,14 +15,14 @@ import { chatDigestedIds } from "./chat-digest";
 import { sayToPerson } from "./workflow-smith";
 import { tOfWorkspace } from "./locale";
 
-export const RECORDING_DIGESTER = "crossline:crossline-recording-digest";
+export const RECORDING_DIGESTER = "crossline:crossline-capture-digest:recording";
 /** Recordings one run reads at most, and the text of them together; a pass makes at most `RUNS_PER_PASS` runs. */
 const PER_RUN = 4;
 const TEXT_PER_RUN = 60_000;
 const RUNS_PER_PASS = 3;
 
 /**
- * After transcription (docs/phone-recording.md 「录音之后」): each recording's transcript is read once by `crossline-recording-digest`,
+ * After transcription (docs/phone-recording.md 「录音之后」): each recording's transcript is read once by `crossline-capture-digest:recording`,
  * which sorts out small talk, videos and noise and, for what is kept, writes a summary document and pulls out commitments, facts and days.
  * The ledger gets: a `recording.digested` event per recording (what it was, what came of it); a 「… 摘要.md」 document that the interview
  * and planning read instead of the transcript; an inferred profile fact per fact or day, citing the recording, which the interview can
@@ -37,9 +36,9 @@ const addDays = (day: string, days: number) => new Date(Date.parse(`${day}T12:00
 
 /** Transcripts with no digest yet, oldest first. */
 export function transcriptsAwaitingDigest(store: CrosslineStore, workspaceId: string): Array<{ doc: StoredSourceDocument; recording: RecordingTranscribed }> {
-  const done = new Set(store.listEvents(workspaceId, { type: RECORDING_DIGESTED_EVENT }).map((event) => event.entityId));
+  const done = new Set(store.listEvents(workspaceId, { type: "recording.changed", change: "digested" }).map((event) => event.entityId));
   const docs = new Map(store.listSourceDocuments(workspaceId).map((doc) => [doc.id, doc]));
-  return store.listEvents(workspaceId, { type: RECORDING_TRANSCRIBED_EVENT }).map((event) => event.payload as RecordingTranscribed)
+  return store.listEvents(workspaceId, { type: "recording.changed", change: "transcribed" }).map((event) => event.payload as RecordingTranscribed)
     .filter((recording) => !done.has(recording.documentId) && docs.has(recording.documentId))
     .map((recording) => ({ doc: docs.get(recording.documentId)!, recording }));
 }
@@ -50,7 +49,7 @@ export function transcriptsAwaitingDigest(store: CrosslineStore, workspaceId: st
  * originals stay stored and readable by id.
  */
 export function transcriptDocumentIds(store: CrosslineStore, workspaceId: string): Set<string> {
-  return new Set([...store.listEvents(workspaceId, { type: RECORDING_TRANSCRIBED_EVENT }).map((event) => String((event.payload as RecordingTranscribed).documentId ?? "")),
+  return new Set([...store.listEvents(workspaceId, { type: "recording.changed", change: "transcribed" }).map((event) => String((event.payload as RecordingTranscribed).documentId ?? "")),
     ...supersededDocumentIds(store, workspaceId), ...chatDigestedIds(store, workspaceId)]);
 }
 
@@ -60,8 +59,8 @@ export function createRecordingDigester(store: CrosslineStore, workspaceId: stri
   options: { dataDir: string; timeZone: string; now?: () => Date }) {
   const now = options.now ?? (() => new Date());
   const owner = () => ownerOf(store, workspaceId);
-  const record = (docId: string, payload: Record<string, unknown>) => store.appendEvent({ ownerId: owner(), workspaceId, idempotencyKey: `${RECORDING_DIGESTED_EVENT}:${docId}`,
-    type: RECORDING_DIGESTED_EVENT, entityId: docId, payload });
+  const record = (docId: string, payload: Record<string, unknown>) => store.appendEvent({ ownerId: owner(), workspaceId, idempotencyKey: `recording.digested:${docId}`,
+    type: "recording.changed", entityId: docId, payload: { ...payload, change: "digested" } });
 
   return async function digest(): Promise<DigestOutcome> {
     const outcome = { digested: 0, kept: 0, captures: 0, facts: 0, waits: 0 };

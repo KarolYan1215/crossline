@@ -161,7 +161,7 @@ export function personalEfficiency(ctx: AccessContext, now = new Date()): [numbe
   type Energy = { slot: "low" | "medium" | "high"; need: "low" | "medium" | "high"; efficiency: number };
   type Confirmed = { blockId?: string; day?: string; outcome?: string; minutes?: number; blockMinutes?: number; energy?: Energy };
   const store = getStore();
-  const confirmed = store.listEvents(ctx.workspaceId, { type: "block.confirmed" });
+  const confirmed = store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "block_confirmed" });
   const samples: EfficiencySample[] = confirmed.flatMap((event) => {
     const payload = event.payload as Confirmed;
     if (!payload.energy || !payload.blockMinutes) return [];

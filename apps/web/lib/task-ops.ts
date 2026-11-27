@@ -15,7 +15,7 @@ export function recordTaskNote(ctx: AccessContext, workOrderId: string, text: st
   const note = text.trim().slice(0, 1000);
   if (!note) return { ok: false, code: "NOTE_EMPTY" };
   getStore().appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `task.note:${workOrderId}:${randomUUID()}`,
-    type: "task.note", entityId: workOrderId, payload: { text: note, kind } });
+    type: "task.changed", entityId: workOrderId, payload: { text: note, kind, change: "note" } });
   return { ok: true };
 }
 
@@ -25,8 +25,8 @@ export function recordEnergy(ctx: AccessContext, level: "low" | "medium" | "high
   const id = randomUUID(), at = new Date();
   store.saveEnergyObservation({ id, ownerId: ctx.principalId, workspaceId: ctx.workspaceId, source: "self_report", level, confidence: "medium",
     aggregate: {}, observedAt: at.toISOString() });
-  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `energy-observed:${id}`, type: "energy.observed", entityId: id,
-    payload: { source: "self_report", level, confidence: "medium", context: "general", ...(workOrderId ? { workOrderId } : {}), ...(note.trim() ? { note: note.trim().slice(0, 300) } : {}) } });
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `energy-observed:${id}`, type: "energy.changed", entityId: id,
+    payload: { source: "self_report", level, confidence: "medium", context: "general", ...(workOrderId ? { workOrderId } : {}), ...(note.trim() ? { note: note.trim().slice(0, 300) } : {}), change: "observed" } });
   if (level === "low") {
     const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
     const when = formatInTimeZone(at, zone, "EEEE HH:00");
@@ -81,7 +81,7 @@ export function snoozeBlock(ctx: AccessContext, workOrderId: string, blockId: st
   if (!blockId.startsWith(`scheduled:${workOrderId}:`) && blockId !== `scheduled:${workOrderId}`) return { ok: false, code: "SNOOZE_BLOCK_INVALID" };
   const length = Number.isFinite(minutes) && minutes > 0 ? Math.min(60, Math.round(minutes)) : SNOOZE_MINUTES;
   getStore().appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `block.snoozed:${blockId}:${randomUUID()}`,
-    type: "block.snoozed", entityId: workOrderId, payload: { blockId, day: planToday(ctx, now), until: new Date(now.getTime() + length * 60_000).toISOString() } });
+    type: "work_order.changed", entityId: workOrderId, payload: { blockId, day: planToday(ctx, now), until: new Date(now.getTime() + length * 60_000).toISOString(), change: "block_snoozed" } });
   return { ok: true };
 }
 
@@ -109,7 +109,7 @@ export function postponeTask(ctx: AccessContext, workOrderId: string, input: { r
   if (!result.ok) return result;
   const store = getStore();
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `task.postponed:${workOrderId}:${randomUUID()}`,
-    type: "task.postponed", entityId: workOrderId, payload: { reason: input.reason, until: date, text: input.text.trim().slice(0, 300) } });
+    type: "task.changed", entityId: workOrderId, payload: { reason: input.reason, until: date, text: input.text.trim().slice(0, 300), change: "postponed" } });
   const t = tOf(ctx);
   const detail = input.reason === "waiting" ? `${input.who ? `${input.who} · ` : ""}${input.what}` : input.text.trim();
   const reason = input.reason === "none" ? "" : t(REASON_LABEL[input.reason]);

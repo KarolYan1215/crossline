@@ -158,10 +158,10 @@ test("a thinking variant is sent to an endpoint that takes it as the base model 
 });
 
 test("a Skill's text goes ahead of the input it was named in, and instructions Codex adds mid-thread stay where they came", () => {
-  const skill = "<skill>\n<name>crossline:crossline-step-planner</name>\n<path>/s/SKILL.md</path>\nrules\n</skill>";
+  const skill = "<skill>\n<name>crossline:crossline-task-planner:steps</name>\n<path>/s/SKILL.md</path>\nrules\n</skill>";
   const chat = responsesToChat({ model: "m", instructions: "base", input: [
     { type: "message", role: "developer", content: [{ type: "input_text", text: "<permissions>x</permissions>" }] },
-    { type: "message", role: "user", content: [{ type: "input_text", text: "$crossline:crossline-step-planner\n\n{\"task\":1}" }] },
+    { type: "message", role: "user", content: [{ type: "input_text", text: "$crossline:crossline-task-planner:steps\n\n{\"task\":1}" }] },
     { type: "message", role: "user", content: [{ type: "input_text", text: skill }] },
     { type: "message", role: "assistant", content: [{ type: "output_text", text: "{}" }] },
     { type: "message", role: "developer", content: [{ type: "input_text", text: "model changed" }] },

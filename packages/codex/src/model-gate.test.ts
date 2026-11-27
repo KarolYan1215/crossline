@@ -16,13 +16,13 @@ test("the hosted beta runs two model turns at a time; elsewhere there is no limi
   expect(guestRuntimeLimit({ CROSSLINE_PUBLIC_BETA: "1", CROSSLINE_MODEL_CONCURRENCY: "4" })).toBe(4);
   expect(guestRuntimeLimit({ CROSSLINE_PUBLIC_BETA: "1", CROSSLINE_MODEL_CONCURRENCY: "4", CROSSLINE_GUEST_RUNTIMES: "3" })).toBe(3);
   expect(guestRuntimeLimit({})).toBeUndefined();
-  expect(priorityForSkill("crossline:crossline-milestone-architect")).toBe("planning");
-  expect(priorityForSkill("crossline:crossline-due-diligence")).toBe("background");
+  expect(priorityForSkill("crossline:crossline-milestone-architect:design")).toBe("planning");
+  expect(priorityForSkill("crossline:crossline-research:diligence")).toBe("background");
   // Information first (2026-10-21): what arrived is read and recorded before anything is planned from it.
-  for (const skill of ["crossline-mail-triage", "crossline-automation-stripper", "crossline-calendar-classifier", "crossline-recording-digest", "crossline-onboarding-extract"]) {
+  for (const skill of ["crossline-inbox-triage:mail", "crossline-automation-stripper", "crossline-line-filer:calendar", "crossline-capture-digest:recording", "crossline-onboarding-extract"]) {
     expect(priorityForSkill(`crossline:${skill}`)).toBe("intake");
   }
-  for (const skill of ["crossline-material-researcher", "crossline-material-writer", "crossline-agent-tools", "crossline-mail-reply-drafter"]) {
+  for (const skill of ["crossline-research:material", "crossline-material-writer", "crossline-agent:functions", "crossline-mail-reply-drafter"]) {
     expect(priorityForSkill(`crossline:${skill}`)).toBe("background");
   }
 });
@@ -32,9 +32,9 @@ test("with one slot, background runs wait in line and hear what is ahead; a pers
   const order: string[] = [];
   const told: Record<string, number[]> = { b: [], c: [] };
   const first = deferred();
-  const running = withModelSlot({ skill: "crossline-milestone-architect" }, async () => { order.push("a"); await first.promise; });
+  const running = withModelSlot({ skill: "crossline-milestone-architect:design" }, async () => { order.push("a"); await first.promise; });
   const b = withModelSlot({ skill: "crossline-backplanner", onQueued: (ahead) => told.b!.push(ahead) }, async () => { order.push("b"); });
-  const c = withModelSlot({ skill: "crossline-portrait-writer", onQueued: (ahead) => told.c!.push(ahead) }, async () => { order.push("c"); });
+  const c = withModelSlot({ skill: "crossline-portrait:report", onQueued: (ahead) => told.c!.push(ahead) }, async () => { order.push("c"); });
   const i = withModelSlot({ skill: "crossline-onboarding" }, async () => { order.push("i"); });
   await tick();
   // The interview did not wait for the one slot: slots count background work only (2026-10-19).
@@ -73,12 +73,12 @@ test("accounts take turns within a priority: a slot that frees goes to an accoun
   configureModelGate({ limit: 2, perTenant: 1, log: () => {} });
   const order: string[] = [];
   const gates = [deferred(), deferred()];
-  const running = [0, 1].map((index) => withModelSlot({ skill: "crossline-step-planner", tenant: "w1" }, async () => { order.push(`w1-${index}`); await gates[index]!.promise; }));
+  const running = [0, 1].map((index) => withModelSlot({ skill: "crossline-task-planner:steps", tenant: "w1" }, async () => { order.push(`w1-${index}`); await gates[index]!.promise; }));
   await tick();
   // Nobody else was waiting: the first account took both slots, one of them borrowed.
   expect(order).toEqual(["w1-0", "w1-1"]);
-  const backlog = ["w1-2", "w1-3"].map((name) => withModelSlot({ skill: "crossline-step-planner", tenant: "w1" }, async () => { order.push(name); }));
-  const other = withModelSlot({ skill: "crossline-step-planner", tenant: "w2" }, async () => { order.push("w2-0"); });
+  const backlog = ["w1-2", "w1-3"].map((name) => withModelSlot({ skill: "crossline-task-planner:steps", tenant: "w1" }, async () => { order.push(name); }));
+  const other = withModelSlot({ skill: "crossline-task-planner:steps", tenant: "w2" }, async () => { order.push("w2-0"); });
   gates[0]!.resolve();
   await running[0];
   await tick();
@@ -93,11 +93,11 @@ test("one account alone uses every background slot; a slot it borrowed goes, onc
   configureModelGate({ limit: 3, perTenant: 2, log: () => {} });
   const order: string[] = [];
   const gates = [deferred(), deferred(), deferred()];
-  const mine = [0, 1, 2].map((index) => withModelSlot({ skill: "crossline-step-planner", tenant: "w1" }, async () => { order.push(`w1-${index}`); await gates[index]!.promise; }));
+  const mine = [0, 1, 2].map((index) => withModelSlot({ skill: "crossline-task-planner:steps", tenant: "w1" }, async () => { order.push(`w1-${index}`); await gates[index]!.promise; }));
   await tick();
   expect(order).toEqual(["w1-0", "w1-1", "w1-2"]);
-  const later = withModelSlot({ skill: "crossline-step-planner", tenant: "w1" }, async () => { order.push("w1-3"); });
-  const other = withModelSlot({ skill: "crossline-step-planner", tenant: "w2" }, async () => { order.push("w2-0"); });
+  const later = withModelSlot({ skill: "crossline-task-planner:steps", tenant: "w1" }, async () => { order.push("w1-3"); });
+  const other = withModelSlot({ skill: "crossline-task-planner:steps", tenant: "w2" }, async () => { order.push("w2-0"); });
   gates[0]!.resolve();
   await mine[0];
   await tick();
@@ -122,13 +122,13 @@ test("within one account the shorter job goes first, and a long wait moves a run
   let now = 0;
   configureModelGate({ limit: 1, agingMs: 1000, now: () => now, log: () => {} });
   // Teach the gate how long each Skill takes (two of one priority): the title writer is quick, the tutorial writer slow.
-  await withModelSlot({ skill: "crossline-task-titler" }, async () => { now += 5; });
+  await withModelSlot({ skill: "crossline-goal-backplanner:title" }, async () => { now += 5; });
   await withModelSlot({ skill: "crossline-material-writer" }, async () => { now += 500; });
   const order: string[] = [];
   const first = deferred();
   const running = withModelSlot({ skill: "hold" }, async () => { await first.promise; });
   const slow = withModelSlot({ skill: "crossline-material-writer" }, async () => { order.push("slow"); });
-  const quick = withModelSlot({ skill: "crossline-task-titler" }, async () => { order.push("quick"); });
+  const quick = withModelSlot({ skill: "crossline-goal-backplanner:title" }, async () => { order.push("quick"); });
   first.resolve();
   await Promise.all([running, slow, quick]);
   expect(order).toEqual(["quick", "slow"]);
@@ -137,9 +137,9 @@ test("within one account the shorter job goes first, and a long wait moves a run
   const order2: string[] = [];
   const second = deferred();
   const hold = withModelSlot({ skill: "hold" }, async () => { await second.promise; });
-  const research = withModelSlot({ skill: "crossline:crossline-due-diligence" }, async () => { order2.push("research"); });
+  const research = withModelSlot({ skill: "crossline:crossline-research:diligence" }, async () => { order2.push("research"); });
   now += 1500;
-  const backplan = withModelSlot({ skill: "crossline:crossline-goal-backplanner" }, async () => { order2.push("backplan"); });
+  const backplan = withModelSlot({ skill: "crossline:crossline-goal-backplanner:backplan" }, async () => { order2.push("backplan"); });
   second.resolve();
   await Promise.all([hold, research, backplan]);
   expect(order2).toEqual(["research", "backplan"]);
@@ -151,9 +151,9 @@ test("planning work goes before discretionary background work, behind a person's
   configureModelGate({ limit: 2, reserve: 1, log: () => {} });
   const order: string[] = [];
   const first = deferred();
-  const running = withModelSlot({ skill: "crossline:crossline-due-diligence" }, async () => { order.push("research"); await first.promise; });
-  const tutorial = withModelSlot({ skill: "crossline:crossline-material-researcher" }, async () => { order.push("tutorial"); });
-  const backplan = withModelSlot({ skill: "crossline:crossline-goal-backplanner" }, async () => { order.push("backplan"); });
+  const running = withModelSlot({ skill: "crossline:crossline-research:diligence" }, async () => { order.push("research"); await first.promise; });
+  const tutorial = withModelSlot({ skill: "crossline:crossline-research:material" }, async () => { order.push("tutorial"); });
+  const backplan = withModelSlot({ skill: "crossline:crossline-goal-backplanner:backplan" }, async () => { order.push("backplan"); });
   await tick();
   // The free slot is the person's: neither background run takes it.
   expect(order).toEqual(["research"]);
@@ -168,9 +168,9 @@ test("information goes first: intake before planning before preparation, and a l
   const order: string[] = [];
   const first = deferred();
   const running = withModelSlot({ skill: "hold" }, async () => { await first.promise; });
-  const tutorial = withModelSlot({ skill: "crossline:crossline-material-researcher" }, async () => { order.push("tutorial"); });
-  const steps = withModelSlot({ skill: "crossline:crossline-step-planner" }, async () => { order.push("steps"); });
-  const mail = withModelSlot({ skill: "crossline:crossline-mail-triage" }, async () => { order.push("mail"); });
+  const tutorial = withModelSlot({ skill: "crossline:crossline-research:material" }, async () => { order.push("tutorial"); });
+  const steps = withModelSlot({ skill: "crossline:crossline-task-planner:steps" }, async () => { order.push("steps"); });
+  const mail = withModelSlot({ skill: "crossline:crossline-inbox-triage:mail" }, async () => { order.push("mail"); });
   const capture = withModelSlot({ skill: "crossline:crossline-automation-stripper" }, async () => { order.push("capture"); });
   first.resolve();
   await Promise.all([running, tutorial, steps, mail, capture]);
@@ -182,7 +182,7 @@ test("information goes first: intake before planning before preparation, and a l
   const hold = withModelSlot({ skill: "hold" }, async () => { await second.promise; });
   const waited = withModelSlot({ skill: "crossline:crossline-material-writer" }, async () => { order2.push("tutorial"); });
   now += 3500;
-  const fresh = withModelSlot({ skill: "crossline:crossline-mail-triage" }, async () => { order2.push("mail"); });
+  const fresh = withModelSlot({ skill: "crossline:crossline-inbox-triage:mail" }, async () => { order2.push("mail"); });
   second.resolve();
   await Promise.all([hold, waited, fresh]);
   expect(order2).toEqual(["tutorial", "mail"]);
@@ -195,7 +195,7 @@ test("on the hosted beta one slot is kept for a person: background work never ta
   configureModelGate({ limit: 2, reserve: 1, log: () => {} });
   const order: string[] = [];
   const first = deferred();
-  const a = withModelSlot({ skill: "crossline-milestone-architect" }, async () => { order.push("a"); await first.promise; });
+  const a = withModelSlot({ skill: "crossline-milestone-architect:design" }, async () => { order.push("a"); await first.promise; });
   const b = withModelSlot({ skill: "crossline-backplanner" }, async () => { order.push("b"); });
   await tick();
   // The second background run waits although a slot is free: that slot belongs to the person.
@@ -253,7 +253,7 @@ test("memory promised to the browser counts for background work, which is not fo
   configureModelGate({ limit: 2, highWater: 0.75, probe: () => ({ used: 500, limit: 1000 }), reserved: () => reserved, pollMs: 5, maxMemoryWaitMs: 20,
     log: (event) => events.push(event) });
   const order: string[] = [];
-  const background = withModelSlot({ skill: "crossline:crossline-due-diligence" }, async () => { order.push("background"); });
+  const background = withModelSlot({ skill: "crossline:crossline-research:diligence" }, async () => { order.push("background"); });
   await tick(); await tick(); await tick();
   // 500 in use + 300 promised = 80%: past the mark, and well past the minute's rule, it still waits.
   expect(order).toEqual([]);
@@ -293,7 +293,7 @@ test("a person's turns running do not keep background work from its slots", asyn
   const hold = deferred();
   const people = [withModelSlot({ skill: "crossline-onboarding", tenant: "w1" }, async () => { order.push("i1"); await hold.promise; }),
     withModelSlot({ skill: "crossline-concierge", tenant: "w2" }, async () => { order.push("i2"); await hold.promise; })];
-  const background = withModelSlot({ skill: "crossline-step-planner", tenant: "w3" }, async () => { order.push("b"); await hold.promise; });
+  const background = withModelSlot({ skill: "crossline-task-planner:steps", tenant: "w3" }, async () => { order.push("b"); await hold.promise; });
   await tick();
   expect(order).toEqual(["i1", "i2", "b"]);
   hold.resolve();

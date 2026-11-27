@@ -55,14 +55,14 @@ export default async function ApprovalsPage() {
   // A revoked acceptance puts the order back here with the same evidence, and the gate deliberately
   // will not re-judge it on its own — so without the reason on screen the order looks stuck for no
   // stated cause, and the button that would move it looks like it does nothing.
-  const revocations = new Map(store.listEvents(ctx.workspaceId, { type: "milestone_gate.auto_acceptance_revoked" })
+  const revocations = new Map(store.listEvents(ctx.workspaceId, { type: "milestone_gate.changed", change: "auto_acceptance_revoked" })
     .map((event) => [event.entityId, String((event.payload as { reason?: string }).reason ?? "")]));
   // The gate's own refusal, last word wins against a later 「现在判定」 retry request. It used to be written
   // to the ledger and the worker log only, so the page said 「等待里程碑闸门」 indefinitely for a verdict
   // that had already come back — with the one thing the person could do about it (write criteria) nowhere.
   const gateBlocks = new Map<string, { code: string; message: string }>();
-  for (const event of store.listEvents(ctx.workspaceId, { type: ["milestone_gate.blocked", "milestone_gate.retry_requested"] })) {
-    if (event.type === "milestone_gate.blocked") gateBlocks.set(event.entityId, event.payload as { code: string; message: string });
+  for (const event of store.listEvents(ctx.workspaceId, { type: "milestone_gate.changed", change: ["blocked", "retry_requested"] })) {
+    if ((event.type === "milestone_gate.changed" && (event.payload as { change?: string }).change === "blocked")) gateBlocks.set(event.entityId, event.payload as { code: string; message: string });
     else gateBlocks.delete(event.entityId);
   }
   const pending = await timed("pending", () => countPending(ctx));
@@ -84,7 +84,7 @@ export default async function ApprovalsPage() {
     ...loadAssistant(ctx).reviews.flatMap((task) => deferredOrder(task.workOrderId) ?? [])
   ];
   // What the person's own timed answers took, for the head's estimate.
-  const timedAnswers = store.listEvents(ctx.workspaceId, { type: ["ask.answered", "ask.snoozed"] })
+  const timedAnswers = store.listEvents(ctx.workspaceId, { type: "ask.changed", change: ["answered", "snoozed"] })
     .map((event) => Number((event.payload as { seconds?: unknown }).seconds)).filter((value) => Number.isFinite(value) && value > 0);
   const minutes = clearMinutes({ asks: pending.asks, workOrders: pending.workOrders, evidence: evidenceReviews.length,
     assistantReviews: pending.assistantReviews, assistantOther: pending.assistantKinds + pending.assistantQuestions }, timedAnswers);

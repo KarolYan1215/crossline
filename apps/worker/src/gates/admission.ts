@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { MILESTONE_PARKED, MILESTONE_UNPARKED, parkedMilestones, type GateSubject, type MilestoneParkedPayload } from "@crossline/core";
+import { parkedMilestones, type GateSubject, type MilestoneParkedPayload } from "@crossline/core";
 import type { CodexRpcBoundary } from "@crossline/codex";
 import { withdrawArtifactRelationsFor, type CrosslineStore, type StoredMilestone } from "@crossline/db";
 import { tOfWorkspace } from "../locale";
@@ -15,7 +15,7 @@ import { boardTasks, gateLookups, gateTask, isFinished, isOpen } from "./tasks";
  * is done, then told, with an undo: the milestone goes back to draft with a `milestone.parked` event, and its worked-back tasks nobody
  * started are put away (they come back with it). `decline` changes nothing and is put to the person (`askOn`).
  */
-export const ADMISSION_SKILL = "crossline-gate-admission";
+export const ADMISSION_SKILL = "crossline-milestone-review:admission";
 export const ADMISSION_VERSION = "crossline.gate.admission.v1";
 /** The milestones already approved when the gate first ran: never judged (written once). */
 const BASELINE = "gates.admission.baseline";
@@ -44,11 +44,11 @@ export function admissionPending(store: CrosslineStore, workspaceId: string, now
  */
 export function reconcileParked(store: CrosslineStore, workspaceId: string) {
   const milestones = new Map(store.listMilestones(workspaceId).map((milestone) => [milestone.id, milestone]));
-  for (const [id, entry] of parkedMilestones(store.listEvents(workspaceId, { type: [MILESTONE_PARKED, MILESTONE_UNPARKED] }))) {
+  for (const [id, entry] of parkedMilestones(store.listEvents(workspaceId, { type: "milestone.changed", change: ["parked", "unparked"] }))) {
     const status = milestones.get(id)?.status;
     if (status === "draft") continue;
-    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, type: MILESTONE_UNPARKED, entityId: id,
-      idempotencyKey: `${MILESTONE_UNPARKED}:${id}:${entry.judgedId}`, payload: { by: status === "approved" ? "approved_again" : status ?? "gone" } });
+    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, type: "milestone.changed", entityId: id,
+      idempotencyKey: `milestone.unparked:${id}:${entry.judgedId}`, payload: { by: status === "approved" ? "approved_again" : status ?? "gone", change: "unparked" } });
   }
 }
 
@@ -60,16 +60,16 @@ export function parkMilestone(store: CrosslineStore, workspaceId: string, milest
   const archived: string[] = [];
   for (const order of store.listWorkOrders(workspaceId)) {
     if (order.milestoneId !== milestone.id || !(order.payload as { backplan?: unknown } | undefined)?.backplan || !UNSTARTED.has(order.state) || started.has(order.id)) continue;
-    const attempt = store.listEvents(workspaceId, { type: "work_order.archived", entityId: order.id }).length;
+    const attempt = store.listEvents(workspaceId, { type: "work_order.changed", change: "archived", entityId: order.id }).length;
     const suffix = attempt ? `:${attempt}` : "";
-    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `archive-reason:${order.id}${suffix}`, type: "work_order.archived", entityId: order.id,
-      payload: { reason: t("里程碑已停放"), from: order.state, bySystem: true } });
+    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `archive-reason:${order.id}${suffix}`, type: "work_order.changed", entityId: order.id,
+      payload: { reason: t("里程碑已停放"), from: order.state, bySystem: true, change: "archived" } });
     if (store.transitionWorkOrder(workspaceId, order.id, { type: "archived" }, `archive:${order.id}${suffix}`).changed) archived.push(order.id);
   }
   store.saveMilestone({ ...milestone, status: "draft" });
   withdrawArtifactRelationsFor(store, workspaceId, milestone.id);
   const payload: MilestoneParkedPayload = { milestoneId: milestone.id, judgedId: judged.eventId, unparkWhen: judged.unparkWhen, reason: judged.reason, archivedTasks: archived };
-  store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `${MILESTONE_PARKED}:${milestone.id}:${judged.eventId}`, type: MILESTONE_PARKED, entityId: milestone.id, payload });
+  store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `milestone.parked:${milestone.id}:${judged.eventId}`, type: "milestone.changed", entityId: milestone.id, payload: { ...payload, change: "parked" } });
   const opId = `op-${now.getTime().toString(36)}-${randomUUID().slice(0, 6)}`;
   // The same shape the web's undo writes (`recordOp`): 撤销 approves it again (then `reconcileParked` unparks it) and brings the tasks back.
   store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `op.applied:${opId}`, type: "op.applied", entityId: opId,
@@ -102,7 +102,7 @@ export async function admissionGatePass(deps: { store: CrosslineStore; workspace
   const results = await runGate({ store, workspaceId, client: deps.client, cwd: deps.cwd, gate: "admission", skill: ADMISSION_SKILL, promptVersion: ADMISSION_VERSION, input,
     swap: (value, dual) => ({ ...value, judge: value.judge.filter((item) => dual.has(item.subject)).reverse(), approved: [...value.approved].reverse(), relations: [...value.relations].reverse() }),
     detail: DETAIL, subjects, stableKeys: ["goal"], round: "1", summary: `judge ${pending.length}, approved ${others.length}, relations ${relations.length}`,
-    developerInstructions: "Judge every milestone in `judge` as the crossline-gate-admission Skill describes, against `approved` and `relations`; return only the requested JSON, one item per milestone in `judge`.",
+    developerInstructions: "Judge every milestone in `judge` as the crossline-milestone-review:admission Skill describes, against `approved` and `relations`; return only the requested JSON, one item per milestone in `judge`.",
     now });
   for (const result of results) {
     // Parked only when it is still approved and the second run, if any, agreed: a disagreeing pair is the person's to decide.

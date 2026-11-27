@@ -23,11 +23,11 @@ import { sayToPerson } from "./workflow-smith";
 /**
  * The person's mailbox in the worker (docs/personal-agent.md, 2026-10-19). Accounts are added after one successful sign-in, the
  * password goes to the secret store (`mail-<id>`), and every `MAIL_CHECK_MINUTES` the new mail is read (read-only) and, when the
- * person left sorting on, sorted by `crossline-mail-triage`: to-dos and dates go into the inbox as captures (the analysis then plans
+ * person left sorting on, sorted by `crossline-inbox-triage:mail`: to-dos and dates go into the inbox as captures (the analysis then plans
  * them like anything typed), a reply from someone a wait is on brings that wait forward on 待决事项, and the rest is left. The new
  * headers are also handed to the automations (`onNewMail`), which is how a mail-triggered workflow starts.
  */
-export const MAIL_TRIAGE_SKILL = "crossline:crossline-mail-triage";
+export const MAIL_TRIAGE_SKILL = "crossline:crossline-inbox-triage:mail";
 const secretName = (id: string) => `mail-${id}`;
 
 export type MailDeps = { store: CrosslineStore; secrets: SecretStore; factory?: ImapFactory; now?: () => Date;
@@ -69,8 +69,8 @@ export async function addMailAccount(deps: MailDeps, workspaceId: string, input:
   const account: MailAccount = { id, address, label: input.label?.trim().slice(0, 40) || preset?.label || address, host, port, triage: true,
     addedAt: (deps.now?.() ?? new Date()).toISOString() };
   saveAccounts(deps.store, workspaceId, [...accounts(deps.store, workspaceId), account]);
-  deps.store.appendEvent({ ownerId: ownerOf(deps.store, workspaceId), workspaceId, idempotencyKey: `mail.connected:${id}`, type: "mail.connected", entityId: id,
-    payload: { host, label: account.label } });
+  deps.store.appendEvent({ ownerId: ownerOf(deps.store, workspaceId), workspaceId, idempotencyKey: `mail.connected:${id}`, type: "person.decided", entityId: id,
+    payload: { host, label: account.label, subject: "mail", decision: "connected" } });
   return { ok: true, account };
 }
 
@@ -80,7 +80,7 @@ export function removeMailAccount(deps: MailDeps, workspaceId: string, id: strin
   saveAccounts(deps.store, workspaceId, list.filter((account) => account.id !== id));
   deps.secrets.remove(workspaceId, secretName(id));
   deps.store.setSetting(workspaceId, MAIL_LOG_SETTING, JSON.stringify(readMailLog(deps.store.getSetting(workspaceId, MAIL_LOG_SETTING)).filter((entry) => entry.accountId !== id)));
-  deps.store.appendEvent({ ownerId: ownerOf(deps.store, workspaceId), workspaceId, idempotencyKey: `mail.removed:${id}`, type: "mail.removed", entityId: id, payload: {} });
+  deps.store.appendEvent({ ownerId: ownerOf(deps.store, workspaceId), workspaceId, idempotencyKey: `mail.removed:${id}`, type: "person.decided", entityId: id, payload: { subject: "mail", decision: "removed" } });
   return true;
 }
 
@@ -302,8 +302,8 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
     if ((kind === "todo" || kind === "date" || kind === "event") && item.known && knownTitles.has(item.known)) {
       log.push({ accountId: message.accountId, uid: message.uid, from: message.from, subject: message.subject, date: message.date, kind: "known",
         title: t("已在「{{title}}」里", { title: knownTitles.get(item.known)! }).slice(0, 140), at, key });
-      deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `mail.known:${key}`, type: "mail.known", entityId: item.known,
-        payload: { from: message.from, subject: message.subject, date: message.date } });
+      deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `mail.known:${key}`, type: "job.ran", entityId: item.known,
+        payload: { from: message.from, subject: message.subject, date: message.date, job: "mail.known", state: "done" } });
       continue;
     }
     // Serves none of the person's milestones or lines (the attention gate, §3.5; the owner, round 1: 「都不要」): not created, not listed
@@ -384,8 +384,8 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
       else kind = "info";
     }
     if (kind === "reply") {
-      const seen = deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.mail_seen:${item.waitingId}:${mailKey(message)}`, type: "waiting.mail_seen",
-        entityId: item.waitingId, payload: { from: message.from, subject: message.subject, date: message.date, at } });
+      const seen = deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.mail_seen:${item.waitingId}:${mailKey(message)}`, type: "waiting.changed",
+        entityId: item.waitingId, payload: { from: message.from, subject: message.subject, date: message.date, at, change: "mail_seen" } });
       replies += 1;
       // The wait stays open until the person says it arrived, so they are asked now (desktop and phone when no page is open), not only
       // when they next open 待决事项 (2026-11-03).
@@ -396,8 +396,8 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
   }
   const kept = [...readMailLog(deps.store.getSetting(workspaceId, MAIL_LOG_SETTING)), ...log].slice(-MAIL_LOG_KEEP);
   deps.store.setSetting(workspaceId, MAIL_LOG_SETTING, JSON.stringify(kept));
-  deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `mail.triaged:${at}:${randomUUID().slice(0, 6)}`, type: "mail.triaged", entityId: workspaceId,
-    payload: { messages: keyed.length, captured, replies, recorded, events } });
+  deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `mail.triaged:${at}:${randomUUID().slice(0, 6)}`, type: "job.ran", entityId: workspaceId,
+    payload: { messages: keyed.length, captured, replies, recorded, events, job: "mail.triage", state: "done" } });
   return { state: "done", captured, replies, sorted: log.length, needsReply, recorded, events };
 }
 

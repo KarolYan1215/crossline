@@ -33,10 +33,10 @@ import { browserProfilesRoot, loginBrowser, sayToPerson } from "./workflow-smith
  * server has none and hands the run to a connected compute node whose computer offers a browser (§10.1, `openNodeFormBrowser`), and
  * refuses (`FORM_NEEDS_SCREEN`) only when no such node is connected.
  */
-export const FORM_FILLER = "crossline:crossline-form-filler";
-export const FORM_CHECKER = "crossline:crossline-form-checker";
-export const FORM_OBSERVER = "crossline:crossline-form-observer";
-export const FORM_BROWSER_AGENT = "crossline:crossline-form-browser-agent";
+export const FORM_FILLER = "crossline:crossline-form-page:fill";
+export const FORM_CHECKER = "crossline:crossline-outward-check:form";
+export const FORM_OBSERVER = "crossline:crossline-form-page:observe";
+export const FORM_BROWSER_AGENT = "crossline:crossline-form-page:browser";
 /** How long a submitted run waits for its confirmation mail before the person is asked. */
 const RECEIPT_WAIT_MS = 48 * 3_600_000;
 /** How often the copies of sensitive items still on this worker are offered to the person's connected computer again after a failure. */
@@ -64,7 +64,7 @@ export type FormServiceDeps = {
   /** Tests open their own browser (headless, local pages allowed); the default opens Crossline's profile for the site. */
   open?: (options: FormBrowserOptions) => Promise<FormDriver>;
   executable?: () => string | undefined;
-  /** The fallback engines tried when the filler finds nothing to do on a page; the default is Stagehand's observe over `crossline-form-observer`. */
+  /** The fallback engines tried when the filler finds nothing to do on a page; the default is Stagehand's observe over `crossline-form-page:observe`. */
   fallbacks?: (workspaceId: string) => FormFallback[];
   profilesRoot?: (workspaceId: string) => string;
   /** Tests script the two Skill runs; the default runs them on the account's own Codex. */
@@ -194,11 +194,11 @@ export function createFormService(deps: FormServiceDeps) {
         next = { ...next, calendarEventId: event.id };
       }
     } else next = { ...next, calendarSkipped: "no start time" }; // i18n-ignore: a code kept on the run
-    next = saveFormRun(store, workspaceId, next, { type: "opportunity.form.confirmed", payload: { ...(mail ? { mailFrom: mail.from } : {}), ...(next.calendarEventId ? { calendarEventId: next.calendarEventId } : {}) } });
+    next = saveFormRun(store, workspaceId, next, { change: "form_confirmed", payload: { ...(mail ? { mailFrom: mail.from } : {}), ...(next.calendarEventId ? { calendarEventId: next.calendarEventId } : {}) } });
     // The one receipt path: the run's confirmation is also the opportunity's (the weekly review and the offer's history read `confirmedBy`).
     if (store.confirmOpportunity(workspaceId, run.opportunityId, mail ? `mail:${mail.from}:${mail.at}` : `form:${run.id}`))
-      store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "system", workspaceId, idempotencyKey: `opportunity.confirmed:${run.opportunityId}`, type: "opportunity.confirmed",
-        entityId: run.opportunityId, payload: { runId: run.id, ...(mail ? { mailFrom: mail.from, subject: mail.subject } : {}) } });
+      store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "system", workspaceId, idempotencyKey: `opportunity.confirmed:${run.opportunityId}`, type: "opportunity.changed",
+        entityId: run.opportunityId, payload: { runId: run.id, ...(mail ? { mailFrom: mail.from, subject: mail.subject } : {}), change: "confirmed" } });
     notify(workspaceId, next);
     return next;
   };
@@ -213,7 +213,7 @@ export function createFormService(deps: FormServiceDeps) {
   const drive = async (workspaceId: string, start: StoredFormRun, resume: boolean): Promise<StoredFormRun> => {
     const t = tOfWorkspace(store, workspaceId);
     const hold = siteHold(store, workspaceId, start.host);
-    if (hold) return saveFormRun(store, workspaceId, { ...start, state: "waiting_person", stoppedFor: "site_hold", stopDetail: hold.where.slice(0, 300) }, { type: "opportunity.form.stopped", payload: { stop: "site_hold" } });
+    if (hold) return saveFormRun(store, workspaceId, { ...start, state: "waiting_person", stoppedFor: "site_hold", stopDetail: hold.where.slice(0, 300) }, { change: "form_stopped", payload: { stop: "site_hold" } });
     let session = sessions.get(start.id);
     if (session?.driver.closed()) { await closeSession(start.id); session = undefined; }
     let run = start;
@@ -221,14 +221,14 @@ export function createFormService(deps: FormServiceDeps) {
       const hosts = runHosts(start.host);
       const url = start.opportunity.url;
       const onHost = (() => { try { const host = new URL(url).hostname.toLowerCase().replace(/^www\./, ""); return hosts.some((item) => host === item || host.endsWith(`.${item}`)); } catch { return false; } })();
-      if (!onHost) return saveFormRun(store, workspaceId, { ...start, state: "stopped", stoppedFor: "not_allowed", stopDetail: t("报名页不在报名网站 {{host}} 上", { host: start.host }) }, { type: "opportunity.form.stopped", payload: { stop: "not_allowed" } });
+      if (!onHost) return saveFormRun(store, workspaceId, { ...start, state: "stopped", stoppedFor: "not_allowed", stopDetail: t("报名页不在报名网站 {{host}} 上", { host: start.host }) }, { change: "form_stopped", payload: { stop: "not_allowed" } });
       const where = windowFor(workspaceId);
-      if (!where) return saveFormRun(store, workspaceId, { ...start, state: "waiting_person", stoppedFor: "engine_failed", stopDetail: t("没有能显示窗口的电脑：本人电脑上的节点未连接") }, { type: "opportunity.form.stopped", payload: { stop: "engine_failed" } });
+      if (!where) return saveFormRun(store, workspaceId, { ...start, state: "waiting_person", stoppedFor: "engine_failed", stopDetail: t("没有能显示窗口的电脑：本人电脑上的节点未连接") }, { change: "form_stopped", payload: { stop: "engine_failed" } });
       const onBlocked = (blocked: string, why: string) => {
         let host = "";
         try { host = new URL(blocked).hostname; } catch { /* not a URL */ }
-        store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "system", workspaceId, type: "opportunity.form.blocked", entityId: start.id,
-          idempotencyKey: `opportunity.form.blocked:${start.id}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`, payload: { host, why } });
+        store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "system", workspaceId, type: "opportunity.changed", entityId: start.id,
+          idempotencyKey: `opportunity.form.blocked:${start.id}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`, payload: { host, why, change: "form_blocked" } });
       };
       if (where.kind === "node") {
         // The node keeps its own per-site profile on the person's computer; nothing here holds a profile of this worker's.
@@ -236,20 +236,20 @@ export function createFormService(deps: FormServiceDeps) {
         const vault = where.link.vault ? heldSensitiveSlots(store, workspaceId) : [];
         try { session = { driver: await openNodeFormBrowser(where.link, { host: hosts[0] ?? start.host, hosts, onBlocked, vault }), profileDir: "", busy: false,
           sensitiveAt: where.link.vault ? "computer" : "nowhere" }; }
-        catch (error) { log({ event: "form.open_failed", runId: start.id, node: where.link.host, message: String(error).slice(0, 200) }); return saveFormRun(store, workspaceId, { ...start, state: "waiting_person", stoppedFor: "engine_failed", stopDetail: t("本人电脑上的浏览器没能打开") }, { type: "opportunity.form.stopped", payload: { stop: "engine_failed" } }); }
+        catch (error) { log({ event: "form.open_failed", runId: start.id, node: where.link.host, message: String(error).slice(0, 200) }); return saveFormRun(store, workspaceId, { ...start, state: "waiting_person", stoppedFor: "engine_failed", stopDetail: t("本人电脑上的浏览器没能打开") }, { change: "form_stopped", payload: { stop: "engine_failed" } }); }
         log({ event: "form.on_node", runId: start.id, node: where.link.host });
       } else {
         const profileDir = profileDirOf(workspaceId, start.host);
         if (!holdProfile(profileDir, "fill")) return start; // the site's profile is in use (a login window, a reader): the next pass tries again
         const executable = deps.executable?.() ?? loginBrowser() ?? findBrowser();
-        if (!executable && !deps.open) { releaseProfile(profileDir, "fill"); return saveFormRun(store, workspaceId, { ...start, state: "waiting_person", stoppedFor: "engine_failed", stopDetail: t("这台电脑上找不到浏览器") }, { type: "opportunity.form.stopped", payload: { stop: "engine_failed" } }); }
+        if (!executable && !deps.open) { releaseProfile(profileDir, "fill"); return saveFormRun(store, workspaceId, { ...start, state: "waiting_person", stoppedFor: "engine_failed", stopDetail: t("这台电脑上找不到浏览器") }, { change: "form_stopped", payload: { stop: "engine_failed" } }); }
         const options: FormBrowserOptions = { profileDir, executablePath: executable ?? "", hosts, onBlocked };
         try { session = { driver: await (deps.open ?? openFormBrowser)(options), profileDir, busy: false, sensitiveAt: "here" }; }
-        catch (error) { releaseProfile(profileDir, "fill"); log({ event: "form.open_failed", runId: start.id, message: String(error).slice(0, 200) }); return saveFormRun(store, workspaceId, { ...start, state: "waiting_person", stoppedFor: "engine_failed", stopDetail: t("浏览器没能打开") }, { type: "opportunity.form.stopped", payload: { stop: "engine_failed" } }); }
+        catch (error) { releaseProfile(profileDir, "fill"); log({ event: "form.open_failed", runId: start.id, message: String(error).slice(0, 200) }); return saveFormRun(store, workspaceId, { ...start, state: "waiting_person", stoppedFor: "engine_failed", stopDetail: t("浏览器没能打开") }, { change: "form_stopped", payload: { stop: "engine_failed" } }); }
       }
       sessions.set(start.id, session);
       try { await session.driver.open(url); }
-      catch { await closeSession(start.id); return saveFormRun(store, workspaceId, { ...start, state: "waiting_person", stoppedFor: "engine_failed", stopDetail: t("报名页没能打开") }, { type: "opportunity.form.stopped", payload: { stop: "engine_failed" } }); }
+      catch { await closeSession(start.id); return saveFormRun(store, workspaceId, { ...start, state: "waiting_person", stoppedFor: "engine_failed", stopDetail: t("报名页没能打开") }, { change: "form_stopped", payload: { stop: "engine_failed" } }); }
       if (resume) run = { ...run, pageNo: 0 };
       resume = false;
     }
@@ -280,7 +280,7 @@ export function createFormService(deps: FormServiceDeps) {
       log({ event: "form.failed", runId: run.id, message: String(error).slice(0, 200) });
       await closeSession(run.id);
       const failed = saveFormRun(store, workspaceId, { ...(formRunOf(store, workspaceId, run.id) ?? run), state: "waiting_person", stoppedFor: "engine_failed", stopDetail: String(error).slice(0, 200), sessionLost: true },
-        { type: "opportunity.form.stopped", payload: { stop: "engine_failed" } });
+        { change: "form_stopped", payload: { stop: "engine_failed" } });
       notify(workspaceId, failed);
       return failed;
     } finally { active.delete(workspaceId); }
@@ -298,10 +298,10 @@ export function createFormService(deps: FormServiceDeps) {
       const session = sessions.get(run.id);
       if (!session || session.busy || (run.state !== "ready_to_submit" && run.state !== "waiting_person")) continue;
       const seen = await watchForPersonSubmit(run, session.driver);
-      if (seen === "closed") { await closeSession(run.id); saveFormRun(store, workspaceId, { ...run, sessionLost: true }, { type: "opportunity.form.session_lost" }); continue; }
+      if (seen === "closed") { await closeSession(run.id); saveFormRun(store, workspaceId, { ...run, sessionLost: true }, { change: "form_session_lost" }); continue; }
       if (seen) {
         const submitted = saveFormRun(store, workspaceId, { ...run, state: "submitted", submittedBy: "person", confirmation: { quote: seen.quote.slice(0, 300), kind: seen.kind, at: now.toISOString() } },
-          { type: "opportunity.form.submitted", payload: { by: "person", kind: seen.kind } });
+          { change: "form_submitted", payload: { by: "person", kind: seen.kind } });
         await closeSession(run.id);
         notify(workspaceId, submitted);
         afterSubmit(workspaceId, submitted);
@@ -310,7 +310,7 @@ export function createFormService(deps: FormServiceDeps) {
     for (const run of readFormRuns(store, workspaceId)) {
       if (run.state !== "submitted" || run.receiptAskedAt || !run.confirmation) continue;
       if (now.getTime() - Date.parse(run.confirmation.at) < RECEIPT_WAIT_MS) continue;
-      const asked = saveFormRun(store, workspaceId, { ...run, receiptAskedAt: now.toISOString() }, { type: "opportunity.form.receipt_asked" });
+      const asked = saveFormRun(store, workspaceId, { ...run, receiptAskedAt: now.toISOString() }, { change: "form_receipt_asked" });
       const t = tOfWorkspace(store, workspaceId);
       sayToPerson(store, workspaceId, t("{{act}}「{{title}}」提交两天了还没收到确认邮件，请在邮箱里找一下，收到了就在资料卡页确认。", { act: asked.decision.choice === "apply" ? t("申请", { context: "form" }) : t("报名", { context: "form" }), title: asked.opportunity.title }),
         "opportunity_form", `${asked.id}:receipt`, [{ label: t("查看报名"), href: "/settings#apply" }], now);
@@ -352,7 +352,7 @@ export function createFormService(deps: FormServiceDeps) {
       if (run.state === "submitted") { confirm(workspaceId, run, mail); continue; }
       await closeSession(run.id);
       const submitted = saveFormRun(store, workspaceId, { ...run, state: "submitted", submittedBy: "person", stoppedFor: undefined, confirmation: run.confirmation ?? { quote: "", kind: "pending", at: mail.at || new Date().toISOString() } },
-        { type: "opportunity.form.submitted", payload: { by: "person", seenInMail: true } });
+        { change: "form_submitted", payload: { by: "person", seenInMail: true } });
       confirm(workspaceId, submitted, mail);
     }
   };
@@ -475,7 +475,7 @@ export function createFormService(deps: FormServiceDeps) {
     }
     if (action === "stop") {
       await closeSession(run.id);
-      const stopped = saveFormRun(store, workspaceId, { ...run, state: "stopped", stopDetail: tOfWorkspace(store, workspaceId)("本人停止") }, { type: "opportunity.form.stopped", payload: { stop: "person" } });
+      const stopped = saveFormRun(store, workspaceId, { ...run, state: "stopped", stopDetail: tOfWorkspace(store, workspaceId)("本人停止") }, { change: "form_stopped", payload: { stop: "person" } });
       return { status: 200, body: { run: stopped } };
     }
     if (action === "submitted") {
@@ -483,7 +483,7 @@ export function createFormService(deps: FormServiceDeps) {
       if (run.state !== "ready_to_submit" && run.state !== "waiting_person") return { status: 409, body: { code: "FORM_RUN_NOT_WAITING" } };
       await closeSession(run.id);
       const submitted = saveFormRun(store, workspaceId, { ...run, state: "submitted", submittedBy: "person", confirmation: run.confirmation ?? { quote: "", kind: "pending", at: new Date().toISOString() } },
-        { type: "opportunity.form.submitted", payload: { by: "person", said: true } });
+        { change: "form_submitted", payload: { by: "person", said: true } });
       return { status: 200, body: { run: submitted } };
     }
     // confirm: the person found the confirmation themselves.

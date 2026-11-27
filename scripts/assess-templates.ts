@@ -207,14 +207,14 @@ type Drawer = { draw(prompt: string, seed: number): Promise<Buffer>; stop(): Pro
 
 /**
  * Draws through the machine owner's own Codex sign-in (ChatGPT's image tool), the same path the portrait figure takes
- * (`crossline-portrait-illustrator`). For the templates only, drawn once on this machine for the owner's own project — never for the
+ * (`crossline-portrait:figure`). For the templates only, drawn once on this machine for the owner's own project — never for the
  * public test's per-person figures, which would put the owner's ChatGPT login on a public server and serve other people from a personal
  * subscription.
  */
 async function codexDrawer(port: number): Promise<Drawer> {
   const { startCodexSupervisor, runCodexSkill } = await import("../packages/codex/src/index");
   const repoRoot = path.resolve(TEMPLATES, "..", "..", "..");
-  const skill = "crossline:crossline-portrait-illustrator";
+  const skill = "crossline:crossline-portrait:figure";
   const supervisor = await startCodexSupervisor({ port, plugin: { name: "crossline", cwd: repoRoot, requiredSkills: [skill],
     marketplacePath: path.join(repoRoot, "skills", "marketplace", ".agents", "plugins", "marketplace.json") } });
   const schema = { type: "object", properties: { generated: { type: "boolean" }, note: { type: "string", minLength: 0, maxLength: 200 } },

@@ -1,16 +1,27 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-/** Each Skill's SKILL.md frontmatter `description`, by Skill id (the directory name). Node only: the generator and its test read it. */
+/**
+ * Each Skill's SKILL.md frontmatter `description`, by Skill id (the directory name). A Skill merged on 2026-11-27 (one section per mode,
+ * headed ``## `mode: "steps"` — …``) is listed per mode instead (`crossline-task-planner:steps`), by the first paragraph of its section:
+ * a person's note goes to one mode, as it went to one Skill before. Both plugins: Crossline's own and the owner's (`crossline-personal`).
+ * Node only: the generator and its test read it.
+ */
 export function readSkillDescriptions(repoRoot: string): Record<string, string> {
-  const dir = join(repoRoot, "skills", "marketplace", "plugins", "crossline", "skills");
   const out: Record<string, string> = {};
-  for (const name of readdirSync(dir).sort()) {
-    let text: string;
-    try { text = readFileSync(join(dir, name, "SKILL.md"), "utf8"); } catch { continue; }
-    const front = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? "";
-    const description = /^description:\s*(.+)$/m.exec(front)?.[1]?.trim().replace(/^["']|["']$/g, "");
-    if (description) out[name] = description;
+  for (const plugin of ["crossline", "crossline-personal"]) {
+    const dir = join(repoRoot, "skills", "marketplace", "plugins", plugin, "skills");
+    for (const name of readdirSync(dir).sort()) {
+      let text: string;
+      try { text = readFileSync(join(dir, name, "SKILL.md"), "utf8").replace(/\r\n/g, "\n"); } catch { continue; }
+      // A section may serve two modes (``## `mode: "report"` / `mode: "gap"` — …``).
+      const sections = [...text.matchAll(/^## (`\w+: "[\w-]+"`(?: \/ `\w+: "[\w-]+"`)*) — .+\n\n(.+)$/gm)];
+      for (const [, heads, first] of sections) for (const [, mode] of heads!.matchAll(/: "([\w-]+)"/g)) out[`${name}:${mode}`] = first!.trim();
+      if (sections.length) continue;
+      const front = /^---\n([\s\S]*?)\n---/.exec(text)?.[1] ?? "";
+      const description = /^description:\s*(.+)$/m.exec(front)?.[1]?.trim().replace(/^["']|["']$/g, "");
+      if (description) out[name] = description;
+    }
   }
   return out;
 }

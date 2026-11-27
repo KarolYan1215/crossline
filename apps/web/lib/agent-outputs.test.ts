@@ -18,11 +18,11 @@ function run(store: CrosslineStore, taskId: string, files: Record<string, string
   dirs.push(directory);
   for (const [name, body] of Object.entries(files)) { mkdirSync(path.dirname(path.join(directory, name)), { recursive: true }); writeFileSync(path.join(directory, name), body); }
   writeFileSync(path.join(directory, "audit.json"), "{}");
-  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `req-${taskId}`, type: "agent.task.requested", entityId: taskId,
-    payload: { taskId, title: extra.title ?? taskId, category: "read_research_organize", workOrderId: "" } });
-  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `done-${taskId}`, type: "agent.task.completed", entityId: taskId,
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `req-${taskId}`, type: "agent.changed", entityId: taskId,
+    payload: { taskId, title: extra.title ?? taskId, category: "read_research_organize", workOrderId: "", change: "task_requested" } });
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `done-${taskId}`, type: "agent.changed", entityId: taskId,
     payload: { taskId, directory, reviewRequired: extra.reviewRequired ?? false,
-      artifacts: Object.entries(files).map(([name, body]) => ({ path: name, sha256: "x", bytes: Buffer.byteLength(body) })) } });
+      artifacts: Object.entries(files).map(([name, body]) => ({ path: name, sha256: "x", bytes: Buffer.byteLength(body) })), change: "task_completed" } });
 }
 
 test("Agent 产出 gathers a workflow's report, the assistant's own runs and every handed-over file, each on its line", () => {

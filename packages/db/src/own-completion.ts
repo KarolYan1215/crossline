@@ -36,7 +36,7 @@ export function repairOwnCompletions(store: CrosslineStore, workspaceId: string,
   const accepted = store.listWorkOrders(workspaceId).filter((order) => order.state === "blocked")
     .filter((order) => acceptOwnCompletion(store, workspaceId, order.id, `own-completion:${order.id}`)).map((order) => order.id);
   store.setSetting(workspaceId, OWN_COMPLETION_REPAIR, now.toISOString());
-  if (accepted.length) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `${OWN_COMPLETION_REPAIR}:${workspaceId}`, type: "repair.own_completion",
-    entityId: workspaceId, payload: { accepted } });
+  if (accepted.length) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `${OWN_COMPLETION_REPAIR}:${workspaceId}`, type: "job.ran",
+    entityId: workspaceId, payload: { accepted, job: "repair.own_completion", state: "done" } });
   return accepted;
 }

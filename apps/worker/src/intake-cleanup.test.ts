@@ -65,7 +65,7 @@ test("the one-time mail cleanup judges old mail tasks with the brief: events, un
   expect(JSON.stringify(prompts())).toContain("known 必须是账本简报里另一项的 id");
   expect(archived.sort()).toEqual(["cap-mail-group", "cap-mail-health", "cap-mail-hw4b", "cap-mail-movie"]);
   expect(state(store, workspaceId, "cap-mail-hw4")).toBe("approved");
-  const reasons = store.listEvents(workspaceId, { type: "work_order.archived" }).map((event) => (event.payload as { reason: string }).reason);
+  const reasons = store.listEvents(workspaceId, { type: "work_order.changed", change: "archived" }).map((event) => (event.payload as { reason: string }).reason);
   expect(reasons).toEqual(expect.arrayContaining(["邮件里的活动，不作为任务", "与里程碑无关，未列入", "与「完成 ECE 555 作业 4（本人建）」是同一件", "与「控制组组会」是同一件"]));
   expect(store.listEvents(workspaceId, { type: "op.applied" }).at(-1)!.payload).toMatchObject({ inverse: { kind: "work_order.restore" } });
   // Once only.
@@ -73,10 +73,10 @@ test("the one-time mail cleanup judges old mail tasks with the brief: events, un
   expect(await mailIntakeRepair(store, workspaceId, rpc, "/repo", NOW)).toEqual([]);
 });
 
-test("near-term work said in the interview becomes a capture at once, once per sentence; 「没有」 makes none", () => {
+test("near-term work said in the interview becomes a capture at once, once per sentence; the extraction's `none` makes none", () => {
   const { store, workspaceId } = setup();
   const fact = (value: string, status: "confirmed" | "inferred" = "confirmed") => ({ identityId: "research", projectId: "", slot: "near_term", value, status, sourceRef: "reply-3", sourceQuote: value });
-  const facts = [fact("11/24 前提交 ECE 555 HW4"), fact("没有"), fact("写开题报告", "inferred"), { ...fact("x"), slot: "goal" }];
+  const facts = [fact("11/24 前提交 ECE 555 HW4"), fact("none"), fact("写开题报告", "inferred"), { ...fact("x"), slot: "goal" }];
   expect(nearTermCaptures(store, workspaceId, "user-1", "s1", facts)).toBe(1);
   expect(nearTermCaptures(store, workspaceId, "user-1", "s1", facts)).toBe(0);
   expect(store.listCaptures(workspaceId).map((capture) => capture.title)).toEqual(["11/24 前提交 ECE 555 HW4"]);

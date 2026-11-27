@@ -45,7 +45,7 @@ test("each adopted goal is split, kept chosen, and the composed sentence is the 
   const profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles")!) as Record<string, { attributes: Array<{ text: string; sourceRef: string }> }>;
   expect(profiles["line-media"]!.attributes.map((item) => item.text)).toEqual(["会剪辑", "有影响力", "科普", "稳定更新"]);
   expect(profiles["line-media"]!.attributes.at(-1)!.sourceRef).toBe("goal");
-  const events = store.listEvents(workspaceId, { type: "line.goal_split" });
+  const events = store.listEvents(workspaceId, { type: "line.changed", change: "goal_split" });
   expect(events.map((event) => [event.entityId, (event.payload as { recomposed: boolean }).recomposed])).toEqual([["research", true], ["line-media", true]]);
   // Idempotent: nothing is waiting, and a second pass asks nothing.
   expect(linesAwaitingSplit(store, workspaceId)).toEqual([]);

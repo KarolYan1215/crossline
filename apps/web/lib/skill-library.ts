@@ -86,7 +86,7 @@ export function loadSkillLibrary(ctx: AccessContext): SkillLibraryView {
       files: record.files.length, skipped, risk: record.scan.risk, injection: record.scan.injection,
       ...scriptsView(record), verdict: record.review.final, reasons: record.review.reasons };
   });
-  const removed = store.listEvents(ctx.workspaceId, { type: "skill.public.removed" }).slice(-5).reverse().map((event) => {
+  const removed = store.listEvents(ctx.workspaceId, { type: "skill.changed", change: "public_removed" }).slice(-5).reverse().map((event) => {
     const payload = event.payload as { name?: string; reason?: string; by?: string };
     return { name: String(payload.name ?? event.entityId), reason: String(payload.reason ?? ""), at: event.createdAt, by: String(payload.by ?? "system") };
   });
@@ -116,8 +116,8 @@ export function loadSkillLibrary(ctx: AccessContext): SkillLibraryView {
         summary: readGrownSkills(store, ctx.workspaceId).find((item) => item.id === record.mergedInto!.id)?.manifest.summary ?? t("另一个工作流") } } : {}) };
   });
   // Requests made in words that no growing run has picked up yet: the page says they are on their way.
-  const tried = new Set(store.listEvents(ctx.workspaceId, { type: "skill.grown.attempted" }).map((event) => String((event.payload as { requestId?: string }).requestId ?? "")));
-  const growing = store.listEvents(ctx.workspaceId, { type: "workflow.requested" }).filter((event) => !tried.has(event.entityId)).length;
+  const tried = new Set(store.listEvents(ctx.workspaceId, { type: "skill.changed", change: "grown_attempted" }).map((event) => String((event.payload as { requestId?: string }).requestId ?? "")));
+  const growing = store.listEvents(ctx.workspaceId, { type: "skill.changed", change: "workflow_requested" }).filter((event) => !tried.has(event.entityId)).length;
   const favouritesInstall = favouritesOffer(readGrownSkills(store, ctx.workspaceId), identityLines(ctx));
   return { mine, grown, publics, removed, growing, aiTools: aiToolsFor(store, ctx.workspaceId), shell: assistantMode(store, ctx.workspaceId) === "shell",
     ...(favouritesInstall ? { favouritesInstall } : {}) };
@@ -180,7 +180,7 @@ export function requestSkillSearch(ctx: AccessContext, lineId: string): { ok: bo
   if (!identityLines(ctx).some((line) => line.id === lineId)) return { ok: false, code: "LINE_NOT_FOUND" };
   const at = new Date().toISOString();
   getStore().appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `skill.public.search_requested:${lineId}:${at}`,
-    type: "skill.public.search_requested", entityId: lineId, payload: { lineId, at } });
+    type: "skill.changed", entityId: lineId, payload: { lineId, at, change: "public_search_requested" } });
   return { ok: true };
 }
 
@@ -195,8 +195,8 @@ export function deletePublicSkill(ctx: AccessContext, id: string): { ok: boolean
 /** A collection is taken as over after this long without its end (a worker restarted mid-run never writes `collect.ran`). */
 const COLLECT_STALE_MS = 8 * 3_600_000;
 function runningView(store: CrosslineStore, workspaceId: string, id: string, agentRuns: ReturnType<typeof listAgentTasks>, t: Translate): Pick<GrownSkillView, "running"> {
-  const started = store.listEvents(workspaceId, { type: "collect.started", entityId: id }).at(-1);
-  const ended = store.listEvents(workspaceId, { type: "collect.ran", entityId: id }).at(-1);
+  const started = store.listEvents(workspaceId, { type: "job.ran", job: "collect", state: "started", entityId: id }).at(-1);
+  const ended = store.listEvents(workspaceId, { type: "job.ran", job: "collect", state: "done", entityId: id }).at(-1);
   if (started && (!ended || ended.createdAt < started.createdAt) && Date.now() - Date.parse(started.createdAt) < COLLECT_STALE_MS) {
     const payload = started.payload as { listOnly?: boolean; notes?: number };
     return { running: { since: started.createdAt, what: payload.listOnly ? t("读取收藏列表") : payload.notes ? t("读取 {{count}} 篇笔记", { count: payload.notes }) : t("读取") } };
@@ -208,10 +208,10 @@ function runningView(store: CrosslineStore, workspaceId: string, id: string, age
 
 function improvementView(store: CrosslineStore, workspaceId: string, record: ReturnType<typeof readGrownSkills>[number], agentRuns: ReturnType<typeof listAgentTasks>): GrownSkillView["improvement"] {
   // The revision that made the version in force: after 回到上一版 the newest revision is no longer it.
-  const revised = store.listEvents(workspaceId, { type: "skill.grown.revised", entityId: record.id })
+  const revised = store.listEvents(workspaceId, { type: "skill.changed", change: "grown_revised", entityId: record.id })
     .filter((event) => Number((event.payload as { version?: number }).version) === (record.version ?? 1)).at(-1);
   const since = record.improvedAt ?? record.createdAt;
-  const pending = store.listEvents(workspaceId, { type: "skill.grown.feedback", entityId: record.id }).filter((event) => event.createdAt > since)
+  const pending = store.listEvents(workspaceId, { type: "skill.changed", change: "grown_feedback", entityId: record.id }).filter((event) => event.createdAt > since)
     .map((event) => String((event.payload as { text?: string }).text ?? "")).filter(Boolean);
   const improving = agentRuns.some((run) => run.taskId.startsWith(`improve-${record.id.replace(/^flow-/, "")}-`) && run.status === "running");
   return { version: record.version ?? 1, canRevert: readGrownVersions(store, workspaceId, record.id).length > 0, pending, improving,
@@ -271,8 +271,8 @@ export function changeFavouriteTopics(ctx: AccessContext, id: string, change: { 
   if (!plan) return { ok: false, code: "NOT_TOPIC_MODE" };
   const next = withTopicSettings(plan, change);
   store.setSetting(ctx.workspaceId, topicPlanKey(id), JSON.stringify(next));
-  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `favourites.topics_changed:${id}:${Date.now()}`, type: "favourites.topics_changed",
-    entityId: id, payload: { perDay: next.perDay, window: next.window } });
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `favourites.topics_changed:${id}:${Date.now()}`, type: "person.decided",
+    entityId: id, payload: { perDay: next.perDay, window: next.window, subject: "favourites", decision: "topics_changed" } });
   return { ok: true };
 }
 

@@ -17,14 +17,14 @@ import { ownerOf } from "./owner";
 import { localeOf } from "./locale";
 import { identityLines } from "./lines";
 import { materialExcerpts } from "./material-context";
-export const MILESTONE_ARCHITECT_SKILL = "crossline:crossline-milestone-architect";
-export const ARTIFACT_PLANNER_SKILL = "crossline:crossline-artifact-planner";
+export const MILESTONE_ARCHITECT_SKILL = "crossline:crossline-milestone-architect:design";
+export const ARTIFACT_PLANNER_SKILL = "crossline:crossline-cross-line-planner:artifacts";
 
 /**
  * The scenario in short, for the system prompt; the Skill holds the rules and the examples. It used to be a second, older copy of the
  * Skill (「three to five milestones per line」 long after a chain became per project) and the two disagreed.
  */
-const INSTRUCTIONS = "Design milestones as the crossline-milestone-architect Skill describes and return only the requested JSON. "
+const INSTRUCTIONS = "Design milestones as the crossline-milestone-architect:design Skill describes and return only the requested JSON. "
   + "They become drafts on the person's 主线 page; once approved, tasks are worked back from their criteria and the scheduler plans toward their deadlines. " // i18n-ignore: model-facing
   + "A milestone is a result that has happened by its deadline (an exam score, a submission, someone's reply), never an ongoing condition and never a task. "
   + "With a `profile` you design one line: at least three milestones in it, a chain of one to five for every project in requiredProjects, each with a plan "
@@ -33,7 +33,7 @@ const INSTRUCTIONS = "Design milestones as the crossline-milestone-architect Ski
   + "direction; never copy it into a title. Thin information is an assumption, not a blocker. With `artifacts`, declare plan.outputs and plan.inputs as the Skill says.";
 
 const INSTRUCTIONS_ARTIFACTS = "Plan what each line in planLines produces this period and the few cross-line supply pairs, as the "
-  + "crossline-artifact-planner Skill describes, and return only the requested JSON. The milestones of these lines are designed from this plan next, and "
+  + "crossline-cross-line-planner:artifacts Skill describes, and return only the requested JSON. The milestones of these lines are designed from this plan next, and "
   + "each pair becomes a link the person checks on the receiving milestone's deadline, so a pair names an artifact someone can hand over, a numeric "
   + "transfer with its unit, a lag in days and what the receiving line would spend or lack without it. At most two pairs leave a line, and none is a valid "
   + "answer. Never list again what `kept` holds. When `feedback` is present, fix what it names.";
@@ -115,9 +115,9 @@ export function rederiveArtifactRelations(store: CrosslineStore, workspaceId: st
   for (const relation of derived.relations.filter((item) => saved.includes(item.id) && !before.has(item.id))) {
     const warnings = supplyWarnings({ use: relation.use, counterfactual: relation.counterfactual, hoursSaved: relation.transfer.hoursSaved });
     if (!warnings.length) continue;
-    const version = store.listEvents(workspaceId, { type: "validation.warned", entityId: relation.id }).length + 1;
-    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `validation.warned:milestone_relation:${relation.id}:${version}`, type: "validation.warned",
-      entityId: relation.id, payload: { subject: "milestone_relation", version, warnings, revised: Boolean(options.revised) } });
+    const version = store.listEvents(workspaceId, { type: "validation.changed", change: "warned", entityId: relation.id }).length + 1;
+    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `validation.warned:milestone_relation:${relation.id}:${version}`, type: "validation.changed",
+      entityId: relation.id, payload: { subject: "milestone_relation", version, warnings, revised: Boolean(options.revised), change: "warned" } });
   }
   return { derived: derived.relations.map((relation) => relation.id), refused: derived.refused };
 }
@@ -280,10 +280,10 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
     const at = new Date().toISOString();
     const plan = mergeArtifactPlan(kept, result.output, at);
     saveStoredArtifactPlan(store, workspaceId, plan);
-    const round = store.listEvents(workspaceId, { type: "artifact_plan.saved" }).length;
-    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `artifact_plan.saved:${round}`, type: "artifact_plan.saved", entityId: "artifact-plan",
+    const round = store.listEvents(workspaceId, { type: "artifact.changed", change: "plan_saved" }).length;
+    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `artifact_plan.saved:${round}`, type: "artifact.changed", entityId: "artifact-plan",
       payload: { planLines, artifacts: result.output.artifacts.map((artifact) => artifact.id), supplies: result.output.supplies.length,
-        dropped: result.output.dropped, warnings: result.output.warnings, assumptions: result.output.assumptions } });
+        dropped: result.output.dropped, warnings: result.output.warnings, assumptions: result.output.assumptions, change: "plan_saved" } });
     return { plan, checked: result.output };
   }
 
@@ -369,10 +369,10 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
       saveDrafting();
       if (result.audit.warnings?.length) {
         const entityId = `line:${identityId}`;
-        const version = store.listEvents(workspaceId, { type: "validation.warned", entityId }).length + 1;
+        const version = store.listEvents(workspaceId, { type: "validation.changed", change: "warned", entityId }).length + 1;
         store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `validation.warned:milestone_line:${identityId}:${version}`,
-          type: "validation.warned", entityId, payload: { subject: "milestone_line", version, warnings: result.audit.warnings,
-            revised: Boolean(options?.revised), milestoneIds: saved.map((draft) => draft.id) } });
+          type: "validation.changed", entityId, payload: { subject: "milestone_line", version, warnings: result.audit.warnings,
+            revised: Boolean(options?.revised), milestoneIds: saved.map((draft) => draft.id), change: "warned" } });
       }
       assumptions.push(...result.output.assumptions);
       for (const proposal of result.output.targetProposals ?? []) {

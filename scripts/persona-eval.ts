@@ -7,13 +7,16 @@
  * the short answers). The interviewer never sees the sheet; the player never sees the core; the judges see the core and what the
  * interview wrote, and not the sheet's reasoning.
  *
- *   tsx scripts/persona-eval.ts --set <dir> --out <dir> [--only a,b] [--turns 26] [--max-yuan 1.5] [--model <id>] [--player-model <id>]
+ *   tsx scripts/persona-eval.ts --set <dir> --out <dir> [--only a,b]  [--codex] [--turns 60] [--max-yuan 1.5] [--model <id>] [--player-model <id>]
  *
  * `<dir>/openings.json` holds each person's opening card ({life, tone, lines, base, fixed}). Every person gets a throwaway ledger of
- * their own and the real path a new account takes: the opening card's lines and tone, the interview (dialogue and extraction, the
+ * their own and the real path a new account takes: the opening card's lines and tone, the scale page filled in character before the
+ * interview (`playScale`, stored as the scale route stores it), the interview (dialogue and extraction, the
  * extraction in the background as the app runs it), the screen's own filtering of the round's questions (what 待决事项 owns, what the
  * ledger already answers) and the app's held questions, the cards and the observation's 准/不准, dates adopted as the page adopts them,
- * the long-term goal adopted from the first two attribute chips; then the extraction's finishing runs and the portrait writer. The people
+ * the long-term goal adopted from the first two attribute chips; then the extraction's finishing runs and the portrait writer. The
+ * interview runs until the model has settled every item of the checklist (`interviewComplete`, 2026-11-27: no round limit; `--turns` is
+ * only a safety cap) or the spend limit. The people
  * run side by side in one process (one Codex app-server in a throwaway home); the web library's store is swapped around each of its
  * synchronous calls, so no call reads another person's ledger. Everything goes through the model gateway on the developer's key
  * (`CROSSLINE_SPONSOR_*`): the interview on `--model` (default the main model), the player on `--player-model` (default the same).
@@ -22,8 +25,8 @@
  * run as a side effect. On the hosted beta it is the `persona` action of .github/workflows/server.yml, and `persona-report` fetches it.
  */
 import { register } from "node:module";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { configureModelGate, runCodexSkill, setProviderResolver, setUsageSink, startCodexAppServer, startCodexSupervisor, startModelGateway,
   installUndiciAssertionGuard, threadProvider, withUsageWorkspace, type ProviderRouting, type SkillUsage } from "../packages/codex/src/index";
@@ -45,6 +48,7 @@ import { createWebTools } from "../apps/worker/src/web-tools";
 import { webSearchFromEnv } from "../packages/connectors/src/index";
 import { createPortraitWriter } from "../apps/worker/src/portrait-writer";
 import { sponsorFromEnv, SPONSOR_PROVIDER_ID } from "../apps/worker/src/sponsor";
+import { playScale, SCALE_PLAYER_SCHEMA, type ScaleTaps } from "./persona-scale";
 
 // The web library guards itself with `import "server-only"`, which only Next resolves; here it is an empty module.
 // A component's stylesheet (`import "./x.css"`, opening-card → CalendarSetupStep since 2026-11-22) is Next's to bundle: empty here too.
@@ -58,14 +62,18 @@ const args = process.argv.slice(2);
 // `--set /persona/sets/<name>`) must be able to replace it.
 const arg = (name: string): string | undefined => { const at = args.lastIndexOf(`--${name}`); return at >= 0 ? args[at + 1] : undefined; };
 const setDir = arg("set"), outRoot = arg("out");
-if (!setDir || !outRoot) { console.error("usage: persona-eval.ts --set <dir> --out <dir> [--only a,b] [--turns 26] [--max-yuan 1.5] [--model <id>] [--player-model <id>]"); process.exit(2); }
-const sponsor = sponsorFromEnv();
-if (!sponsor) { console.error("CROSSLINE_SPONSOR_API_KEY / CROSSLINE_SPONSOR_MODELS are not set"); process.exit(2); }
-const priced = parseSponsorModels(process.env.CROSSLINE_SPONSOR_MODELS);
-const model = arg("model") ?? sponsor.mainModel ?? priced[0]!.model;
+if (!setDir || !outRoot) { console.error("usage: persona-eval.ts --set <dir> --out <dir> [--only a,b] [--turns 60] [--max-yuan 1.5] [--model <id>] [--player-model <id>]"); process.exit(2); }
+// `--codex` (2026-11-27): every Skill on the Codex sign-in of this machine (`~/.codex/auth.json`, copied into the throwaway home), the
+// route a ChatGPT account takes; no gateway, no spend in yuan.
+const codex = args.includes("--codex");
+const sponsor = codex ? undefined : sponsorFromEnv();
+if (!codex && !sponsor) { console.error("CROSSLINE_SPONSOR_API_KEY / CROSSLINE_SPONSOR_MODELS are not set (or pass --codex)"); process.exit(2); }
+const priced = codex ? [] : parseSponsorModels(process.env.CROSSLINE_SPONSOR_MODELS);
+const model = arg("model") ?? (sponsor ? sponsor.mainModel ?? priced[0]!.model : "codex");
 const playerModel = arg("player-model") ?? model;
-for (const item of [model, playerModel]) if (!priced.some((listed) => listed.model === item)) { console.error(`${item} is not in CROSSLINE_SPONSOR_MODELS`); process.exit(2); }
-const turnLimit = Number(arg("turns")) || 26;
+if (!codex) for (const item of [model, playerModel]) if (!priced.some((listed) => listed.model === item)) { console.error(`${item} is not in CROSSLINE_SPONSOR_MODELS`); process.exit(2); }
+// A safety cap only (2026-11-27): the run ends when the model has settled the checklist.
+const turnLimit = Number(arg("turns")) || 60;
 // What one person's interview rounds may spend (interview and player together, in yuan) before the run stops asking and goes on to the
 // finishing runs and the portrait. Replay 17 (2026-11-17): two people who could not reach the start ran to the 45-round cap and the
 // replay cost ¥7.39 against an estimate of ¥1–2; the round cap alone does not bound the bill.
@@ -88,7 +96,7 @@ process.env.CROSSLINE_DATA_DIR = path.join(scratch, "data");
 process.env.CROSSLINE_RECORD_DIR ??= path.join(out, "answers");
 
 // ---- usage, the gateway and the routing: what the worker gives an invited account, the model pinned ----
-const SKILLS = ["crossline-onboarding", "crossline-onboarding-extract", "crossline-onboarding-research", "crossline-portrait-writer", "crossline-portrait-narrative", "crossline-eval-persona"];
+const SKILLS = ["crossline-onboarding", "crossline-onboarding-extract", "crossline-research:onboarding", "crossline-portrait:report", "crossline-portrait:narrative", "crossline-eval-persona"];
 // The interview's runs get the web as an invited account's do (2026-11-12): Crossline's own search through the configured search API.
 const search = webSearchFromEnv();
 const keyOf = (name: string, role: "interview" | "player") => `persona-eval:${name}:${role}`;
@@ -96,16 +104,24 @@ const usageByKey = new Map<string, SkillUsage[]>();
 setUsageSink((usage) => { if (usage.workspaceId) usageByKey.set(usage.workspaceId, [...(usageByKey.get(usage.workspaceId) ?? []), usage]); });
 // No real person shares this process: the people, their extractions and their players each get a slot.
 configureModelGate({ limit: names.length * 3, perTenant: 3, reserve: 0 });
-const gateway = await startModelGateway({ resolve: (key) => key.startsWith("persona-eval:")
-  ? { kind: "chat", baseUrl: sponsor.baseUrl, responseFormat: "json_object", key: sponsor.key, thinkingControl: true, patient: true } : undefined });
+const gateway = sponsor ? await startModelGateway({ resolve: (key) => key.startsWith("persona-eval:")
+  ? { kind: "chat", baseUrl: sponsor.baseUrl, responseFormat: "json_object", key: sponsor.key, thinkingControl: true, patient: true } : undefined }) : undefined;
 const routing = (key: string, pinned: string): ProviderRouting => {
+  if (!sponsor || !gateway) throw new Error("no provider routing on --codex");
   const contextK = sponsor.models.find((item) => item.model === pinned)?.contextK;
   return { provider: { id: SPONSOR_PROVIDER_ID, kind: "chat", label: "开发者提供的模型", baseUrl: sponsor.baseUrl, model: pinned, responseFormat: "json_object",
     keyLast4: null, updatedAt: "1970-01-01T00:00:00.000Z", ...(contextK ? { contextK } : {}) },
     gatewayUrl: gateway.urlFor(key, SPONSOR_PROVIDER_ID), admitted: new Set(SKILLS), codexSignedIn: false, capabilities: { ...THIRD_PARTY_CAPABILITIES, webSearch: Boolean(search) },
     functionCalls: true, ...(search && !key.endsWith(":player") ? { webTools: createWebTools(search) } : {}) };
 };
-setProviderResolver((key) => key?.startsWith("persona-eval:") ? routing(key, key.endsWith(":player") ? playerModel : model) : undefined);
+if (!codex) setProviderResolver((key) => key?.startsWith("persona-eval:") ? routing(key, key.endsWith(":player") ? playerModel : model) : undefined);
+/** The player's thread: on the provider, or (`--codex`) the sign-in. */
+const playerProvider = (key: string) => codex ? {} : { provider: threadProvider(routing(key, playerModel), playerModel, "crossline-eval-persona") };
+if (codex) {
+  const home = path.join(scratch, "codex-home");
+  mkdirSync(home, { recursive: true });
+  copyFileSync(path.join(homedir(), ".codex", "auth.json"), path.join(home, "auth.json"));
+}
 const supervisor = await startCodexSupervisor({ port: Number(process.env.CROSSLINE_CODEX_SUPERVISOR_PORT ?? 3392),
   sidecarFactory: () => startCodexAppServer(path.join(scratch, "codex-home")),
   plugin: { name: "crossline", marketplacePath: path.join(repoRoot, "skills", "marketplace", ".agents", "plugins", "marketplace.json"), cwd: repoRoot,
@@ -170,7 +186,8 @@ async function runPerson(name: string, opening: Opening) {
   const ctx = { principalId: principal.id, workspaceId, role: "owner", identity: { provider: "credential", issuer: "persona-eval", subject: principal.id },
     authMethod: "session", requestId: `persona-eval-${name}` } as AccessContext;
   // The web library reads the global store first: set for each synchronous call, so a person never reads another's ledger.
-  const web = async () => ({ ...(await import("../apps/web/lib/lines")), ...(await import("../apps/web/lib/interview-status")), ...(await import("../apps/web/lib/imported-dates")) });
+  const web = async () => ({ ...(await import("../apps/web/lib/lines")), ...(await import("../apps/web/lib/interview-status")), ...(await import("../apps/web/lib/imported-dates")),
+    ...(await import("../apps/web/lib/profile-scale")) });
   const lib = await web();
   const withStore = <T,>(work: () => T): T => { (globalThis as { crosslineStore?: unknown }).crosslineStore = store; return work(); };
   const json = <T,>(key: string, fallback: T): T => { try { return JSON.parse(store.getSetting(workspaceId, key) ?? "null") ?? fallback; } catch { return fallback; } };
@@ -209,6 +226,22 @@ async function runPerson(name: string, opening: Opening) {
   };
 
   try {
+    // The scale page comes first, as for a new account (2026-11-27): every item answered in character, stored as the route stores it.
+    const scale = await playScale(life, async (context) => {
+      const run = () => withUsageWorkspace(playerKey, () => runCodexSkill<ScaleTaps>(client, context, { skillName: "crossline:crossline-eval-persona", cwd: repoRoot,
+        ...playerProvider(playerKey),
+        developerInstructions: "Play the person as the Skill describes. Return raw JSON only.", outputSchema: SCALE_PLAYER_SCHEMA, prepareInput: () => context,
+        validateOutput: (output) => output as ScaleTaps, onAudit: () => {}, timeoutMs: 30 * 60_000 }));
+      let played = await run();
+      for (let attempt = 1; attempt <= 4 && !played.ok && rateLimited(played.blocker.message); attempt += 1) { await wait(attempt * 60_000); played = await run(); }
+      return played.ok ? played.output : undefined;
+    });
+    const stored = withStore(() => lib.changeScale(ctx, { action: "answers", answers: scale }));
+    if (!stored.ok) throw new Error(`${name}: changeScale refused: ${stored.code}`);
+    withStore(() => lib.changeScale(ctx, { action: "complete" }));
+    const tapped = scale.filter((answer) => answer.score !== null).length;
+    transcript.push(`**量表页**：${tapped}/${scale.length} 题作答`, "");
+    log({ scale: tapped, of: scale.length });
     transcript.push("**开场**", "", text, "");
     while (turns < turnLimit) {
       turns += 1;
@@ -254,6 +287,8 @@ async function runPerson(name: string, opening: Opening) {
       writeFileSync(path.join(dir, "progress.json"), JSON.stringify({ turns, readyAtRound: readyAt ?? null, rounds,
         metrics: interviewMetrics(store, workspaceId, "eval"), cost: { interview: cost(interviewKey), player: cost(playerKey) } }, null, 2), "utf8");
       if (outcome.state === "ready") break;
+      // Complete as the model judged the checklist (2026-11-27): the end of the replay, not the player's press.
+      if (interviewComplete(items)) { transcript.push(`**访谈完整**：清单各项都已判定（第 ${turns} 轮）`, ""); log({ turn: turns, complete: true }); break; }
       const spent = cost(interviewKey).yuan + cost(playerKey).yuan;
       if (spent >= spendLimit) {
         transcript.push(`**预算用完**：访谈轮已花 ¥${spent.toFixed(2)}（上限 ¥${spendLimit}），停在第 ${turns} 轮。`, "");
@@ -266,7 +301,7 @@ async function runPerson(name: string, opening: Opening) {
         const sideContext = { version: "crossline.eval-persona.v2", persona: life, reply: `（侧栏调研卡：${thread.question}）`, questions: [{ id: "side", text: thread.ask!, kind: "free", options: [] }],
           files: [], cards: [], insights: [], earlier: earlier.slice(-3) };
         const side = await withUsageWorkspace(playerKey, () => runCodexSkill<Played>(client, sideContext, { skillName: "crossline:crossline-eval-persona", cwd: repoRoot,
-          provider: threadProvider(routing(playerKey, playerModel), playerModel, "crossline-eval-persona"),
+          ...playerProvider(playerKey),
           developerInstructions: "Play the person as the Skill describes. Return raw JSON only.", outputSchema: PLAYER_SCHEMA, prepareInput: () => sideContext,
           validateOutput: (output) => output as Played, onAudit: () => {}, timeoutMs: 30 * 60_000 }));
         const said = side.ok ? [side.output.answers[0]?.other, side.output.freeText].filter(Boolean).join(" ") : "";
@@ -288,14 +323,15 @@ async function runPerson(name: string, opening: Opening) {
         finish: { offered: Boolean(readyAt), percent: Math.round(completeness.score * 100), reminder } };
       const play = () => withUsageWorkspace(playerKey, () => runCodexSkill<Played>(client, context, { skillName: "crossline:crossline-eval-persona", cwd: repoRoot,
         // A test-only Skill is never routed to a provider by the rules, so the player names its thread's provider itself.
-        provider: threadProvider(routing(playerKey, playerModel), playerModel, "crossline-eval-persona"),
+        ...playerProvider(playerKey),
         developerInstructions: "Play the person as the Skill describes. Return raw JSON only.", outputSchema: PLAYER_SCHEMA, prepareInput: () => context,
         validateOutput: (output) => output as Played, onAudit: () => {}, timeoutMs: 30 * 60_000 }));
       let played = await play();
       for (let attempt = 1; attempt <= 4 && !played.ok && rateLimited(played.blocker.message); attempt += 1) { await wait(attempt * 60_000); played = await play(); }
       if (!played.ok) { transcript.push(`模拟用户未能作答：${played.blocker.code} ${played.blocker.message}`); log({ turn: turns, playerBlocked: played.blocker.code }); break; }
       const answer = played.output;
-      if (readyAt && answer.finish) { transcript.push(`**本人按「结束并出报告」**（完善度 ${Math.round(completeness.score * 100)}%）`, ""); log({ turn: turns, finished: true }); break; }
+      // Recorded, not the end (2026-11-27): the replay runs on until the checklist is settled, so the whole interview is judged.
+      if (readyAt && answer.finish) { rounds[rounds.length - 1]!.finishPressed = true; transcript.push(`（本人想按「结束并出报告」，完善度 ${Math.round(completeness.score * 100)}%；回放继续到清单判定完整）`, ""); }
       const goOn = Boolean(answer.goOn && turn.next?.trim());
       rounds[rounds.length - 1]!.goOn = goOn;
       const answers = Object.fromEntries((answer.answers ?? []).map((item) => {
@@ -389,5 +425,5 @@ const summary = (await Promise.allSettled(names.map((name) => runPerson(name, op
 writeFileSync(path.join(out, "summary.json"), JSON.stringify(summary, null, 2), "utf8");
 console.info(JSON.stringify({ step: "done", summary }));
 await supervisor.stop();
-await gateway.close?.();
+await gateway?.close?.();
 process.exit(0);

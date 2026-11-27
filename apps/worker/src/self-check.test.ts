@@ -19,10 +19,10 @@ beforeEach(() => {
 afterEach(() => { store.close(); rmSync(root, { recursive: true, force: true }); });
 
 const run = (taskId: string, directory: string, files: string[]) => {
-  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `req:${taskId}`, type: "agent.task.requested", entityId: taskId, payload: { title: taskId, category: "draft_text" } });
-  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `done:${taskId}`, type: "agent.task.completed", entityId: taskId,
-    payload: { directory, artifacts: files.map((file) => ({ path: file, sha256: "h", bytes: 1 })), needsHuman: 0, checksPassed: true, inputsModified: [], reviewRequired: true } });
-  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `rev:${taskId}`, type: "agent.task.reviewed", entityId: taskId, payload: { decision: "accepted" } });
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `req:${taskId}`, type: "agent.changed", entityId: taskId, payload: { title: taskId, category: "draft_text", change: "task_requested" } });
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `done:${taskId}`, type: "agent.changed", entityId: taskId,
+    payload: { directory, artifacts: files.map((file) => ({ path: file, sha256: "h", bytes: 1 })), needsHuman: 0, checksPassed: true, inputsModified: [], reviewRequired: true, change: "task_completed" } });
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `rev:${taskId}`, type: "agent.changed", entityId: taskId, payload: { decision: "accepted", change: "task_reviewed" } });
 };
 const folder = (name: string, files: string[]) => {
   const dir = path.join(root, name);

@@ -78,7 +78,7 @@ export function redeemInvite(store: CrosslineStore, workspaceId: string, ownerId
   const sponsorship: Sponsorship = { inviteId: invite.id, since: invite.redeemedAt ?? now.toISOString() };
   if (invite.status === "approved") {
     store.saveInvite({ ...invite, status: "redeemed", redeemedAt: sponsorship.since, redeemedWorkspaceId: workspaceId });
-    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `invite.redeemed:${invite.id}`, type: "invite.redeemed", entityId: invite.id, payload: {} });
+    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `invite.redeemed:${invite.id}`, type: "person.decided", entityId: invite.id, payload: { subject: "invite", decision: "redeemed" } });
   }
   store.setSetting(workspaceId, SPONSOR_SETTING, JSON.stringify(sponsorship));
   return { ok: true, sponsorship };

@@ -19,8 +19,6 @@ export type ReportItemView = ReportItem & { key: string; state: "open" | "added"
 export type ReportSummary = { id: string; workflowId: string; title: string; at: string; notes?: number; files: number };
 export type ReportView = ReportSummary & { documents: ReportDocument[]; items: ReportItemView[]; versions: Array<{ id: string; at: string }> };
 
-export const REPORT_ADDED_EVENT = "report.item_added";
-export const REPORT_DISMISSED_EVENT = "report.item_dismissed";
 const CAPTURE_PREFIX = "report-";
 const MAX_DOCUMENTS = 40;
 const OVERVIEW = /^话题总览\.md$/; // i18n-ignore: the file name the run writes
@@ -86,10 +84,10 @@ export function listReports(ctx: AccessContext): ReportSummary[] {
 
 function decisions(store: CrosslineStore, workspaceId: string): Map<string, "added" | "dismissed"> {
   const state = new Map<string, "added" | "dismissed">();
-  for (const event of store.listEvents(workspaceId, { type: [REPORT_DISMISSED_EVENT, REPORT_ADDED_EVENT] })) {
+  for (const event of store.listEvents(workspaceId, { type: "report.changed", change: ["item_dismissed", "item_added"] })) {
     const key = (event.payload as { key?: unknown }).key;
     // Added wins over dismissed whatever the order: the task exists.
-    if (typeof key === "string" && state.get(key) !== "added") state.set(key, event.type === REPORT_ADDED_EVENT ? "added" : "dismissed");
+    if (typeof key === "string" && state.get(key) !== "added") state.set(key, (event.type === "report.changed" && (event.payload as { change?: string }).change === "item_added") ? "added" : "dismissed");
   }
   return state;
 }
@@ -124,7 +122,7 @@ export function decideReportItem(ctx: AccessContext, reportId: string, key: stri
   const captureId = `${CAPTURE_PREFIX}${key}`;
   if (decision === "dismiss") {
     if (item.state === "open") store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `report:dismissed:${key}`,
-      type: REPORT_DISMISSED_EVENT, entityId: captureId, payload: { key, reportId } });
+      type: "report.changed", entityId: captureId, payload: { key, reportId, change: "item_dismissed" } });
     return { ok: true, captured: false };
   }
   if (item.state === "added" || store.listCaptures(ctx.workspaceId).some((capture) => capture.id === captureId)) return { ok: true, captured: false };
@@ -133,13 +131,13 @@ export function decideReportItem(ctx: AccessContext, reportId: string, key: stri
   const context = [item.why, item.topic ? `话题：${item.topic}` : "", line ? `主线：${line}` : "", `来自报告「${report.title}」`].filter(Boolean).join("\n");
   addCapturedTaskWithId(ctx, { title: item.title, context: context.slice(0, 500) }, captureId, captureId);
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `report:added:${key}`,
-    type: REPORT_ADDED_EVENT, entityId: captureId, payload: { key, reportId, reportTitle: report.title, title: item.title } });
+    type: "report.changed", entityId: captureId, payload: { key, reportId, reportTitle: report.title, title: item.title, change: "item_added" } });
   return { ok: true, captured: true };
 }
 
 /** The report a task came from: its capture id is the action's (the work order keeps the capture's id when analysis promotes it). */
 export function reportOfTask(store: CrosslineStore, workspaceId: string, workOrderId: string): { id: string; title: string } | undefined {
   if (!workOrderId.startsWith(CAPTURE_PREFIX)) return undefined;
-  const payload = store.listEvents(workspaceId, { type: REPORT_ADDED_EVENT, entityId: workOrderId }).at(-1)?.payload as { reportId?: unknown; reportTitle?: unknown } | undefined;
+  const payload = store.listEvents(workspaceId, { type: "report.changed", change: "item_added", entityId: workOrderId }).at(-1)?.payload as { reportId?: unknown; reportTitle?: unknown } | undefined;
   return typeof payload?.reportId === "string" ? { id: payload.reportId, title: typeof payload.reportTitle === "string" ? payload.reportTitle : "" } : undefined;
 }

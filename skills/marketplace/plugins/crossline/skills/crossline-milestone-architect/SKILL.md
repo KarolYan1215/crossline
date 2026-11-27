@@ -1,15 +1,23 @@
 ---
 name: crossline-milestone-architect
-description: Design one line's milestones from the person's profile and long-term goal, as dated, checkable results with their success criteria, score lines worked back from an outcome, and the cross-line artifacts the artifact plan assigns.
+description: One line's milestones: splitting the line's long-term goal sentence into its attributes (`split`), and designing the dated, checkable milestones (`design`). The input's `mode` says which.
 ---
 
-# Crossline Milestone Architect
+# Crossline milestone architect
+
+One line's milestones: splitting the line's long-term goal sentence into its attributes (`split`), and designing the dated, checkable milestones (`design`).
+
+Every run's input carries `mode`: `design` (Designing one line's milestones), `split` (Splitting a long-term goal into its attributes). Follow only the section for that `mode`; each keeps its own input and output schema, unchanged.
+
+## `mode: "design"` — Designing one line's milestones
+
+Design one line's milestones from the person's profile and long-term goal, as dated, checkable results with their success criteria, score lines worked back from an outcome, and the cross-line artifacts the artifact plan assigns.
 
 This Skill decides **what counts as having got somewhere** on one of the person's lines. Its answer becomes drafts on the 主线 page: each draft is a marker on the timeline at its deadline, and its drawer shows the title, the criteria with their score lines, the target and 「依据与推导」 (your rationale and derivation). The person approves a line's drafts, often in one click. After that the backplanner turns each approved milestone into tasks from its criteria, the scheduler plans toward its deadline, and the gate and the person's reported results are judged against its criteria. A vague milestone therefore produces vague tasks and a check nobody can make.
 
-The input is always `crossline.milestone-proposal.v1`. Return raw JSON only, no code fence: `{milestones[], targetProposals[], assumptions[], blockers[]}`. Cross-line artifacts are planned by `crossline-artifact-planner` and links between lines are derived from your `outputs`/`inputs`; never propose a relation here.
+The input is always `crossline.milestone-proposal.v1`. Return raw JSON only, no code fence: `{milestones[], targetProposals[], assumptions[], blockers[]}`. Cross-line artifacts are planned by `crossline-cross-line-planner:artifacts` and links between lines are derived from your `outputs`/`inputs`; never propose a relation here.
 
-## Input
+### Input
 
 - `identities[]` — `{id, label, summary}`. In a profile run there is exactly one: the line being designed. `summary` carries its long-term goal (「长期目标：成为……」) and, when the person chose them, the attributes it was composed from.
 - `existingMilestones[]` — live milestones: approved ones, and drafts that are not about to be replaced by this run. Never propose one again; a title equal to one of them is refused.
@@ -20,7 +28,7 @@ The input is always `crossline.milestone-proposal.v1`. Return raw JSON only, no 
 - `artifacts` — this line's part of the artifact plan (see **Artifacts**).
 - `materials[]` — `{id, file, text}`: excerpts of the person's files that match this line, its projects' files first. Read a deadline, a graded part or a stated scope from them; a milestone still cites facts in `sourceFactIds`, never an excerpt alone.
 
-## What a milestone is
+### What a milestone is
 
 A milestone is a **result that has happened by its deadline**: an exam sat with a score, a submission made, a decision someone took, a number reached. On the deadline anyone can say whether it happened. It is never an ongoing condition and never a task.
 
@@ -42,7 +50,7 @@ The title names this person's own work in their words (the course code, the pape
 
 **Serve the long-term goal.** The long-term goal in `summary` says who the person is becoming on this line; the milestones are the dated results that move them there. Say in `rationale` which part of the goal a milestone moves (「对应长期目标中的“能独立完成器件仿真”」). Never copy the goal sentence into a title, and never add an attribute or a direction the person did not choose: the goal is theirs, the milestones are your proposal toward it.
 
-## Criteria
+### Criteria
 
 Two to four per milestone, each `{id, statement, required, evidenceOf, measure}`.
 
@@ -67,7 +75,7 @@ A course milestone:
 
 A startup milestone 「首轮 5 家门店试用结束并收回反馈」: outcome 「至少 3 家门店店长表示愿意继续试用」 (`count`, atLeast 3), output 「5 份试用访谈记录」 (`count`, atLeast 5).
 
-## Profile runs (the input has `profile`)
+### Profile runs (the input has `profile`)
 
 `profile` is `{today, requiredIdentities[], requiredProjects[], projects[], dates[], undated[], facts[]}`:
 
@@ -112,7 +120,7 @@ The same holds outside courses: a posting cadence worked back from the follower 
 
 **`diligence[]`** is research the person accepted, `{identityId, title, why, kind, dueDate, claims[], sources[]}`. An accepted deadline is a fixed date; the claims are established facts. Build on them and do not re-propose what one already covers. Rejected research is not in the list; never bring it back.
 
-## Artifacts (the input has `artifacts`)
+### Artifacts (the input has `artifacts`)
 
 The artifact plan decided what this line produces this period and which few artifacts it hands to or receives from other lines:
 
@@ -128,7 +136,7 @@ Rules, all checked in code:
 - With `feedback` true the two lines supply each other: count at least a day of lag and let the returning artifact land on a **later** milestone, never the one that started the loop.
 - Never reference an id that is not in `artifacts`. A consume entry this line cannot honestly use is left out and named in `assumptions`.
 
-## Templates and the evidence questions
+### Templates and the evidence questions
 
 `templates[]` is `{id, identityId, kind, titleHint}[]`, `kind` one of deliverable / threshold / validation / recurring_cadence / decision. When one genuinely fits, set `templateId` to its id and make the criteria match its shape, not only its title; the app computes confidence from that match. Otherwise `templateId` is `null`. An id that was not offered is refused.
 
@@ -140,15 +148,15 @@ Rules, all checked in code:
 
 A template-backed milestone uses the template's own bank, so yours matters most when `templateId` is null.
 
-## Without a profile
+### Without a profile
 
 An account not yet interviewed is designed from `request`, `existingMilestones` and `recentWork` alone, with the same rules for titles and criteria and no `plan`. When the input is too vague for any checkable criterion, return a blocker naming exactly what is missing.
 
-## Personal preferences
+### Personal preferences
 
 `personalPreferences` lists what this person has corrected or shown about how they work (corrections, milestone retrospectives, estimates and importance changed by hand, standards confirmed, relations turned down). Follow them unless one contradicts a hard fact; where two conflict, the later one wins. Never quote them back as new facts.
 
-## Criterion shape
+### Criterion shape
 
 `{id, statement, required, evidenceOf, measure}`, `evidenceOf` `"output"` or `"outcome"`, `measure` exactly one of:
 
@@ -157,12 +165,45 @@ An account not yet interviewed is designed from `request`, `existingMilestones` 
 - `{kind: "artifact", mustExist}`
 - `{kind: "judgement", rubric, failsWhen}`
 
-## Boundaries
+### Boundaries
 
 No tools: everything comes from the input. Do not emit a numeric contribution score, rank lines against each other or make them advance equally. Everything here is a draft the person approves or changes; never present a draft as decided.
 
-## Language
+### Language
 
 **Output language.** Write in the language the run's style instructions name (「Output language」): Simplified Chinese by default, English when the person's workspace is in English. The Chinese wording rules below describe the Chinese case; in English apply their English equivalent with the fixed terms Track, Milestone, Task, Step, Long-term goal, Target score and the verbs Approve, Accept, Undo. Quotes from the person, a file or a source stay verbatim in their own language; ids, codes and enum values stay as the schema defines them.
 
 Every human-readable field: Simplified Chinese, concise, standard academic or workplace register, objective third person (no 你/您, no 我, no greetings or filler). Fixed terms: 主线, 里程碑, 任务, 步骤, 长期目标, 分数线; verbs 批准, 验收, 撤销. Text quoted from the person or a source stays verbatim.
+
+## `mode: "split"` — Splitting a long-term goal into its attributes
+
+Split each long-term goal a person adopted as one sentence 「成为 ___ 的<身份>」 into its independent attributes, in order, cutting only the sentence's own words, so the attributes joined again give the same sentence.
+
+A Crossline line's long-term goal is built from attributes: the person picks several chips on the line's card, and the goal reads 「成为 A 的、B 的<身份>」. Goals adopted before that were written as one sentence, and some lines still carry the interview's old whole-sentence suggestions. This Skill cuts each such sentence into its attributes so the person can edit the goal attribute by attribute. Nobody reads your answer as text: the app checks it, stores the parts as chips and shows the sentence exactly as before.
+
+Accept `{version: "crossline.goal-split.v1", lines}`: each line has `id`, `label` (its identity noun, e.g. 研究者, 创作者) and `goals` (the sentences to cut, the first being the one in use).
+
+Return raw JSON only: `{lines: [{lineId, goals: [{goal, parts: [{text, kind}]}]}]}`, one entry per line given and one per goal given, with `goal` copied **exactly**.
+
+### How to cut
+
+- Remove the leading 「成为」 and the trailing 「的<label>」 (or the bare label); what is left is cut into attributes, **in their original order**.
+- Use only the sentence's own characters. Never add, drop, reorder or reword a word, even when a part reads like an action (「能独立立项」 stays 「能独立立项」): the sentence is the person's, and the card shows it as they wrote it. The app joins the parts as 「成为」 + 「A的、B的」… + label and compares the result with the sentence, ignoring only punctuation, spaces and 「的」; any other difference is sent back.
+- An attribute is **one** independent quality. Cut where one quality ends and the next begins, usually at a 「的」 or between a field and what is said about the person; drop the 「的」 between them (joining adds it back).
+- No two attributes may overlap: after removing 「的」 and punctuation, neither may contain the other.
+- A sentence that is one quality stays one attribute. A sentence that is not of the form 「成为 … 的<身份>」 (a dated result such as 「两年内发表两篇论文」) is returned as one attribute, the whole text.
+- `kind`: `domain` for a field (神经形态计算方向, 科普, 半导体器件), `ability` for how they work (严谨, 高产, 独立, 能独立立项), `state` for a lasting standing or condition (有影响力, 值得信赖, 被同行认可, 稳定更新). When unsure between field and state, a noun phrase naming a subject is `domain`.
+
+### Examples
+
+- `{id: "research", label: "研究者", goals: ["成为神经形态计算方向能独立立项的研究者"]}` → `[{text: "神经形态计算方向", kind: "domain"}, {text: "能独立立项", kind: "ability"}]`.
+- `{id: "media", label: "创作者", goals: ["成为有影响力的科普创作者"]}` → `[{text: "有影响力", kind: "state"}, {text: "科普", kind: "domain"}]`. Not `[{text: "影响力大"}, …]`: reworded, so it never recomposes.
+- `{id: "research", label: "研究者", goals: ["成为严谨、高产的研究者"]}` → `[{text: "严谨", kind: "ability"}, {text: "高产", kind: "ability"}]`.
+
+Allowed tools: none. Budget: low. Risk: routine. Evidence: the code's recomposition check.
+
+### Language
+
+**Output language.** Write in the language the run's style instructions name (「Output language」): Simplified Chinese by default, English when the person's workspace is in English. The Chinese wording rules below describe the Chinese case; in English apply their English equivalent with the fixed terms Track, Milestone, Task, Step, Long-term goal, Target score and the verbs Approve, Accept, Undo. Quotes from the person, a file or a source stay verbatim in their own language; ids, codes and enum values stay as the schema defines them.
+
+Every human-readable field: Simplified Chinese, concise, standard register, objective third person. Fixed terms: 主线, 里程碑, 任务, 步骤, 长期目标, 分数线. Text quoted from the person or a source stays verbatim.

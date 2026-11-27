@@ -37,7 +37,7 @@ test("each conversation of an AI chat export gets the model's summary; the inter
   save("chat", "conversations.json", exportText);
   save("plan", "计划.md", "# 研究计划\n正文");
   const answer = JSON.stringify({ segments: [{ id: "s0", summary: "本人在改 MoS2 论文的摘要，3 月 15 日前要投出。" }, { id: "s1", summary: "主要贴了 Python 报错日志。" }] });
-  const runtime = fakeRuntime([answer], "crossline:crossline-source-digest");
+  const runtime = fakeRuntime([answer], "crossline:crossline-capture-digest:source");
   expect(await createChatDigester(store, workspaceId, "C:\\repo", () => runtime.rpc, { dataDir: data })()).toEqual({ summarized: 2, notes: 1 });
   // Only the person's words went to the model, by conversation.
   expect(runtime.prompts().join("\n")).toContain("crossline.chat-digest.v1");
@@ -56,7 +56,7 @@ test("a conversation the model passes over twice is written into the note withou
   save("chat", "conversations.json", exportText);
   const partial = JSON.stringify({ segments: [{ id: "s0", summary: "本人在改论文摘要。" }] });
   const none = JSON.stringify({ segments: [] });
-  const runtime = fakeRuntime([partial, none], "crossline:crossline-source-digest");
+  const runtime = fakeRuntime([partial, none], "crossline:crossline-capture-digest:source");
   expect(await createChatDigester(store, workspaceId, "C:\\repo", () => runtime.rpc, { dataDir: data })()).toEqual({ summarized: 1, notes: 1 });
   const note = store.listSourceDocuments(workspaceId).find((doc) => doc.id === `${CHAT_NOTE_ID}chat`)!;
   expect(note.extractedText).toContain("本人在改论文摘要。");

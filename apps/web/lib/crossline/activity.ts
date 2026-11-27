@@ -41,12 +41,10 @@ export const ACTIVITY_BLACKLIST = "activity.blacklist";
 export type LastNight = { state: "none" } | { state: "ran"; proposals: number } | { state: "skipped"; reason: string };
 export function lastNight(workspaceId: string, now: Date, locale?: Locale): LastNight {
   const since = new Date(now.getTime() - 36 * 60 * 60_000).toISOString();
-  const event = [...getStore().listEvents(workspaceId)]
-    .reverse()
-    .find((item) => item.type.startsWith("flywheel.nightly.") && item.createdAt >= since);
+  const event = getStore().listEvents(workspaceId, { type: "job.ran", job: "flywheel.nightly" }).reverse().find((item) => item.createdAt >= since);
   if (!event) return { state: "none" };
   const payload = event.payload as { code?: string; message?: string; proposals?: number };
-  if (event.type === "flywheel.nightly.ran") return { state: "ran", proposals: payload.proposals ?? 0 };
+  if ((event.type === "job.ran" && (event.payload as { job?: string }).job === "flywheel.nightly" && (event.payload as { state?: string }).state === "done")) return { state: "ran", proposals: payload.proposals ?? 0 };
   // Shown on 周复盘: the stored message of a failed run or an unreadable quota is the runtime's own error text (a JSON-RPC body), so
   // those two are said in words by their code.
   const plain: Record<string, string> = { COST_SIGNAL_UNAVAILABLE: "读不到模型额度，今晚不运行。", FLYWHEEL_RUN_FAILED: "扩展运行出错，下一晚重试。" };

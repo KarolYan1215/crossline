@@ -33,11 +33,11 @@ test("migration 14 archives plan changes and older plan versions as events and k
       const raw = new Database(path, { readonly: true });
       expect((raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'plan_changes'").get())).toBeUndefined();
       raw.close();
-      const archived = store.listEvents("w1", { type: "plan.change_archived" });
+      const archived = store.listEvents("w1", { type: "plan.changed", change: "change_archived" });
       expect(archived).toHaveLength(2);
       expect(archived.map((event) => (event.payload as { explanation: string }).explanation).sort()).toEqual(["新会议", "日历中已不存在"]);
       expect((archived.find((event) => (event.payload as { id: string }).id === "chg-1")!.payload as { before: unknown }).before).toEqual({ id: "a" });
-      expect(store.listEvents("w1", { type: "plan.version_archived" })).toHaveLength(1);
+      expect(store.listEvents("w1", { type: "plan.changed", change: "version_archived" })).toHaveLength(1);
       const plans = store.listPlanVersions("w1");
       expect(plans).toHaveLength(1);
       expect(plans[0]).toMatchObject({ id: "plan-v2", status: "current" });

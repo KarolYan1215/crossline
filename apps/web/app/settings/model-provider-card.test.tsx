@@ -17,8 +17,8 @@ test("a tested provider lists what it serves and, for the rest, why not — neve
   const html = renderToStaticMarkup(<ModelProviderCard initial={{ ...base,
     provider: { id: "deepseek", kind: "chat", label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat", keyLast4: "9xyz" },
     conformance: { ranAt: "2026-10-13T11:00:00.000Z", passRate: 0.94, repairRate: 0.03, p95Ms: 41_000, runs: 35, current: true, failures: [] },
-    features: [{ skill: "crossline-task-titler", label: "任务命名", critical: false, served: true, reason: "" },
-      { skill: "crossline-due-diligence", label: "网上查证", critical: false, served: false, reason: "网上查证要联网搜索，这个模型连接没有" }] }} />);
+    features: [{ skill: "crossline-goal-backplanner:title", label: "任务命名", critical: false, served: true, reason: "" },
+      { skill: "crossline-research:diligence", label: "网上查证", critical: false, served: false, reason: "网上查证要联网搜索，这个模型连接没有" }] }} />);
   expect(html).toContain("承担 1 项");
   expect(html).toContain("任务命名");
   expect(html).toContain("网上查证要联网搜索");

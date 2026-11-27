@@ -31,7 +31,7 @@ const only = (pages: GraphDeltaPage[]) => {
 
 /** What the last sync reported as changed (`plan.reality_changed`); the plan itself is one row updated in place. */
 const lastChanges = (): Array<{ kind: string; blockId: string; explanation: string }> =>
-  ((store.listEvents(WORKSPACE, { type: "plan.reality_changed" }).at(-1)?.payload as { changes?: Array<{ kind: string; blockId: string; explanation: string }> })?.changes ?? []);
+  ((store.listEvents(WORKSPACE, { type: "plan.changed", change: "reality_changed" }).at(-1)?.payload as { changes?: Array<{ kind: string; blockId: string; explanation: string }> })?.changes ?? []);
 const seedPlan = (status: "current" | "draft" | "approved", blocks: unknown[]) => {
   store.savePlanVersion({ id: "plan-1", ownerId: "local-owner", workspaceId: WORKSPACE,
     version: 1, status, payload: { blocks } });
@@ -211,7 +211,7 @@ test("a long calendar id keeps add and move as separate changes", async () => {
   await sync();
   await sync();
 
-  const kinds = store.listEvents(WORKSPACE, { type: "plan.reality_changed" })
+  const kinds = store.listEvents(WORKSPACE, { type: "plan.changed", change: "reality_changed" })
     .flatMap((event) => (event.payload as { changes: Array<{ kind: string }> }).changes.map((change) => change.kind));
   expect(kinds).toEqual(["add", "move"]);
 });

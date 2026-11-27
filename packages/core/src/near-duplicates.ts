@@ -1,7 +1,7 @@
 /**
  * Near-duplicate candidates among the person's files (docs/plans/2026-11-22-interview-and-import-redesign.md §四.3.4): code only circles
  * pairs whose text is close, by a 64-bit SimHash over character 4-grams (works the same for Chinese and English); whether two files are
- * versions of one document, and which is the latest, is the model's call (Skill `crossline-source-digest`). Exact copies are already one
+ * versions of one document, and which is the latest, is the model's call (Skill `crossline-capture-digest:source`). Exact copies are already one
  * row (`UNIQUE(workspace_id, sha256)`).
  */
 

@@ -71,7 +71,7 @@ export const MILESTONE_PLAN_SCHEMA = {
  * Judged by the architect, not here (2026-11-22): a title or target that is a state rather than an event (「保持可完成状态」), a milestone
  * whose every criterion is material being ready, and a score line earlier in a chain standing above the chain's final one. They were
  * Chinese word lists and a course exemption (`isCourse`), so an English answer or a line that is not a course was judged by another
- * grammar; the rules are in the crossline-milestone-architect Skill. What stays here is structure: dates, chains, sources, measures, margins.
+ * grammar; the rules are in the crossline-milestone-architect:design Skill. What stays here is structure: dates, chains, sources, measures, margins.
  */
 const GENERIC_TITLE = /第一个可验收|当前最该推进|起步里程碑|-starter$/;
 const ISO = /^\d{4}-\d{2}-\d{2}$/;

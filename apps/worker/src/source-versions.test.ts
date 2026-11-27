@@ -29,7 +29,7 @@ test("code circles near-duplicates, the model confirms the versions and picks th
   save("other", "购物清单.md", "牛奶、鸡蛋、面包、苹果、香蕉、米、面、油、盐、酱、醋、茶。".repeat(20), "2026-04-02T00:00:00Z");
   const answer = JSON.stringify({ pairs: [{ a: "new", b: "old", sameDocument: true, latestId: "new", olderSummary: "较早的研究计划，有背景、方法和时间表三部分。",
     differences: "终稿新增第四部分「风险」。", why: "文件名标为终稿且内容是扩展" }] });
-  const { rpc } = fakeRuntime([answer], "crossline:crossline-source-digest");
+  const { rpc } = fakeRuntime([answer], "crossline:crossline-capture-digest:source");
   expect(await createVersionJudge(store, workspaceId, "C:\\repo", () => rpc, { dataDir: data })()).toEqual({ asked: 1, superseded: 1 });
   expect([...supersededDocumentIds(store, workspaceId)]).toEqual(["old"]);
   // The interview skips the older file in full and reads its note; the original stays stored.
@@ -47,7 +47,7 @@ test("two different documents that only look alike stay as they are", async () =
   save("a", "第一周报告.md", body, "2026-03-01T00:00:00Z");
   save("b", "第二周报告.md", `${body}本周另有安排。`, "2026-03-08T00:00:00Z");
   const answer = JSON.stringify({ pairs: [{ a: "a", b: "b", sameDocument: false, latestId: "", olderSummary: "", differences: "", why: "两周各自的报告" }] });
-  const { rpc } = fakeRuntime([answer], "crossline:crossline-source-digest");
+  const { rpc } = fakeRuntime([answer], "crossline:crossline-capture-digest:source");
   expect(await createVersionJudge(store, workspaceId, "C:\\repo", () => rpc, { dataDir: data })()).toEqual({ asked: 1, superseded: 0 });
   expect(supersededDocumentIds(store, workspaceId).size).toBe(0);
 });
@@ -55,6 +55,6 @@ test("two different documents that only look alike stay as they are", async () =
 test("a picked folder is screened by the model by name, size and date, within the limit", async () => {
   const files = [{ path: "docs/plan.md", size: 2000, modified: Date.UTC(2026, 3, 1) }, { path: "docs/LICENSE.txt", size: 1000, modified: Date.UTC(2020, 0, 1) },
     { path: "docs/cv.pdf", size: 90_000, modified: Date.UTC(2026, 2, 1) }];
-  const { rpc } = fakeRuntime([JSON.stringify({ keep: [2, 0, 0, 9], why: "保留简历和计划，许可证不读" })], "crossline:crossline-folder-classifier");
+  const { rpc } = fakeRuntime([JSON.stringify({ keep: [2, 0, 0, 9], why: "保留简历和计划，许可证不读" })], "crossline:crossline-line-filer:folder");
   expect(await createFolderScreener(store, workspaceId, "C:\\repo", () => rpc)("docs", files, 60)).toEqual({ keep: ["docs/cv.pdf", "docs/plan.md"], why: "保留简历和计划，许可证不读" });
 });

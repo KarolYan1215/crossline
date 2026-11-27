@@ -1,4 +1,4 @@
-import { DELIVERABLE_CHECK_SCHEMA, DELIVERABLE_JUDGED, onPersonsBoard, readSourceFolders, RESULT_FOLDERS_SETTING, SOURCE_FOLDERS_SETTING, sourceFolderIndexSetting,
+import { DELIVERABLE_CHECK_SCHEMA, onPersonsBoard, readSourceFolders, RESULT_FOLDERS_SETTING, SOURCE_FOLDERS_SETTING, sourceFolderIndexSetting,
   taskTitleOf, validateDeliverableCheck, type DeliverableCheck, type FolderIndexEntry } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore, StoredSourceDocument, StoredWorkOrder } from "@crossline/db";
@@ -13,7 +13,7 @@ import { ownerOf } from "./owner";
  * web closes tasks and asks about gaps from them (`apps/web/lib/deliverables.ts`). Only authorized folders, only text already read and
  * kept (credentials and private papers never are), nothing sent anywhere but the model run.
  */
-export const DELIVERABLE_SKILL = "crossline:crossline-deliverable-check";
+export const DELIVERABLE_SKILL = "crossline:crossline-evidence-judge:deliverable";
 const OPEN = new Set(["approved", "preparing", "ready_for_human", "active"]);
 /** Finished work is checked for this long after it was finished. */
 const FINISHED_DAYS = 14;
@@ -27,7 +27,7 @@ type NewFile = { doc: StoredSourceDocument; folderId: string; relative: string; 
 
 /** New files of the authorized folders not judged yet, oldest change first. */
 export function newFolderFiles(store: CrosslineStore, workspaceId: string): NewFile[] {
-  const judged = new Set(store.listEvents(workspaceId, { type: DELIVERABLE_JUDGED }).map((event) => event.entityId));
+  const judged = new Set(store.listEvents(workspaceId, { type: "deliverable.changed", change: "judged" }).map((event) => event.entityId));
   const docs = new Map(store.listSourceDocuments(workspaceId).map((doc) => [doc.id, doc]));
   const out: NewFile[] = [];
   for (const folder of readSourceFolders(store.getSetting(workspaceId, SOURCE_FOLDERS_SETTING))) {
@@ -51,7 +51,9 @@ const resultFolders = (store: CrosslineStore, workspaceId: string): Record<strin
 /** The tasks a file may belong to: open ones and those finished in the last two weeks, on the person's board, with an electronic deliverable. */
 function candidateTasks(store: CrosslineStore, workspaceId: string, now: Date, projectId?: string): StoredWorkOrder[] {
   const since = now.getTime() - FINISHED_DAYS * 86_400_000;
-  const accepted = new Map(store.listEvents(workspaceId, { type: "work_order.accepted" }).map((event) => [event.entityId, Date.parse(event.createdAt)]));
+  // When each was accepted: its transition into `accepted` (a `work_order.accepted` was read here, a type never written, 2026-11-27).
+  const accepted = new Map(store.listEvents(workspaceId, { type: "work_order.transitioned" }).filter((event) => (event.payload as { to?: string }).to === "accepted")
+    .map((event) => [event.entityId, Date.parse(event.createdAt)]));
   return store.listWorkOrders(workspaceId)
     .filter((order) => onPersonsBoard(order) && !(order.payload as { offline?: boolean } | undefined)?.offline && (!projectId || order.projectId === projectId))
     .filter((order) => OPEN.has(order.state) || (order.state === "accepted" && (accepted.get(order.id) ?? 0) >= since))
@@ -88,7 +90,7 @@ export async function deliverableCheckPass(store: CrosslineStore, workspaceId: s
     };
     const docs = group.map((file) => ({ id: file.doc.id, text: file.doc.extractedText.slice(0, TEXT_CHARS) }));
     const result = await runCodexSkill<DeliverableCheck>(client, input, { skillName: DELIVERABLE_SKILL, cwd,
-      developerInstructions: "Judge each new file in `files` against the tasks as the crossline-deliverable-check Skill describes and return only the "
+      developerInstructions: "Judge each new file in `files` against the tasks as the crossline-evidence-judge:deliverable Skill describes and return only the "
         + "requested JSON: one item per file. Quote the file verbatim. When unsure whether a file is a task's deliverable, it is evidence, not a deliverable.",
       outputSchema: DELIVERABLE_CHECK_SCHEMA as unknown as Record<string, unknown>, prepareInput: () => input, stableKeys: ["ledger"],
       validateOutput: (output) => validateDeliverableCheck(output, docs, tasks.map((order) => order.id)), onAudit: () => {}, timeoutMs: 30 * 60_000 });
@@ -97,8 +99,8 @@ export async function deliverableCheckPass(store: CrosslineStore, workspaceId: s
     for (const item of result.output.items) {
       const file = byId.get(item.doc);
       if (!file) continue;
-      store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `${DELIVERABLE_JUDGED}:${item.doc}`, type: DELIVERABLE_JUDGED, entityId: item.doc,
-        payload: { ...item, fileName: file.relative, uri: file.doc.uri, folderId: file.folderId } });
+      store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `deliverable.judged:${item.doc}`, type: "deliverable.changed", entityId: item.doc,
+        payload: { ...item, fileName: file.relative, uri: file.doc.uri, folderId: file.folderId, change: "judged" } });
       // A file that is a task's deliverable or evidence is filed under the task's project when it had none.
       const order = item.task ? tasks.find((task) => task.id === item.task) : undefined;
       if (order?.projectId && !file.doc.projectId) store.assignSourceDocumentProject(workspaceId, file.doc.id, order.projectId);

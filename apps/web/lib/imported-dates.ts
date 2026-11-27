@@ -279,7 +279,7 @@ export function loadAdoptedDates(ctx: AccessContext): { items: AdoptedItem[]; dr
     }
   }
   // A reading with nothing left to offer writes no batch, only its drops (W-228); an item recorded since is no longer listed as dropped.
-  const unrecorded = [...store.listEvents(ctx.workspaceId, { type: "dates.unrecorded" })].reverse().map((event) => (event.payload as { dropped?: Dropped[] }).dropped ?? []);
+  const unrecorded = [...store.listEvents(ctx.workspaceId, { type: "onboarding.changed", change: "dates_unrecorded" })].reverse().map((event) => (event.payload as { dropped?: Dropped[] }).dropped ?? []);
   const dropped = droppedLines([...unrecorded, ...drops], locale, new Set(items.map((item) => item.title)));
   return { items: items.sort((a, b) => Number(b.adopted) - Number(a.adopted)), dropped };
 }

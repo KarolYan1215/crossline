@@ -5,7 +5,6 @@
  * The wrapper says what the words are: the person's preferences, never permission past a safety boundary.
  */
 export const INSTRUCTIONS_MAX = 4000;
-export const INSTRUCTIONS_EVENT = "instructions.set";
 export const INSTRUCTIONS_ENTITY = "instructions";
 
 export type InstructionsVersion = { version: number; text: string; at: string; by: "person" | "assistant"; revertOf?: number };

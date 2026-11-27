@@ -226,8 +226,8 @@ test("a run the last worker lost at a restart is marked 没跑完 and said once,
   fire(deps(), workspaceId, readAutomations(store.getSetting(workspaceId, AUTOMATIONS_SETTING))[0]!, { reason: "到点", context: "" });
   const taskId = started[0]!.taskId;
   // What the agent service writes: the request, then recoverLost at the next start.
-  for (const [type, payload] of [["agent.task.requested", { taskId, title: "x" }], ["agent.task.blocked", { taskId, code: "AGENT_RUN_LOST", message: "后台进程重启，这次运行中断" }]] as const) {
-    store.appendEvent({ ownerId: "user-1", workspaceId, idempotencyKey: `${type}:${taskId}`, type, entityId: taskId, payload });
+  for (const [change, payload] of [["task_requested", { taskId, title: "x" }], ["task_blocked", { taskId, code: "AGENT_RUN_LOST", message: "后台进程重启，这次运行中断" }]] as const) {
+    store.appendEvent({ ownerId: "user-1", workspaceId, idempotencyKey: `${change}:${taskId}`, type: "agent.changed", entityId: taskId, payload: { ...payload, change } });
   }
   expect(reconcileAutomationRuns(store, workspaceId)).toEqual([taskId]);
   expect(JSON.parse(store.getSetting(workspaceId, AUTOMATION_RUNS_SETTING) ?? "[]")).toEqual([expect.objectContaining({ taskId, state: "failed", detail: expect.stringContaining("重启") })]);
@@ -240,8 +240,8 @@ test("a run left 已开始 takes its end from the assistant's ledger; one with n
   const old = (taskId: string, firedAt: string) => ({ automationId: "auto-x", taskId, firedAt, reason: "到点", state: "started" });
   store.setSetting(workspaceId, AUTOMATION_RUNS_SETTING, JSON.stringify([old("t-done", "2026-11-02T15:07:00.000Z"), old("t-none", "2026-11-02T15:07:00.000Z"),
     old("t-running", "2026-11-04T18:00:00.000Z"), old("t-fresh", "2026-11-04T18:00:00.000Z")]));
-  for (const [type, id] of [["agent.task.requested", "t-done"], ["agent.task.completed", "t-done"], ["agent.task.requested", "t-running"]] as const) {
-    store.appendEvent({ ownerId: "user-1", workspaceId, idempotencyKey: `${type}:${id}`, type, entityId: id, payload: { taskId: id, title: "x", reviewRequired: false } });
+  for (const [change, id] of [["task_requested", "t-done"], ["task_completed", "t-done"], ["task_requested", "t-running"]] as const) {
+    store.appendEvent({ ownerId: "user-1", workspaceId, idempotencyKey: `${change}:${id}`, type: "agent.changed", entityId: id, payload: { taskId: id, title: "x", reviewRequired: false, change } });
   }
   expect(reconcileAutomationRuns(store, workspaceId, new Date("2026-11-04T20:00:00Z")).sort()).toEqual(["t-done", "t-none"]);
   expect(runsNow().map((run) => `${run.taskId}:${run.state}`)).toEqual(["t-done:done", "t-none:failed", "t-running:started", "t-fresh:started"]);

@@ -37,8 +37,8 @@ test("timer, screen in work categories and Codex time are joined; a confirmation
   store.setSetting(ws, AGENT_HISTORY_SUMMARY, JSON.stringify({ updatedAt: iso("2026-11-09", "00:00"), days: 30, timeZone: ZONE, totalMinutes: 30, folders: [], byHour: [], byWeekday: [], daily: [],
     spans: [{ start: iso("2026-11-03", "14:00"), end: iso("2026-11-03", "14:30") }] }));
   // Wednesday 11-04: a block answered 没做, nothing else.
-  store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: ws, idempotencyKey: "c1", type: "block.confirmed", entityId: "m1",
-    payload: { blockId: "b", workOrderId: "hw", day: "2026-11-04", outcome: "not_done", blockMinutes: 60 } });
+  store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: ws, idempotencyKey: "c1", type: "work_order.changed", entityId: "m1",
+    payload: { blockId: "b", workOrderId: "hw", day: "2026-11-04", outcome: "not_done", blockMinutes: 60, change: "block_confirmed" } });
 
   const view = measuredView(TEST_CTX);
   const byDay = new Map(view.days.map((day) => [day.day, day]));

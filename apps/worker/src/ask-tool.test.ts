@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { pushPolicyOf, readPersonQuestion } from "@crossline/core";
-import { CrosslineStore, PERSON_QUESTION_EVENT, personQuestionKey, personQuestions, settlePersonQuestion } from "@crossline/db";
+import { CrosslineStore, personQuestionKey, personQuestions, settlePersonQuestion } from "@crossline/db";
 import { createAskTool, withAskTool, type AskToolContext } from "./ask-tool";
 
 let store: CrosslineStore;
@@ -12,7 +12,7 @@ beforeEach(() => {
 });
 afterEach(() => store.close());
 
-const context = (over: Partial<AskToolContext> = {}): AskToolContext => ({ store, workspaceId: ws, skill: "crossline:crossline-step-planner",
+const context = (over: Partial<AskToolContext> = {}): AskToolContext => ({ store, workspaceId: ws, skill: "crossline:crossline-task-planner:steps",
   ref: { kind: "task", id: "task-1" }, identityId: "research", projectId: "ece555", dueBy: "", title: "完成 ECE 555 作业 4", now: () => NOW, ...over });
 const ask = (question: string, over: Record<string, unknown> = {}) => ({ question, why: "决定要不要排复习步骤", knownBy: "person", answerType: "text",
   assumption: "按照常规复习", blocking: false, ...over });
@@ -26,7 +26,7 @@ test("a question the ledger already holds an answer to is answered from it, and 
   const tool = createAskTool(context());
   const answer = await call(tool, ask("期末考试允许带一页公式纸吗"));
   expect(answer).toMatchObject({ status: "answered", answer: "允许，一页双面" });
-  expect(store.listEvents(ws, { type: PERSON_QUESTION_EVENT })).toHaveLength(0);
+  expect(store.listEvents(ws, { type: "ask.changed", change: "question_asked" })).toHaveLength(0);
   expect(tool.outcomes()).toEqual([{ status: "answered", question: "期末考试允许带一页公式纸吗" }]);
 });
 

@@ -108,10 +108,10 @@ export async function loadMilestoneBoard(ctx: AccessContext): Promise<MilestoneB
     .map((event) => [event.entityId, String((event.payload as { rationale?: string }).rationale ?? "")]));
   const relations = store.listMilestoneRelations(ctx.workspaceId).filter((relation) => relation.status === "approved" || relation.status === "candidate");
   const executions = store.listExecutions(ctx.workspaceId);
-  const dismissed = new Set(store.listEvents(ctx.workspaceId, { type: "validation.reviewed" })
+  const dismissed = new Set(store.listEvents(ctx.workspaceId, { type: "validation.changed", change: "reviewed" })
     .filter((event) => (event.payload as { subject?: string; verdict?: string }).subject === "milestone_relation"
       && (event.payload as { verdict?: string }).verdict === "dismiss").map((event) => event.entityId));
-  const notes = new Map(store.listEvents(ctx.workspaceId, { type: "milestone.retrospective" })
+  const notes = new Map(store.listEvents(ctx.workspaceId, { type: "milestone.changed", change: "retrospective" })
     .map((event) => [event.entityId, String((event.payload as { note?: string }).note ?? "")]));
   const labels = Object.fromEntries(identityLines(ctx).map((pack) => [pack.id, pack.label]));
   const artifacts = new Map(readStoredArtifactPlan(store, ctx.workspaceId).artifacts.map((artifact) => [artifact.id, artifact]));
@@ -242,9 +242,9 @@ export async function recordRetrospective(ctx: AccessContext, milestoneId: strin
   const milestone = board.milestones.find((item) => item.id === milestoneId);
   if (!milestone?.retrospective) return { ok: false, code: "MILESTONE_NOT_REACHED" };
   const { note: _previous, ...figures } = milestone.retrospective;
-  getStore().appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, type: "milestone.retrospective", entityId: milestoneId,
+  getStore().appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, type: "milestone.changed", entityId: milestoneId,
     idempotencyKey: `milestone:retrospective:${milestoneId}:${randomUUID()}`,
-    payload: { milestoneVersion: milestone.version, identityId: milestone.identityId, title: milestone.title, ...figures, note: text } });
+    payload: { milestoneVersion: milestone.version, identityId: milestone.identityId, title: milestone.title, ...figures, note: text, change: "retrospective" } });
   if (text) getStore().addPreference({ workspaceId: ctx.workspaceId, source: "retrospective", scope: milestone.identityId, weight: 1, refId: milestoneId,
     text: tOf(ctx)("里程碑「{{title}}」回顾：{{note}}", { title: milestone.title, note: text }) });
   return { ok: true };
@@ -285,10 +285,10 @@ export function saveDraftSettings(ctx: AccessContext, milestoneId: string, input
       target: anchor?.target ?? "", stakeholders: anchor?.stakeholders ?? [], sourceFactIds: anchor?.sourceFactIds ?? [], dependsOn: anchor?.dependsOn ?? [],
       updatedAt: new Date().toISOString() });
   }
-  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, type: "milestone.revised", entityId: milestoneId,
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, type: "milestone.changed", entityId: milestoneId,
     idempotencyKey: `milestone:draft-settings:${milestoneId}:${randomUUID()}`,
     payload: { ...(typeof day === "string" ? { deadline: { previous: anchor?.deadline ?? null, next: day } } : {}),
-      ...(typeof input.weight === "number" ? { weight: Math.max(0, Math.min(100, Math.round(input.weight))) } : {}) } });
+      ...(typeof input.weight === "number" ? { weight: Math.max(0, Math.min(100, Math.round(input.weight))) } : {}), change: "revised" } });
   return { ok: true };
 }
 

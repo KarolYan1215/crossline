@@ -51,7 +51,7 @@ export async function workflowMergePass(store: CrosslineStore, workspaceId: stri
   const byId = new Map(records.map((record) => [record.id, record]));
   // A pair the person took apart (撤销合并) stays apart, at any later version: the reviewer's answer for those versions was the
   // reason it was merged, and asking again would merge it again the next day.
-  const refused = new Set(store.listEvents(workspaceId, { type: "skill.grown.unmerged" })
+  const refused = new Set(store.listEvents(workspaceId, { type: "skill.changed", change: "grown_unmerged" })
     .map((event) => { const payload = event.payload as { keep?: string; absorbed?: string }; return [payload.keep ?? "", payload.absorbed ?? ""].sort().join("|"); }));
   const pairs = workflowMergeCandidates(records, (record) => grownHomeLine(store, workspaceId, record))
     .filter((pair) => !refused.has([pair.a, pair.b].sort().join("|")));

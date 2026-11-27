@@ -11,12 +11,12 @@ import { readProfileModel } from "./onboarding-persist";
  * conversation; the person's answer or follow-up goes straight back to that thread, never through the main dialogue. The dialogue reads
  * the threads when it wants (`read_interview_state`) and reports what they found when the interview ends.
  */
-export const RESEARCH_SKILL = "crossline:crossline-onboarding-research";
+export const RESEARCH_SKILL = "crossline:crossline-research:onboarding";
 export const RESEARCH_SETTING = "onboarding.research";
 export const researchKey = (sessionId: string) => `${RESEARCH_SETTING}:${sessionId}`;
 
 // i18n-ignore-start: instructions to the research Skill (model-facing)
-const INSTRUCTIONS = "你是 Crossline 访谈的调研子任务。Skill crossline-onboarding-research 写了全部规则，照它做。"
+const INSTRUCTIONS = "你是 Crossline 访谈的调研子任务。Skill crossline-research:onboarding 写了全部规则，照它做。"
   + "输入给你一个问题、为什么要查、它属于画像的哪个维度、画像摘要和线程到目前为止的消息。联网查证，只写有来源的结论。"
   + "只在确实需要本人补充时写 ask；结论写在 conclusion，没查完就留空字符串，下一轮接着查；输入带 lastRun 时没有下一轮，写出阶段性结论。"
   + "查询只放主题，不放本人的姓名、学校、邮箱或其他能认出本人的信息。";

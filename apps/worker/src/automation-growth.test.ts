@@ -20,10 +20,10 @@ function setup() {
     projectId: "", milestoneId, intent, state: "approved", riskTier: "routine", estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 60, source: "llm_prior", observationCount: 0, confidence: "low" },
     payload: {} } as never);
   const errand = (taskId: string, workOrderId: string, title: string, category = "read_research_organize") => {
-    store.appendEvent({ ownerId: principal.id, workspaceId: workspace.id, idempotencyKey: `req-${taskId}`, type: "agent.task.requested", entityId: taskId,
-      payload: { taskId, title, category, workOrderId } });
-    store.appendEvent({ ownerId: principal.id, workspaceId: workspace.id, idempotencyKey: `done-${taskId}`, type: "agent.task.completed", entityId: taskId,
-      payload: { taskId, reviewRequired: false, directory: "/tmp/none", artifacts: [{ path: "清单.md", sha256: "x", bytes: 10 }] } });
+    store.appendEvent({ ownerId: principal.id, workspaceId: workspace.id, idempotencyKey: `req-${taskId}`, type: "agent.changed", entityId: taskId,
+      payload: { taskId, title, category, workOrderId, change: "task_requested" } });
+    store.appendEvent({ ownerId: principal.id, workspaceId: workspace.id, idempotencyKey: `done-${taskId}`, type: "agent.changed", entityId: taskId,
+      payload: { taskId, reviewRequired: false, directory: "/tmp/none", artifacts: [{ path: "清单.md", sha256: "x", bytes: 10 }], change: "task_completed" } });
   };
   return { store, workspaceId: workspace.id, ownerId: principal.id, order, errand };
 }
@@ -58,7 +58,7 @@ test("accepted errands of one kind on one line for three pieces of work are offe
   // Said once: the same pair is not offered again.
   expect(suggestFromRepeats(store, workspaceId, growCandidates(store, workspaceId, NOW), NOW)).toBe(0);
 
-  const [nudge] = store.listEvents(workspaceId, { type: "automation.suggested" });
+  const [nudge] = store.listEvents(workspaceId, { type: "automation.changed", change: "suggested" });
   expect(nudge!.payload).toMatchObject({ lineId: "research" });
   expect((nudge!.payload as { taskIds: string[] }).taskIds).toEqual(expect.arrayContaining(["t1", "t2", "t4"]));
   const card = store.listConversationMessages(workspaceId, store.conversationFor(workspaceId, "2026-10-19").id).find((message) => message.role === "nudge")!.payload as {

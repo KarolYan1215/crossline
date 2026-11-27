@@ -15,7 +15,7 @@ import { absorbParts, decideFold, existingTasksFor, openTasks, recentlyDoneTasks
 import { materialExcerpts, relevantFacts } from "./material-context";
 import { localeOf, tOfWorkspace } from "./locale";
 import { ASK_PERSON_INSTRUCTIONS, createAskTool } from "./ask-tool";
-const SKILL = "crossline:crossline-goal-backplanner";
+const SKILL = "crossline:crossline-goal-backplanner:backplan";
 /**
  * How many items an automatic (rolling) backplan keeps when the answer has no core task of the person's. With one, a round keeps that
  * core task and its preparation (`rollingBackplan`, docs/work-split.md §3): keeping the first two in dependency order always kept two
@@ -34,10 +34,10 @@ export function isPersonCore(order: Pick<StoredWorkOrder, "intent" | "payload">)
 
 /** What the person has already said about this milestone's missing inputs: handed over, or being waited for. */
 function personInputs(store: CrosslineStore, workspaceId: string, milestoneId: string) {
-  const supplied = store.listEvents(workspaceId, { type: "goal.backplan_input_supplied", entityId: milestoneId })
+  const supplied = store.listEvents(workspaceId, { type: "goal.changed", change: "backplan_input_supplied", entityId: milestoneId })
     .map((event) => event.payload as { what: string; text: string });
   // An item the person already had for the same thing is linked rather than duplicated (see `waitingIndex` in the web's asks).
-  const linked = new Map(store.listEvents(workspaceId, { type: "goal.backplan_input_waiting", entityId: milestoneId })
+  const linked = new Map(store.listEvents(workspaceId, { type: "goal.changed", change: "backplan_input_waiting", entityId: milestoneId })
     .map((event) => event.payload as { waitingId: string; what: string }).map((link) => [link.waitingId, link.what]));
   const waiting = store.listWaitingItems(workspaceId, { state: "open" })
     .filter((item) => item.id.startsWith(`wait-bp-${milestoneId}-`) || linked.has(item.id))
@@ -80,10 +80,10 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
       item.status === "approved" && item.projectId);
     if (!milestone || !identityLines(store, workspaceId).some((pack) => pack.id === milestone.identityId))
       return { state: "blocked", code: "BACKPLAN_GOAL_NOT_APPROVED", message: tOfWorkspace(store, workspaceId)("需要已批准且绑定真实身份、项目的里程碑。") };
-    const rounds = store.listEvents(workspaceId, { type: "goal.backplan_proposed", entityId: milestone.id })
+    const rounds = store.listEvents(workspaceId, { type: "goal.changed", change: "backplan_proposed", entityId: milestone.id })
       .filter((event) => (event.payload as { rolling?: boolean }).rolling).length;
     const key = options.rolling ? `goal:backplan:${milestone.id}:${milestone.version}:round:${rounds}` : `goal:backplan:${milestone.id}:${milestone.version}`;
-    const existing = store.listEvents(workspaceId, { type: "goal.backplan_proposed", entityId: milestone.id })
+    const existing = store.listEvents(workspaceId, { type: "goal.changed", change: "backplan_proposed", entityId: milestone.id })
       .find((event) => event.idempotencyKey === key);
     if (existing) {
       const payload = existing.payload as { workOrderIds: string[]; dateCandidates?: Answer["dateCandidates"] };
@@ -94,11 +94,11 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
     if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: tOfWorkspace(store, workspaceId)("Codex 运行时不可用。") };
     const request = store.listEvents(workspaceId, { type: "milestone.proposed", entityId: milestone.id })
       .at(-1)?.payload as { request?: string } | undefined;
-    const decisions = store.listEvents(workspaceId, { type: ["insight.approved", "insight.revoked"] });
-    const accepted = new Set(decisions.filter((event) => event.type === "insight.approved")
+    const decisions = store.listEvents(workspaceId, { type: "insight.changed", change: ["approved", "revoked"] });
+    const accepted = new Set(decisions.filter((event) => (event.type === "insight.changed" && (event.payload as { change?: string }).change === "approved"))
       .map((event) => event.entityId));
-    for (const event of decisions.filter((item) => item.type === "insight.revoked")) accepted.delete(event.entityId);
-    const approvedInsights = store.listEvents(workspaceId, { type: "flywheel.finding" })
+    for (const event of decisions.filter((item) => (item.type === "insight.changed" && (item.payload as { change?: string }).change === "revoked"))) accepted.delete(event.entityId);
+    const approvedInsights = store.listEvents(workspaceId, { type: "insight.changed", change: "found" })
       .filter((event) => accepted.has(event.eventId) && event.entityId === milestone.id)
       .map((event) => event.payload as { summary: string; sourceUrl: string; staleWhen: string });
     const dateSources = [milestone.title, ...milestone.successCriteria.map((item) => item.statement), request?.request ?? ""]
@@ -151,7 +151,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
           instructions: ASK_PERSON_INSTRUCTIONS + " Here: an input only the person knows (their plan, preference, a fact about themselves) is "
             + "asked with ask_person and the milestone is split on the assumption; a blocker (what, whoHas) is for what someone else holds or "
             + "must be obtained, never for what you just asked." },
-        developerInstructions: "Work backwards from this approved milestone to the tasks that deliver it, as the crossline-goal-backplanner Skill describes, "
+        developerInstructions: "Work backwards from this approved milestone to the tasks that deliver it, as the crossline-goal-backplanner:backplan Skill describes, "
           + "and return only the requested JSON. Write the person's core tasks first (owner person: their practice, judgement, core output or own acts, "
           + "named by what they produce), then the preparation each needs as the assistant's items (owner assistant, prepares = that core item's id) "
           + "or a short question to the person (owner ask). A person's item becomes one task card on the 任务 page (one deliverable, 30 to 480 minutes, named " // i18n-ignore: model-facing
@@ -186,10 +186,10 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
     };
     const recordBlocked = (code: string, message: string, missingInputs: MissingInput[]) => {
       // Numbered per attempt: after the person answers, a second refusal of the same version is a new fact, not a repeat.
-      const attempt = store.listEvents(workspaceId, { type: "goal.backplan_blocked", entityId: milestone.id }).length;
+      const attempt = store.listEvents(workspaceId, { type: "goal.changed", change: "backplan_blocked", entityId: milestone.id }).length;
       return store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `goal:backplan:blocked:${milestone.id}:${milestone.version}:${attempt}`,
-        type: "goal.backplan_blocked", entityId: milestone.id,
-        payload: { milestoneVersion: milestone.version, code, message: message.slice(0, 400), missing: missingInputs } }).eventId;
+        type: "goal.changed", entityId: milestone.id,
+        payload: { milestoneVersion: milestone.version, code, message: message.slice(0, 400), missing: missingInputs, change: "backplan_blocked" } }).eventId;
     };
     let result = await run([]);
     let missing: MissingInput[] = [];
@@ -283,11 +283,11 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
     });
     const workOrderIds = drafts.map((draft) => draft.id);
     const inserted = store.saveBackplanDrafts(workspaceId, drafts, { ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: key,
-      type: "goal.backplan_proposed", entityId: milestone.id,
+      type: "goal.changed", entityId: milestone.id,
       payload: { milestoneVersion: milestone.version, workOrderIds, ...(options.rolling ? { rolling: true, round: rounds } : {}),
         ...(missing.length ? { missing } : {}), ...(folds.size ? { folded: [...folds].map(([stepId, fold]) => ({ stepId, into: fold.keep, kind: fold.kind })) } : {}),
         ...(noCore ? { noCore: true } : {}),
-        dateCandidates: result.output.dateCandidates, source: SKILL } });
+        dateCandidates: result.output.dateCandidates, source: SKILL, change: "backplan_proposed" } });
     if (inserted) {
       for (const draft of drafts) absorbParts(store, workspaceId, draft.id);
       for (const [stepId, fold] of folds) {
@@ -305,7 +305,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
       autoApproveEligible(store, workspaceId, workOrderIds);
       return { state: "proposed", workOrderIds, dateCandidates: result.output.dateCandidates };
     }
-    const saved = store.listEvents(workspaceId, { type: "goal.backplan_proposed", entityId: milestone.id })
+    const saved = store.listEvents(workspaceId, { type: "goal.changed", change: "backplan_proposed", entityId: milestone.id })
       .find((event) => event.idempotencyKey === key);
     return { state: "proposed", workOrderIds: (saved?.payload as { workOrderIds?: string[] })?.workOrderIds ?? [],
       dateCandidates: (saved?.payload as { dateCandidates?: Answer["dateCandidates"] })?.dateCandidates ?? [] };
@@ -342,29 +342,29 @@ export function milestonesAwaitingBackplan(store: CrosslineStore, workspaceId: s
   // version is not tried again on a timer — a refusal repeated every fifteen minutes is quota spent on the same answer.
   // A refusal recorded before missing inputs were itemised (no `missing` field) gets one more try: the next run asks about
   // each input and splits around them, which the old one never did.
-  const blocked = new Set(store.listEvents(workspaceId, { type: "goal.backplan_blocked" })
+  const blocked = new Set(store.listEvents(workspaceId, { type: "goal.changed", change: "backplan_blocked" })
     .filter((event) => Array.isArray((event.payload as { missing?: unknown }).missing)).map((event) =>
     `${event.entityId}:${(event.payload as { milestoneVersion?: number }).milestoneVersion}`));
   // A round with no core task of the person's even after being sent back, all of it folded into work already open, wrote nothing that
   // could serve the milestone: it is not asked for again at this version. (A round that wrote the assistant's work serves while open.)
-  for (const event of store.listEvents(workspaceId, { type: "goal.backplan_proposed" })) {
+  for (const event of store.listEvents(workspaceId, { type: "goal.changed", change: "backplan_proposed" })) {
     const payload = event.payload as { noCore?: boolean; workOrderIds?: string[]; milestoneVersion?: number };
     if (payload.noCore && !payload.workOrderIds?.length) blocked.add(`${event.entityId}:${payload.milestoneVersion}`);
   }
   const states = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order.state]));
   // A round the person discarded entirely is a "no" to this version: it is not proposed again on a timer.
-  const declined = new Set(store.listEvents(workspaceId, { type: "goal.backplan_proposed" }).filter((event) => {
+  const declined = new Set(store.listEvents(workspaceId, { type: "goal.changed", change: "backplan_proposed" }).filter((event) => {
     const ids = (event.payload as { workOrderIds?: string[] }).workOrderIds ?? [];
     return ids.length > 0 && ids.every((id) => states.get(id) === "archived");
   }).map((event) => `${event.entityId}:${(event.payload as { milestoneVersion?: number }).milestoneVersion}`));
-  for (const event of store.listEvents(workspaceId, { type: "goal.backplan_declined" }))
+  for (const event of store.listEvents(workspaceId, { type: "goal.changed", change: "backplan_declined" }))
     declined.add(`${event.entityId}:${(event.payload as { milestoneVersion?: number }).milestoneVersion}`);
   // The person answered one of its questions (handed over a missing input, or it arrived): that is a request to
   // split it again now, past every rule above — it is their answer, not the timer.
   const lastRun = new Map<string, string>();
-  for (const event of store.listEvents(workspaceId, { type: ["goal.backplan_proposed", "goal.backplan_blocked"] }))
+  for (const event of store.listEvents(workspaceId, { type: "goal.changed", change: ["backplan_proposed", "backplan_blocked"] }))
     if ((lastRun.get(event.entityId) ?? "") < event.createdAt) lastRun.set(event.entityId, event.createdAt);
-  const rerun = new Set(store.listEvents(workspaceId, { type: "goal.backplan_rerun_requested" })
+  const rerun = new Set(store.listEvents(workspaceId, { type: "goal.changed", change: "backplan_rerun_requested" })
     .filter((event) => event.createdAt >= (lastRun.get(event.entityId) ?? "")).map((event) => event.entityId));
   const identities = new Set(identityLines(store, workspaceId).map((pack) => pack.id));
   const approved = store.listMilestones(workspaceId)

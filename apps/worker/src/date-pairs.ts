@@ -46,7 +46,7 @@ export function materializeDatePairs(store: CrosslineStore, workspaceId: string,
   });
   const existing = new Set(store.listWorkOrders(workspaceId).map((order) => order.id));
   // A homework already folded into a task the person had (below) is not written again on the next tick.
-  for (const event of store.listEvents(workspaceId, { type: "task.duplicate_prevented" }))
+  for (const event of store.listEvents(workspaceId, { type: "task.changed", change: "duplicate_prevented" }))
     existing.add(String((event.payload as { candidate?: { id?: string } }).candidate?.id ?? ""));
   const open = openTasks(store, workspaceId);
   const milestones = store.listMilestones(workspaceId).filter((item) => item.status !== "archived");
@@ -90,7 +90,7 @@ export function materializeDatePairs(store: CrosslineStore, workspaceId: string,
       continue;
     }
     if (store.saveBackplanDrafts(workspaceId, [order], { ownerId: order.ownerId, workspaceId, idempotencyKey: `datepair.created:${id}`,
-      type: "datepair.created", entityId: id, payload: { projectId: project.id, releaseDay: out?.day ?? "", dueDay: due.day } })) created.push(id);
+      type: "goal.changed", entityId: id, payload: { projectId: project.id, releaseDay: out?.day ?? "", dueDay: due.day, change: "datepair_created" } })) created.push(id);
   }
   for (const id of created) absorbParts(store, workspaceId, id);
   if (created.length) autoApproveEligible(store, workspaceId, created);
@@ -127,8 +127,8 @@ export function releaseWaits(store: CrosslineStore, workspaceId: string): { open
     const wait = waits.get(id);
     if (wait) {
       if (wait.state === "open" && file && store.answerWaitingItem(workspaceId, id, { kind: "arrived" }, owner).changed) {
-        store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `waiting.arrived_by_file:${id}`, type: "waiting.arrived_by_file", entityId: id,
-          payload: { documentId: file.id, fileName: file.fileName } });
+        store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `waiting.arrived_by_file:${id}`, type: "waiting.changed", entityId: id,
+          payload: { documentId: file.id, fileName: file.fileName, change: "arrived_by_file" } });
         arrived.push(id);
       }
       continue;

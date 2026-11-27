@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { GATE_CONFIRMED, GATE_JUDGED, GATE_OVERRIDDEN, type GateJudgedPayload } from "@crossline/core";
+import { GATE_JUDGED, type GateJudgedPayload } from "@crossline/core";
 
 vi.mock("server-only", () => ({}));
 const { answerGateCheck, gateCheckAsks, loadGateReview, overrideGate, reportSetback } = await import("./gates");
@@ -32,7 +32,7 @@ test("only an asked judgement becomes a gate_check; answering with another verdi
   expect(asks[0]!.title).toContain("把初稿发给导师");
   expect(asks[0]!.options.map((option) => option.id)).toEqual(["right", "to:done", "to:submitted", "to:waiting"]);
   expect(answerGateCheck(TEST_CTX, asks[0]!, "to:submitted", "邮件在另一个邮箱")).toEqual({ ok: true });
-  expect(store().listEvents(TEST_CTX.workspaceId, { type: GATE_OVERRIDDEN })[0]!.payload).toMatchObject({ judgedId: asked, from: "planned", to: "submitted", note: "邮件在另一个邮箱" });
+  expect(store().listEvents(TEST_CTX.workspaceId, { type: "gate.changed", change: "overridden" })[0]!.payload).toMatchObject({ judgedId: asked, from: "planned", to: "submitted", note: "邮件在另一个邮箱" });
   expect(gateCheckAsks(TEST_CTX, NOW)).toEqual([]);
 });
 
@@ -40,15 +40,16 @@ test("a confirmation is not an override; an unknown verdict is refused", () => {
   const id = judge("j", "completion", { kind: "task", id: "send-draft" }, "planned", { asked: true });
   expect(overrideGate(TEST_CTX, { judgedId: id, to: "maybe" })).toEqual({ ok: false, code: "GATE_VERDICT_UNKNOWN" });
   expect(overrideGate(TEST_CTX, { judgedId: id, to: "planned" })).toEqual({ ok: true });
-  expect(store().listEvents(TEST_CTX.workspaceId, { type: GATE_CONFIRMED })).toHaveLength(1);
-  expect(store().listEvents(TEST_CTX.workspaceId, { type: GATE_OVERRIDDEN })).toHaveLength(0);
+  expect(store().listEvents(TEST_CTX.workspaceId, { type: "gate.changed", change: "confirmed" })).toHaveLength(1);
+  expect(store().listEvents(TEST_CTX.workspaceId, { type: "gate.changed", change: "overridden" })).toHaveLength(0);
   expect(gateCheckAsks(TEST_CTX, NOW)).toEqual([]);
 });
 
 test("the weekly review lists a P1 task pressed 完成 without evidence, and every override", () => {
   judge("p1", "priority", { kind: "task", id: "send-draft" }, "p1_external");
   const done = judge("c", "completion", { kind: "task", id: "send-draft" }, "planned");
-  store().appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId, type: "human.completed", entityId: "send-draft", idempotencyKey: "hc", payload: { workOrderId: "send-draft" } });
+  store().appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId, type: "work_order.transitioned", entityId: "send-draft", idempotencyKey: "hc",
+    payload: { from: "active", to: "evidence_review", event: { type: "human.completed" } } });
   overrideGate(TEST_CTX, { judgedId: done, to: "waiting", note: "等导师回" });
   const since = new Date(Date.now() - 7 * 86_400_000).toISOString(), until = new Date(Date.now() + 60_000).toISOString();
   const review = loadGateReview(TEST_CTX, since, until, NOW);
@@ -60,5 +61,5 @@ test("the weekly review lists a P1 task pressed 完成 without evidence, and eve
 test("a setback in the person's words is recorded for the worker; an empty one is refused", () => {
   expect(reportSetback(TEST_CTX, "  ")).toEqual({ ok: false, code: "SETBACK_EMPTY" });
   expect(reportSetback(TEST_CTX, "ISLPED 被拒").ok).toBe(true);
-  expect(store().listEvents(TEST_CTX.workspaceId, { type: "setback.reported" })[0]!.payload).toEqual({ text: "ISLPED 被拒" });
+  expect(store().listEvents(TEST_CTX.workspaceId, { type: "gate.changed", change: "setback_reported" })[0]!.payload).toEqual({ text: "ISLPED 被拒", change: "setback_reported" });
 });

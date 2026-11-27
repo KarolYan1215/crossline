@@ -1,4 +1,4 @@
-import { INSTRUCTIONS_ENTITY, INSTRUCTIONS_EVENT, PERSONAL_DESIGN_SETTING, currentInstructions, instructionVersions, instructionsProblem, knobValue, readDesign, skillNote, type DesignKnobId, type InstructionsVersion, type PersonalDesign } from "@crossline/core";
+import { INSTRUCTIONS_ENTITY, PERSONAL_DESIGN_SETTING, currentInstructions, instructionVersions, instructionsProblem, knobValue, readDesign, skillNote, type DesignKnobId, type InstructionsVersion, type PersonalDesign } from "@crossline/core";
 import type { CrosslineStore } from "./index";
 
 /** The account's own design (packages/core/src/personal-design.ts). */
@@ -13,7 +13,7 @@ export const designSkillNote = (store: CrosslineStore, workspaceId: string, skil
 
 /** Every version of 「给 Crossline 的话」, oldest first (packages/core/src/instructions.ts). */
 export const instructionVersionsOf = (store: CrosslineStore, workspaceId: string): InstructionsVersion[] =>
-  instructionVersions(store.listEvents(workspaceId, { type: INSTRUCTIONS_EVENT, entityId: INSTRUCTIONS_ENTITY }));
+  instructionVersions(store.listEvents(workspaceId, { type: "profile.changed", change: "instructions_set", entityId: INSTRUCTIONS_ENTITY }));
 
 export const currentInstructionsOf = (store: CrosslineStore, workspaceId: string): { version: number; text: string } =>
   currentInstructions(instructionVersionsOf(store, workspaceId));
@@ -30,7 +30,7 @@ export function setInstructions(store: CrosslineStore, input: { workspaceId: str
   const current = currentInstructionsOf(store, input.workspaceId);
   if (current.text === text) return { ...current, changed: false };
   const version = current.version + 1;
-  store.appendEvent({ ownerId: input.ownerId, workspaceId: input.workspaceId, idempotencyKey: `${INSTRUCTIONS_EVENT}:${version}`, type: INSTRUCTIONS_EVENT,
-    entityId: INSTRUCTIONS_ENTITY, payload: { version, text, by: input.by, ...(input.revertOf !== undefined ? { revertOf: input.revertOf } : {}) } });
+  store.appendEvent({ ownerId: input.ownerId, workspaceId: input.workspaceId, idempotencyKey: `instructions.set:${version}`, type: "profile.changed",
+    entityId: INSTRUCTIONS_ENTITY, payload: { version, text, by: input.by, ...(input.revertOf !== undefined ? { revertOf: input.revertOf } : {}), change: "instructions_set" } });
   return { version, text, changed: true };
 }

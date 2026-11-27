@@ -48,17 +48,15 @@ export function portraitConfirmedByInsights(ratings: InsightRatings): boolean {
  * An observation is kept only when it is what it claims to be (contract A, 2026-11-12): text, a falsifier (「如果……，这条就不准」), and at
  * least one of the person's replies quoted, each quote found in the reply it names; outside data only with a web URL. Any part of the main
  * interview may give one (a line's own interview, `details`, does not). Anything else is dropped, never repaired: a round is not held up for it.
- * The quotes come from at least two different replies (the owner, 2026-11-12): an observation connects things the person said. Of the
- * replay's cards judged 「不准」, most read one answer for what it lacked (「你还举不出一件」).
- * `minReplies` is 1 only for a card on an uncertain hypothesis the log offered resting on one reply (`cardCandidates`).
+ * How many replies a card joins is the Skill's (2026-11-27, docs/plans/condense-1127.md A5: the two-reply minimum moved to the prompt).
  */
-export function checkInsight(insight: TurnInsight | undefined, replies: Record<string, string>, stage: string | undefined, minReplies = 2): TurnInsight | undefined {
+export function checkInsight(insight: TurnInsight | undefined, replies: Record<string, string>, stage: string | undefined): TurnInsight | undefined {
   const text = insight?.text?.trim() ?? "";
   const falsifier = insight?.falsifier?.trim() ?? "";
   if (!text || !falsifier || stage === "details" || !(ONBOARDING_STAGES as readonly string[]).includes(stage ?? "")) return undefined;
   const refs = (insight?.refs ?? []).filter((ref) => typeof ref?.replyId === "string" && typeof ref.quote === "string" && ref.quote.trim()
     && ref.replyId in replies && Boolean(locateQuote(replies[ref.replyId]!, ref.quote)));
-  if (!refs.length || refs.length < (insight?.refs ?? []).length || new Set(refs.map((ref) => ref.replyId)).size < minReplies) return undefined;
+  if (!refs.length || refs.length < (insight?.refs ?? []).length) return undefined;
   const external = (insight?.external ?? []).filter((item) => typeof item?.text === "string" && item.text.trim() && isWebUrl(item.url))
     .slice(0, 3).map((item) => ({ text: item.text.trim(), url: item.url.trim() }));
   return { text, refs: refs.slice(0, 4).map((ref) => ({ replyId: ref.replyId, quote: ref.quote.trim() })), ...(external.length ? { external } : {}), falsifier };
@@ -157,80 +155,6 @@ export function lessonAnswer(reply: string): "yes" | "no" {
   if (at < 0) return "no";
   const line = reply.slice(at + LESSON_QUESTION.text.length + 2).split("\n")[0] ?? "";
   return line.includes(LESSON_QUESTION.options[0]!.label) && !line.includes(LESSON_QUESTION.options[1]!.label) ? "yes" : "no";
-}
-
-/**
- * The person's own words in a reply: what they typed under an answer (after 「补充：」 or 「Added:」) and lines outside the answer format.
- * The 【question】 and the picked labels are the interviewer's and the app's words, not the person's.
- */
-export function ownWords(reply: string): string[] {
-  return reply.split("\n").flatMap((line) => {
-    const said = line.trim();
-    if (!said) return [];
-    if (!/^[【[]/u.test(said)) return [said];
-    const typed = (/补充：(.*)$/u.exec(said)?.[1] ?? /(?:^|\s|\.)\s*Added: (.*)$/u.exec(said)?.[1] ?? "").trim();
-    return typed ? [typed] : [];
-  });
-}
-
-/**
- * What a text is compared with for echoes of a disclosure (`disclosureEchoes`): the person's own words in the hidden replies, and in a
- * reply that names self-harm only those lines. A reply that only follows a safety round counts by its self-harm lines alone; the rest of
- * it is the talk going on. Replay 16 (2026-11-16) sent rounds back for 「自己安排」 from a schedule answer in the same reply and for the
- * app's own 「成为怎样的」: five of y's twelve rounds in one run.
- */
-export function disclosureWords(messages: ReadonlyArray<ConversationMessage>, hidden: ReadonlySet<string>): string[] {
-  return messages.flatMap((message, index) => {
-    if (message.role !== "user" || !hidden.has(`reply-${message.seq}`)) return [];
-    const lines = ownWords(replyTextOf(message));
-    const harm = lines.filter(mentionsSelfHarm);
-    if (harm.length) return harm;
-    const before = messages.slice(0, index).reverse().find((item) => item.role === "assistant");
-    return before && safetyRound(before.content as { safety?: unknown; reply?: unknown }) ? [] : lines;
-  });
-}
-
-/** The interviewer's own words — its replies, questions and options — which are never the person's disclosure; a safety round's reply is left out. */
-export function interviewerWords(messages: ReadonlyArray<ConversationMessage>): string[] {
-  return messages.filter((message) => message.role === "assistant").flatMap((message) => {
-    const content = message.content as { reply?: unknown; safety?: unknown; questions?: Array<{ text?: unknown; options?: Array<{ label?: unknown }> }> } | undefined;
-    const questions = (content?.questions ?? []).flatMap((question) => [String(question.text ?? ""), ...(question.options ?? []).map((option) => String(option.label ?? ""))]);
-    return safetyRound(content) ? questions : [String(content?.reply ?? ""), ...questions];
-  });
-}
-
-const HAN_RUN = /\p{Script=Han}+/gu;
-/**
- * The runs of at least `size` Chinese characters a text shares with a disclosure, leaving out every run the conversation's other replies
- * also hold (their ordinary words: 「那段时间」 said about a job is not the disclosure). An English disclosure is compared by four words.
- */
-export function disclosureEchoes(text: string, disclosures: readonly string[], ordinary: readonly string[], size = 4): string[] {
-  const grams = (value: string): Set<string> => {
-    const out = new Set<string>();
-    for (const run of value.match(HAN_RUN) ?? []) for (let at = 0; at + size <= run.length; at += 1) out.add(run.slice(at, at + size));
-    const words = value.toLowerCase().match(/[a-z']+/gu) ?? [];
-    for (let at = 0; at + 4 <= words.length; at += 1) out.add(words.slice(at, at + 4).join(" "));
-    return out;
-  };
-  const common = new Set(ordinary.flatMap((value) => [...grams(value)]));
-  const disclosed = new Set(disclosures.flatMap((value) => [...grams(value)]));
-  const shared = (gram: string) => disclosed.has(gram) && !common.has(gram);
-  // Overlapping runs reported once, as the stretch of the text they cover together.
-  const spans: string[] = [];
-  for (const run of text.match(HAN_RUN) ?? []) {
-    const covered = new Array<boolean>(run.length).fill(false);
-    for (let at = 0; at + size <= run.length; at += 1) if (shared(run.slice(at, at + size))) covered.fill(true, at, at + size);
-    for (let at = 0; at < run.length;) {
-      if (!covered[at]) { at += 1; continue; }
-      let end = at;
-      while (end < run.length && covered[end]) end += 1;
-      spans.push(run.slice(at, end));
-      at = end;
-    }
-  }
-  const words = text.toLowerCase().match(/[a-z']+/gu) ?? [];
-  for (let at = 0; at + 4 <= words.length; at += 1) { const gram = words.slice(at, at + 4).join(" "); if (shared(gram)) spans.push(gram); }
-  return [...new Set(spans)].slice(0, 3);
 }
 
 /** The progress record as stored; anything malformed reads as none (an older round, or a model that left it out). */

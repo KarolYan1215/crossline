@@ -7,7 +7,7 @@ import { backedDrillForms, stripDrillForms } from "./drill-forms";
  * `method.research`; one `method.researched` event per run.
  */
 export const METHOD_RESEARCH_SETTING = "method.research";
-export const METHOD_RESEARCH_SKILL = "crossline:crossline-method-research";
+export const METHOD_RESEARCH_SKILL = "crossline:crossline-line-method:research";
 
 const ID = { type: "string", pattern: "^[a-z][a-z0-9_-]{0,23}$" } as const;
 export const METHOD_RESEARCH_SCHEMA = { type: "object", additionalProperties: false, required: ["habits", "methods", "sources"], properties: {

@@ -52,9 +52,10 @@ export function lineCardDetails(ctx: AccessContext): Record<string, LineCardDeta
   const edits = json<Record<string, PendingGoalEdit>>(ctx, GOAL_EDITS_SETTING, {});
   const milestones = store.listMilestones(ctx.workspaceId);
   const lineOfMilestone = new Map(milestones.map((milestone) => [milestone.id, milestone.identityId]));
-  const proposed = store.listEvents(ctx.workspaceId, { type: ["milestone.proposed", "line.redraft_requested"] });
-  const goalEvents = store.listEvents(ctx.workspaceId, { type: ["line.updated", "line.goal_edit_adopted"] })
-    .filter((event) => event.type === "line.goal_edit_adopted" || ["goals", "goal", "goalParts"].some((key) => key in ((event.payload ?? {}) as object)));
+  const proposed = [...store.listEvents(ctx.workspaceId, { type: "milestone.proposed" }), ...store.listEvents(ctx.workspaceId, { type: "line.changed", change: "redraft_requested" })]
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const goalEvents = store.listEvents(ctx.workspaceId, { type: "line.changed", change: ["updated", "goal_edit_adopted"] })
+    .filter((event) => (event.type === "line.changed" && (event.payload as { change?: string }).change === "goal_edit_adopted") || ["goals", "goal", "goalParts"].some((key) => key in ((event.payload ?? {}) as object)));
   const facts = store.listProfileFacts(ctx.workspaceId);
   const result: Record<string, LineCardDetail> = {};
   for (const line of identityLines(ctx)) {
@@ -70,7 +71,7 @@ export function lineCardDetails(ctx: AccessContext): Record<string, LineCardDeta
       redraftDue: redraftDue({
         goalChangedAt: latest(goalEvents.filter((event) => event.entityId === line.id).map((event) => event.createdAt)),
         factChangedAt: latest(facts.filter((fact) => fact.identityId === line.id).map((fact) => fact.updatedAt)),
-        lastDraftAt: latest(proposed.filter((event) => event.type === "line.redraft_requested" ? event.entityId === line.id : lineOfMilestone.get(event.entityId) === line.id)
+        lastDraftAt: latest(proposed.filter((event) => (event.type === "line.changed" && (event.payload as { change?: string }).change === "redraft_requested") ? event.entityId === line.id : lineOfMilestone.get(event.entityId) === line.id)
           .map((event) => event.createdAt)),
         hasMilestones: milestones.some((milestone) => milestone.identityId === line.id && milestone.status !== "archived")
       }),
@@ -91,8 +92,8 @@ export function recordRedraftRequested(ctx: AccessContext, lineIds: string[]): v
   const store = getStore();
   const at = new Date().toISOString();
   for (const lineId of lineIds) {
-    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `line:redraft:${lineId}:${at}`, type: "line.redraft_requested",
-      entityId: lineId, payload: { at } });
+    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `line:redraft:${lineId}:${at}`, type: "line.changed",
+      entityId: lineId, payload: { at, change: "redraft_requested" } });
   }
 }
 
@@ -112,6 +113,6 @@ export function decideGoalEdit(ctx: AccessContext, lineId: string, decision: "ad
   const { [lineId]: _done, ...rest } = edits;
   store.setSetting(ctx.workspaceId, GOAL_EDITS_SETTING, JSON.stringify(rest));
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `line:goal-edit:${lineId}:${edit.at}:${decision}`,
-    type: decision === "adopt" ? "line.goal_edit_adopted" : "line.goal_edit_dismissed", entityId: lineId, payload: { parts: edit.parts, sourceRef: edit.sourceRef } });
+    type: "line.changed", entityId: lineId, payload: { parts: edit.parts, sourceRef: edit.sourceRef, change: decision === "adopt" ? "goal_edit_adopted" : "goal_edit_dismissed" } });
   return { ok: true };
 }

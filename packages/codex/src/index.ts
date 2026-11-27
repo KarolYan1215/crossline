@@ -12,7 +12,7 @@ import { createRuntimePool, type PoolMember, type RuntimePool } from "./runtime-
 import { verifyCapability } from "./capability";
 import { currentUsageWorkspace, enterUsageWorkspace } from "./usage";
 import { runLocale } from "./style";
-import { CALENDAR_APPS, calendarAppStatuses, tFor, type CostSignal } from "@crossline/core";
+import { CALENDAR_APPS, calendarAppStatuses, skillBase, tFor, type CostSignal } from "@crossline/core";
 import { createRuntimeRegistry, type RuntimeRegistry, type RuntimeSidecar } from "./runtime-registry";
 export * from "./skill-runner";
 export * from "./model-gate";
@@ -377,12 +377,20 @@ export type LocalPluginContract = {
   marketplacePath: string;
   cwd: string;
   requiredSkills: string[];
+  /**
+   * Other plugins of the same marketplace installed beside it, none of them required: the owner's own `crossline-personal` (the weekly
+   * drill, moved out of the built-in plugin on 2026-11-27). One that does not install (an older copy of the marketplace) is skipped.
+   */
+  extraPlugins?: string[];
 };
 
 export async function installLocalPlugin(client: CodexRpcBoundary, plugin: LocalPluginContract): Promise<string[]> {
   try {
     await client.request("plugin/install", { marketplacePath: plugin.marketplacePath, pluginName: plugin.name });
   } catch { throw new Error("CODEX_PLUGIN_INSTALL_FAILED"); }
+  for (const name of plugin.extraPlugins ?? []) {
+    await client.request("plugin/install", { marketplacePath: plugin.marketplacePath, pluginName: name }).catch(() => undefined);
+  }
   let listed: unknown;
   try { listed = await client.request("skills/list", { cwds: [plugin.cwd], forceReload: true }); }
   catch { throw new Error("CODEX_SKILL_LIST_FAILED"); }
@@ -675,7 +683,8 @@ export async function startCodexSupervisor(options: {
   if (options.plugin) {
     try {
       const discoveredSkills = await installLocalPlugin(sidecar.client, options.plugin);
-      if (options.plugin.requiredSkills.some((name) => !discoveredSkills.includes(name))) throw Object.assign(new Error("CODEX_PLUGIN_SKILLS_MISSING"), { discoveredSkills });
+      // A required name may carry a mode (`crossline:crossline-portrait:figure`); the Skill listed is its base.
+      if (options.plugin.requiredSkills.some((name) => !discoveredSkills.includes(skillBase(name)))) throw Object.assign(new Error("CODEX_PLUGIN_SKILLS_MISSING"), { discoveredSkills });
       pluginState = { name: options.plugin.name, requiredSkills: options.plugin.requiredSkills, discoveredSkills, state: "installed" };
     } catch (error) {
       const code = error instanceof Error && /^CODEX_[A-Z_]+$/.test(error.message) ? error.message : "CODEX_PLUGIN_INSTALL_FAILED";

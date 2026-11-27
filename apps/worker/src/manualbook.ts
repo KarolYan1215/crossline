@@ -9,16 +9,16 @@ import {
   type MaterialSearchContext, type NodeWriteup, type WriteContext
 } from "@crossline/core";
 import { continueSkillTurn, releaseThread, runCodexSkill, webResearchBlocker, type CodexRpcBoundary, type SkillRunResult } from "@crossline/codex";
-import { aiToolsFor, doneKinds, familiarityBook, familiarityFor, listAgentTasks, openNeedsOf, preparationOf, provisionsOf, type CrosslineStore } from "@crossline/db";
-import { aiToolBrief, FAMILIARITY_INSTRUCTIONS, onPersonsBoard, requiredApproval, taskTitleOf, tutorialSteps, tFor, type Locale } from "@crossline/core";
+import { aiToolsFor, appendTick, doneKinds, familiarityBook, familiarityFor, listAgentTasks, openNeedsOf, preparationOf, provisionsOf, type CrosslineStore } from "@crossline/db";
+import { type EventChange, aiToolBrief, FAMILIARITY_INSTRUCTIONS, onPersonsBoard, requiredApproval, taskTitleOf, tutorialSteps, tFor, type Locale } from "@crossline/core";
 import { localeOf } from "./locale";
 import { claimedTitleMatches } from "./diligence";
 import { arxivPdfAddress, defaultSafeGetDeps, htmlToText, safeGet, type SafeGetDeps } from "./safe-fetch";
 import { citable, citableUrls } from "./cited-urls";
 import { extractText } from "./extract";
 
-export const MANUAL_DESIGNER_SKILL = "crossline:crossline-manualbook-designer";
-export const MATERIAL_RESEARCHER_SKILL = "crossline:crossline-material-researcher";
+export const MANUAL_DESIGNER_SKILL = "crossline:crossline-task-planner:manual";
+export const MATERIAL_RESEARCHER_SKILL = "crossline:crossline-research:material";
 import { libraryInstruction, librarySkillsFor } from "./skill-library";
 export const MATERIAL_WRITER_SKILL = "crossline:crossline-material-writer";
 import { ownerOf } from "./owner";
@@ -194,16 +194,17 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
       return blocked(cost.available ? "MATERIAL_BUDGET_EXHAUSTED" : "COST_SIGNAL_UNAVAILABLE", cost.available ? t("预算已用尽；材料请人工自备。") : t("读不到用量信号；材料请人工自备。"));
     }
 
-    const progress = (stage: ManualProgress["stage"], done: number, total: number) => store.appendEvent({
-      ownerId, workspaceId, idempotencyKey: `manualbook:progress:${workOrderId}:${stage}:${done}:${randomUUID()}`, type: "manualbook.progress",
-      entityId: workOrderId, payload: { stage, done, total } satisfies ManualProgress });
+    // A progress tick for the task page, kept in the `manualbook-progress` log beside the data, not the ledger (2026-11-27).
+    const progress = (stage: ManualProgress["stage"], done: number, total: number) =>
+      appendTick("manualbook-progress", { workspaceId, entityId: workOrderId, payload: { stage, done, total } satisfies ManualProgress });
     const fail = (code: string, message: string): ManualOutcome => {
       // Keyed per retry: a retry that failed with the same code as before used to collide with the first block, so the retry
       // request stayed the last word and the order was prepared again on every tick.
-      // A tutorial's failure is its own event: `materials.blocked` decides whether a `preparing` order is retried on the tick.
+      // A tutorial's failure is its own change: `blocked` decides whether a `preparing` order is retried on the tick.
       const kind = mode === "tutorial" ? "tutorial" : "materials";
-      const attempt = store.listEvents(workspaceId, { type: mode === "tutorial" ? "tutorial.requested" : "materials.retry_requested", entityId: workOrderId }).length;
-      store.appendEvent({ ownerId, workspaceId, idempotencyKey: `${kind}:blocked:${workOrderId}:${code}:${attempt}:${mode === "tutorial" ? all.now().getTime() : ""}`, type: `${kind}.blocked`, entityId: workOrderId, payload: { code, message } });
+      const attempt = store.listEvents(workspaceId, { type: "materials.changed", change: mode === "tutorial" ? "tutorial_requested" : "retry_requested", entityId: workOrderId }).length;
+      store.appendEvent({ ownerId, workspaceId, idempotencyKey: `${kind}:blocked:${workOrderId}:${code}:${attempt}:${mode === "tutorial" ? all.now().getTime() : ""}`, type: "materials.changed", entityId: workOrderId,
+        payload: { code, message, change: mode === "tutorial" ? "tutorial_blocked" : "blocked" } });
       return blocked(code, message);
     };
 
@@ -356,11 +357,11 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
     if (store.getWorkOrder(workspaceId, workOrderId)?.state === "preparing")
       store.transitionWorkOrder(workspaceId, workOrderId, { type: "materials.ready" }, `materials-ready:${workOrderId}:manualbook`);
     const sources = results.flatMap((result) => result.sources);
-    const builds = store.listEvents(workspaceId, { type: "manualbook.built", entityId: workOrderId }).length;
-    store.appendEvent({ ownerId, workspaceId, idempotencyKey: builds ? `manualbook:built:${workOrderId}:${builds}` : `manualbook:built:${workOrderId}`, type: "manualbook.built", entityId: workOrderId,
+    const builds = store.listEvents(workspaceId, { type: "materials.changed", change: "manualbook_built", entityId: workOrderId }).length;
+    store.appendEvent({ ownerId, workspaceId, idempotencyKey: builds ? `manualbook:built:${workOrderId}:${builds}` : `manualbook:built:${workOrderId}`, type: "materials.changed", entityId: workOrderId,
       payload: { nodes: nodes.length, sources: sources.length, downloaded: sources.filter((source) => source.kept === "full_text").length,
         inputs: tutorialInputs(store, workspaceId, workOrderId), inputsVersion: TUTORIAL_INPUTS_VERSION,
-        researched: researched.size } });
+        researched: researched.size, change: "manualbook_built" } });
     return { state: "ready", workOrderId, artifacts: files.filter((item) => item.record).length, nodes: nodes.length, sources: sources.length,
       downloaded: sources.filter((source) => source.kept === "full_text").length };
   };
@@ -503,8 +504,8 @@ export function pendingMaterialWorkOrders(store: CrosslineStore, workspaceId: st
   // information, and the human self-preparation path is open the whole time. Retrying is a deliberate act — so the
   // LAST word wins: a retry the person asked for re-opens the order, and a failure after that closes it again.
   const decidedAt = new Map<string, "blocked" | "retry">();
-  for (const event of store.listEvents(workspaceId, { type: ["materials.blocked", "materials.retry_requested"] })) {
-    decidedAt.set(event.entityId, event.type === "materials.blocked" ? "blocked" : "retry");
+  for (const event of store.listEvents(workspaceId, { type: "materials.changed", change: ["blocked", "retry_requested"] })) {
+    decidedAt.set(event.entityId, (event.type === "materials.changed" && (event.payload as { change?: string }).change === "blocked") ? "blocked" : "retry");
   }
   return store.listWorkOrders(workspaceId)
     .filter((order) => order.state === "preparing" && decidedAt.get(order.id) !== "blocked")
@@ -594,7 +595,7 @@ function researchedBefore(store: CrosslineStore, workspaceId: string, materialsD
     if (sources.length && !found.has(titleKey(note.title))) found.set(titleKey(note.title), { note: t("沿用上次生成中途停止前这一步已查到的资料"), sources });
   }
   const since = now.getTime() - REUSE_SOURCES_DAYS * 86_400_000;
-  const built = new Set(store.listEvents(workspaceId, { type: "manualbook.built" }).filter((event) => Date.parse(event.createdAt) >= since).map((event) => event.entityId));
+  const built = new Set(store.listEvents(workspaceId, { type: "materials.changed", change: "manualbook_built" }).filter((event) => Date.parse(event.createdAt) >= since).map((event) => event.entityId));
   const books = store.listWorkOrders(workspaceId).filter((item) => built.has(item.id) && (item.id === order.id || (order.projectId && item.projectId === order.projectId)))
     .sort((a, b) => Number(b.id === order.id) - Number(a.id === order.id));
   for (const other of books) {
@@ -667,15 +668,15 @@ export function pendingTutorials(store: CrosslineStore, workspaceId: string, now
   const planOf = new Map(plans.map((plan) => [plan.workOrderId, plan]));
   const done = doneKinds(store, workspaceId, plans);
   const book = familiarityBook(store, workspaceId, plans);
-  const latest = (type: string) => {
+  const latest = (change: EventChange<"materials.changed">) => {
     const out = new Map<string, { createdAt: string; payload: Record<string, unknown> }>();
-    for (const event of store.listEvents(workspaceId, { type })) {
+    for (const event of store.listEvents(workspaceId, { type: "materials.changed", change })) {
       const seen = out.get(event.entityId);
       if (!seen || seen.createdAt <= event.createdAt) out.set(event.entityId, { createdAt: event.createdAt, payload: event.payload as Record<string, unknown> });
     }
     return out;
   };
-  const built = latest("manualbook.built"), failed = latest("tutorial.blocked");
+  const built = latest("manualbook_built"), failed = latest("tutorial_blocked");
   const orders = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order]));
   return [...soon].filter((id) => {
     const order = orders.get(id);

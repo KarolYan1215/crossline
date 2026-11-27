@@ -62,8 +62,8 @@ export function createNightlyFlywheel(deps: NightlyDeps, options: {
         deps.store.appendEvent({
           ownerId: ownerOf(deps.store, deps.workspaceId), workspaceId: deps.workspaceId,
           idempotencyKey: `flywheel:nightly:${now.toISOString().slice(0, 10)}:skipped`,
-          type: "flywheel.nightly.skipped", entityId: "flywheel",
-          payload: { code: decision.code, message: decision.message }
+          type: "job.ran", entityId: "flywheel",
+          payload: { code: decision.code, message: decision.message, job: "flywheel.nightly", state: "skipped" }
         });
       }
       return decision;
@@ -77,15 +77,15 @@ export function createNightlyFlywheel(deps: NightlyDeps, options: {
       deps.store.appendEvent({
         ownerId: ownerOf(deps.store, deps.workspaceId), workspaceId: deps.workspaceId,
         idempotencyKey: `flywheel:nightly:${localDay}:ran`,
-        type: "flywheel.nightly.ran", entityId: "flywheel",
-        payload: { proposals, headroomPercent: decision.headroomPercent, mode: decision.mode }
+        type: "job.ran", entityId: "flywheel",
+        payload: { proposals, headroomPercent: decision.headroomPercent, mode: decision.mode, job: "flywheel.nightly", state: "done" }
       });
     } catch (error) {
       deps.store.appendEvent({
         ownerId: ownerOf(deps.store, deps.workspaceId), workspaceId: deps.workspaceId,
         idempotencyKey: `flywheel:nightly:${localDay}:failed`,
-        type: "flywheel.nightly.failed", entityId: "flywheel",
-        payload: { code: "FLYWHEEL_RUN_FAILED", message: error instanceof Error ? error.message.slice(0, 200) : "unknown" }
+        type: "job.ran", entityId: "flywheel",
+        payload: { code: "FLYWHEEL_RUN_FAILED", message: error instanceof Error ? error.message.slice(0, 200) : "unknown", job: "flywheel.nightly", state: "failed" }
       });
     }
     return decision;

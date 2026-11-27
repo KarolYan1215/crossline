@@ -1,5 +1,5 @@
 import "server-only";
-import { checkGoalParts, composeGoal, plainComposeGoal, type AccessContext } from "@crossline/core";
+import { checkGoalParts, composeGoal, plainComposeGoal, type AccessContext, type EventPayload } from "@crossline/core";
 import { DOMAIN_PACKS, LINE_PALETTE, LINE_SETTING, MAX_HARD_LINES, defaultIdentityPacks, domainLineId, freeLineColor, identityPacksFor, isLineDomain, lineForDomain, newLineId,
   readLineSpecs, type IdentityPack, type LineDomain, type LineSpec } from "@crossline/identity-packs";
 import { getStore } from "./crossline";
@@ -31,10 +31,10 @@ function currentSpecs(ctx: AccessContext): LineSpec[] {
   return defaultIdentityPacks().filter((pack) => pack.kind === "identity").map((pack) => ({ id: pack.id, label: pack.label, color: pack.id, goal: "", createdAt: "",
     ...(pack.masterClock ? { rank: 1 } : {}) }));
 }
-function saveSpecs(ctx: AccessContext, specs: LineSpec[], event: { type: string; entityId: string; payload: Record<string, unknown> }): void {
+function saveSpecs(ctx: AccessContext, specs: LineSpec[], event: { type: "line.changed"; entityId: string; payload: EventPayload<"line.changed"> }): void {
   const store = getStore();
   store.setSetting(ctx.workspaceId, LINE_SETTING, JSON.stringify(specs));
-  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `${event.type}:${event.entityId}:${Date.now()}`, ...event });
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `line.${event.payload.change}:${event.entityId}:${Date.now()}`, ...event });
 }
 
 /** A new line: its name, its long-term goal and a free colour. Its interview (`/onboarding?line=<id>`) comes next. */
@@ -53,7 +53,7 @@ export function addLine(ctx: AccessContext, input: { label: string; goal: string
   const goals = cleanGoals(input.goals ?? (input.goal ? [input.goal] : []));
   saveSpecs(ctx, [...specs, { id, label, color, goal: goals[0] ?? "", goals, createdAt: new Date().toISOString(),
     ...(input.hard ? { hard: true } : {}), ...(input.rank ? { rank: input.rank } : {}), ...(domain ? { domain } : {}) }],
-    { type: "line.created", entityId: id, payload: { label, color, ...(domain ? { domain } : {}) } });
+    { type: "line.changed", entityId: id, payload: { label, color, ...(domain ? { domain } : {}), change: "created" } });
   return { ok: true, id };
 }
 
@@ -103,7 +103,7 @@ export function updateLine(ctx: AccessContext, id: string, change: { label?: str
   if (typeof change.rank === "number" && change.rank >= 1) next.rank = Math.round(change.rank);
   if (change.domain === null) delete next.domain;
   if (isLineDomain(change.domain)) next.domain = change.domain;
-  saveSpecs(ctx, specs.map((item) => item.id === id ? next : item), { type: "line.updated", entityId: id, payload: change });
+  saveSpecs(ctx, specs.map((item) => item.id === id ? next : item), { type: "line.changed", entityId: id, payload: { ...change, change: "updated" } });
   return { ok: true };
 }
 
@@ -117,7 +117,7 @@ export function rankLines(ctx: AccessContext, order: string[]): { ok: true } | {
   const specs = currentSpecs(ctx);
   const ranked = order.filter((id) => specs.some((line) => line.id === id));
   saveSpecs(ctx, specs.map((line) => { const index = ranked.indexOf(line.id); const { rank: _rank, ...rest } = line; return index >= 0 ? { ...rest, rank: index + 1 } : rest; }),
-    { type: "line.ranked", entityId: ctx.workspaceId, payload: { order: ranked } });
+    { type: "line.changed", entityId: ctx.workspaceId, payload: { order: ranked, change: "ranked" } });
   return { ok: true };
 }
 
@@ -148,7 +148,7 @@ export function setupLines(ctx: AccessContext, lines: Array<{ label: string; ran
       color: domainColor(line.domain, specs), goal: "", goals: [], createdAt: new Date().toISOString(),
       ...(line.hard ? { hard: true } : {}), ...(line.ranked ? { rank: ++rank } : {}), ...(line.domain ? { domain: line.domain } : {}) });
   }
-  saveSpecs(ctx, specs, { type: "lines.set_up", entityId: ctx.workspaceId, payload: { lines: specs.map((line) => line.label) } });
+  saveSpecs(ctx, specs, { type: "line.changed", entityId: ctx.workspaceId, payload: { lines: specs.map((line) => line.label), change: "set_up" } });
   return { ok: true, ids: specs.map((line) => line.id) };
 }
 

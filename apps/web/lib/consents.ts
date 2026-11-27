@@ -126,6 +126,6 @@ export function dismissEnergyAdvice(ctx: AccessContext, id?: string): SwitchResu
   if (!advice || !("id" in advice) || (id !== undefined && id !== advice.id)) return { ok: false, code: "ENERGY_ADVICE_NOT_CURRENT" };
   store.setSetting(ctx.workspaceId, ENERGY_ADVICE_DISMISSED, advice.id);
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `energy.advice.dismissed:${advice.id}`,
-    type: "energy.advice.dismissed", entityId: ctx.workspaceId, payload: { id: advice.id } });
+    type: "energy.changed", entityId: ctx.workspaceId, payload: { id: advice.id, change: "advice_dismissed" } });
   return { ok: true };
 }

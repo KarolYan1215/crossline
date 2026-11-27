@@ -40,7 +40,7 @@ export function syncDeviceTimeZone(ctx: AccessContext, timeZone: unknown): { ok:
   const store = getStore();
   store.setSetting(ctx.workspaceId, PREFERENCES_SETTING, JSON.stringify({ ...current, timeZone: zone } satisfies SchedulePreferences));
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `schedule:time_zone:${randomUUID()}`,
-    type: "schedule.time_zone_detected", entityId: ctx.workspaceId, payload: { previous: current.timeZone, next: zone } });
+    type: "job.ran", entityId: ctx.workspaceId, payload: { previous: current.timeZone, next: zone, job: "schedule.time_zone_detect", state: "done" } });
   return { ok: true, changed: current.timeZone !== zone };
 }
 
@@ -51,7 +51,7 @@ export function saveScheduleParams(ctx: AccessContext, value: unknown): { ok: tr
   const store = getStore();
   store.setSetting(ctx.workspaceId, PREFERENCES_SETTING, JSON.stringify({ ...current, mode, params } satisfies SchedulePreferences));
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `schedule:params:${randomUUID()}`,
-    type: "schedule.params_saved", entityId: ctx.workspaceId, payload: { previous: paramsFor(current), next: params } });
+    type: "person.decided", entityId: ctx.workspaceId, payload: { previous: paramsFor(current), next: params, subject: "schedule", decision: "params_saved" } });
   return { ok: true };
 }
 
@@ -114,12 +114,12 @@ export function saveSchedulePreferences(ctx: AccessContext, input: {
     const next = { ...goal, importance };
     store.setSetting(ctx.workspaceId, goalKey(id), JSON.stringify(next));
     store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
-      idempotencyKey: `goal:importance:${id}:${randomUUID()}`, type: "goal.settings_confirmed",
-      entityId: id, payload: { previous: goal, next, source: "schedule_preferences" } });
+      idempotencyKey: `goal:importance:${id}:${randomUUID()}`, type: "goal.changed",
+      entityId: id, payload: { previous: goal, next, source: "schedule_preferences", change: "settings_confirmed" } });
   }
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
-    idempotencyKey: `schedule:preferences:${randomUUID()}`, type: "schedule.preferences_saved",
-    entityId: ctx.workspaceId, payload: { timeZone, mode: input.mode, milestoneCount: approved.length } });
+    idempotencyKey: `schedule:preferences:${randomUUID()}`, type: "person.decided",
+    entityId: ctx.workspaceId, payload: { timeZone, mode: input.mode, milestoneCount: approved.length, subject: "schedule", decision: "preferences_saved" } });
   return { ok: true };
 }
 
@@ -153,7 +153,8 @@ export function readLineShares(ctx: AccessContext): Record<string, number> | nul
   try { portrait = (JSON.parse(store.getSetting(ctx.workspaceId, "portrait.report") ?? "{}") as { report?: PortraitReport }).report; } catch { /* none yet */ }
   // The portrait's suggested share (`targetShare`) over the one the person described (`share`): the owner chose on 2026-10-20 to plan
   // on the suggestion, which keeps the hard line as the calendar's base and gives each other line what it feeds back to it.
-  const items = portrait?.lines?.items?.map((item) => ({ lineId: item.lineId, share: item.targetShare ?? item.share })) ?? null;
+  // A share the report left null (not said, 2026-11-27) is left out, as an absent one is.
+  const items = portrait?.lines?.items?.map((item) => { const share = item.targetShare ?? item.share; return { lineId: item.lineId, ...(share != null ? { share } : {}) }; }) ?? null;
   return statedShares(items, store.listProfileFacts(ctx.workspaceId), hoursFromText);
 }
 

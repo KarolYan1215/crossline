@@ -40,7 +40,7 @@ test("each answer is stored under the milestone's fingerprint; an edit makes it 
   // An answer without a weight is not asked again for it (only reviews from before the weight are).
   expect(stored.c).toMatchObject({ weighed: true });
   expect(stored.c).toMatchObject({ source: "model", risks: [] });
-  expect(store.listEvents(workspaceId, { type: "milestone.risk_reviewed" })).toHaveLength(3);
+  expect(store.listEvents(workspaceId, { type: "milestone.changed", change: "risk_reviewed" })).toHaveLength(3);
   expect(milestonesAwaitingRiskReview(store, workspaceId, NOW)).toEqual([]);
   // An approved milestone edited after its review is not reviewed again (the page shows the rule estimate for it).
   store.saveMilestoneAnchor({ workspaceId, milestoneId: "a", stage: 1, deadline: "2026-11-27", baseline: "", target: "", stakeholders: [], sourceFactIds: [],

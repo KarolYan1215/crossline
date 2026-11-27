@@ -47,7 +47,7 @@ export function taskTitleOf(order: { intent: string; payload?: unknown; projectI
 }
 
 /**
- * The titler's answer (Skill `crossline-task-titler`), by id: a short name for each task, and whether the task is going to something at
+ * The titler's answer (Skill `crossline-goal-backplanner:title`), by id: a short name for each task, and whether the task is going to something at
  * its own time (`attends`: a talk, a rehearsal, an interview, an exam sitting), which replaced the verb list (「参加/出席…」) on 2026-11-22.
  */
 export type TaskTitles = { titles: Array<{ id: string; title: string; attends?: boolean }> };

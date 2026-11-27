@@ -36,14 +36,14 @@ if (!context.openMilestones.length) {
   process.exit(1);
 }
 
-const before = store.listEvents(WORKSPACE).filter((event) => event.type === "flywheel.finding").length;
+const before = store.listEvents(WORKSPACE).filter((event) => (event.type === "insight.changed" && (event.payload as { change?: string }).change === "found")).length;
 const supervisor = await startCodexSupervisor({
   port: Number(process.env.CROSSLINE_CODEX_SUPERVISOR_PORT ?? 3399),
   plugin: {
     name: "crossline",
     marketplacePath: path.join(repoRoot, "skills", "marketplace", ".agents", "plugins", "marketplace.json"),
     cwd: repoRoot,
-    requiredSkills: ["crossline:crossline-flywheel-scout"]
+    requiredSkills: ["crossline:crossline-cross-line-planner:flywheel"]
   }
 });
 
@@ -57,7 +57,7 @@ try {
   const expand = createFlywheelExpander(target, workspaceId, repoRoot, () => supervisor.client);
   const count = await expand();
 
-  const findings = target.listEvents(WORKSPACE).filter((event) => event.type === "flywheel.finding");
+  const findings = target.listEvents(WORKSPACE).filter((event) => (event.type === "insight.changed" && (event.payload as { change?: string }).change === "found"));
   for (const event of findings) {
     const finding = event.payload as { milestoneId: string; summary: string; sourceUrl: string; retrievedAt: string; staleWhen: string; helpsHow: string };
     console.info(JSON.stringify({ status: "finding", ...finding }, null, 1));

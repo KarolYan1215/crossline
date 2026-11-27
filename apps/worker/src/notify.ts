@@ -215,7 +215,7 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
     dueSoon: store.listMilestones(workspaceId).filter((milestone) => milestone.status === "approved" && anchors.get(milestone.id) && !accepted.has(milestone.id))
       .map((milestone) => ({ id: milestone.id, title: milestone.title, deadline: anchors.get(milestone.id)!, daysLeft: daysLeft(anchors.get(milestone.id)!) }))
       .filter((item) => item.daysLeft >= 0 && item.daysLeft <= 3).sort((a, b) => a.daysLeft - b.daysLeft),
-    gateRefusals: store.listEvents(workspaceId, { type: "milestone_gate.blocked" }).filter((event) => event.createdAt >= since)
+    gateRefusals: store.listEvents(workspaceId, { type: "milestone_gate.changed", change: "blocked" }).filter((event) => event.createdAt >= since)
       .map((event) => ({ id: event.eventId, title: orders.get(event.entityId) ?? tFor(locale)("一项作业"), message: String((event.payload as { message?: string }).message ?? "") })),
     unconfirmedLastNight: unconfirmedLastNight(store, workspaceId, today),
     unconfirmedWork: unconfirmedWorkYesterday(store, workspaceId, today, zone),
@@ -294,7 +294,7 @@ export function unconfirmedLastNight(store: CrosslineStore, workspaceId: string,
   const yesterday = new Date(Date.parse(`${today}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
   let seen: Record<string, { id: string; end: string; began?: boolean }> = {};
   try { seen = JSON.parse(store.getSetting(workspaceId, `nudge.blocks:${yesterday}`) ?? "{}"); } catch { return 0; }
-  const confirmed = new Set(store.listEvents(workspaceId, { type: "block.confirmed" })
+  const confirmed = new Set(store.listEvents(workspaceId, { type: "work_order.changed", change: "block_confirmed" })
     .filter((event) => (event.payload as { day?: string }).day === yesterday).map((event) => String((event.payload as { blockId?: string }).blockId)));
   // The evening wrap-up (docs/rituals.md) holds every block whose task is not due by the next day; a day not wrapped up leaves all of them
   // unconfirmed, so the brief counts all of them, not only the ones that ended in the quiet hours.

@@ -1,7 +1,7 @@
 import { isWebUrl, type DimensionId, type ResearchThread } from "./onboarding-turn-schema";
 
 /**
- * One run of an interview's research thread (contract C, 2026-11-12, Skill `crossline-onboarding-research`): a question the dialogue
+ * One run of an interview's research thread (contract C, 2026-11-12, Skill `crossline-research:onboarding`): a question the dialogue
  * found worth looking into on the web (a role's requirements, how common something is among people like them, the literature behind an
  * inference, the outside background of something they lived through), answered on its own long thread so the conversation is not held up.
  * Each run says what it found (`message`), asks the person only what it cannot find out itself (`ask`), and ends with a `conclusion` once

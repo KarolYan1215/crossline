@@ -172,7 +172,7 @@ function SharePart({ report, state, ordered, anchors = false, afterType = null }
   const { cells, identities } = portraitLabels(report, { lineLabel: name, locale });
   const edges = edgesOf(report);
   const allLines = [...report.lines.items].sort((a, b) => (b.targetShare ?? 0) - (a.targetShare ?? 0))
-    .flatMap((item) => item.targetShare === undefined ? [] : [{ lineId: item.lineId, label: name(item.lineId), target: item.targetShare, now: item.share ?? null }]);
+    .flatMap((item) => item.targetShare == null ? [] : [{ lineId: item.lineId, label: name(item.lineId), target: item.targetShare, now: item.share ?? null }]);
   const values = radarValues(report.compass.values);
   return <>
     <section className="pt-page pt-type" style={groupStyle(type)} {...id("type")}>

@@ -1,3 +1,5 @@
+import type { EventType } from "@crossline/core";
+import type { LedgerEventInput } from "@crossline/db";
 import "server-only";
 import {
   PRIVACY_LEVELS, PROFILE_CLAIMS_SETTING, PROFILE_CLAIM_STATUS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, REPORT_PRIVACY_SETTING, REPORT_SECTIONS,
@@ -36,11 +38,11 @@ export function loadProfileReport(ctx: AccessContext): ProfileReportState {
   };
 }
 
-const event = (ctx: AccessContext, type: string, payload: Record<string, unknown>) => {
+const event = (ctx: AccessContext, type: EventType, payload: Record<string, unknown>) => {
   const store = getStore();
   const at = new Date().toISOString();
   store.appendEvent({ ownerId: store.getWorkspaceOwnerId(ctx.workspaceId) ?? ctx.principalId, workspaceId: ctx.workspaceId,
-    idempotencyKey: `${type}:${JSON.stringify(payload)}:${at}`, type, entityId: ctx.workspaceId, payload });
+    idempotencyKey: `${type}:${JSON.stringify(payload)}:${at}`, type, entityId: ctx.workspaceId, payload } as LedgerEventInput);
 };
 
 export type ProfileReportChange =
@@ -77,7 +79,7 @@ export function changeProfileReport(ctx: AccessContext, change: ProfileReportCha
     if (change.action === "privacy") choices.sections[change.section] = change.level;
     else if (change.level) choices.claims[change.claimId] = change.level; else delete choices.claims[change.claimId];
     store.setSetting(ws, REPORT_PRIVACY_SETTING, JSON.stringify(choices));
-    event(ctx, "profile.privacy_set", change);
+    event(ctx, "person.decided", { ...change, subject: "profile", decision: "privacy_set" });
     return { ok: true };
   }
   if (change.action === "judge") {
@@ -86,7 +88,7 @@ export function changeProfileReport(ctx: AccessContext, change: ProfileReportCha
     const status = readClaimStatus(store.getSetting(ws, PROFILE_CLAIM_STATUS_SETTING));
     if (change.status) status[claim.id] = { status: change.status, at: new Date().toISOString(), statement: claim.statement }; else delete status[claim.id];
     store.setSetting(ws, PROFILE_CLAIM_STATUS_SETTING, JSON.stringify(status));
-    event(ctx, "profile.claim_judged", { claimId: claim.id, section: claim.section, status: change.status });
+    event(ctx, "person.decided", { claimId: claim.id, section: claim.section, status: change.status, subject: "profile", decision: "claim_judged" });
     return { ok: true };
   }
   const item = PROFILE_ITEMS.find((entry) => entry.id === change.itemId);
@@ -98,6 +100,6 @@ export function changeProfileReport(ctx: AccessContext, change: ProfileReportCha
   answers[change.itemId] = change.score === null ? { itemId: change.itemId, by: "skipped", at: new Date().toISOString() }
     : { itemId: change.itemId, score: change.score, by: "tapped", at: new Date().toISOString() };
   store.setSetting(ws, PROFILE_INSTRUMENTS_SETTING, JSON.stringify(answers));
-  event(ctx, "profile.item_answered", { itemId: change.itemId, score: change.score, via: "portrait" });
+  event(ctx, "person.decided", { itemId: change.itemId, score: change.score, via: "portrait", subject: "profile", decision: "item_answered" });
   return { ok: true };
 }

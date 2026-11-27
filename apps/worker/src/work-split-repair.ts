@@ -62,7 +62,7 @@ export function planWorkSplit(store: CrosslineStore, workspaceId: string, now = 
   const plans = new Map(store.listStepPlans(workspaceId).map((plan) => [plan.workOrderId, plan]));
   // Who last moved each step's progress: the assistant (`agent`) or anyone else (the person, their report, their confirmation).
   const lastSource = new Map<string, string>();
-  for (const event of store.listEvents(workspaceId, { type: "task.step_progress" })) {
+  for (const event of store.listEvents(workspaceId, { type: "task.changed", change: "step_progress" })) {
     const payload = event.payload as { stepId?: string; source?: string };
     lastSource.set(`${event.entityId}#${payload.stepId ?? ""}`, String(payload.source ?? ""));
   }
@@ -210,14 +210,14 @@ export async function workSplitRepair(store: CrosslineStore, workspaceId: string
   }
   const merged = options.mergeNow ? await options.mergeNow().catch(() => 0) : 0;
   for (const milestone of plan.backplan)
-    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `goal:backplan:rerun:${milestone.id}:work-split`, type: "goal.backplan_rerun_requested",
-      entityId: milestone.id, payload: { reason: "work_split", why: milestone.why } });
+    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `goal:backplan:rerun:${milestone.id}:work-split`, type: "goal.changed",
+      entityId: milestone.id, payload: { reason: "work_split", why: milestone.why, change: "backplan_rerun_requested" } });
   const assistant = plan.moves.filter((move) => move.owner === "assistant").length;
   const ask = plan.moves.filter((move) => move.owner === "ask").length;
-  store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `work_split.reorganized:${WORK_SPLIT_REPAIR_MARKER}`, type: "work_split.reorganized", entityId: workspaceId,
+  store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `work_split.reorganized:${WORK_SPLIT_REPAIR_MARKER}`, type: "job.ran", entityId: workspaceId,
     payload: { assistant: plan.moves.filter((move) => move.owner === "assistant").map((move) => move.order.id), ask: plan.moves.filter((move) => move.owner === "ask").map((move) => move.order.id),
       steps: plan.steps.map((split) => ({ workOrderId: split.order.id, changes: split.changes })), merged, backplan: plan.backplan.map((item) => item.id),
-      prepOnly: plan.prepOnly.map((item) => item.id), ...(opId ? { opId } : {}) } });
+      prepOnly: plan.prepOnly.map((item) => item.id), ...(opId ? { opId } : {}), job: "work_split.reorganize", state: "done" } });
   const lonely = plan.prepOnly.filter((item) => !item.next);
   const text = workSplitMessage({ assistant, ask, steps: changedSteps, tasksWithSteps: plan.steps.length, merged,
     backplan: plan.backplan.map((item) => item.title), lonely: lonely.map((item) => item.title) }, locale);

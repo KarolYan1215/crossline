@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { DELIVERABLE_JUDGED, RESULT_FOLDERS_SETTING, SOURCE_FOLDERS_SETTING, sourceFolderIndexSetting } from "@crossline/core";
+import { RESULT_FOLDERS_SETTING, SOURCE_FOLDERS_SETTING, sourceFolderIndexSetting } from "@crossline/core";
 import { DELIVERABLE_SKILL, deliverableCheckPass, newFolderFiles } from "./deliverable-check";
 import { fakeRuntime } from "./testing/fake-runtime";
 
@@ -43,7 +43,7 @@ test("each new file is judged once; an offline task is never a candidate; the fi
   const prompt = runtime.prompts().join("\n");
   expect(prompt).toContain("hw4");
   expect(prompt).not.toContain("\"run\"");
-  const judged = store.listEvents(ws, { type: DELIVERABLE_JUDGED });
+  const judged = store.listEvents(ws, { type: "deliverable.changed", change: "judged" });
   expect(judged.map((event) => event.entityId).sort()).toEqual(["new", "note"]);
   expect(judged.find((event) => event.entityId === "new")!.payload).toMatchObject({ task: "hw4", verdict: "deliverable", criterion: "pass", fileName: "ECE555/hw4_final.txt" });
   expect(store.listSourceDocuments(ws).find((doc) => doc.id === "new")!.projectId).toBe("ece555");
@@ -54,7 +54,7 @@ test("a quote not in the file is sent back, and the repaired answer is kept", as
   const runtime = fakeRuntime([JSON.stringify({ items: [unrelated, { ...pass, quote: "全部完成" }] }), JSON.stringify({ items: [unrelated, pass] })], DELIVERABLE_SKILL);
   await deliverableCheckPass(store, ws, runtime.rpc, "C:\\repo", NOW);
   expect(runtime.prompts().join("\n")).toContain("quote 必须逐字出自该文件");
-  expect(store.listEvents(ws, { type: DELIVERABLE_JUDGED })).toHaveLength(2);
+  expect(store.listEvents(ws, { type: "deliverable.changed", change: "judged" })).toHaveLength(2);
 });
 
 test("a result folder is matched against its project's tasks only", async () => {

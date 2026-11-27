@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import * as reply from "./onboarding-reply";
-import { inventedDates, safetyReplyOnly } from "./onboarding-reply";
+import { safetyReplyOnly } from "./onboarding-reply";
 
 const HELP = "如果这个念头再出现，全国心理援助热线 12356；北京心理危机研究与干预中心 010-82951332；身处危险时打 120 或 110，或去最近的医院急诊。";
 
@@ -14,14 +14,4 @@ test("the safety round's reply ends at its help lines; only a question after the
 test("a reply may use the research's figures: the check that counted them is gone (2026-11-22, the reply cites its data)", () => {
   expect(Object.keys(reply)).not.toContain("researchCopied");
   expect(Object.keys(reply)).not.toContain("RESEARCH_FIGURES_MAX");
-});
-
-test("a date the reply sets something for must come from the person, the research, the files or a weekday just said", () => {
-  const known = ["【约人问岗位，定在哪天？】选择：11 月 16 日周一，先发消息约时间"];
-  // 2026-11-17 is a Tuesday; nobody gave it.
-  expect(inventedDates("试做定在 11 月 17 日周二：约两位聊一次。", known, "【未来两周先做哪一件？】选择：约两位聊一次", "2026-11-14")).toEqual(["11 月 17 日"]);
-  expect(inventedDates("发消息定在 11 月 16 日。", known, "", "2026-11-14")).toEqual([]);
-  expect(inventedDates("第一份投递定在 11 月 18 日周三。", known, "周三就投，拖着更没底。", "2026-11-14")).toEqual([]);
-  expect(inventedDates("投递就在今天 11 月 14 日。", [], "", "2026-11-14")).toEqual([]);
-  expect(inventedDates("上次 11 月 17 日那场考试考得不错。", [], "", "2026-11-14")).toEqual([]);
 });

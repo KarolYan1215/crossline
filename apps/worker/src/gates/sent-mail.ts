@@ -4,10 +4,9 @@ import { ownerOf } from "../owner";
 
 /**
  * What the person sent, as evidence for J1 (docs/plans/execution-gates-1124.md, round 2): per message the time, the recipients' domains
- * and the subject are kept as one `mail.sent_seen` event; the opening 500 characters of the text go only into a judgement's input and are
+ * and the subject are kept as one `mail.changed` `sent_seen` event; the opening 500 characters of the text go only into a judgement's input and are
  * read again from the mailbox when needed, never stored.
  */
-export const MAIL_SENT_SEEN = "mail.sent_seen";
 export const SENT_EXCERPT_CHARS = 500;
 const stateKey = (accountId: string) => `mail.sentState.${accountId}`;
 
@@ -34,8 +33,8 @@ export async function readSentMail(store: CrosslineStore, workspaceId: string, a
     for (const message of read.messages) {
       const sent = sentOf(account.id, message);
       const { excerpt: _excerpt, ...kept } = sent;
-      store.appendEvent({ ownerId: owner, workspaceId, type: MAIL_SENT_SEEN, entityId: `${account.id}:${message.uid}`,
-        idempotencyKey: `${MAIL_SENT_SEEN}:${account.id}:${read.uidValidity}:${message.uid}`, payload: kept });
+      store.appendEvent({ ownerId: owner, workspaceId, type: "mail.changed", entityId: `${account.id}:${message.uid}`,
+        idempotencyKey: `mail.sent_seen:${account.id}:${read.uidValidity}:${message.uid}`, payload: { ...kept, change: "sent_seen" } });
       out.push(sent);
     }
     store.setSetting(workspaceId, stateKey(account.id), JSON.stringify({ uidValidity: read.uidValidity, lastUid: read.lastUid }));
@@ -45,7 +44,7 @@ export async function readSentMail(store: CrosslineStore, workspaceId: string, a
 
 /** The recorded sent messages since `sinceIso`, newest last. */
 export function sentSeenSince(store: CrosslineStore, workspaceId: string, sinceIso: string): Array<SentSeen & { eventId: string }> {
-  return store.listEvents(workspaceId, { type: MAIL_SENT_SEEN }).filter((event) => event.createdAt >= sinceIso || String((event.payload as SentSeen).at) >= sinceIso)
+  return store.listEvents(workspaceId, { type: "mail.changed", change: "sent_seen" }).filter((event) => event.createdAt >= sinceIso || String((event.payload as SentSeen).at) >= sinceIso)
     .map((event) => ({ ...(event.payload as SentSeen), eventId: event.eventId }));
 }
 

@@ -1,11 +1,11 @@
-import { DELIVERABLE_JUDGED, GIT_COMMIT_SEEN_EVENT, MAIL_LOG_SETTING, readMailLog, type DeviceCommit, type GateSubject } from "@crossline/core";
+import { GIT_COMMIT_SEEN_EVENT, MAIL_LOG_SETTING, readMailLog, type DeviceCommit, type GateSubject } from "@crossline/core";
 import type { CodexRpcBoundary } from "@crossline/codex";
 import type { ImapMail } from "@crossline/connectors";
 import type { CrosslineStore, StoredWorkOrder } from "@crossline/db";
 import { buildLedgerBrief } from "../ledger-brief";
 import { daysBefore, GATE_LIMITS, localDay } from "./context";
 import { runGate, type GateResult } from "./run";
-import { MAIL_SENT_SEEN, sentExcerpts, sentSeenSince } from "./sent-mail";
+import { sentExcerpts, sentSeenSince } from "./sent-mail";
 import { boardTasks, gateLookups, gateTask, isFinished, isOpen, priorityLabels, type GateTask } from "./tasks";
 /* i18n-ignore-start: evidence and context written for a model, not interface text */
 
@@ -16,7 +16,7 @@ import { boardTasks, gateLookups, gateTask, isFinished, isOpen, priorityLabels, 
  * (`claimed_no_evidence` in the weekly review). Judged twice, the evidence reversed, for P1 and outward tasks (round 1).
  * Record only for now: the verdict changes no task's state until the evaluation set passes (§一.3).
  */
-export const COMPLETION_SKILL = "crossline-gate-completion";
+export const COMPLETION_SKILL = "crossline-evidence-judge:completion";
 export const COMPLETION_VERSION = "crossline.gate.completion.v1";
 const DETAIL = {
   type: "object", additionalProperties: false, required: ["waitingOn", "criteriaMet"],
@@ -39,7 +39,7 @@ export type CompletionEvidence = { id: string; kind: "file" | "mail" | "commit" 
 export function completionEvidence(store: CrosslineStore, workspaceId: string, sinceIso: string, excerpts: Map<string, string>, untilIso = "\uffff"): CompletionEvidence[] {
   const out: CompletionEvidence[] = [];
   const docs = new Map(store.listSourceDocuments(workspaceId).map((doc) => [doc.id, doc]));
-  for (const event of store.listEvents(workspaceId, { type: DELIVERABLE_JUDGED })) {
+  for (const event of store.listEvents(workspaceId, { type: "deliverable.changed", change: "judged" })) {
     if (event.createdAt < sinceIso) continue;
     const payload = event.payload as { doc: string; verdict: string; fileName?: string };
     if (payload.verdict === "unrelated") continue;
@@ -78,8 +78,8 @@ export function completionEvidence(store: CrosslineStore, workspaceId: string, s
 export function completionSubjects(store: CrosslineStore, workspaceId: string, sinceIso: string, now: Date, full: boolean) {
   const labels = priorityLabels(store, workspaceId);
   const windowStart = daysBefore(now, COMPLETION_WINDOW_DAYS);
-  const finishedAt = new Map(store.listEvents(workspaceId, { type: "human.completed" }).map((event) => [String((event.payload as { workOrderId?: string }).workOrderId ?? event.entityId), event.createdAt]));
-  const touched = new Set(store.listEvents(workspaceId, { type: DELIVERABLE_JUDGED }).filter((event) => event.createdAt >= sinceIso)
+  const finishedAt = new Map(store.listEvents(workspaceId, { type: "work_order.transitioned" }).filter((event) => (event.payload as { event?: { type?: string } }).event?.type === "human.completed").map((event) => [String((event.payload as { workOrderId?: string }).workOrderId ?? event.entityId), event.createdAt]));
+  const touched = new Set(store.listEvents(workspaceId, { type: "deliverable.changed", change: "judged" }).filter((event) => event.createdAt >= sinceIso)
     .map((event) => String((event.payload as { task?: string }).task ?? "")).filter(Boolean));
   const rank = (order: StoredWorkOrder) => {
     const label = labels.get(order.id);
@@ -147,7 +147,8 @@ export function completionDue(store: CrosslineStore, workspaceId: string, now: D
   const lastRun = store.getSetting(workspaceId, LAST_RUN);
   const lastFull = store.getSetting(workspaceId, LAST_FULL);
   if (!lastRun || !lastFull || now.getTime() - Date.parse(lastFull) >= DAY) return { due: true, full: true };
-  const fresh = [DELIVERABLE_JUDGED, MAIL_SENT_SEEN, GIT_COMMIT_SEEN_EVENT, "human.completed"].some((type) => store.listEvents(workspaceId, { type }).some((event) => event.createdAt > lastRun));
+  const fresh = [store.latestEventAt(workspaceId, { type: "deliverable.changed", change: "judged" }), store.latestEventAt(workspaceId, { type: "mail.changed", change: "sent_seen" }),
+    store.latestEventAt(workspaceId, { type: GIT_COMMIT_SEEN_EVENT })].some((at) => at !== undefined && at > lastRun);
   return { due: fresh, full: false };
 }
 

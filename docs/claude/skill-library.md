@@ -50,3 +50,36 @@ Design, decisions, the real-ledger demo and what is not done: `docs/skills-libra
 **Reading a run's folder never follows a link** (2026-11-21, W-305): the run's shell is sandboxed, the worker reading `skill/` and `NO_CHANGE.md` afterwards is not, so `readSkillDir` reads only plain files with one link (`lstat`, `nlink === 1`) and refuses a `skill/` that is itself a link, and `readRunFile` also checks the realpath stays in the task folder. Any new worker read of a run's output goes through `readRunFile`.
 
 **Built-in workflows and 「重置时保留」** (2026-11-21, the owner's request before resetting their account): 按话题整理小红书收藏 (`xiaohongshu-favourites-topics`) is built in (`BUILT_IN_WORKFLOWS`, `packages/core/src/workflows.ts`) and any grown workflow can be marked 「重置时保留」 on its Skill 库 card (`keepOnReset`, `POST /api/skills/grown/[id] {keepOnReset}`). 「清空数据重新开始」 goes through `resetWorkspaceKeepingWorkflows` (`packages/db/src/skills.ts`): in one transaction it saves the kept records and their per-id settings (`grownKeptSettingKeys`: files, versions, the favourites reader's `collect.notes.<id>` and the topic plan `collect.topics.<id>`), runs `resetWorkspace` with `RESET_KEEPS`, and writes them back on no line (the lines went with the reset; `grownHomeLine` then names none, and runs go without a line). Consent and logins stay with the record and the browser profile on disk; one merged into a workflow that went is unmerged with the status it had. A new per-workflow setting a kept workflow needs after a reset goes into `grownKeptSettingKeys`.
+
+**One Skill per scenario** (2026-11-27, docs/plans/condense-1127.md §B). The built-in plugin went from 66 Skills to 35. A merged Skill is one folder with one SKILL.md, with one section per mode; each section keeps its old Skill's text and its input and output schemas unchanged. A run names its mode as `crossline:crossline-<skill>:<mode>`. The runner (`firstPromptTexts`) mentions the Skill itself, `$crossline:crossline-<skill>`, and puts the mode first in the input: `mode`, or `toolset` for the assistant, `engine` for form pages and `purpose` for research. Name mapping and helpers: `packages/core/src/skill-modes.ts` (`MERGED_SKILLS`, `skillBase`, `skillModeOf`, `currentSkillKeys`). The merges, new ← old (mode):
+
+- portrait ← portrait-writer (report, gap), portrait-narrative (narrative), portrait-illustrator (figure)
+- line-method ← method-research (research), insight-compiler (rules)
+- milestone-architect (design) + goal-splitter (split)
+- goal-backplanner (backplan) + task-titler (title)
+- cross-line-planner ← artifact-planner (artifacts), flywheel-scout (flywheel)
+- milestone-review ← milestone-risk-reviewer (risk), gate-admission (admission)
+- task-planner ← step-planner (steps), manualbook-designer (manual), archetype-curator (archetype)
+- schedule-advisor ← plan-explainer, energy-advisor
+- evidence-judge ← milestone-gate, gate-completion, progress-judge, deliverable-check
+- focus ← gate-priority, gate-front
+- weekly-review ← gate-attention, gate-setback, weekly-insight
+- form-page ← form-filler, form-observer, form-browser-agent (`engine`)
+- outward-check ← form-checker (form), gate-night (pending, week)
+- research ← due-diligence, onboarding-research, material-researcher, skill-scout, opportunity-needs (`purpose`)
+- page-reader ← opportunity-reader, visa-finder
+- line-filer ← calendar-classifier, folder-classifier, time-attributor
+- capture-digest ← recording-digest, source-digest, background-facts
+- inbox-triage ← mail-triage, import-triage
+- agent ← agent (`toolset: shell`), agent-tools (`toolset: functions`)
+
+The exact mode names are in `MERGED_SKILLS`. The weekly drill (`crossline-gate-drill`, J7) is no longer in the built-in plugin. It is the owner's own plugin, `crossline-personal`, in the same marketplace. The worker installs it beside `crossline` (`extraPlugins`) but does not require it, and a failed install is skipped. `runGate` names it with its own prefix. Two other homes were considered and not used: a ledger line skill (`crossline-mine`), whose text code renders, and a grown workflow, which carries manifest, consent and expiry rules that the drill does not need.
+
+What is keyed by Skill name is now keyed by `skill:mode`: tiers (`SKILL_TIERS`, `NEVER_DOWNGRADED`; the mode's own key, or else the Skill's), provider needs (`SKILL_NEEDS`), routing, background kinds, the person's notes (`find_system_part` lists each mode from its section's first paragraph, `scripts/skill-catalogue-source.ts`) and model choices. Names stored before the merge are read through `currentSkillKeys` and are never rewritten:
+- usage rows: Settings → 用量 counts them under the Skill they became, and background kinds under the mode;
+- `model.choice` slots (`crossline-agent` → `crossline-agent:shell`);
+- design notes;
+- lessons' `skill:` keywords;
+- provider records.
+
+Conformance is measured per schema, so a provider admitted before the merge is admitted for the same modes without being measured again. `REQUIRED_SKILLS` names the 33 production Skills. It now also covers the six that were missing before: the opportunity agent's two, the deliverable check, the energy review, the method research and the quote reader. The supervisor checks a required name by its base, so a script may still name a mode. Threads already open on an old Skill name keep the instructions they were started with, and new runs start on the merged Skill.

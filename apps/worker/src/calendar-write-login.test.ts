@@ -26,7 +26,7 @@ test("the code goes to the page; once the person signs in with it, that account 
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(login.status(ws)).toMatchObject({ state: "done" });
   expect(store.getSetting(ws, "calendar.write.account")).toBe("acct-1");
-  expect(JSON.stringify(store.listEvents(ws, { type: "calendar.write.authorized" })[0]!.payload)).not.toContain("example");
+  expect(JSON.stringify(store.listEvents(ws, { type: "person.decided", subject: "calendar.write", decision: "authorized" })[0]!.payload)).not.toContain("example");
 });
 
 test("without Microsoft configured nothing starts; only Microsoft's own pages are offered as the place to sign in", async () => {

@@ -11,7 +11,7 @@ import { boardTasks, gateLookups, gateTask, isOpen, priorityLabels } from "./tas
  * critical path of a high-value external result, and the web puts it first on Today with what a day of delay costs. The cost
  * correction (J5's ratio) and the completion gate's latest status go in as evidence; the choice is the model's.
  */
-export const FRONT_SKILL = "crossline-gate-front";
+export const FRONT_SKILL = "crossline-focus:front";
 export const FRONT_VERSION = "crossline.gate.front.v1";
 const DETAIL = {
   type: "object", additionalProperties: false, required: ["task", "minutes", "costOfDelay"],
@@ -49,6 +49,6 @@ export async function frontGatePass(deps: { store: CrosslineStore; workspaceId: 
   return runGate({ store, workspaceId, client: deps.client, cwd: deps.cwd, gate: "front", skill: FRONT_SKILL, promptVersion: FRONT_VERSION, input,
     detail: DETAIL, subjects: new Map([["today", subject]]), stableKeys: ["goal", "ledger"], round: day,
     summary: `open ${tasks.length}, p1 ${tasks.filter((task) => task.p1).length}, outward ${tasks.filter((task) => task.outward).length}, ratio ${ratio ? `${ratio.median}×${ratio.n}` : "none"}`,
-    developerInstructions: "Pick today's one front task as the crossline-gate-front Skill describes; return only the requested JSON with exactly one item whose `subject` is `today`.",
+    developerInstructions: "Pick today's one front task as the crossline-focus:front Skill describes; return only the requested JSON with exactly one item whose `subject` is `today`.",
     now });
 }

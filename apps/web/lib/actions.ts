@@ -326,8 +326,8 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === args.workOrderId);
     if (!doc || !order) return { ok: false, code: doc ? "WORK_ORDER_NOT_FOUND" : "DOCUMENT_NOT_FOUND" };
     if (order.projectId && doc.projectId !== order.projectId) fileUnder(ctx, doc.id, order.projectId);
-    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `task.note:${order.id}:${randomUUID()}`, type: "task.note",
-      entityId: order.id, payload: { text: tOf(ctx)("添加材料《{{name}}》", { name: doc.fileName }), kind: "material", documentId: doc.id } });
+    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `task.note:${order.id}:${randomUUID()}`, type: "task.changed",
+      entityId: order.id, payload: { text: tOf(ctx)("添加材料《{{name}}》", { name: doc.fileName }), kind: "material", documentId: doc.id, change: "note" } });
     const plan = store.getStepPlan(ctx.workspaceId, order.id);
     // The one step that asks the person for material is answered by this file, as an upload on the task page would answer it (W-169).
     const asking = plan?.steps.filter((step) => step.provides && step.status === "planned") ?? [];
@@ -395,7 +395,7 @@ function fileUnder(ctx: AccessContext, documentId: string, projectId: string): v
   const store = getStore();
   store.assignSourceDocumentProject(ctx.workspaceId, documentId, projectId);
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `source:assigned:${documentId}:${projectId}:${Date.now()}`,
-    type: "source.project_assigned", entityId: documentId, payload: { projectId, by: "person" } });
+    type: "source.changed", entityId: documentId, payload: { projectId, by: "person", change: "project_assigned" } });
 }
 
 /** Words for the codes a handler can return, so a failed card says why in the person's terms. */

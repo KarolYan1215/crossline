@@ -1,3 +1,5 @@
+import type { EventType } from "@crossline/core";
+import type { LedgerEventInput } from "./store";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore, createRefBook, extractLessons, lessonsFor, lessonsPass, withRef, type StepPlanInput } from "./index";
 
@@ -11,21 +13,21 @@ const order = (id: string, payload: Record<string, unknown> = {}, identityId = "
 const plan = (archetypeId = "draft_publish"): StepPlanInput => ({ archetypeId, quantity: { basis: "篇", amount: 1, unit: "篇" }, rationale: "r",
   steps: [{ id: "s1", role: "draft", title: "写初稿", deliverable: "d", doneCriterion: "c", share: 1, estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 40 },
     dependsOn: [], notBefore: "", dueBy: "", schedulable: true, executor: "human", tickOutcome: "" }] });
-const event = (type: string, entityId: string, payload: Record<string, unknown>, key = `${type}:${entityId}:${JSON.stringify(payload)}`) =>
-  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: key, type, entityId, payload });
+const event = (type: EventType, entityId: string, payload: Record<string, unknown>, key = `${type}:${entityId}:${JSON.stringify(payload)}`) =>
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: key, type, entityId, payload } as LedgerEventInput);
 
 test("the rules draw lessons from a rejected result, a 「部分符合」, an overrun and a repeated error, once each, with no model", () => {
   order("wo-1");
   store.saveStepPlan("w", "wo-1", plan(), "o", "initial");
-  event("agent.task.requested", "t1", { title: "小红书提纲", category: "draft_text", workOrderId: "wo-1" });
-  event("agent.task.reviewed", "t1", { decision: "rejected", note: "要先制造冲突再给方案，不要写成研究报告" });
-  event("agent.task.requested", "t2", { title: "素材清单", category: "draft_text", workOrderId: "wo-1" });
-  event("agent.task.reviewed", "t2", { decision: "accepted", note: "很好" });
+  event("agent.changed", "t1", { title: "小红书提纲", category: "draft_text", workOrderId: "wo-1", change: "task_requested" });
+  event("agent.changed", "t1", { decision: "rejected", note: "要先制造冲突再给方案，不要写成研究报告", change: "task_reviewed" });
+  event("agent.changed", "t2", { title: "素材清单", category: "draft_text", workOrderId: "wo-1", change: "task_requested" });
+  event("agent.changed", "t2", { decision: "accepted", note: "很好", change: "task_reviewed" });
   order("wo-2", { gateReview: { verdict: "partial", fit: { fits: false, violated: ["开头三秒抛出冲突"], why: "开头平铺直叙" } } });
   const step = store.getStepPlan("w", "wo-1")!.steps[0]!;
-  event("block.confirmed", "m1", { workOrderId: "wo-1", stepId: step.id, outcome: "over", minutes: 50, blockMinutes: 30 });
-  event("block.confirmed", "m2", { workOrderId: "wo-1", stepId: step.id, outcome: "as_estimated", blockMinutes: 30 });
-  const usage = { workspaceId: "w", skill: "crossline:crossline-step-planner", tier: "mid", model: "m", effort: "low", spendMode: "normal", threadId: "",
+  event("work_order.changed", "m1", { workOrderId: "wo-1", stepId: step.id, outcome: "over", minutes: 50, blockMinutes: 30, change: "block_confirmed" });
+  event("work_order.changed", "m2", { workOrderId: "wo-1", stepId: step.id, outcome: "as_estimated", blockMinutes: 30, change: "block_confirmed" });
+  const usage = { workspaceId: "w", skill: "crossline:crossline-task-planner:steps", tier: "mid", model: "m", effort: "low", spendMode: "normal", threadId: "",
     ok: false, errorCode: "SKILL_SCHEMA_INVALID", repairs: 2, turns: 3, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0, totalTokens: 0,
     durationMs: 0, at: "2026-10-20T00:00:00.000Z" };
   for (let i = 0; i < 3; i += 1) store.saveModelUsage(usage);
@@ -41,12 +43,12 @@ test("the rules draw lessons from a rejected result, a 「部分符合」, an ov
   expect(lessons.find((lesson) => lesson.source === "rule:estimate_overrun")!.text).toContain("实际约 80 分钟，保守估计 40 分钟");
 
   // The planner gets this line's lessons and its own repeated error; the assistant is not given the planner's error.
-  const forPlanner = lessonsFor(store, "w", { lineId: "media", archetypeId: "draft_publish", skill: "crossline:crossline-step-planner" });
+  const forPlanner = lessonsFor(store, "w", { lineId: "media", archetypeId: "draft_publish", skill: "crossline:crossline-task-planner:steps" });
   expect(forPlanner.map((lesson) => lesson.source)).toContain("rule:error_repeat");
   expect(forPlanner.length).toBeLessThanOrEqual(5);
   expect(forPlanner.reduce((sum, lesson) => sum + lesson.text.length, 0)).toBeLessThanOrEqual(600);
-  expect(lessonsFor(store, "w", { lineId: "media", skill: ["crossline-agent", "crossline-agent-tools"] }).map((lesson) => lesson.source)).not.toContain("rule:error_repeat");
-  expect(lessonsFor(store, "w", { lineId: "research", skill: "crossline-step-planner" }).map((lesson) => lesson.source)).toEqual(["rule:error_repeat"]);
+  expect(lessonsFor(store, "w", { lineId: "media", skill: ["crossline-agent:shell", "crossline-agent:functions"] }).map((lesson) => lesson.source)).not.toContain("rule:error_repeat");
+  expect(lessonsFor(store, "w", { lineId: "research", skill: "crossline-task-planner:steps" }).map((lesson) => lesson.source)).toEqual(["rule:error_repeat"]);
 });
 
 test("cited ids are counted when the answer takes effect, and order what a context gets", () => {

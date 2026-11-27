@@ -19,7 +19,7 @@ export function noteScheduleChanges(ctx: AccessContext, committed: PersistedSche
   try { saved = JSON.parse(store.getSetting(ctx.workspaceId, CHANGE_SUMMARY) ?? "{}"); } catch { /* none */ }
   const basis = Object.fromEntries(blocks.filter((block) => block.id.startsWith("scheduled:") && block.day)
     .map((block) => [block.id, { day: block.day!, start: block.start, end: block.end }]));
-  const reality = store.listEvents(ctx.workspaceId, { type: "plan.reality_changed" }).at(-1);
+  const reality = store.listEvents(ctx.workspaceId, { type: "plan.changed", change: "reality_changed" }).at(-1);
   const realityAt = reality?.createdAt ?? "";
   const sameBasis = JSON.stringify(basis) === JSON.stringify(saved.basis ?? {});
   if (sameBasis && realityAt === (saved.realityAt ?? "")) return;
@@ -58,8 +58,8 @@ const FINER_SPLIT_STATES = new Set(["approved", "preparing", "ready_for_human", 
 export function readFinerSplits(ctx: AccessContext, now = appNow()): FinerSplitNote[] {
   const store = getStore();
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
-  const planned = store.listEvents(ctx.workspaceId, { type: "task.steps_planned" });
-  return store.listEvents(ctx.workspaceId, { type: "task.steps_replan_requested" }).flatMap((event) => {
+  const planned = store.listEvents(ctx.workspaceId, { type: "task.changed", change: "steps_planned" });
+  return store.listEvents(ctx.workspaceId, { type: "task.changed", change: "steps_replan_requested" }).flatMap((event) => {
     const split = (event.payload as { finerSplit?: { title?: string; days?: string[] } }).finerSplit;
     const order = orders.get(event.entityId);
     const redone = planned.find((item) => item.entityId === event.entityId && item.createdAt > event.createdAt);
@@ -78,7 +78,7 @@ export function readFinerSplits(ctx: AccessContext, now = appNow()): FinerSplitN
 export function loadPlanExplanation(ctx: AccessContext, today: string): {
   summary: string; nextActionReason: string; alternatives: Array<{ id: string; reason: string }>;
 } | null {
-  const event = [...getStore().listEvents(ctx.workspaceId, { type: "plan.explained", entityId: today })].at(-1);
+  const event = [...getStore().listEvents(ctx.workspaceId, { type: "plan.changed", change: "explained", entityId: today })].at(-1);
   if (!event) return null;
   const payload = event.payload as { summary?: string; nextActionReason?: string; alternatives?: Array<{ id: string; reason: string }> };
   if (!payload.summary || !payload.nextActionReason) return null;
@@ -105,7 +105,7 @@ export function loadCalendarConnectorState(ctx: AccessContext): CalendarConnecto
   const plan = store.listPlanVersions(ctx.workspaceId)[0];
   const blocks = ((plan?.payload as { blocks?: Array<{ id?: string }> } | undefined)?.blocks ?? [])
     .filter((block) => String(block.id).startsWith("graph_calendar:"));
-  const last = store.listEvents(ctx.workspaceId, { type: "plan.reality_changed" }).at(-1);
+  const last = store.listEvents(ctx.workspaceId, { type: "plan.changed", change: "reality_changed" }).at(-1);
   return {
     synced: store.hasAnySyncCursor(ctx.workspaceId, "graph_calendar"),
     importedBlocks: blocks.length,

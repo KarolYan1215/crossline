@@ -3,7 +3,7 @@ import { conformanceCases, summarizeConformance, TASK_TITLES_SCHEMA, validateTas
 import { enterUsageWorkspace, runCodexSkill, setProviderResolver, startModelGateway, type ModelGateway } from "@crossline/codex";
 import { createMemorySecretStore, type SecretStore } from "@crossline/connectors";
 import { CrosslineStore } from "@crossline/db";
-import { CONFORMANCE_EVENT, createModelProviderService, RUNTIME_VERSION } from "./model-provider";
+import { createModelProviderService, RUNTIME_VERSION } from "./model-provider";
 import { fakeRuntime } from "./testing/fake-runtime";
 import type { ProbeDeps } from "./provider-probe";
 
@@ -77,18 +77,18 @@ test("nothing is routed to a provider before it passes; a record from before the
   await providers.handle("POST", "/v1/model/provider", workspaceId, deepseek);
   expect([...providers.routing(workspaceId)!.admitted]).toEqual([]);
   const runs = conformanceCases().flatMap((item) => Array.from({ length: item.runs }, () => ({ caseId: item.id, ok: true, repairs: 0, ms: 1 })));
-  const write = (model: string, ranAt: string) => store.appendEvent({ ownerId: "o", workspaceId, idempotencyKey: `c:${model}:${ranAt}`, type: CONFORMANCE_EVENT, entityId: "deepseek",
-    payload: summarizeConformance({ providerId: "deepseek", model, runtimeVersion: RUNTIME_VERSION, ranAt }, runs) });
+  const write = (model: string, ranAt: string) => store.appendEvent({ ownerId: "o", workspaceId, idempotencyKey: `c:${model}:${ranAt}`, type: "model.changed", entityId: "deepseek",
+    payload: { ...(summarizeConformance({ providerId: "deepseek", model, runtimeVersion: RUNTIME_VERSION, ranAt }, runs)), change: "provider_conformance" } });
   write("deepseek-chat", "2026-10-13T09:00:00.000Z");
   expect(providers.routing(workspaceId)!.admitted.size).toBe(0);
   write("deepseek-reasoner", "2026-10-13T11:00:00.000Z");
   expect(providers.routing(workspaceId)!.admitted.size).toBe(0);
   write("deepseek-chat", "2026-10-13T11:00:01.000Z");
   const admitted = providers.routing(workspaceId)!.admitted;
-  expect(admitted.has("crossline-milestone-gate")).toBe(true);
-  expect(admitted.has("crossline-due-diligence")).toBe(false);
+  expect(admitted.has("crossline-evidence-judge:milestone")).toBe(true);
+  expect(admitted.has("crossline-research:diligence")).toBe(false);
   const view = providers.view(workspaceId);
-  expect(view.features.find((feature) => feature.skill === "crossline-due-diligence")).toMatchObject({ served: false, reason: expect.stringContaining("联网") });
+  expect(view.features.find((feature) => feature.skill === "crossline-research:diligence")).toMatchObject({ served: false, reason: expect.stringContaining("联网") });
   expect(view.features.some((feature) => feature.skill === "crossline-conformance")).toBe(false);
 });
 
@@ -96,13 +96,13 @@ test("an admitted Skill runs on the provider's thread: the provider defined on t
   const providers = service();
   await providers.handle("POST", "/v1/model/provider", workspaceId, deepseek);
   const runs = conformanceCases().flatMap((item) => Array.from({ length: item.runs }, () => ({ caseId: item.id, ok: true, repairs: 0, ms: 1 })));
-  store.appendEvent({ ownerId: "o", workspaceId, idempotencyKey: "c", type: CONFORMANCE_EVENT, entityId: "deepseek",
-    payload: summarizeConformance({ providerId: "deepseek", model: "deepseek-chat", runtimeVersion: RUNTIME_VERSION, ranAt: "2026-10-13T11:00:00.000Z" }, runs) });
+  store.appendEvent({ ownerId: "o", workspaceId, idempotencyKey: "c", type: "model.changed", entityId: "deepseek",
+    payload: { ...(summarizeConformance({ providerId: "deepseek", model: "deepseek-chat", runtimeVersion: RUNTIME_VERSION, ranAt: "2026-10-13T11:00:00.000Z" }, runs)), change: "provider_conformance" } });
   setProviderResolver((id) => providers.routing(id));
-  const runtime = fakeRuntime([JSON.stringify({ titles: [{ id: "t1", title: "整理 ECE 555 笔记" }] })], "crossline:crossline-task-titler",
+  const runtime = fakeRuntime([JSON.stringify({ titles: [{ id: "t1", title: "整理 ECE 555 笔记" }] })], "crossline:crossline-goal-backplanner:title",
     { threadResponse: {} });
   enterUsageWorkspace(workspaceId);
-  const result = await runCodexSkill(runtime.rpc, {}, { skillName: "crossline:crossline-task-titler", cwd: "C:\\repo", developerInstructions: "x",
+  const result = await runCodexSkill(runtime.rpc, {}, { skillName: "crossline:crossline-goal-backplanner:title", cwd: "C:\\repo", developerInstructions: "x",
     outputSchema: TASK_TITLES_SCHEMA, prepareInput: () => ({}), validateOutput: (output) => validateTaskTitles(output, ["t1"]), onAudit: () => {} });
   expect(result.ok).toBe(true);
   const start = runtime.threadStarts()[0]!;
@@ -118,22 +118,22 @@ test("an admitted Skill runs on the provider's thread: the provider defined on t
 test("a run on a Skill's own model that needed a repair is run again on the provider's model, and that answer is kept", async () => {
   const provider = { id: "sponsor", kind: "chat" as const, label: "开发者提供的模型", baseUrl: "https://api.example.com/v1", model: "main",
     keyLast4: null, updatedAt: "1970-01-01T00:00:00.000Z" };
-  setProviderResolver(() => ({ provider, gatewayUrl: gateway.urlFor(workspaceId, "sponsor"), admitted: new Set(["crossline-task-titler"]),
+  setProviderResolver(() => ({ provider, gatewayUrl: gateway.urlFor(workspaceId, "sponsor"), admitted: new Set(["crossline-goal-backplanner:title"]),
     codexSignedIn: false, modelFor: () => "cheap" }));
   const valid = (title: string) => JSON.stringify({ titles: [{ id: "t1", title }] });
-  const options = { skillName: "crossline:crossline-task-titler", cwd: "C:\\repo", developerInstructions: "x", outputSchema: TASK_TITLES_SCHEMA,
+  const options = { skillName: "crossline:crossline-goal-backplanner:title", cwd: "C:\\repo", developerInstructions: "x", outputSchema: TASK_TITLES_SCHEMA,
     prepareInput: () => ({}), validateOutput: (output: unknown) => validateTaskTitles(output, ["t1"]), onAudit: () => {} };
   enterUsageWorkspace(workspaceId);
   // First answer is not JSON (a rejection), the repair passes on the cheap model; the redo on the main model is the answer kept.
-  const runtime = fakeRuntime(["不是 JSON", valid("便宜模型的标题"), valid("整理 ECE 555 笔记")], "crossline:crossline-task-titler", { threadResponse: {} });
+  const runtime = fakeRuntime(["不是 JSON", valid("便宜模型的标题"), valid("整理 ECE 555 笔记")], "crossline:crossline-goal-backplanner:title", { threadResponse: {} });
   const result = await runCodexSkill(runtime.rpc, {}, { ...options, redoOnRepair: true });
   expect(result).toMatchObject({ ok: true, output: { titles: [{ title: "整理 ECE 555 笔记" }] }, audit: { redone: { repairs: 1 } } });
   expect(runtime.threadStarts().map((start) => start.model)).toEqual(["cheap", "main"]);
   // Passed first time, or without the option: one run on the cheap model.
-  const once = fakeRuntime([valid("整理 ECE 555 笔记")], "crossline:crossline-task-titler", { threadResponse: {} });
+  const once = fakeRuntime([valid("整理 ECE 555 笔记")], "crossline:crossline-goal-backplanner:title", { threadResponse: {} });
   expect(await runCodexSkill(once.rpc, {}, { ...options, redoOnRepair: true })).toMatchObject({ ok: true });
   expect(once.threadStarts().map((start) => start.model)).toEqual(["cheap"]);
-  const without = fakeRuntime(["不是 JSON", valid("整理 ECE 555 笔记")], "crossline:crossline-task-titler", { threadResponse: {} });
+  const without = fakeRuntime(["不是 JSON", valid("整理 ECE 555 笔记")], "crossline:crossline-goal-backplanner:title", { threadResponse: {} });
   expect(await runCodexSkill(without.rpc, {}, options)).toMatchObject({ ok: true, audit: { repairs: 1 } });
   expect(without.threadStarts()).toHaveLength(1);
 });
@@ -142,9 +142,9 @@ test("a Skill the provider has not passed, in a workspace with no Codex sign-in,
   const providers = service();
   await providers.handle("POST", "/v1/model/provider", workspaceId, deepseek);
   setProviderResolver((id) => providers.routing(id));
-  const runtime = fakeRuntime(["{}"], "crossline:crossline-milestone-gate");
+  const runtime = fakeRuntime(["{}"], "crossline:crossline-evidence-judge:milestone");
   enterUsageWorkspace(workspaceId);
-  const result = await runCodexSkill(runtime.rpc, {}, { skillName: "crossline:crossline-milestone-gate", cwd: "C:\\repo", developerInstructions: "x",
+  const result = await runCodexSkill(runtime.rpc, {}, { skillName: "crossline:crossline-evidence-judge:milestone", cwd: "C:\\repo", developerInstructions: "x",
     outputSchema: {}, prepareInput: () => ({}), validateOutput: (output) => output, onAudit: () => {} });
   expect(result).toMatchObject({ ok: false, blocker: { code: "MODEL_NOT_ADMITTED", message: expect.stringContaining("验收判定") } });
   expect(runtime.threadStarts()).toHaveLength(0);
@@ -166,7 +166,7 @@ test("conformance: each case runs on the provider through the repair loop, and t
     runs: [{ caseId: "TASK_TITLES_SCHEMA", ok: true, repairs: 1 }, { caseId: "ADVERSARIAL_UNION", ok: true, repairs: 0 }] });
   expect(runtime.threadStarts().every((start) => start.modelProvider === "crossline-deepseek")).toBe(true);
   expect(runtime.prompts()[1]).toContain("characters, at most 60");
-  expect(store.listEvents(workspaceId, { type: CONFORMANCE_EVENT })).toHaveLength(1);
+  expect(store.listEvents(workspaceId, { type: "model.changed", change: "provider_conformance" })).toHaveLength(1);
 });
 
 test("a relay (中转站): the pasted endpoint is cut to its base, one real request goes out with the key, and the check starts after saving", async () => {

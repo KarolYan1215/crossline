@@ -299,7 +299,7 @@ test("a pair an approved downstream milestone rests on survives redoing the upst
 test("one line that cannot be done does not take the others with it, and the person is told which and why", async () => {
   seedProfile(); seedStartup();
   const stuck = JSON.stringify({ milestones: [], assumptions: [], blockers: [{ code: "thin", message: "创业线没有任何截止日期可以倒推" }] });
-  const runtime = fakeRuntime([chain(), stuck, stuck, stuck], "crossline:crossline-milestone-architect");
+  const runtime = fakeRuntime([chain(), stuck, stuck, stuck], "crossline:crossline-milestone-architect:design");
   const outcome = await createMilestoneProposer(store, WORKSPACE, "C:\repo", () => runtime.rpc, NOW)("");
   expect(outcome).toMatchObject({ state: "proposed", skipped: [{ identityId: "startup", code: "PROPOSAL_BLOCKED" }] });
   expect(outcome.state === "proposed" && outcome.assumptions.some((line) => line.includes("创业") && line.includes("没有任何截止日期"))).toBe(true);
@@ -317,7 +317,7 @@ test("a line whose run failed keeps the drafts the person already had", async ()
   store.saveMilestone({ id: "old-startup", ownerId: "o", workspaceId: WORKSPACE, identityId: "startup", projectId: "", title: "旧的创业草稿", version: 1, status: "draft" });
   store.saveMilestone({ id: "old-research", ownerId: "o", workspaceId: WORKSPACE, identityId: "research", projectId: "westlake", title: "旧的科研草稿", version: 1, status: "draft" });
   const stuck = JSON.stringify({ milestones: [], assumptions: [], blockers: [{ code: "thin", message: "太少" }] });
-  const runtime = fakeRuntime([chain(), stuck], "crossline:crossline-milestone-architect");
+  const runtime = fakeRuntime([chain(), stuck], "crossline:crossline-milestone-architect:design");
   await createMilestoneProposer(store, WORKSPACE, "C:\repo", () => runtime.rpc, NOW)("");
   const status = (id: string) => store.listMilestones(WORKSPACE).find((milestone) => milestone.id === id)?.status;
   expect([status("old-research"), status("old-startup")]).toEqual(["archived", "draft"]);

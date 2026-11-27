@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { DELIVERABLE_JUDGED, SOURCE_FOLDERS_SETTING, sourceFolderIndexSetting } from "@crossline/core";
+import { SOURCE_FOLDERS_SETTING, sourceFolderIndexSetting } from "@crossline/core";
 vi.mock("server-only", () => ({}));
 vi.mock("./codex-runtime", () => ({ requestCodexSupervisor: vi.fn(async () => ({})), CodexSupervisorRequestError: class extends Error {} }));
 import { answerGap, gapAsks, settleDeliverables, withdrawDeliverables } from "./deliverables";
@@ -20,8 +20,8 @@ function setup() {
   const order = (id: string, state: string, milestoneId = "") => store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p", milestoneId,
     intent: `任务 ${id}`, state: state as "approved", riskTier: "routine", estimate, payload: { materialContract: [], family: "deep_work" } });
   const judged = (doc: string, task: string, verdict: string, criterion: string, extra: Record<string, unknown> = {}) => store.appendEvent({ ownerId: owner, workspaceId: ws,
-    idempotencyKey: `${DELIVERABLE_JUDGED}:${doc}`, type: DELIVERABLE_JUDGED, entityId: doc,
-    payload: { doc, task, verdict, criterion, quote: "Q5", gap: "", external: false, why: "五题齐全", fileName: `${doc}.pdf`, uri: `file:///C:/${doc}.pdf`, folderId: "f1", ...extra } });
+    idempotencyKey: `deliverable.judged:${doc}`, type: "deliverable.changed", entityId: doc,
+    payload: { doc, task, verdict, criterion, quote: "Q5", gap: "", external: false, why: "五题齐全", fileName: `${doc}.pdf`, uri: `file:///C:/${doc}.pdf`, folderId: "f1", ...extra, change: "judged" } });
   return { store, order, judged };
 }
 

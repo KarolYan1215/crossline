@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { agentLanguageLine, runLocale, schemaForLocale, styleInstructions } from "./style";
 import { join } from "node:path";
 import { looksLooping, mergeSplitObjects, repairJsonBrackets } from "./json-repair";
-import { cleanAnswerStrings, designNoteText, instructionsText, privateLeak, skillKey, tFor, UNTRUSTED_WEB_INSTRUCTION, untrustedWebBlock, urlKnown, urlsIn, validateWebScout,
+import { cleanAnswerStrings, designNoteText, instructionsText, modeField, privateLeak, skillBase, skillKey, skillModeOf, tFor, UNTRUSTED_WEB_INSTRUCTION, untrustedWebBlock, urlKnown, urlsIn, validateWebScout,
   WEB_RESEARCH_LIMITS, WEB_SCOUT_SCHEMA, QUERY_REVIEW_SCHEMA, validateQueryReview, webQueryProblem, type Locale, type PrivateGuard, type QueryReview,
   type WebScoutAnswer } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
@@ -401,7 +401,7 @@ function inLane<T>(lanes: Map<string, Promise<void>>, lane: string, run: () => P
   lanes.set(lane, mine);
   return previous.then(run).finally(() => { release(); if (lanes.get(lane) === mine) lanes.delete(lane); });
 }
-const isAssistant = (skillName: string) => /crossline-agent(-tools)?$/.test(skillName);
+const isAssistant = (skillName: string) => /crossline-agent:(shell|functions)$/.test(skillName);
 /** Two turns on one thread never overlap (the interview and the input box send one after another on the same thread). */
 const threadLanes = new Map<string, Promise<void>>();
 
@@ -717,7 +717,7 @@ async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: s
     timing.laneMs = Date.now() - queuedAt;
     // The assistant (owner's machine only, never on the hosted beta) runs for up to an hour; holding a gate slot that long would stop
     // every interview behind it. A sandboxed assistant (any account, on a shared server) waits for a model slot like any background run.
-    if ((/crossline-agent$/.test(options.skillName) && !options.agent?.sandbox) || options.nested) return runGated(client, options, body, timing);
+    if ((/crossline-agent:shell$/.test(options.skillName) && !options.agent?.sandbox) || options.nested) return runGated(client, options, body, timing);
     // The assistant's own runs count apart from the account's two background slots (the owner's decision of 2026-10-19).
     const tenant = isAssistant(options.skillName) ? `${timing.tenant}#assistant` : timing.tenant;
     const result = await withModelSlot({ skill: options.skillName, tenant, onGranted: (waited) => { timing.gateMs = waited; },
@@ -854,7 +854,7 @@ async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: stri
   let result: SkillRunResult<T>;
   try {
     await underConfigLock(client, async () => {
-      const found = await findNativeSkill(client, options.skillName, options.cwd);
+      const found = await findNativeSkill(client, skillBase(options.skillName), options.cwd);
       await holdSkill(client, found);
       holding.push(found.path);
       for (const name of options.extraSkills ?? []) {
@@ -1708,7 +1708,7 @@ export const THREAD_KEEP_MS = Math.max(60_000, (Number(process.env.CROSSLINE_THR
  * part way through is rebuilt from the ledger and loses what it reasoned in the thread), and are compacted only near the runtime's own
  * limit (`contextWindowConfig`: 0.8 of the window), not from `COMPACT_AT`.
  */
-const INTERVIEW_THREADS = new Set(["crossline-onboarding", "crossline-onboarding-research"]);
+const INTERVIEW_THREADS = new Set(["crossline-onboarding", "crossline-research:onboarding"]);
 export const interviewThread = (skillName: string) => INTERVIEW_THREADS.has(skillName.replace(/^crossline:/, ""));
 export const INTERVIEW_THREAD_KEEP_MS = 60 * 60_000;
 export const INTERVIEW_COMPACT_AT = 0.75;
@@ -1814,8 +1814,15 @@ export const RUN_NOTE_LEAD = "Instructions for this run only (they extend the de
 export function firstPromptTexts(skillName: string, extraSkills: readonly string[], prepared: unknown,
   options: { stableKeys?: readonly string[] | undefined; runNote?: string | undefined } = {}): string[] {
   const note = options.runNote?.trim();
+  // A merged Skill's mode (`crossline:crossline-portrait:report`, docs/plans/condense-1127.md §B): the runtime knows the Skill by its own
+  // name, and the mode goes first in the input, the same for every run of that mode.
+  const mode = skillModeOf(skillName);
+  const field = modeField(skillName);
+  const ordered = typeof prepared === "string" ? prepared : cacheOrderedInput(prepared, options.stableKeys);
+  const input = typeof ordered === "string" ? (mode ? `${field}: ${mode}\n\n${ordered}` : ordered)
+    : JSON.stringify(mode && ordered && typeof ordered === "object" && !Array.isArray(ordered) ? { [field]: mode, ...ordered } : ordered);
   // A string is a message as it is (a resumed conversation's next line); anything else the run's JSON input.
-  return [`$${skillName}\n\n${typeof prepared === "string" ? prepared : JSON.stringify(cacheOrderedInput(prepared, options.stableKeys))}`,
+  return [`$${skillBase(skillName)}\n\n${input}`,
     ...(extraSkills.length ? [extraSkills.map((name) => `$${name}`).join(" ")] : []),
     ...(note ? [`${RUN_NOTE_LEAD}\n${note}`] : [])];
 }

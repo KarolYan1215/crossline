@@ -45,7 +45,7 @@ export type ChecklistItem = {
    * in a details stage at the end of the interview. Shown, never counted against finishing.
    */
   deferred?: true;
-  /** `portrait_grounded` only: the portrait's parts (`situation`, `compass`, `energy`, `method`) with nothing of the person's on record yet. */
+  /** `portrait_grounded` only: the portrait's parts (`PORTRAIT_PARTS`: `situation` … `saydo`) with nothing of the person's on record yet. */
   sections?: string[];
   /**
    * The item's `done` rests on the model's verdict against the ledger (2026-11-25, `ChecklistVerdict`): listed in every round's snapshot for
@@ -95,11 +95,18 @@ const confirmedFact = (fact: { status: string; sourceRef: string }) => fact.stat
 const PORTRAIT_PARTS: Array<{ label: string; section: string; ask: string }> = [
   { label: "现状与真问题", section: "situation", ask: "眼下最让你放不下的是哪件事？" },
   { label: "工作观与人生观", section: "compass", ask: "做事的时候，你最看重的是什么？" },
-  { label: "能量与心流", section: "energy", ask: "最近一次做得忘了时间，是在做什么？" },
+  // The energy map's numbers come from here (2026-11-27, docs/plans/condense-1127.md A3): which activities charge and which drain, and
+  // for each whether the person is good at it and whether they like it.
+  { label: "精力：充电与耗电、擅长与喜欢", section: "energy", ask: "最近哪几件事做完更有劲，哪几件做完很累？其中哪些是你擅长的，哪些是你喜欢的？" },
   // How the person actually works (decided 2026-11-10, the owner: tasks take their form from the goal and the person's own habits, never
   // from an identity template such as 学生 → 订正/错题本/背诵/打卡; habits like these are asked in the interview). Asked in the energy part;
   // no section of the portrait stands for it, so only the model's verdict settles it.
-  { label: "做事方法", section: "method", ask: "遇到要准备的考核、要赶的截止，或者要学一样新东西，你平时是怎么做的？" }
+  { label: "做事方法", section: "method", ask: "遇到要准备的考核、要赶的截止，或者要学一样新东西，你平时是怎么做的？" },
+  // The two numbers no scale measures (2026-11-27, A3): each line's share of attention now, and how much each of the five say–do
+  // dimensions matters to the person. No section of the portrait is written from them, so only the model's verdict settles them; a part
+  // asked and still unknown is settled as such, and the report leaves its number null.
+  { label: "各主线现在的注意力占比", section: "allocation", ask: "眼下你的注意力在这几条主线之间大概怎么分？比如各占几成。" },
+  { label: "说与做五项各有多重要", section: "saydo", ask: "按计划投入、按时完成、收尾、等外部验收、回应别人的等待，这五样对你各有多重要？" }
 ];
 /** The portrait's written parts, each a field of the working profile. */
 const PORTRAIT_FIELDS: Array<[keyof ProfileModel, string]> = [["problem", "真问题"],

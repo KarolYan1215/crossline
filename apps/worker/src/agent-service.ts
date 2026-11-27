@@ -339,9 +339,9 @@ export function createAgentService(deps: {
     recoverLost(workspaceId: string): string[] {
       const lost = listAgentTasks(deps.store, workspaceId).filter((task) => task.status === "running" && !mark(workspaceId).has(task.taskId));
       for (const task of lost) {
-        deps.store.appendEvent({ ownerId: ownerOf(deps.store, workspaceId), workspaceId, idempotencyKey: `agent:blocked:${task.taskId}`, type: "agent.task.blocked",
+        deps.store.appendEvent({ ownerId: ownerOf(deps.store, workspaceId), workspaceId, idempotencyKey: `agent:blocked:${task.taskId}`, type: "agent.changed",
           entityId: task.taskId, payload: { taskId: task.taskId, code: AGENT_RUN_LOST, message: tOfWorkspace(deps.store, workspaceId)("后台进程重启，这次运行中断"),
-            directory: path.join(deps.outputRoot ?? defaultOutputRoot(), task.taskId) } });
+            directory: path.join(deps.outputRoot ?? defaultOutputRoot(), task.taskId), change: "task_blocked" } });
       }
       return lost.map((task) => task.taskId);
     }

@@ -62,7 +62,7 @@ test("reports become the record and the live view; only a waiting command is pus
   const state = (await remote.handle("POST", "/v1/remote/state", ws, { host: "PC-A" }))?.body as { live: { session: { id: string }; draft: string; pending: unknown[] }; events: Array<{ type: string }> };
   expect(state.live).toMatchObject({ session: { id: "s1" }, draft: "hel", pending: [expect.objectContaining({ approval: "a1" })] });
   expect(state.events.map((event) => event.type)).toEqual(["session.started", "approval.asked"]);
-  expect(remote.ledgerFor(ws, "PC-A")).toEqual([expect.objectContaining({ type: "remote.session.started", nonce: "n1", session: "s1" })]);
+  expect(remote.ledgerFor(ws, "PC-A")).toEqual([expect.objectContaining({ type: "remote.changed", nonce: "n1", session: "s1" })]);
 });
 
 test("「电脑上线时通知我」 is told once when the computer comes back", async () => {

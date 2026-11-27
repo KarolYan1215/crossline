@@ -32,7 +32,7 @@ test("a session left running is cut where the work ended: paused from then, late
   // The same correction again changes nothing; a stop after the session's current pause keeps the earlier pause.
   expect(store.stopSessionAt("w", "w1", "2026-11-11T21:45:00.000Z", "更正", new Date().toISOString()).changed).toBe(false);
   expect(store.stopSessionAt("w", "w1", "2026-11-11T23:00:00.000Z", "更正", new Date().toISOString())).toMatchObject({ changed: false, stoppedAt: "2026-11-11T21:45:00.000Z" });
-  expect(store.listEvents("w", { type: "execution.stopped_at", entityId: "w1" })).toHaveLength(1);
+  expect(store.listEvents("w", { type: "execution.changed", change: "stopped_at", entityId: "w1" })).toHaveLength(1);
 
   // Resuming and completing work as after any pause.
   vi.setSystemTime(new Date("2026-11-12T03:30:00.000Z"));

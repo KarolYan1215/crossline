@@ -21,7 +21,8 @@ const store = new CrosslineStore(path.resolve(process.env.CROSSLINE_DATA_DIR ?? 
 const since = new Date(Date.now() - days * 86_400_000).toISOString();
 
 const events = store.listEvents(WORKSPACE_ID).filter((event) => event.createdAt >= since);
-const countBy = (type: string) => events.filter((event) => event.type === type).length;
+const countBy = (type: string, change?: string) => events.filter((event) => event.type === type
+  && (change === undefined || (event.payload as { change?: string }).change === change)).length;
 
 const transitions = events.filter((event) => event.type === "work_order.transitioned")
   .map((event) => (event.payload as { to?: string }).to ?? "");
@@ -57,7 +58,7 @@ console.log(JSON.stringify({
   windowDays: days,
   since,
   captured: countBy("capture.created"),
-  discarded: countBy("capture.discarded") + countBy("work_order.archived"),
+  discarded: countBy("capture.changed", "discarded") + countBy("work_order.changed", "archived"),
   analysed: reached("awaiting_plan_approval"),
   started: reached("active"),
   submitted: reached("evidence_review"),

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { RECORDING_DIGESTED_EVENT, RECORDING_TRANSCRIBED_EVENT, autoApprovalEligible, validateRecordingDigest } from "@crossline/core";
+import { autoApprovalEligible, validateRecordingDigest } from "@crossline/core";
 import { CrosslineStore } from "@crossline/db";
 import { createRecordingDigester, transcriptDocumentIds, transcriptsAwaitingDigest } from "./recording-digest";
 import { fakeRuntime } from "./testing/fake-runtime";
@@ -20,8 +20,8 @@ const tiny = "[录音：phone/c.m4a，约 2026-10-20 13:00 开始，时长 30:00
 function transcript(id: string, text: string, seconds = 2700) {
   store.saveSourceDocument({ id, ownerId, workspaceId, kind: "text", fileName: `phone/${id}.m4a 转写.txt`, mediaType: "text/plain", sha256: `sha-${id}`,
     uri: `file:///nowhere/${id}.txt`, extractedText: text, extractionStatus: "done", createdAt: "2026-10-20T15:00:00Z" });
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `t:${id}`, type: RECORDING_TRANSCRIBED_EVENT, entityId: `audio-${id}`,
-    payload: { fileName: `${id}.m4a`, seconds, speechSeconds: 600, workMs: 1000, wallMs: 1000, documentId: id } });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `t:${id}`, type: "recording.changed", entityId: `audio-${id}`,
+    payload: { fileName: `${id}.m4a`, seconds, speechSeconds: 600, workMs: 1000, wallMs: 1000, documentId: id, change: "transcribed" } });
 }
 
 beforeEach(() => {
@@ -44,12 +44,12 @@ const answer = JSON.stringify({ recordings: [
 
 test("kept recordings become a summary, inferred facts and captures that wait for the person; small talk and noise leave nothing", async () => {
   transcript("a", meeting); transcript("b", chat); transcript("c", tiny);
-  const { rpc, turns } = fakeRuntime([answer], "crossline:crossline-recording-digest");
+  const { rpc, turns } = fakeRuntime([answer], "crossline:crossline-capture-digest:recording");
   const outcome = await createRecordingDigester(store, workspaceId, "C:\\repo", () => rpc, { dataDir: data, timeZone: "America/Chicago" })();
   expect(outcome).toEqual({ digested: 3, kept: 1, captures: 1, facts: 2, waits: 1 });
   expect(turns()).toBe(1);
   // The near-empty one was noise by rule, without the model.
-  expect(store.listEvents(workspaceId, { type: RECORDING_DIGESTED_EVENT, entityId: "c" })[0]!.payload).toMatchObject({ kind: "noise", by: "rule" });
+  expect(store.listEvents(workspaceId, { type: "recording.changed", change: "digested", entityId: "c" })[0]!.payload).toMatchObject({ kind: "noise", by: "rule" });
   const digest = store.listSourceDocuments(workspaceId).find((doc) => doc.fileName === "phone/a.m4a 摘要.md")!;
   expect(digest.extractedText).toContain("## 本人答应做的");
   expect(digest.extractedText).toContain("别人答应的或说不清是谁");

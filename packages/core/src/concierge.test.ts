@@ -68,14 +68,14 @@ test("修工作流 names one of the person's grown workflows and says what is wr
 });
 
 test("find_system_part routes a wish to the part that owns it, with the person's note and its versions", () => {
-  const pack = { designSkills: ["crossline-step-planner", "crossline-onboarding"],
-    designLabels: { "crossline-step-planner": "步骤拆分", "crossline-onboarding": "访谈" },
-    designNotes: [{ id: "crossline-step-planner", text: "不要订正", paused: false, history: [{ at: "2026-11-18T00:00:00Z", text: "" }] }] } as unknown as ConciergePack;
+  const pack = { designSkills: ["crossline-task-planner:steps", "crossline-onboarding"],
+    designLabels: { "crossline-task-planner:steps": "步骤拆分", "crossline-onboarding": "访谈" },
+    designNotes: [{ id: "crossline-task-planner:steps", text: "不要订正", paused: false, history: [{ at: "2026-11-18T00:00:00Z", text: "" }] }] } as unknown as ConciergePack;
   const hit = JSON.parse(answerFromPack(pack, "find_system_part", { query: "访谈" })) as Array<{ id: string; does: string }>;
   expect(hit.map((part) => part.id)).toEqual(["crossline-onboarding"]);
   expect(hit[0]!.does.length).toBeGreaterThan(10);
   const steps = JSON.parse(answerFromPack(pack, "find_system_part", { query: "订正" })) as Array<{ id: string; note?: string; history?: unknown[] }>;
-  expect(steps).toMatchObject([{ id: "crossline-step-planner", note: "不要订正", history: [{ text: "" }] }]);
+  expect(steps).toMatchObject([{ id: "crossline-task-planner:steps", note: "不要订正", history: [{ text: "" }] }]);
   // Nothing matches: every part is listed, so the model can still route by reading.
   expect((JSON.parse(answerFromPack(pack, "find_system_part", { query: "zzz-nothing" })) as unknown[]).length).toBe(2);
 });

@@ -159,7 +159,7 @@ describe("form service", () => {
     expect(formRunOf(store, ws, first.id)).toMatchObject({ state: "confirmed", submittedBy: "person" });
     expect(formRunOf(store, ws, second.id)?.state).toBe("waiting_person");
     expect(store.listOpportunities(ws, { id: one.id })[0]?.confirmedBy).toBe("mail:calendar@luma-mail.com:2026-11-02");
-    expect(store.listEvents(ws, { type: "opportunity.confirmed" })).toHaveLength(1);
+    expect(store.listEvents(ws, { type: "opportunity.changed", change: "confirmed" })).toHaveLength(1);
   });
 
   it("without a screen and without a node, refuses to queue (FORM_NEEDS_SCREEN)", async () => {

@@ -101,7 +101,7 @@ test.each(degenerate)("a $fixture answer is $outcome all the way through to the 
       expect(item.description).not.toMatch(/[{}[\]]/);
       expect(item.description.length).toBeLessThan(300);
     }
-    const warned = store.listEvents("personal-crossline", { type: "validation.warned", entityId: "analysis:c" });
+    const warned = store.listEvents("personal-crossline", { type: "validation.changed", change: "warned", entityId: "analysis:c" });
     expect(warned[0]?.payload).toMatchObject({ subject: "analysis", warnings: [{ code }] });
     return;
   }
@@ -245,6 +245,6 @@ test("the analysis sees the open tasks, stores its completion judgement, and a c
   const result = await analysis.createCaptureAnalyzer(store, "personal-crossline", "C:\repo")(rpc, "c");
   expect(result.state).toBe("archived");
   expect((store.getWorkOrder("personal-crossline", "c")!.payload as { completion?: unknown }).completion).toMatchObject({ reason: "result_pending", askAfterHours: 72 });
-  expect(store.listEvents("personal-crossline", { type: "task.duplicate_prevented", entityId: "open" })[0]?.payload).toMatchObject({ kind: "extends" });
+  expect(store.listEvents("personal-crossline", { type: "task.changed", change: "duplicate_prevented", entityId: "open" })[0]?.payload).toMatchObject({ kind: "extends" });
   expect(prompts().join(" ")).toContain("existingTasks");
 });

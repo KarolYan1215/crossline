@@ -13,7 +13,7 @@ test("a curation is due on the period once there is history, early after twenty 
   for (let i = 0; i < 8; i += 1) store.saveStepPlan("w", `wo${i}`, { archetypeId: "writing", quantity: { basis: "字数", amount: 1, unit: "千字" }, rationale: "",
     steps: [step("a", "draft"), step("b", "check")] }, "o", "planned");
   expect(curationDue(store, "w", now)).toBe(true);
-  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "c1", type: "archetypes.curated", entityId: "w", payload: { added: [], dropped: [] } });
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "c1", type: "job.ran", entityId: "w", payload: { added: [], dropped: [], job: "archetypes.curate", state: "done" } });
   expect(curationDue(store, "w", now)).toBe(false);
   for (let i = 0; i < 20; i += 1) store.addPreference({ workspaceId: "w", source: "correction", scope: "all", weight: 1, refId: "", text: `偏好 ${i} 条`, createdAt: "2099-01-01T00:00:00Z" });
   expect(curationDue(store, "w", now)).toBe(true);

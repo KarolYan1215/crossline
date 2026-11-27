@@ -58,8 +58,8 @@ export async function runScaleAnalysis(store: CrosslineStore, workspaceId: strin
     const analysis: ScaleAnalysis = { at: new Date().toISOString(), basedOn, text: result.output.text,
       hypotheses: result.output.hypotheses.map((item, index) => ({ id: `s${index + 1}`, ...item })) };
     store.setSetting(workspaceId, PROFILE_SCALE_ANALYSIS_SETTING, JSON.stringify(analysis));
-    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `profile.scale_analysed:${basedOn}:${analysis.at}`, type: "profile.scale_analysed",
-      entityId: workspaceId, payload: { basedOn, hypotheses: analysis.hypotheses.length } });
+    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `profile.scale_analysed:${basedOn}:${analysis.at}`, type: "job.ran",
+      entityId: workspaceId, payload: { basedOn, hypotheses: analysis.hypotheses.length, job: "profile.scale.analyse", state: "done" } });
     return { state: "done" };
   } finally { running.delete(workspaceId); }
 }

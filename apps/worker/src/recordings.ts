@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
-  PACE_REST_FACTOR, RECORDING_CONSENT, RECORDING_MODEL_NOTICE, RECORDING_SILENT_EVENT, RECORDING_TRANSCRIBED_EVENT, SOURCE_FOLDERS_SETTING,
+  PACE_REST_FACTOR, RECORDING_CONSENT, RECORDING_MODEL_NOTICE, SOURCE_FOLDERS_SETTING,
   readSourceFolders, recordingPace, sourceFolderIndexSetting, type FolderIndexEntry, type Locale, type RecordingTranscribed, type SourceFolder
 } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
@@ -148,8 +148,8 @@ async function transcribeOne(store: CrosslineStore, workspaceId: string, deps: R
   const owner = ownerOf(store, workspaceId);
   const wallMs = now().getTime() - began;
   if (result.state === "silent") {
-    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `${RECORDING_SILENT_EVENT}:${audioSha}`, type: RECORDING_SILENT_EVENT, entityId: audioSha,
-      payload: { fileName: file, seconds: result.seconds, speechSeconds: result.speechSeconds, workMs: result.workMs, wallMs, folderId: folder.id } });
+    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `recording.silent:${audioSha}`, type: "recording.changed", entityId: audioSha,
+      payload: { fileName: file, seconds: result.seconds, speechSeconds: result.speechSeconds, workMs: result.workMs, wallMs, folderId: folder.id, change: "silent" } });
     settle(store, workspaceId, folder.id, relative, entry, { audio: "silent" });
     return { state: "silent", file };
   }
@@ -188,18 +188,18 @@ export function saveTranscript(store: CrosslineStore, workspaceId: string, input
     createdAt: input.now.toISOString() });
   const payload: RecordingTranscribed & Record<string, unknown> = { fileName: input.file, seconds: result.seconds, speechSeconds: result.speechSeconds,
     workMs: result.workMs, wallMs: result.wallMs, documentId: doc.id, ...input.extra };
-  store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `${RECORDING_TRANSCRIBED_EVENT}:${input.audioSha}`, type: RECORDING_TRANSCRIBED_EVENT,
-    entityId: input.audioSha, payload });
+  store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `recording.transcribed:${input.audioSha}`, type: "recording.changed",
+    entityId: input.audioSha, payload: { ...payload, change: "transcribed" } });
   return { documentId: doc.id, created: doc.id === id };
 }
 
 /** Whether this audio was already transcribed or found silent, and the transcript it became if it still exists. */
 export function priorRecording(store: CrosslineStore, workspaceId: string, audioSha: string): { state: "done" | "silent"; documentId: string } | undefined {
-  const prior = store.listEvents(workspaceId, { type: [RECORDING_TRANSCRIBED_EVENT, RECORDING_SILENT_EVENT], entityId: audioSha }).at(-1);
+  const prior = store.listEvents(workspaceId, { type: "recording.changed", change: ["transcribed", "silent"], entityId: audioSha }).at(-1);
   if (!prior) return undefined;
-  const documentId = prior.type === RECORDING_TRANSCRIBED_EVENT ? String((prior.payload as { documentId?: unknown }).documentId ?? "") : "";
+  const documentId = (prior.type === "recording.changed" && (prior.payload as { change?: string }).change === "transcribed") ? String((prior.payload as { documentId?: unknown }).documentId ?? "") : "";
   const exists = documentId && store.listSourceDocuments(workspaceId).some((doc) => doc.id === documentId);
-  return { state: prior.type === RECORDING_SILENT_EVENT ? "silent" : "done", documentId: exists ? documentId : "" };
+  return { state: (prior.type === "recording.changed" && (prior.payload as { change?: string }).change === "silent") ? "silent" : "done", documentId: exists ? documentId : "" };
 }
 
 /**

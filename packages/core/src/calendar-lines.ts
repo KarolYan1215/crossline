@@ -27,7 +27,7 @@ export const calendarEventKey = (title: string) => title.replace(/\s+/g, " ").tr
 /** What the filing was made against: the lines' ids and names. When it changes, earlier answers are no longer trusted. */
 export const calendarLinesBasis = (lines: Array<{ id: string; label: string }>) => lines.map((line) => `${line.id}=${line.label}`).sort().join("|");
 
-/** The classifier's answer (Skill `crossline-calendar-classifier`). */
+/** The classifier's answer (Skill `crossline-line-filer:calendar`). */
 export type CalendarClassification = { items: Array<{ key: string; lineId: string; why: string; unclear: boolean; rest: boolean; cancelled: boolean }> };
 export const CALENDAR_CLASSIFICATION_SCHEMA = { type: "object", additionalProperties: false, required: ["items"], properties: {
   items: { type: "array", maxItems: 60, items: { type: "object", additionalProperties: false, required: ["key", "lineId", "why", "unclear", "rest", "cancelled"], properties: {

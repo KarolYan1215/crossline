@@ -6,7 +6,7 @@ import { scriptedRuntime } from "../testing/fake-runtime";
 afterEach(() => { resetModelGate(); setProviderResolver(() => undefined); });
 
 const stub = (): CodexRpcBoundary => ({ request: async () => ({}), onNotification: () => () => {} });
-const SKILL = "crossline:crossline-task-titler";
+const SKILL = "crossline:crossline-goal-backplanner:title";
 const SCHEMA = { type: "object", additionalProperties: false, properties: { titles: { type: "array", items: { type: "string" } } }, required: ["titles"] };
 const run = (client: CodexRpcBoundary) => runCodexSkill(client, {}, { skillName: SKILL, cwd: "C:\\repo", developerInstructions: "x", outputSchema: SCHEMA,
   prepareInput: () => ({}), validateOutput: (output) => output as { titles: string[] }, onAudit: () => {} });
@@ -73,7 +73,7 @@ test("the gate counts the owner's node capacity on top of its share, and a node 
     extraCapacity: (tenant) => tenant === "owner" ? 3 : 0, nodeRoom: (tenant) => tenant === "owner" && room, log: () => {} });
   const holds: Array<() => void> = [];
   const started: string[] = [];
-  const slot = (tenant: string, name: string) => withModelSlot({ skill: "crossline:crossline-due-diligence", tenant }, () => new Promise<void>((resolve) => {
+  const slot = (tenant: string, name: string) => withModelSlot({ skill: "crossline:crossline-research:diligence", tenant }, () => new Promise<void>((resolve) => {
     started.push(name); holds.push(resolve);
   }));
   // Memory is past the mark: the owner's runs start anyway while a node has room, up to its share plus the nodes' three.

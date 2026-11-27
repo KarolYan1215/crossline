@@ -4,9 +4,9 @@ import { fakeRuntime } from "./testing/fake-runtime";
 
 const TOP = "crossline:crossline-onboarding";
 // A top-tier Skill that steps down when the budget is tight (the interview's no longer do, 2026-11-17).
-const TOP_STEPS = "crossline:crossline-milestone-architect";
-const LOW = "crossline:crossline-plan-explainer";
-const MID = "crossline:crossline-due-diligence";
+const TOP_STEPS = "crossline:crossline-milestone-architect:design";
+const LOW = "crossline:crossline-schedule-advisor:explain";
+const MID = "crossline:crossline-research:diligence";
 
 const options = (skillName: string) => ({
   skillName, cwd: "C:\\repo", developerInstructions: "x", outputSchema: {}, prepareInput: (input: unknown) => input,
@@ -38,10 +38,10 @@ test("two runs of the same tier on one runtime still go one after the other", as
 
 test("two accounts' own runtimes do not queue behind each other", async () => {
   const mine = fakeRuntime(["{}"], TOP, { delayMs: 300 });
-  const theirs = fakeRuntime(["{}"], "crossline:crossline-milestone-architect");
+  const theirs = fakeRuntime(["{}"], "crossline:crossline-milestone-architect:design");
   const finished: string[] = [];
   const a = runCodexSkill(mine.rpc, {}, options(TOP)).then(() => finished.push("mine"));
-  const b = runCodexSkill(theirs.rpc, {}, options("crossline:crossline-milestone-architect")).then(() => finished.push("theirs"));
+  const b = runCodexSkill(theirs.rpc, {}, options("crossline:crossline-milestone-architect:design")).then(() => finished.push("theirs"));
   await Promise.all([a, b]);
   expect(finished).toEqual(["theirs", "mine"]);
 });
@@ -85,7 +85,7 @@ test("the person's 模型强度 moves the effort on their own Codex, and 更强 
 
 test("the milestone gate never steps down, however tight the budget", async () => {
   setSpendModeProvider(async () => "economy");
-  const gate = "crossline:crossline-milestone-gate";
+  const gate = "crossline:crossline-evidence-judge:milestone";
   const { rpc } = fakeRuntime(["{}"], gate);
   await runCodexSkill(rpc, {}, options(gate));
   expect(usage[0]).toMatchObject({ spendMode: "economy", model: "gpt-6.1-terra" });

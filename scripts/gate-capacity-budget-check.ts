@@ -61,7 +61,7 @@ try {
     return { ...row, actual: decision, topTierSkillRunsOn: route?.model ?? "(runtime default)" };
   });
   if (routeForSkill("crossline-onboarding", {}, "economy")?.model === routeForSkill("crossline-onboarding", {}, "normal")?.model) failures.push("economy did not downgrade the top tier");
-  if (routeForSkill("crossline-milestone-gate", {}, "economy")?.model !== routeForSkill("crossline-milestone-gate", {}, "normal")?.model) failures.push("economy downgraded the milestone gate");
+  if (routeForSkill("crossline-evidence-judge:milestone", {}, "economy")?.model !== routeForSkill("crossline-evidence-judge:milestone", {}, "normal")?.model) failures.push("economy downgraded the milestone gate");
   console.info(JSON.stringify({ status: "gate_7_budget", budget }, null, 1));
 } finally {
   store.close();

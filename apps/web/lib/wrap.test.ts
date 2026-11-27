@@ -50,7 +50,7 @@ test("`/wrap?day=` reaches back seven days and no further, and an earlier day's 
   expect(yesterday.rows).toEqual([expect.objectContaining({ blockId: first.id, line: "research", timedMinutes: 0 })]);
 
   expect(answerWrapBlock(TEST_CTX, first.id, "not_done", nextMorning, DAY)).toMatchObject({ ok: true, done: "not_done" });
-  expect(store.listEvents(ws, { type: "block.confirmed" })).toEqual([expect.objectContaining({ entityId: `wrap:${DAY}:${first.id}`,
+  expect(store.listEvents(ws, { type: "work_order.changed", change: "block_confirmed" })).toEqual([expect.objectContaining({ entityId: `wrap:${DAY}:${first.id}`,
     payload: expect.objectContaining({ blockId: first.id, day: DAY, outcome: "not_done" }) })]);
   expect(loadWrap(TEST_CTX, nextMorning, DAY).open).toBe(0);
 });
@@ -92,7 +92,7 @@ test("a timer stopped with 结束 (left paused) stops counting where it was paus
   const session = store.listExecutions(ws, "sim")[0]!;
   expect(session.interruptions.at(-1)).toEqual({ pausedAt: toZonedInstant(DAY, "23:31", ZONE), reason: "计时一直没停，按超时提醒时截止" });
   await pass(TEST_CTX, next("01:57"));
-  const said = store.listEvents(ws, { type: "execution.stopped_at" });
+  const said = store.listEvents(ws, { type: "execution.changed", change: "stopped_at" });
   expect(said).toHaveLength(1);
   expect(loadWrap(TEST_CTX, next("02:00"), DAY).timedMinutes).toBe(135);
   expect(store.listConversationMessages(ws, store.conversationFor(ws, "2026-10-13").id).filter((message) => JSON.stringify(message.payload).includes("forgotten:"))).toHaveLength(1);
@@ -118,13 +118,13 @@ test("a block due later waits for the wrap-up; 部分 keeps the step open with h
   expect(wrapped.filter((item) => item.kind === "day_wrap")).toHaveLength(1);
 
   expect(answerWrapBlock(TEST_CTX, first.id, "partial", at(plus(view.at!, 6)))).toMatchObject({ ok: true, done: "partial" });
-  expect(store.listEvents(ws, { type: "block.confirmed" }).map((event) => event.payload)).toEqual([expect.objectContaining({ blockId: first.id, day: DAY, outcome: "partial" })]);
+  expect(store.listEvents(ws, { type: "work_order.changed", change: "block_confirmed" }).map((event) => event.payload)).toEqual([expect.objectContaining({ blockId: first.id, day: DAY, outcome: "partial" })]);
   const stepId = first.id.split(":")[2]!;
   expect(store.getStepPlan(ws, "hw")!.steps.find((item) => item.id === stepId)).toMatchObject({ status: "planned", progressQuarter: 2 });
   expect(store.listExecutions(ws, "hw")).toHaveLength(1);
   // Once: a second tap writes nothing more.
   expect(answerWrapBlock(TEST_CTX, first.id, "done", at(plus(view.at!, 7)))).toMatchObject({ ok: true, already: true });
-  expect(store.listEvents(ws, { type: "block.confirmed" })).toHaveLength(1);
+  expect(store.listEvents(ws, { type: "work_order.changed", change: "block_confirmed" })).toHaveLength(1);
   expect(loadWrap(TEST_CTX, at(plus(view.at!, 7))).open).toBe(0);
 
   await finishWrap(TEST_CTX, at(plus(view.at!, 8)));
@@ -167,7 +167,7 @@ test("the wrap-up prefills what the signals infer; 推断都对 writes it marked
   const view = loadWrap(TEST_CTX, at(plus(first.end, 3)));
   expect(view.rows).toEqual([expect.objectContaining({ blockId: first.id, inferred: "done" })]);
   expect(answerWrapBlock(TEST_CTX, first.id, "done", at(plus(first.end, 4)), undefined, { inferred: true })).toMatchObject({ ok: true });
-  expect(store.listEvents(ws, { type: "block.confirmed" }).map((event) => event.payload)).toEqual([expect.objectContaining({ outcome: "as_planned", inferred: true })]);
+  expect(store.listEvents(ws, { type: "work_order.changed", change: "block_confirmed" }).map((event) => event.payload)).toEqual([expect.objectContaining({ outcome: "as_planned", inferred: true })]);
 });
 
 test("a block due tomorrow with no sign of work is asked by day, and the phone's ✗没做 writes the answer marked as a push", async () => {
@@ -184,7 +184,7 @@ test("a block due tomorrow with no sign of work is asked by day, and the phone's
   expect(asked).toHaveLength(1);
   const message = store.listRecentNudges(ws, toZonedInstant(DAY, "00:00", ZONE)).find((item) => (item.payload.nudge as { kind?: string }).kind === "block_confirm")!;
   expect(confirmBlock(TEST_CTX, message.id, { kind: "not_done", via: "push" }, at(plus(first.end, 5)))).toMatchObject({ ok: true, done: "not_done" });
-  expect(store.listEvents(ws, { type: "block.confirmed" }).map((event) => event.payload)).toEqual([expect.objectContaining({ outcome: "not_done", source: "push" })]);
+  expect(store.listEvents(ws, { type: "work_order.changed", change: "block_confirmed" }).map((event) => event.payload)).toEqual([expect.objectContaining({ outcome: "not_done", source: "push" })]);
 });
 
 test("a block still under way is 进行中: nothing inferred about it, not yet counted to confirm, and counted once it ends", async () => {

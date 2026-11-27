@@ -286,7 +286,7 @@ export function createSiteReader(store: CrosslineStore, workspaceId: string, rec
   let stoppedBy: string | undefined;
   const refuse = (text: string) => { refused += 1; return JSON.stringify({ ok: false, stop: true, message: text }); };
   const log = (host: string, url: string, outcome: string) => store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
-    idempotencyKey: `site.read:${host}:${now().getTime()}:${Math.random().toString(36).slice(2, 8)}`, type: "site.read", entityId: record.id, payload: { host, url: url.slice(0, 300), outcome } });
+    idempotencyKey: `site.read:${host}:${now().getTime()}:${Math.random().toString(36).slice(2, 8)}`, type: "job.ran", entityId: record.id, payload: { host, url: url.slice(0, 300), outcome, job: "site.read", state: "done" } });
   const profiles = new Map<string, string>();
   const closeSite = async (service: string) => {
     const open = browsers.get(service); browsers.delete(service);

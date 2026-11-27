@@ -61,7 +61,7 @@ test("a standalone request becomes the first steps of the task it serves; the me
   expect(plan[1]!.estimate.p85Minutes).toBeLessThanOrEqual(15);
   expect(store.getWorkOrder(ws, "ask")!.state).toBe("archived");
   expect(store.getWorkOrder(ws, "mat2")!.state).toBe("archived");
-  expect(store.listEvents(ws, { type: "work_order.archived", entityId: "ask" })[0]?.payload).toMatchObject({ reason: "与「汇集 ECE 548 复习材料」合并", bySystem: true });
+  expect(store.listEvents(ws, { type: "work_order.changed", change: "archived", entityId: "ask" })[0]?.payload).toMatchObject({ reason: "与「汇集 ECE 548 复习材料」合并", bySystem: true });
   // The kept task takes the earlier due day of what it absorbed.
   expect((store.getWorkOrder(ws, "mat")!.payload as { dueDate?: string; mergedFrom?: unknown[] })).toMatchObject({ dueDate: "2026-10-25", mergedFrom: [{ id: "ask" }, { id: "mat2" }] });
   expect(store.getWorkOrder(ws, "hw3")!.state).toBe("approved");

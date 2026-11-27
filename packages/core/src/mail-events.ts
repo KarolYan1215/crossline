@@ -24,7 +24,7 @@ export const MAIL_EVENT_ASKS = 4;
  * Going to something — a talk, a rehearsal, a forum, an exam sitting. It has a day and a time and is over when that passes; it is never
  * work to place in free hours (W-253, W-256: nine 「参加…」 tasks from mail sat in the owner's plan as overdue, and an exam as a movable
  * half hour). Preparing for it (「复习…，并参加小测」) stays work. The task titler reads it for every task (`payload.attends`, Skill
- * `crossline-task-titler`, 2026-11-22), replacing the verb list (「参加/出席/参观…」) that missed 「于 11 月 5 日参加…」 and 「通过 Zoom 参加…」.
+ * `crossline-goal-backplanner:title`, 2026-11-22), replacing the verb list (「参加/出席/参观…」) that missed 「于 11 月 5 日参加…」 and 「通过 Zoom 参加…」.
  * A task not read yet is not an event: it stays ordinary work until the titler has read it. Returns the task's name when it is one.
  */
 export function attendedText(order: { intent: string; payload?: unknown }): string | undefined {

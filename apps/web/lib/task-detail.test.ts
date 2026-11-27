@@ -176,6 +176,6 @@ test("each plan question shows what it rests on — the person's answer, the app
   expect(shown()).toEqual([["初稿投哪个会？", { text: "ISCA", assumed: false }], ["导师多久回复？", { text: "建议1", assumed: true }], ["要不要附代码？", null]]);
   expect(changeStepAnswer(TEST_CTX, "wo-1", "导师多久回复？", "一周")).toEqual({ ok: true });
   expect(shown()[1]).toEqual(["导师多久回复？", { text: "一周", assumed: false }]);
-  expect(store.listEvents(TEST_CTX.workspaceId, { type: "task.steps_replan_requested", entityId: "wo-1" })).toHaveLength(1);
+  expect(store.listEvents(TEST_CTX.workspaceId, { type: "task.changed", change: "steps_replan_requested", entityId: "wo-1" })).toHaveLength(1);
   expect(changeStepAnswer(TEST_CTX, "wo-1", "不在计划里的问题？", "x")).toEqual({ ok: false, code: "STEP_QUESTION_GONE" });
 });

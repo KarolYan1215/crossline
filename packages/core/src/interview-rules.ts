@@ -9,15 +9,13 @@
  * migration can move a rule between layers or retire it, but never lose one silently.
  *
  * `verdict` is the 2026-11-14 audit's decision for the rule: keep it in code; keep it in code but hand a failure back to the model in
- * the same turn instead of rewriting silently ("return"); leave the judgement to the model ("model"); or delete it. "record" (2026-11-25,
- * 「访谈账本驱动」): the model avoids it from its prompt and the ledger snapshot, and the code that used to send it back only writes a
- * `rule-fired` line when it fires, so a replay can count whether moving it brought the fault back.
+ * the same turn instead of rewriting silently ("return"); leave the judgement to the model ("model"); or delete it. "record" (2026-11-25 to
+ * 2026-11-27): the code only wrote a `rule-fired` line; every such rule was retired on 2026-11-27 and stated once in its Skill instead.
  *
  * Coverage is per symbol, not per test case: the covering test file must name the symbol or the test that exercises it.
  */
 export type RuleLayer = "L0" | "L1" | "L2" | "L3" | "L4";
-// rule: interview.record — the "record" verdict's firings go to `ruleFired("interview.record", { rule })`.
-export type RuleVerdict = "keep" | "return" | "model" | "record" | "delete";
+export type RuleVerdict = "keep" | "return" | "model" | "delete";
 
 export type InterviewRule = {
   id: string;
@@ -52,7 +50,7 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     code: { file: `${CORE}/onboarding-refs.ts`, symbol: "citedSpan", test: `${CORE}/onboarding-refs.test.ts` } },
   { id: "IR-002", layer: "L0", verdict: "keep", status: "active", rule: "卡片点选行（【题】点选：n/5）不作事实证据",
     code: { file: `${CORE}/onboarding-refs.ts`, symbol: "TAP_LINE", test: `${CORE}/onboarding-refs.test.ts`, by: "点选：4/5" } },
-  { id: "IR-003", layer: "L0", verdict: "return", status: "active", rule: "观察卡的引文逐字出自本人回复，且至少来自两条回复（待核实卡一条）",
+  { id: "IR-003", layer: "L0", verdict: "return", status: "active", rule: "观察卡的引文逐字出自所引的本人回复（至少一条；连几条回答由 Skill 定，2026-11-27）",
     code: { file: `${CORE}/onboarding-pace.ts`, symbol: "checkInsight", test: `${CORE}/onboarding-pace.test.ts` } },
   { id: "IR-004", layer: "L0", verdict: "keep", status: "active", rule: "粗略日期说法按今天换算成窗口",
     code: { file: `${CORE}/rough-dates.ts`, symbol: "roughWindow", test: `${CORE}/rough-dates.test.ts` } },
@@ -60,8 +58,9 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     code: { file: `${CORE}/date-schema.ts`, symbol: "quoteSupportsDate", test: `${CORE}/date-schema.test.ts` } },
   // 2026-11-25: no longer sent back or cut from the reply. The snapshot lists the days the person gave and the Skill says a reply writes no
   // other; what keeps a made-up day off the ledger and the calendar is the write step (IR-005, the extraction cites only reply-N / src-N).
-  { id: "IR-006", layer: "L0", verdict: "record", status: "active", rule: "回复里出现本人和账本都没给过的日期：记 rule-fired，不退回、不删句；记进账本和日历的日期由 IR-005 把住",
-    code: { file: `${CORE}/onboarding-reply.ts`, symbol: "inventedDates", test: `${CORE}/onboarding-reply.test.ts` } },
+  { id: "IR-006", layer: "L0", verdict: "delete", status: "retired", rule: "回复里出现本人和账本都没给过的日期：记 rule-fired，不退回、不删句；记进账本和日历的日期由 IR-005 把住",
+    code: { file: `${CORE}/onboarding-reply.ts`, symbol: "inventedDates" },
+    reason: "2026-11-27 精简（docs/plans/condense-1127.md A5）：只记不退的检查删去；回复写的日子只能来自快照「三、本人说过的日期」、文件或调研（访谈 Skill），记进账本的日期仍由 IR-005 把住", replacedBy: "IR-201" },
   { id: "IR-007", layer: "L0", verdict: "keep", status: "active", rule: "调研结论要有来源（最后一轮可以写查不到）",
     code: { file: `${CORE}/onboarding-research.ts`, symbol: "validateResearchTurn", test: `${CORE}/profile-hypotheses.test.ts` } },
   { id: "IR-008", layer: "L0", verdict: "keep", status: "active", rule: "画像结论的引文要能解析回本人回复",
@@ -83,8 +82,9 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
   { id: "IR-013", layer: "L0", verdict: "keep", status: "active", rule: "开始标准（至少一条主线、至少一个里程碑，D10）齐了才能开始（闸门、409）",
     code: { file: `${CORE}/interview-checklist.ts`, symbol: "readyToStart", test: `${CORE}/interview-checklist.test.ts` } },
   // Counted over rewordings. Since 2026-11-25 the Skill's goal, judged against the snapshot; the count is recorded when passed.
-  { id: "IR-014", layer: "L0", verdict: "record", status: "active", rule: "同一件事最多问两次：Skill 的目标，按字面相似数到第三次时记 rule-fired",
-    code: { file: `${WORKER}/onboarding-cards.ts`, symbol: "MAX_ASKINGS", test: `${WORKER}/onboarding-cards.test.ts`, by: "rewordings are counted" } },
+  { id: "IR-014", layer: "L0", verdict: "delete", status: "retired", rule: "同一件事最多问两次：Skill 的目标，按字面相似数到第三次时记 rule-fired",
+    code: { file: `${WORKER}/onboarding-cards.ts`, symbol: "MAX_ASKINGS" },
+    reason: "2026-11-27 精简（docs/plans/condense-1127.md A5）：只记不退的字面计数删去；「同一件事，换了说法也算，整场最多问两次」在访谈 Skill 的账本快照一节" },
   // Typed words are written here only when they say a day or a time; the rest is the extraction's to read (2026-11-14 audit).
   { id: "IR-015", layer: "L0", verdict: "keep", status: "active", rule: "本人在 app 自己的问题卡上的点选，直接写成确认的事实",
     code: { file: `${CORE}/profile-gaps.ts`, symbol: "answeredGapFacts", test: `${CORE}/profile-gaps.test.ts` } },
@@ -95,8 +95,9 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
   { id: "IR-017", layer: "L0", verdict: "delete", status: "retired", rule: "画像阶段一轮超过三个问题时截掉多的",
     code: { file: `${WORKER}/onboarding-session.ts`, symbol: "paceDeepRound" },
     reason: "截掉的题本人看不到、模型也不知道；画像阶段三题是 Skill 的规则，一轮的上限由退回执行", replacedBy: "IR-051" },
-  { id: "IR-051", layer: "L0", verdict: "record", status: "active", rule: "一轮最多五个问题（openItems 也算）：Skill 的目标，超过时记 rule-fired",
-    code: { file: `${WORKER}/onboarding-cards.ts`, symbol: "ROUND_QUESTIONS", test: `${WORKER}/onboarding-cards.test.ts` } },
+  { id: "IR-051", layer: "L0", verdict: "delete", status: "retired", rule: "一轮最多五个问题（openItems 也算）：Skill 的目标，超过时记 rule-fired",
+    code: { file: `${WORKER}/onboarding-cards.ts`, symbol: "ROUND_QUESTIONS" },
+    reason: "2026-11-27 精简（docs/plans/condense-1127.md A5）：只记不退的计数删去；「一轮最多五道」在访谈 Skill 的账本快照一节" },
 
   // 3.4 Meaning judgements: the model's.
   { id: "IR-018", layer: "L0", verdict: "model", status: "retired", rule: "题干像问日子的，改成不带选项的日期题",
@@ -113,7 +114,7 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     reason: "按字面相似度删题，误删往深一层的追问（0.69）；改成退回模型并附本人的回答", replacedBy: "IR-047" },
   // 2026-11-25: whether two questions mean the same is the model's verdict against the snapshot (`repeats`, `followUp`); the wording
   // likeness only records. A question the model itself marked as an answered one, not deeper, still comes back with the answer.
-  { id: "IR-047", layer: "L0", verdict: "record", status: "active", rule: "和答过的题字面相像：记 rule-fired，不退回；模型自己在 repeats 标了答过的题又不是 followUp 的，退回并附本人的回答",
+  { id: "IR-047", layer: "L0", verdict: "return", status: "active", rule: "模型自己在 repeats 标了答过的题又不是 followUp 的，退回并附本人的回答（字面相像只记的那半 2026-11-27 删去，意思是否相同由模型判）",
     code: { file: `${WORKER}/onboarding-cards.ts`, symbol: "checkQuestions", test: `${WORKER}/onboarding-cards.test.ts` } },
   { id: "IR-022", layer: "L0", verdict: "delete", status: "retired", rule: "从回答的文字判断本人是不知道还是没定",
     code: { file: `${CORE}/question-ledger.ts`, symbol: "unsureAnswer" },
@@ -156,8 +157,9 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
   { id: "IR-035", layer: "L0", verdict: "return", status: "retired", rule: "开始标准没齐时，回复不说可以开始，也不提结束按钮",
     code: { file: `${WORKER}/onboarding-session.ts`, symbol: "endHinted", test: `${WORKER}/onboarding-session.test.ts`, by: "withoutEndHint" },
     reason: "2026-11-22 原生改写：开始不开始由本人决定；回复说可以开始只记在 round_edited 的 noted 里，不退回、不删句", replacedBy: "IR-165" },
-  { id: "IR-036", layer: "L0", verdict: "keep", status: "active", rule: "画像的类型简介不把类型名当成本人的标签（「你是军师」），普通用法放过",
-    code: { file: `${CORE}/portrait-type.ts`, symbol: "typeSummaryProblem", test: `${CORE}/portrait.test.ts` } },
+  { id: "IR-036", layer: "L0", verdict: "delete", status: "retired", rule: "画像的类型简介不把类型名当成本人的标签（「你是军师」），普通用法放过",
+    code: { file: `${CORE}/portrait-type.ts`, symbol: "typeSummaryProblem" },
+    reason: "2026-11-27 精简（docs/plans/condense-1127.md A5）：画像的输出 schema 早已没有 `type`，检查读不到任何新写的字段；不贴标签在画像 Skill 的「判断的规则」" },
   { id: "IR-037", layer: "L0", verdict: "keep", status: "active", rule: "画像里不在本场的主线那一项被剪掉，不让整份画像失败",
     code: { file: `${CORE}/portrait.ts`, symbol: "onRecord", test: `${CORE}/portrait.test.ts`, by: "A line not on record is left out" } },
 
@@ -188,7 +190,7 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
   { id: "IR-044", layer: "L0", verdict: "delete", status: "retired", rule: "画像阶段先不出缺项题",
     code: { file: `${WORKER}/onboarding-session.ts`, symbol: "holdGaps" },
     reason: "缺项题不再由 app 插入，什么时候问由模型在 openItems 里定", replacedBy: "IR-048" },
-  { id: "IR-049", layer: "L0", verdict: "return", status: "active", rule: "观察卡不合格时连同原因退回模型（引文、披露、引用条数、假设日志、同一假设两次）",
+  { id: "IR-049", layer: "L0", verdict: "return", status: "active", rule: "观察卡不合格时连同原因退回模型（引文、披露、网址、假设日志、同一假设两次；引用条数、级别和同句重复 2026-11-27 交给 Skill）",
     code: { file: `${WORKER}/onboarding-cards.ts`, symbol: "checkInsights", test: `${WORKER}/onboarding-cards.test.ts` } },
   { id: "IR-050", layer: "L0", verdict: "return", status: "active", rule: "调研已有线程或同时开着的太多时退回模型",
     code: { file: `${WORKER}/onboarding-cards.ts`, symbol: "checkResearch", test: `${WORKER}/onboarding-cards.test.ts` } },
@@ -256,18 +258,19 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     code: { file: `${CORE}/onboarding-pace.ts`, symbol: "withoutDisclosures", test: `${CORE}/onboarding-pace.test.ts` } },
   { id: "IR-122", layer: "L0", verdict: "keep", status: "active", rule: "对话线程还留着披露原文时，答完它的下一轮重建线程",
     code: { file: `${WORKER}/onboarding-session.ts`, symbol: "unredacted", test: `${WORKER}/onboarding-session.test.ts`, by: "a disclosure's words leave the dialogue's thread" } },
-  { id: "IR-123", layer: "L0", verdict: "return", status: "active", rule: "回复、题目和卡用了自伤字眼，退回，修复用完后去掉那一句；用了披露独有的四字原话只记 rule-fired（2026-11-25，快照写明披露在哪和本人的同意）",
-    code: { file: `${CORE}/onboarding-pace.ts`, symbol: "disclosureEchoes", test: `${CORE}/onboarding-pace.test.ts` } },
+  { id: "IR-123", layer: "L0", verdict: "return", status: "active", rule: "回复、题目和卡用了自伤字眼，退回，修复用完后去掉那一句（披露独有原话只记的那半 2026-11-27 删去；快照写明披露在哪和本人的同意，访谈 Skill 不复述）",
+    code: { file: `${WORKER}/onboarding-session.ts`, symbol: "echoOf", test: `${WORKER}/onboarding-session.test.ts`, by: "a reply naming self-harm is sent back once" } },
   { id: "IR-124", layer: "L0", verdict: "keep", status: "active", rule: "谈艰难时期学到什么，只由应用的固定题征得同意，整场一次，不答或「先不聊」就整场不提",
     code: { file: `${CORE}/onboarding-pace.ts`, symbol: "lessonAnswer", test: `${CORE}/onboarding-pace.test.ts` } },
   { id: "IR-125", layer: "L2", verdict: "model", status: "active", rule: "同意之后只谈先兆、帮到的人和事、怎么缓过来的，不问不复述经过",
     text: { file: INTERVIEW_SKILL, anchor: "**本人同意以后，只谈先兆、帮到的人和事、怎么缓过来的。**" } },
   // Days, cards and the scale (2026-11-15, after replay 15 asked one day six times, retold just-made plans on cards, said one tension in
   // the reply and the card, and quoted 「5/5」).
-  { id: "IR-126", layer: "L0", verdict: "return", status: "active", rule: "日期题要写 about，没写退回；同一件事的日子问过再问只记 rule-fired（2026-11-25，问过的题和回答在快照里）",
-    code: { file: `${WORKER}/onboarding-cards.ts`, symbol: "sameAbout", test: `${WORKER}/onboarding-cards.test.ts`, by: "a subject answered is not asked again" } },
-  { id: "IR-127", layer: "L0", verdict: "return", status: "active", rule: "两个以上选项是日子的题退回，改成不带选项的 free",
-    code: { file: `${WORKER}/onboarding-cards.ts`, symbol: "dayOption", test: `${WORKER}/onboarding-cards.test.ts`, by: "options that are days come back" } },
+  { id: "IR-126", layer: "L0", verdict: "return", status: "active", rule: "日期题要写 about，没写退回（同一件事的日子问过再问只记的那半 2026-11-27 删去，问过的题和回答在快照里）",
+    code: { file: `${WORKER}/onboarding-cards.ts`, symbol: "checkQuestions", test: `${WORKER}/onboarding-cards.test.ts`, by: "a date question without its subject" } },
+  { id: "IR-127", layer: "L0", verdict: "delete", status: "retired", rule: "两个以上选项是日子的题退回，改成不带选项的 free",
+    code: { file: `${WORKER}/onboarding-cards.ts`, symbol: "dayOption" },
+    reason: "2026-11-27 精简（docs/plans/condense-1127.md A5）：题的样式交给模型；「问日子用不带选项的 `free`」在访谈 Skill 的问题卡一节" },
   { id: "IR-128", layer: "L0", verdict: "keep", status: "retired", rule: "本人说还没定的日子列在进度头里，沿用叫法",
     code: { file: `${WORKER}/onboarding-standing.ts`, symbol: "undecided", test: `${WORKER}/onboarding-standing.test.ts`, by: "days the person said are not set are listed" },
     reason: "2026-11-22 原生改写：「还没定」由问过的日期题本身的回答承担（sameAbout），进度头不再列", replacedBy: "IR-101" },
@@ -328,8 +331,9 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
   { id: "IR-150", layer: "L0", verdict: "keep", status: "active", rule: "D9 维持循环画成一个圈：没被推翻的 D9 假设至少两条，最后一步回到第一步",
     code: { file: "apps/web/app/onboarding/story-views.tsx", symbol: "LoopView", test: "apps/web/app/onboarding/story-views.test.tsx", by: "the loop draws the unrefuted D9 steps round a circle" } },
   // Replay 16 (2026-11-16): IR-123 sent five of twelve rounds back for words that were not the disclosure.
-  { id: "IR-151", layer: "L0", verdict: "keep", status: "active", rule: "披露原话只按本人自己打的字比：回复里有自伤的句子时只比那几句，安全回应之后那条回复只比自伤的句子；题面、选项和访谈者自己的话都算普通的话",
-    code: { file: `${CORE}/onboarding-pace.ts`, symbol: "disclosureWords", test: `${CORE}/onboarding-pace.test.ts`, by: "a disclosure is compared by the person's own words where it is" } },
+  { id: "IR-151", layer: "L0", verdict: "delete", status: "retired", rule: "披露原话只按本人自己打的字比：回复里有自伤的句子时只比那几句，安全回应之后那条回复只比自伤的句子；题面、选项和访谈者自己的话都算普通的话",
+    code: { file: `${CORE}/onboarding-pace.ts`, symbol: "disclosureWords" },
+    reason: "2026-11-27 精简（docs/plans/condense-1127.md A5）：披露原话的比对随 IR-123 只记的那半一起删去；自伤字眼仍由 IR-123 退回", replacedBy: "IR-123" },
   // Replay 16's follow-ups (2026-11-16).
   { id: "IR-152", layer: "L2", verdict: "model", status: "retired", rule: "next 只提对话做得到的事，不许诺把这一周排出来；本人要看一周，请本人看右栏的周草稿",
     text: { file: INTERVIEW_SKILL, anchor: "**`next` 只提对话做得到的事：聊什么、问什么、请本人看右栏的哪张图。**" },
@@ -370,8 +374,9 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     text: { file: EXTRACT_SKILL, anchor: "**`statement` 只说 `basis` 盖得住的范围，一条一个论断。**" } },
   // 2026-11-22, the native rewrite (docs/plans/2026-11-22-interview-and-import-redesign.md §2–§3): one long thread, the reply in free text,
   // the state read on demand, the person's messages queued or steered, at most a thousand of them.
-  { id: "IR-165", layer: "L0", verdict: "record", status: "active", rule: "开始标准没齐时说可以开始、或报量表分数：不退回，记 rule-fired 供回放（2026-11-25 起不再写 round_edited 的 noted）",
-    code: { file: `${WORKER}/onboarding-session.ts`, symbol: "firedAfter", test: `${WORKER}/onboarding-session.test.ts`, by: "is recorded, not sent back or cut" } },
+  { id: "IR-165", layer: "L0", verdict: "delete", status: "retired", rule: "开始标准没齐时说可以开始、或报量表分数：不退回，记 rule-fired 供回放（2026-11-25 起不再写 round_edited 的 noted）",
+    code: { file: `${WORKER}/onboarding-session.ts`, symbol: "firedAfter" },
+    reason: "2026-11-27 精简（docs/plans/condense-1127.md A5）：只记不退的检查删去；开始标准没齐时说还差什么（核心规则 15）和不报量表分数（量表一节）在访谈 Skill" },
   { id: "IR-166", layer: "L0", verdict: "keep", status: "active", rule: "一场访谈最多 1000 条本人的消息，在一轮开始时数",
     code: { file: `${WORKER}/onboarding-session.ts`, symbol: "INTERVIEW_ROUND_LIMIT", test: `${WORKER}/onboarding-session.test.ts`, by: "at most a thousand a session" } },
   { id: "IR-167", layer: "L0", verdict: "keep", status: "active", rule: "一轮进行中本人发的话默认排队到下一轮；选「插入本轮」时用 turn/steer 带上正在跑的 turn id，跑不了就排队",
@@ -404,12 +409,14 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     text: { file: EXTRACT_SKILL, anchor: "**每条假设标一个级别（`level`）。**" } },
   { id: "IR-180", layer: "L2", verdict: "model", status: "active", rule: "叙事部分一个场景问到之后一周、当时和现在的说法、结果由谁来判",
     text: { file: `${SKILLS}/crossline-onboarding/stages/narrative.md`, anchor: "**一个场景问到它的前后，不只是它本身。**" } },
-  { id: "IR-181", layer: "L0", verdict: "keep", status: "active", rule: "自由文本的一轮没调用 mark_round 时退回一次要它标出所在部分，第二次的回答照收",
-    code: { file: `${WORKER}/onboarding-session.ts`, symbol: "stageAsked", test: `${WORKER}/onboarding-session.test.ts`, by: "never marked its part" } },
+  { id: "IR-181", layer: "L0", verdict: "delete", status: "retired", rule: "自由文本的一轮没调用 mark_round 时退回一次要它标出所在部分，第二次的回答照收",
+    code: { file: `${WORKER}/onboarding-session.ts`, symbol: "stageAsked" },
+    reason: "2026-11-27 精简（docs/plans/condense-1127.md A5）：不再退回；没标的一轮留在上一轮的部分里，要求写在访谈 Skill 的访谈顺序一节", replacedBy: "IR-202" },
   // Replay of yaohuaqishu (2026-11-23, 30 rounds): a direct question went unanswered, the recommended direction changed every round, and
   // three parts took 29 rounds between them.
-  { id: "IR-182", layer: "L0", verdict: "keep", status: "active", rule: "本人在回答里问了访谈者的问题，每轮说明里写出来；一部分到第六轮，每轮说明里写出已到第几轮",
-    code: { file: `${WORKER}/onboarding-session.ts`, symbol: "questionsAsked", test: `${WORKER}/onboarding-session.test.ts`, by: "says what the person asked" } },
+  { id: "IR-182", layer: "L0", verdict: "delete", status: "retired", rule: "本人在回答里问了访谈者的问题，每轮说明里写出来；一部分到第六轮，每轮说明里写出已到第几轮",
+    code: { file: `${WORKER}/onboarding-session.ts`, symbol: "questionsAsked" },
+    reason: "2026-11-27 精简（docs/plans/condense-1127.md A5）：按问号找本人的问题删去，模型从回答本身读；一部分的轮数在进度头里（roundsInPart）", replacedBy: "IR-183" },
   { id: "IR-183", layer: "L2", verdict: "model", status: "active", rule: "本人问访谈者的，这一轮第一句先答，判断写在回复里",
     text: { file: INTERVIEW_SKILL, anchor: "**本人问你的，这一轮先答。**" } },
   { id: "IR-184", layer: "L2", verdict: "model", status: "active", rule: "候选方向排成一个次序记在 progress.said，新回答只调整次序，不每轮换一个",
@@ -426,10 +433,12 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
   // 2026-11-25, the interview driven by its ledger (docs/plans/harness-1125.md 「访谈账本驱动」): the ledger is the model's external memory,
   // rewritten after every round and rendered at the head of the next; the model judges the checklist and the sameness of questions
   // against it, and the code checks only structure and that the words cited exist.
-  { id: "IR-190", layer: "L0", verdict: "record", status: "active", rule: "回复抄了卡片答案的写法（【题】已点选）：记 rule-fired，不退回（W-315；量表一节写明不抄）",
-    code: { file: `${WORKER}/onboarding-session.ts`, symbol: "CARD_NOTATION", test: `${WORKER}/onboarding-session.test.ts`, by: "copying a card's notation" } },
-  { id: "IR-191", layer: "L0", verdict: "record", status: "active", rule: "回复说某题「还没答」：记 rule-fired，不退回（W-307、W-314；问过和答过的题在快照里）",
-    code: { file: `${WORKER}/onboarding-session.ts`, symbol: "PENDING_TALK", test: `${WORKER}/onboarding-session.test.ts`, by: "saying a question still waits" } },
+  { id: "IR-190", layer: "L0", verdict: "delete", status: "retired", rule: "回复抄了卡片答案的写法（【题】已点选）：记 rule-fired，不退回（W-315；量表一节写明不抄）",
+    code: { file: `${WORKER}/onboarding-session.ts`, symbol: "CARD_NOTATION" },
+    reason: "2026-11-27 精简（docs/plans/condense-1127.md A5）：只记不退的检查删去；不抄卡片写法在访谈 Skill 的量表一节" },
+  { id: "IR-191", layer: "L0", verdict: "delete", status: "retired", rule: "回复说某题「还没答」：记 rule-fired，不退回（W-307、W-314；问过和答过的题在快照里）",
+    code: { file: `${WORKER}/onboarding-session.ts`, symbol: "PENDING_TALK" },
+    reason: "2026-11-27 精简（docs/plans/condense-1127.md A5）：只记不退的检查删去；写「还在等你」前先在快照里找到那一问（核心规则 6）" },
   { id: "IR-192", layer: "L0", verdict: "return", status: "active", rule: "清单判定只核对依据：id 在快照里、状态四选一、answered/partial 的 basis 逐字在所引 reply-N/src-N 里、不引披露、不适用要写理由",
     code: { file: `${CORE}/interview-checklist.ts`, symbol: "checkChecklistVerdicts", test: `${CORE}/interview-checklist.test.ts` } },
   { id: "IR-193", layer: "L0", verdict: "keep", status: "active", rule: "每轮开头放账本快照：清单与上次判定、已问题目（意思、原题、回答）、本人写过的日期、披露所在；上一轮结束时先写账本，再渲染",
@@ -446,8 +455,14 @@ export const INTERVIEW_RULES: readonly InterviewRule[] = [
     text: { file: INTERVIEW_SKILL, anchor: "**出题前对着快照里的已问题目判意思，不看字面。**" } },
   { id: "IR-199", layer: "L2", verdict: "model", status: "active", rule: "一轮一个主问题、最多五道；同一件事最多问两次，再不清就记成假设；回复里的日子只用快照、文件或调研里的",
     text: { file: INTERVIEW_SKILL, anchor: "**一轮的题量和同一件事的问法有上限。**" } },
-  { id: "IR-200", layer: "L0", verdict: "return", status: "active", rule: "回复的陈述句里有本人、文件和之前回复都没说过的数量（「七张」）：退回一次点名这个数，要么改成问，要么不是在复述本人就照原样；第二次的回答照用（2026-11-26 回放）",
-    code: { file: `${CORE}/said-counts.ts`, symbol: "unsaidCounts", test: `${CORE}/said-counts.test.ts` } },
+  { id: "IR-200", layer: "L0", verdict: "delete", status: "retired", rule: "回复的陈述句里有本人、文件和之前回复都没说过的数量（「七张」）：退回一次点名这个数，要么改成问，要么不是在复述本人就照原样；第二次的回答照用（2026-11-26 回放）",
+    code: { file: `${CORE}/said-counts.ts`, symbol: "unsaidCounts" },
+    reason: "2026-11-27 精简（docs/plans/condense-1127.md A5）：按词表数量词判「本人没说过」交给模型", replacedBy: "IR-201" },
+  // 2026-11-27 (docs/plans/condense-1127.md A4/A5): what the retired reply checks did, stated once in the interview Skill.
+  { id: "IR-201", layer: "L2", verdict: "model", status: "active", rule: "回复不说本人、文件和调研都没给过的数量、日期和细节，范围不收窄成一个点",
+    text: { file: INTERVIEW_SKILL, anchor: "**不添本人没给的数、日子和细节。**" } },
+  { id: "IR-202", layer: "L2", verdict: "model", status: "active", rule: "每轮用 mark_round 的 stage 标出所在部分，不标就留在上一轮的部分",
+    text: { file: INTERVIEW_SKILL, anchor: "每轮都用 `mark_round` 的 `stage` 标出这一轮在哪一部分" } },
   { id: "IR-189", layer: "L2", verdict: "model", status: "active", rule: "项目要不要每周固定到场由访谈判断，没人说过时间的问一次，只问时间",
     text: { file: INTERVIEW_SKILL, anchor: "**一个项目要不要每周固定到场，由你判断。**" } },
 ];

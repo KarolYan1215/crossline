@@ -1,3 +1,5 @@
+import type { EventType } from "@crossline/core";
+import type { LedgerEventInput } from "@crossline/db";
 import { createHash } from "node:crypto";
 import {
   PUBLIC_SKILL_BATCH_CHARS, PUBLIC_SKILL_BATCH_MAX, PUBLIC_SKILL_BATCH_REVIEW_SCHEMA, PUBLIC_SKILL_CATEGORIES, PUBLIC_SKILL_CATEGORY_LABEL, PUBLIC_SKILL_IDLE_DAYS,
@@ -17,7 +19,7 @@ import {
   fileHashes, publicLockEntry, pruneQuarantine, quarantine, quarantineDirFor, readLock, releaseQuarantine, skillLibraryDir, storedPublicFiles, updateLock
 } from "./skill-lock";
 
-export const SKILL_SCOUT = "crossline:crossline-skill-scout";
+export const SKILL_SCOUT = "crossline:crossline-research:skills";
 const REVIEWER = "crossline:crossline-validation-reviewer";
 const SCOUT_PERIOD_DAYS = 30;
 /** A candidate refused for its licence, its contents or its review is not fetched again for this long. */
@@ -138,9 +140,9 @@ export async function fetchSkillDirectory(candidate: { repo: string; path: strin
 // ── The library in the ledger ───────────────────────────────────────────────────────────────────────────────────────────
 
 
-function event(store: CrosslineStore, workspaceId: string, type: string, entityId: string, payload: Record<string, unknown>, at: string) {
+function event(store: CrosslineStore, workspaceId: string, type: EventType, entityId: string, payload: Record<string, unknown>, at: string) {
   store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `${type}:${entityId}:${at}:${Math.random().toString(36).slice(2, 8)}`,
-    type, entityId, payload });
+    type, entityId, payload } as LedgerEventInput);
 }
 
 /** Called after a run switched these on: the clock that removes an unused skill restarts. */
@@ -165,15 +167,13 @@ export function cleanPublicSkills(store: CrosslineStore, workspaceId: string, no
 /** A task on a line found no public skill for it: the next scout searches for it (the search on demand). Once per line a day. */
 export function wantPublicSkill(store: CrosslineStore, workspaceId: string, lineId: string, task: string, now = new Date()): void {
   const day = now.toISOString().slice(0, 10);
-  if (store.listEvents(workspaceId, { type: "skill.public.wanted", entityId: lineId }).some((item) => item.createdAt.slice(0, 10) === day)) return;
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.public.wanted:${lineId}:${day}`, type: "skill.public.wanted", entityId: lineId,
-    payload: { lineId, task: task.slice(0, 300), at: now.toISOString() } });
+  if (store.listEvents(workspaceId, { type: "skill.changed", change: "public_wanted", entityId: lineId }).some((item) => item.createdAt.slice(0, 10) === day)) return;
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.public.wanted:${lineId}:${day}`, type: "skill.changed", entityId: lineId,
+    payload: { lineId, task: task.slice(0, 300), at: now.toISOString(), change: "public_wanted" } });
 }
 
-/** The person's request for one more search of a line, written by the web's Skill 库 (2026-10-22, docs/token-economy.md §2.4). */
-export const SEARCH_REQUESTED = "skill.public.search_requested";
 
-const scoutRuns = (store: CrosslineStore, workspaceId: string) => store.listEvents(workspaceId, { type: "skill.public.scouted" })
+const scoutRuns = (store: CrosslineStore, workspaceId: string) => store.listEvents(workspaceId, { type: "skill.changed", change: "public_scouted" })
   .map((item) => ({ ...(item.payload as { mode?: string; lines?: string[]; code?: string; at?: string }), createdAt: item.createdAt }));
 /** The last monthly search (`routine`); a line's setup search does not move the month. Older records without a mode were routine. */
 const lastScout = (store: CrosslineStore, workspaceId: string) => {
@@ -182,7 +182,7 @@ const lastScout = (store: CrosslineStore, workspaceId: string) => {
 };
 const pendingWants = (store: CrosslineStore, workspaceId: string) => {
   const since = lastScout(store, workspaceId) ?? "";
-  return store.listEvents(workspaceId, { type: "skill.public.wanted" }).filter((item) => String((item.payload as { at?: string }).at ?? item.createdAt) > since)
+  return store.listEvents(workspaceId, { type: "skill.changed", change: "public_wanted" }).filter((item) => String((item.payload as { at?: string }).at ?? item.createdAt) > since)
     .map((item) => ({ lineId: item.entityId, task: String((item.payload as { task?: string }).task ?? "") }));
 };
 
@@ -213,7 +213,7 @@ export function lineSetupDue(store: CrosslineStore, workspaceId: string, now = n
   if (!lines.length) return [];
   // The person asked for another search of a line (Skill 库 「再检索一轮」): due until a setup search covering it ran after the request.
   const searched = scoutRuns(store, workspaceId).filter((run) => run.mode === "setup" && !run.code);
-  const requested = [...new Set(store.listEvents(workspaceId, { type: SEARCH_REQUESTED }).flatMap((event) => {
+  const requested = [...new Set(store.listEvents(workspaceId, { type: "skill.changed", change: "public_search_requested" }).flatMap((event) => {
     const { lineId = "", at = event.createdAt } = event.payload as { lineId?: string; at?: string };
     return lines.includes(lineId) && !searched.some((run) => (run.lines ?? []).includes(lineId) && String(run.at ?? run.createdAt) >= at) ? [lineId] : [];
   }))];
@@ -263,7 +263,7 @@ export function createSkillScout(store: CrosslineStore, workspaceId: string, cwd
     const orders = store.listWorkOrders(workspaceId);
     const lines = identityLines(store, workspaceId).filter((line) => mode !== "setup" || !deps.lines || deps.lines.includes(line.id));
     const outcome = { installed: [] as string[], updated: [] as string[], rejected: [] as Array<{ name: string; reason: string }>, removed: [] as string[], kept: [] as string[], reviews: 0 };
-    const recentlyRejected = new Set(store.listEvents(workspaceId, { type: "skill.public.rejected" })
+    const recentlyRejected = new Set(store.listEvents(workspaceId, { type: "skill.changed", change: "public_rejected" })
       .filter((item) => now.getTime() - Date.parse(item.createdAt) < REJECTED_FOR_DAYS * 86_400_000
         && !TRANSIENT_FETCH.test(String((item.payload as { reason?: string }).reason ?? "")))
       .map((item) => { const payload = item.payload as { repo?: string; path?: string }; return `${payload.repo}#${payload.path}`; }));
@@ -325,9 +325,9 @@ export function createSkillScout(store: CrosslineStore, workspaceId: string, cwd
       else outcome.rejected.push({ name: done.name, reason: done.reason });
     }
     const stopped = blocker ?? (limited ? { code: "GITHUB_RATE_LIMITED", message: t("GitHub 暂时拒绝了请求（频率限制）") } : undefined);
-    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.public.scouted:${now.getTime()}`, type: "skill.public.scouted",
+    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.public.scouted:${now.getTime()}`, type: "skill.changed",
       entityId: workspaceId, payload: { ...outcome, mode, lines: lines.map((line) => line.id), at: now.toISOString(), wanted: wanted.length,
-        ...(stopped ? { code: stopped.code, message: stopped.message.slice(0, 300) } : {}) } });
+        ...(stopped ? { code: stopped.code, message: stopped.message.slice(0, 300) } : {}), change: "public_scouted" } });
     return outcome;
 
     async function currentCommit(record: PublicSkillRecord): Promise<string | undefined> {
@@ -370,13 +370,13 @@ type ReviewResult = { ok: true; review: PublicSkillReview } | { ok: false; messa
 function rejectCandidate(ctx: ConsiderContext, candidate: SkillCandidate, existing: PublicSkillRecord | undefined, reason: string, extra: Record<string, unknown> = {},
   quarantined?: string): Rejection {
   releaseQuarantine(quarantined);
-  event(ctx.store, ctx.workspaceId, "skill.public.rejected", existing?.id ?? candidate.name,
-    { name: candidate.name, repo: candidate.repo, path: candidate.path, reason, ...(ctx.via ? { via: ctx.via } : {}), ...(existing ? { kept: existing.commit } : {}), ...extra },
+  event(ctx.store, ctx.workspaceId, "skill.changed", existing?.id ?? candidate.name,
+    { name: candidate.name, repo: candidate.repo, path: candidate.path, reason, ...(ctx.via ? { via: ctx.via } : {}), ...(existing ? { kept: existing.commit } : {}), ...extra, change: "public_rejected" },
     ctx.now.toISOString());
   return { state: "rejected", reason };
 }
 /** The newer commits of an installed skill already refused: a monthly check does not fetch and review them again. */
-const refusedCommits = (store: CrosslineStore, workspaceId: string, id: string) => new Set(store.listEvents(workspaceId, { type: "skill.public.rejected", entityId: id })
+const refusedCommits = (store: CrosslineStore, workspaceId: string, id: string) => new Set(store.listEvents(workspaceId, { type: "skill.changed", change: "public_rejected", entityId: id })
   .map((item) => String((item.payload as { commit?: string }).commit ?? "")).filter(Boolean));
 
 /**
@@ -535,8 +535,8 @@ function installReviewed(ctx: ConsiderContext, prepared: Prepared, reviewed: Rev
   writePublicSkills(store, workspaceId, [...all.filter((item) => item.id !== id), record]);
   updateLock(ctx.dir, (lock) => { lock.skills[publicSkillName(id)] = publicLockEntry(record, record.files, scan, prepared.injection, SKILL_SCANNER_VERSION, at); });
   releaseQuarantine(prepared.quarantined);
-  event(store, workspaceId, existing ? "skill.public.updated" : "skill.public.installed", id,
-    { id, name: front.name, repo: record.source.repo, path: record.source.path, commit: fetched.commit, license: fetched.license, final, risk: scan.risk,
+  event(store, workspaceId, "skill.changed", id,
+    { change: existing ? "public_updated" : "public_installed", id, name: front.name, repo: record.source.repo, path: record.source.path, commit: fetched.commit, license: fetched.license, final, risk: scan.risk,
       ...(ctx.via ? { via: ctx.via } : {}), ...(existing ? { previousCommit: existing.commit } : {}) }, at);
   return { state: "installed", id, final };
 }
@@ -611,8 +611,8 @@ export async function rescanPublicSkills(store: CrosslineStore, workspaceId: str
       const entry = next.skills[publicSkillName(record.id)];
       next.skills[publicSkillName(record.id)] = { ...(entry ?? publicLockEntry(record, files, record.scan, undefined, SKILL_SCANNER_VERSION, at)), status: "disabled", reason, at };
     });
-    event(store, workspaceId, "skill.public.rejected", record.id, { name: record.name, repo: record.source.repo, path: record.source.path, commit: record.commit,
-      reason, stage: "rescan", ...extra }, at);
+    event(store, workspaceId, "skill.changed", record.id, { name: record.name, repo: record.source.repo, path: record.source.path, commit: record.commit,
+      reason, stage: "rescan", ...extra, change: "public_rejected" }, at);
     outcome.disabled.push({ id: record.id, reason });
   };
   for (const record of records) {
@@ -654,7 +654,7 @@ export async function rescanPublicSkills(store: CrosslineStore, workspaceId: str
         : { ...item, scan, ...(capped ? { review: { ...item.review, final: "text_only" as const } } : {}) }));
       if (capped) {
         outcome.capped.push(record.id);
-        event(store, workspaceId, "skill.public.updated", record.id, { id: record.id, name: record.name, commit: record.commit, final: "text_only", risk: scan.risk, stage: "rescan" }, at);
+        event(store, workspaceId, "skill.changed", record.id, { id: record.id, name: record.name, commit: record.commit, final: "text_only", risk: scan.risk, stage: "rescan", change: "public_updated" }, at);
       }
     }
     updateLock(dir, (next) => { next.skills[name] = publicLockEntry(record, hashes, scan, injection, SKILL_SCANNER_VERSION, at); });
@@ -720,7 +720,7 @@ export async function installPublicSkillFromLink(store: CrosslineStore, workspac
     if (!existing.lines.includes(request.lineId)) {
       const lines = [...existing.lines, request.lineId];
       writePublicSkills(store, workspaceId, readPublicSkills(store, workspaceId).map((record) => record.id === existing.id ? { ...record, lines } : record));
-      event(store, workspaceId, "skill.public.lines_added", existing.id, { id: existing.id, lineId: request.lineId, via: "link" }, now.toISOString());
+      event(store, workspaceId, "skill.changed", existing.id, { id: existing.id, lineId: request.lineId, via: "link", change: "public_lines_added" }, now.toISOString());
       return { state: "already", id: existing.id, lines };
     }
     return { state: "already", id: existing.id, lines: existing.lines };

@@ -96,8 +96,8 @@ test("a goal change from the interview takes effect only on the person's click, 
   expect(decideGoalEdit(TEST_CTX, "line-media", "dismiss")).toEqual({ ok: true });
   expect(identityLines(TEST_CTX).find((item) => item.id === "line-media")!.goals).toEqual([]);
   expect(JSON.parse(store.getSetting(ws, "lines.goalEdits")!)).toEqual({});
-  expect(store.listEvents(ws, { type: ["line.goal_edit_adopted", "line.goal_edit_dismissed"] }).map((event) => [event.type, event.entityId]))
-    .toEqual([["line.goal_edit_adopted", "research"], ["line.goal_edit_dismissed", "line-media"]]);
+  expect(store.listEvents(ws, { type: "line.changed", change: ["goal_edit_adopted", "goal_edit_dismissed"] }).map((event) => [(event.payload as { change?: string }).change, event.entityId]))
+    .toEqual([["goal_edit_adopted", "research"], ["goal_edit_dismissed", "line-media"]]);
   expect(decideGoalEdit(TEST_CTX, "research", "adopt")).toMatchObject({ ok: false, code: "GOAL_EDIT_NOT_FOUND" });
 });
 

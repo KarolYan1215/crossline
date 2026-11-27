@@ -44,7 +44,7 @@ test("an ask answered from the box keeps the person's words; where no option tak
   const store = setup();
   expect(await executeAction(TEST_CTX, { action: "ask.answer", summary: "不等了", args: { askId: "wait:wait-sim-0", optionId: "cancelled", fields: [],
     note: "师兄下周三才回实验室，到时再当面要" } })).toMatchObject({ ok: true });
-  expect(store.listEvents(ws, { type: "ask.answered" }).at(-1)!.payload).toMatchObject({ note: "师兄下周三才回实验室，到时再当面要" });
+  expect(store.listEvents(ws, { type: "ask.changed", change: "answered" }).at(-1)!.payload).toMatchObject({ note: "师兄下周三才回实验室，到时再当面要" });
   expect(notes(store)).toEqual([expect.objectContaining({ text: "师兄下周三才回实验室，到时再当面要", about: expect.stringContaining("西湖 MoS2 真实测量数据"),
     source: expect.objectContaining({ kind: "ask" }) })]);
 });

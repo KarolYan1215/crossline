@@ -3,7 +3,6 @@
  * Claims for the profile report (docs/profile-and-agent-kit.md §五–§六): what the cards measured, computed here and never by a model, and
  * what the portrait writer said, each kept only with a quote that is really in the person's replies.
  */
-import { countsIn } from "./said-counts";
 import { administrationNote, instrumentScores, PROFILE_ITEMS, type DimensionScore, type InstrumentAnswers, type InstrumentId } from "./profile-instruments";
 import {
   DEFAULT_SECTION_PRIVACY, REPORT_SECTIONS, REPORT_SECTION_LABEL, WRITER_SECTIONS, claimPrivacy, visibleClaims,
@@ -41,9 +40,7 @@ const addDays = (at: string, days: number) => new Date(Date.parse(at) + days * 8
  * claim the person rejected before is not written again. `sentenceOf` finds the numbered sentence the quote sits in, when there is one.
  */
 export function resolveWrittenClaims(written: readonly WrittenClaim[] | undefined, replies: readonly string[],
-  options: { at: string; rejected?: ReadonlySet<string>; sentenceOf?: (quote: string) => number | undefined;
-    /** Counts the interviewer said first (`countsFirstSaidByInterviewer`): a quote repeating one is not the person's own report. */
-    echoedCounts?: ReadonlySet<string> }): ProfileClaim[] {
+  options: { at: string; rejected?: ReadonlySet<string>; sentenceOf?: (quote: string) => number | undefined }): ProfileClaim[] {
   const corpus = replies.map(squash);
   const seen = new Set<string>();
   return (written ?? []).flatMap((claim) => {
@@ -54,8 +51,7 @@ export function resolveWrittenClaims(written: readonly WrittenClaim[] | undefine
     const key = squash(quote);
     if (key.length < 2 || !corpus.some((reply) => reply.includes(key))) return [];
     seen.add(id);
-    const echoed = countsIn(quote).some((count) => options.echoedCounts?.has(count.key));
-    return [{ id, section: claim.section, statement, kind: claim.kind === "self_reported" && !echoed ? "self_reported" : "inferred",
+    return [{ id, section: claim.section, statement, kind: claim.kind === "self_reported" ? "self_reported" : "inferred",
       confidence: Math.max(0, Math.min(1, claim.confidence)), basis: [sentenceOf(quote, options.sentenceOf)],
       reviewBy: addDays(options.at, 90) } satisfies ProfileClaim];
   });
@@ -102,6 +98,25 @@ export function instrumentClaims(answers: InstrumentAnswers, at: string): Profil
     + values.slice(-2).map((score) => score.label).join("、"), values, "twivi",
     [...values.slice(0, 3), ...values.slice(-2)].map((score) => score.dimension).join(",")));
   return out;
+}
+
+/**
+ * The person's TwIVI value scores as numbers (0–100, null when not measured), with their own rank and the centred mean when there is one:
+ * what the portrait writer analyses against the person's behaviour, and what the report's values radar is filled from (`withScaleValues`).
+ */
+export function scaleValueScores(answers: InstrumentAnswers): Array<{ name: string; score: number | null; rank?: number; centered?: number }> {
+  return instrumentScores(answers, "twivi").map((score) => ({ name: score.dimension, score: score.score,
+    ...(score.rank !== undefined ? { rank: score.rank } : {}), ...(score.centered !== undefined ? { centered: score.centered } : {}) }));
+}
+
+/**
+ * The report's values scored from the scale, never by the writer (2026-11-27, docs/plans/condense-1127.md A2): each value's `score` is its
+ * TwIVI score, null when the scale did not measure it. The writer's `evidence` stays.
+ */
+export function withScaleValues<T extends { compass: { values?: Array<{ name: string; score: number | null; evidence: string }> } }>(report: T, answers: InstrumentAnswers): T {
+  if (!report.compass.values) return report;
+  const scores = new Map(scaleValueScores(answers).map((value) => [value.name, value.score]));
+  return { ...report, compass: { ...report.compass, values: report.compass.values.map((value) => ({ ...value, score: scores.get(value.name) ?? null })) } };
 }
 
 /** The scale's readings for the person's own page: per scored domain its level in words, and the three values they rate highest. */

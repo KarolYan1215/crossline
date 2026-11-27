@@ -25,10 +25,10 @@ test("推迟 because someone owes something opens a waiting item; low energy is 
 
   expect(postponeTask(TEST_CTX, "w1", { reason: "energy", date: "2026-10-10", who: "", what: "", text: "熬夜后注意力差" })).toEqual({ ok: true });
   expect(store.listWorkOrders(ws)[0]?.payload).toMatchObject({ notBefore: "2026-10-10" });
-  expect(store.listEvents(ws, { type: "energy.observed" }).at(-1)?.payload).toMatchObject({ level: "low", note: "熬夜后注意力差" });
+  expect(store.listEvents(ws, { type: "energy.changed", change: "observed" }).at(-1)?.payload).toMatchObject({ level: "low", note: "熬夜后注意力差" });
   expect(store.listPreferences(ws).some((entry) => entry.source === "postpone" && entry.text.includes("精力低"))).toBe(true);
   // Every postponement is on the task's record, reason included.
-  expect(store.listEvents(ws, { type: "task.note", entityId: "w1" }).map((event) => (event.payload as { text: string }).text))
+  expect(store.listEvents(ws, { type: "task.changed", change: "note", entityId: "w1" }).map((event) => (event.payload as { text: string }).text))
     .toEqual(["推迟至 2026-10-12 · 等待他人提供：师兄 · 实测数据", "推迟至 2026-10-10 · 精力不足：熬夜后注意力差"]);
 });
 
@@ -36,23 +36,23 @@ test("推迟 needs no reason: it moves the task at once and says only the day (2
   const store = setup();
   expect(postponeTask(TEST_CTX, "w1", { reason: "none", date: "2026-10-12", who: "", what: "", text: "" })).toEqual({ ok: true });
   expect(store.listWorkOrders(ws)[0]?.payload).toMatchObject({ notBefore: "2026-10-12" });
-  expect(store.listEvents(ws, { type: "task.note", entityId: "w1" }).map((event) => (event.payload as { text: string }).text)).toEqual(["推迟至 2026-10-12"]);
+  expect(store.listEvents(ws, { type: "task.changed", change: "note", entityId: "w1" }).map((event) => (event.payload as { text: string }).text)).toEqual(["推迟至 2026-10-12"]);
 });
 
 test("a note from the task's record is kept in the person's words", async () => {
   const store = setup();
   expect(await applyTaskOp(TEST_CTX, "w1", { type: "note", date: "", minutes: 0, stepId: "", text: "跑通了第一组数据", who: "", energy: "", summary: "记录" })).toEqual({ ok: true });
-  expect(store.listEvents(ws, { type: "task.note" })[0]?.payload).toEqual({ text: "跑通了第一组数据", kind: "note" });
+  expect(store.listEvents(ws, { type: "task.changed", change: "note" })[0]?.payload).toEqual({ text: "跑通了第一组数据", kind: "note", change: "note" });
 });
 
 test("「推迟 10 分钟」 on a block's prompt records a snooze of that block until ten minutes from now; another task's block is refused", async () => {
   const store = setup();
   const snooze = (blockId: string) => applyTaskOp(TEST_CTX, "w1", { type: "snooze", date: "", minutes: 10, stepId: "v1s1", text: blockId, who: "", energy: "", summary: "" });
   expect(await snooze("scheduled:w1:v1s1")).toEqual({ ok: true });
-  expect(store.listEvents(ws, { type: "block.snoozed", entityId: "w1" }).map((event) => event.payload))
-    .toEqual([{ blockId: "scheduled:w1:v1s1", day: "2026-10-08", until: "2026-10-08T15:10:00.000Z" }]);
+  expect(store.listEvents(ws, { type: "work_order.changed", change: "block_snoozed", entityId: "w1" }).map((event) => event.payload))
+    .toEqual([{ blockId: "scheduled:w1:v1s1", day: "2026-10-08", until: "2026-10-08T15:10:00.000Z", change: "block_snoozed" }]);
   expect(await snooze("scheduled:other:v1s1")).toEqual({ ok: false, code: "SNOOZE_BLOCK_INVALID" });
-  expect(store.listEvents(ws, { type: "block.snoozed" })).toHaveLength(1);
+  expect(store.listEvents(ws, { type: "work_order.changed", change: "block_snoozed" })).toHaveLength(1);
 });
 
 test("「早停了」 on the 「超时」 message ends the timed work at the usual length after the start; with no timer it refuses (2026-11-11)", async () => {

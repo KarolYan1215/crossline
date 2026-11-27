@@ -12,7 +12,7 @@ import { scriptedRuntime } from "./testing/fake-runtime";
  * writer are each told the level and what it means; this holds the prompts to it.
  */
 const ws = "w", owner = "o";
-const skill = (name: string) => readFileSync(path.resolve(import.meta.dirname, `../../../skills/marketplace/plugins/crossline/skills/${name}/SKILL.md`), "utf8");
+const skill = (name: string) => readFileSync(path.resolve(import.meta.dirname, `../../../skills/marketplace/plugins/crossline/skills/${name.split(":")[0]}/SKILL.md`), "utf8");
 
 function seed() {
   const store = new CrosslineStore(":memory:");
@@ -32,7 +32,7 @@ const plan = { archetypeId: "content", quantity: { basis: "选题", amount: 3, u
 
 test("the step planner judges the familiarity itself (no rule scores the person's words) and it is kept with the plan", async () => {
   const store = seed();
-  const runtime = scriptedRuntime(["crossline:crossline-step-planner"], () => JSON.stringify(plan));
+  const runtime = scriptedRuntime(["crossline:crossline-task-planner:steps"], () => JSON.stringify(plan));
   await createStepPlanner(store, ws, "C:\\repo", () => runtime.rpc)("wo");
   const prompt = runtime.prompts().join("\n");
   // Nothing set by the person: the planner is asked to judge, from the facts it is given (「完全是新手」 among them).
@@ -44,7 +44,7 @@ test("the step planner judges the familiarity itself (no rule scores the person'
 test("the person's own choice is passed to the planner as set", async () => {
   const store = seed();
   store.setSetting(ws, "tasks.familiarity", JSON.stringify({ "media|*": "near" }));
-  const runtime = scriptedRuntime(["crossline:crossline-step-planner"], () => JSON.stringify(plan));
+  const runtime = scriptedRuntime(["crossline:crossline-task-planner:steps"], () => JSON.stringify(plan));
   await createStepPlanner(store, ws, "C:\\repo", () => runtime.rpc)("wo");
   expect(runtime.prompts().join("\n")).toContain("\"familiarity\":{\"setByPerson\":\"near\"}");
   store.close();
@@ -54,14 +54,14 @@ test("the tutorial's design and its sections carry the planner's level", async (
   const store = seed();
   // Before any plan: mid, never a guess from the words.
   expect(buildManualContext(store, ws, "wo", "2026-10-29")?.familiarity?.level).toBe("mid");
-  const runtime = scriptedRuntime(["crossline:crossline-step-planner"], () => JSON.stringify(plan));
+  const runtime = scriptedRuntime(["crossline:crossline-task-planner:steps"], () => JSON.stringify(plan));
   await createStepPlanner(store, ws, "C:\\repo", () => runtime.rpc)("wo");
   expect(buildManualContext(store, ws, "wo", "2026-10-29")?.familiarity?.level).toBe("far");
   store.close();
 });
 
 test("the Skills say what near and far mean, and the shared sentence names both ends", () => {
-  for (const name of ["crossline-step-planner", "crossline-material-writer", "crossline-manualbook-designer"]) {
+  for (const name of ["crossline-task-planner:steps", "crossline-material-writer", "crossline-task-planner:manual"]) {
     const text = skill(name);
     expect(text).toContain("familiarity");
     expect(text).toMatch(/`near`/);

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { SELF_CHECK_DAY_SETTING, SELF_CHECK_EVENT, SELF_CHECK_FEATURES, SELF_CHECK_SETTING, tellKey, type CheckResult } from "@crossline/core";
-import { AGENT_FILES_CHECKED, listAgentTasks, type CrosslineStore } from "@crossline/db";
+import { SELF_CHECK_DAY_SETTING, SELF_CHECK_FEATURES, SELF_CHECK_SETTING, tellKey, type CheckResult } from "@crossline/core";
+import { listAgentTasks, type CrosslineStore } from "@crossline/db";
 import { ownerOf } from "./owner";
 import { tOfWorkspace } from "./locale";
 import { sayToPerson } from "./workflow-smith";
@@ -33,8 +33,8 @@ export async function selfCheckPass(store: CrosslineStore, workspaceId: string, 
     results.push({ id: probe.id, ...outcome, at });
   }
   store.setSetting(workspaceId, SELF_CHECK_SETTING, JSON.stringify({ at, results }));
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `${SELF_CHECK_EVENT}:${at}`, type: SELF_CHECK_EVENT, entityId: workspaceId,
-    payload: { results: results.filter((result) => result.status !== "ok" && result.status !== "skipped") } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `selfcheck.ran:${at}`, type: "job.ran", entityId: workspaceId,
+    payload: { results: results.filter((result) => result.status !== "ok" && result.status !== "skipped"), job: "selfcheck", state: "done" } });
   const t = tOfWorkspace(store, workspaceId);
   for (const result of results.filter((item) => item.status === "failing")) {
     const feature = t(SELF_CHECK_FEATURES[result.id] ?? result.id);
@@ -72,16 +72,16 @@ export function outputsProbe(store: CrosslineStore, root: string, env: NodeJS.Pr
         if (here) { directory = here; moved++; }
         else {
           gone++;
-          store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `${AGENT_FILES_CHECKED}:${row.taskId}:gone`, type: AGENT_FILES_CHECKED, entityId: row.taskId,
-            payload: { gone: true, missing: row.artifacts.map((artifact) => artifact.path) } });
+          store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `agent.task.files_checked:${row.taskId}:gone`, type: "agent.changed", entityId: row.taskId,
+            payload: { gone: true, missing: row.artifacts.map((artifact) => artifact.path), change: "task_files_checked" } });
           continue;
         }
       }
       const missing = row.artifacts.filter((artifact) => !existsSync(path.join(directory, artifact.path))).map((artifact) => artifact.path);
       missingFiles += missing.length;
       if (directory === row.directory && !missing.length) continue;
-      store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `${AGENT_FILES_CHECKED}:${row.taskId}:${directory}:${missing.join("|")}`, type: AGENT_FILES_CHECKED,
-        entityId: row.taskId, payload: { ...(directory !== row.directory ? { directory } : {}), missing, gone: missing.length === row.artifacts.length } });
+      store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `agent.task.files_checked:${row.taskId}:${directory}:${missing.join("|")}`, type: "agent.changed",
+        entityId: row.taskId, payload: { ...(directory !== row.directory ? { directory } : {}), missing, gone: missing.length === row.artifacts.length, change: "task_files_checked" } });
     }
     if (!moved && !gone && !missingFiles) return ok;
     return { status: "repaired", code: gone ? "OUTPUT_DIR_MISSING" : missingFiles ? "OUTPUT_FILE_MISSING" : "OUTPUT_DIR_FOREIGN",

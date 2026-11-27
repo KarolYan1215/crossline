@@ -81,7 +81,7 @@ if (args.includes("--apply-settings") && settings.some((item) => item.state === 
 if (args.includes("--milestones")) {
   const supervisor = await startCodexSupervisor({ port: Number(process.env.CROSSLINE_CODEX_SUPERVISOR_PORT ?? 3392),
     plugin: { name: "crossline", marketplacePath: path.join(repoRoot, "skills", "marketplace", ".agents", "plugins", "marketplace.json"), cwd: repoRoot,
-      requiredSkills: ["crossline:crossline-milestone-architect", "crossline:crossline-artifact-planner"] } });
+      requiredSkills: ["crossline:crossline-milestone-architect:design", "crossline:crossline-cross-line-planner:artifacts"] } });
   setUsageSink(() => {});
   try {
     const started = Date.now();

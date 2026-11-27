@@ -35,7 +35,7 @@ test("low-risk work from the assistant's reading of mail takes effect and the be
   const order = await analysed("cap-agent-low", "Outline the ECE 548 midterm topics", fromMail);
   expect(order.state).toBe("approved");
   expect((order.payload as { provenance?: unknown }).provenance).toEqual(fromMail);
-  expect(store.listEvents(ws, { type: "work_order.auto_approved", entityId: order.id })[0]!.payload).toEqual({ reason: "来自助手读邮件，低风险，默认生效" });
+  expect(store.listEvents(ws, { type: "work_order.changed", change: "auto_approved", entityId: order.id })[0]!.payload).toEqual({ reason: "来自助手读邮件，低风险，默认生效", change: "auto_approved" });
   const said = bell();
   expect(said).toHaveLength(1);
   expect(said[0]).toContain("来自助手读邮件");
@@ -48,7 +48,7 @@ test("low-risk work from the assistant's reading of mail takes effect and the be
 test("high-risk work from mail waits on 待确认 as a proposal: not approved, not scheduled, never published", async () => {
   const order = await analysed("cap-agent-high", "Pay the $40 lab fee at http://pay.example.com", fromMail);
   expect(order.state).toBe("awaiting_plan_approval");
-  expect(store.listEvents(ws, { type: "work_order.auto_approved", entityId: order.id })).toHaveLength(0);
+  expect(store.listEvents(ws, { type: "work_order.changed", change: "auto_approved", entityId: order.id })).toHaveLength(0);
   expect(bell()).toHaveLength(0);
   // Taking effect needs the person's own click: the order stays a proposal until then.
   expect(store.listEvents(ws, { type: "work_order.transitioned", entityId: order.id }).map((event) => (event.payload as { to?: string }).to)).not.toContain("approved");

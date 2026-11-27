@@ -212,8 +212,8 @@ test("with 自动交给 Agent on, the tick starts a due step first, and a truste
 });
 
 test("at startup a run with no outcome is recorded as lost, not shown as running for eight hours", () => {
-  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "req-old", type: "agent.task.requested", entityId: "old",
-    payload: { taskId: "old", workOrderId: "a", title: "汇编公式表", category: "read_research_organize" } });
+  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "req-old", type: "agent.changed", entityId: "old",
+    payload: { taskId: "old", workOrderId: "a", title: "汇编公式表", category: "read_research_organize", change: "task_requested" } });
   const { svc } = service();
   expect(svc.recoverLost(ws)).toEqual(["old"]);
   expect(listAgentTasks(store, ws).find((task) => task.taskId === "old")).toMatchObject({ status: "blocked", blockerCode: "AGENT_RUN_LOST" });
@@ -244,10 +244,10 @@ const lostRun = (taskId: string, by: "person" | "system" = "system") => {
   const dir = path.join(root, "out", taskId);
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, "half.md"), "前半部分");
-  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: `req-${taskId}`, type: "agent.task.requested", entityId: taskId,
-    payload: { taskId, workOrderId: "wo-1", title: "任务 wo-1", category: "read_research_organize", ...(by === "person" ? { by } : {}) } });
-  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: `blk-${taskId}`, type: "agent.task.blocked", entityId: taskId,
-    payload: { taskId, code: "AGENT_RUN_LOST", message: "后台进程重启，这次运行中断", directory: dir } });
+  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: `req-${taskId}`, type: "agent.changed", entityId: taskId,
+    payload: { taskId, workOrderId: "wo-1", title: "任务 wo-1", category: "read_research_organize", ...(by === "person" ? { by } : {}), change: "task_requested" } });
+  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: `blk-${taskId}`, type: "agent.changed", entityId: taskId,
+    payload: { taskId, code: "AGENT_RUN_LOST", message: "后台进程重启，这次运行中断", directory: dir, change: "task_blocked" } });
 };
 
 test("a whole order lost to a restart is run again after its backoff, handed the lost run's files and told where it stopped", async () => {
@@ -260,7 +260,7 @@ test("a whole order lost to a restart is run again after its backoff, handed the
   await svc.pass(ws, new Date(Date.now() + 6 * 60_000));
   expect(svc.runningTasks(ws)).toEqual(["agent-wo1-2"]);
   await settled(svc);
-  const requested = store.listEvents(ws, { type: "agent.task.requested", entityId: "agent-wo1-2" })[0]!.payload as { inputs: string[] };
+  const requested = store.listEvents(ws, { type: "agent.changed", change: "task_requested", entityId: "agent-wo1-2" })[0]!.payload as { inputs: string[] };
   expect(requested.inputs).toContain(path.join(root, "out", "agent-wo1-1"));
   expect(prompts().join(" ")).toContain("上一次停在：后台进程重启，这次运行中断");
 });

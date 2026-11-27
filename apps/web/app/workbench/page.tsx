@@ -68,18 +68,19 @@ export default async function WorkbenchPage({ searchParams }: {
   // The task library: work backplanned for a milestone due beyond the scheduling window waits until the window opens.
   const library = new Map(all.flatMap((run) => { const day = run.state === "archived" ? null : libraryUntil(ctx, run, today); return day ? [[run.id, day] as const] : []; }));
   // What the system withdrew on its own (its replaced drafts, demo orders) is not shown: only what the person discarded.
-  const systemArchived = new Set(store.listEvents(ctx.workspaceId, { type: "work_order.archived" })
+  const systemArchived = new Set(store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "archived" })
     .filter((event) => archivedBySystem(event.payload)).map((event) => event.entityId));
   const discarded = all.filter((run) => run.state === "archived" && !systemArchived.has(run.id));
   // What the daily self-check merged into another task is shown, as its own group, with 撤销合并 (decided 2026-10-15).
-  const mergedInto = new Map(store.listEvents(ctx.workspaceId, { type: "work_order.archived" })
+  const mergedInto = new Map(store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "archived" })
     .flatMap((event) => { const target = (event.payload as { mergedInto?: string }).mergedInto; return target ? [[event.entityId, target] as const] : []; }));
   const merged = all.filter((run) => run.state === "archived" && mergedInto.has(run.id));
   const titleOfId = new Map(all.map((run) => [run.id, ((run.payload as { title?: string } | undefined)?.title ?? "").trim() || run.intent]));
   const captures = store.listCaptures(ctx.workspaceId).filter((capture) => capture.state !== "promoted" && capture.state !== "discarded");
   const attachments = store.listCaptureAttachments(ctx.workspaceId);
   const discardedCaptures = store.listCaptures(ctx.workspaceId).filter((capture) => capture.state === "discarded");
-  const discardReasons = new Map(store.listEvents(ctx.workspaceId, { type: ["work_order.archived", "capture.discarded"] })
+  const discardReasons = new Map([...store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "archived" }), ...store.listEvents(ctx.workspaceId, { type: "capture.changed", change: "discarded" })]
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
     .map((event) => [event.entityId, (event.payload as { reason?: string }).reason ?? ""]));
   const milestoneOptions = store.listMilestones(ctx.workspaceId)
     .filter((milestone) => milestone.status === "approved")

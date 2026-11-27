@@ -4,14 +4,6 @@
  * `RECORDING_CONSENT` in `source-folders.ts`; what is here is how hard the transcription may work and how its cost is reported.
  */
 
-/** One per recording transcribed, keyed by the audio's sha256: what stops the same audio, renamed or copied, being transcribed twice. */
-export const RECORDING_TRANSCRIBED_EVENT = "recording.transcribed";
-/** A recording with no speech in it: also never transcribed again. */
-export const RECORDING_SILENT_EVENT = "recording.silent";
-/** An uploaded recording the server transcriber could not read (its audio is deleted). */
-export const RECORDING_FAILED_EVENT = "recording.failed";
-/** The person turned 录音自动转写 off and chose to delete the transcripts. */
-export const RECORDING_PURGED_EVENT = "recording.transcripts_deleted";
 /** Set once when recordings wait for the speech model, so the person is told once and not on every pass. */
 export const RECORDING_MODEL_NOTICE = "recordings.modelNoticeAt";
 

@@ -90,7 +90,7 @@ async function runScout(ctx: EngineContext, now: Date, deps: Clients) {
         (ctx.persona === "adversarial" && hit.adversarial ? hit.adversarial : hit.reading ? [hit.reading] : [])
           .map((item) => ({ ...item, lineId: lead.lineId, why: lead.why }))));
       writeFileSync(path.join(directory, SCOUT_FILE), JSON.stringify({ opportunities: finds, watches: SCOUT_LEADS.map((lead) => lead.watch), notes: [] }));
-      ctx.store.saveModelUsage({ workspaceId: ctx.workspaceId, skill: "crossline:crossline-agent-tools", tier: "mid", model: "world", effort: "", spendMode: "normal",
+      ctx.store.saveModelUsage({ workspaceId: ctx.workspaceId, skill: "crossline:crossline-agent:functions", tier: "mid", model: "world", effort: "", spendMode: "normal",
         threadId: "", ok: true, errorCode: "", repairs: 0, turns: 6, inputTokens: SCOUT_RUN_TOKENS.input, cachedInputTokens: 0, outputTokens: SCOUT_RUN_TOKENS.output,
         reasoningTokens: 0, totalTokens: SCOUT_RUN_TOKENS.input + SCOUT_RUN_TOKENS.output, durationMs: 0, at: now.toISOString(), purpose: SCOUT_PURPOSE });
       return { state: "started", taskId: input.taskId } as ReturnType<Parameters<typeof startScout>[2]>;
@@ -354,8 +354,8 @@ async function milestoneReached(ctx: EngineContext, milestoneId: string, now: Da
     estimate: { p25Minutes: 60, p50Minutes: 90, p85Minutes: 150, confidence: "medium", basis: "world" }, payload: {} } as never);
   ctx.store.appendEvent({ ownerId: ctx.ownerId, workspaceId: ctx.workspaceId, idempotencyKey: `world:gate:${milestoneId}`, type: "milestone_gate.judged", entityId: workOrderId,
     payload: { milestoneId, milestoneVersion: 1, verdict: "pass", criteriaVerdict: [], at: now.toISOString() } });
-  ctx.store.appendEvent({ ownerId: ctx.ownerId, workspaceId: ctx.workspaceId, idempotencyKey: `world:accepted:${milestoneId}`, type: "evidence.accepted", entityId: workOrderId,
-    payload: { milestoneId, approvalId: "crossline-milestone-gate", at: now.toISOString() } });
+  ctx.store.appendEvent({ ownerId: ctx.ownerId, workspaceId: ctx.workspaceId, idempotencyKey: `world:accepted:${milestoneId}`, type: "work_order.transitioned", entityId: workOrderId,
+    payload: { milestoneId, from: "evidence_review", to: "accepted", event: { type: "evidence.accepted", approvalId: "crossline-evidence-judge:milestone" }, at: now.toISOString() } });
 }
 
 // ── Judging a run against the ground truth ─────────────────────────────────────────────────────────────────────

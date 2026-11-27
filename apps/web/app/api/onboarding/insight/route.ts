@@ -39,6 +39,6 @@ export async function POST(request: Request) {
   if (!result.ok) return NextResponse.json({ ok: false, code: result.code }, { status: result.code === "INSIGHT_NOT_FOUND" ? 404 : 400 });
   const stage = String((store.listOnboardingMessages(workspaceId, sessionId).find((message) => message.seq === seq)?.content as { stage?: string } | undefined)?.stage ?? "");
   store.appendEvent({ ownerId: access.ctx.principalId, workspaceId, idempotencyKey: `onboarding:insight:${sessionId}:${seq}:${verdict}:${Date.now()}`,
-    type: "onboarding.insight_rated", entityId: sessionId, payload: { seq, ...(index ? { index } : {}), verdict, stage, ...(result.hypothesisId ? { hypothesisId: result.hypothesisId } : {}) } });
+    type: "person.decided", entityId: sessionId, payload: { seq, ...(index ? { index } : {}), verdict, stage, ...(result.hypothesisId ? { hypothesisId: result.hypothesisId } : {}), subject: "onboarding", decision: "insight_rated" } });
   return NextResponse.json({ ok: true });
 }

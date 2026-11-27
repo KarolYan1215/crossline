@@ -84,7 +84,7 @@ export function changeScale(ctx: AccessContext, change: ScaleChange): { ok: true
   const session = sessionOf(ctx);
   const save = (next: ScaleSession) => store.setSetting(ws, PROFILE_SCALE_SETTING, JSON.stringify(next));
   const event = (payload: Record<string, unknown>) => store.appendEvent({ ownerId: store.getWorkspaceOwnerId(ws) ?? ctx.principalId, workspaceId: ws,
-    idempotencyKey: `profile.scale:${change.action}:${at}`, type: "profile.scale_changed", entityId: ws, payload: { action: change.action, ...payload } });
+    idempotencyKey: `profile.scale:${change.action}:${at}`, type: "person.decided", entityId: ws, payload: { action: change.action, ...payload, subject: "profile", decision: "scale_changed" } });
   if (change.action === "answers") {
     for (const entry of change.answers) {
       const item = profileItem(entry.itemId);

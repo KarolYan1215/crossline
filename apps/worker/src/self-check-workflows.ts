@@ -1,12 +1,10 @@
 import { createHash } from "node:crypto";
-import { WORKFLOW_FEEDBACK_EVENT, grownSkillFilesKey, widensAgreed, type GrownSkillRecord } from "@crossline/core";
+import { grownSkillFilesKey, widensAgreed, type GrownSkillRecord } from "@crossline/core";
 import { agreedScope, readGrownSkills, readGrownVersions, writeGrownSkills, type CrosslineStore } from "@crossline/db";
 import { ownerOf } from "./owner";
 import { tOfWorkspace } from "./locale";
 import type { Probe, ProbeOutcome } from "./self-check";
 
-/** A merge's reason given up on (its absorbed workflow no longer merged into the kept one): the reviser is not asked to take it over. */
-export const ABSORB_DROPPED_EVENT = "skill.grown.absorb_dropped";
 
 const sha = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
 const storedFiles = (store: CrosslineStore, workspaceId: string, id: string): Array<{ path: string; text: string }> => {
@@ -55,18 +53,18 @@ export function workflowsProbe(store: CrosslineStore): Probe {
     // A merge's reason whose absorbed workflow is no longer merged into the kept one, and that nothing has given up on yet.
     let dropped = 0;
     const owner = ownerOf(store, workspaceId);
-    const settled = (keep: string, absorbed: string, since: string) => [...store.listEvents(workspaceId, { type: "skill.grown.unmerged", entityId: keep }),
-      ...store.listEvents(workspaceId, { type: ABSORB_DROPPED_EVENT, entityId: keep })]
+    const settled = (keep: string, absorbed: string, since: string) => [...store.listEvents(workspaceId, { type: "skill.changed", change: "grown_unmerged", entityId: keep }),
+      ...store.listEvents(workspaceId, { type: "job.ran", job: "skill.grown.absorb", entityId: keep })]
       .some((event) => (event.payload as { absorbed?: string }).absorbed === absorbed && event.createdAt >= since);
     for (const record of next) {
       const since = record.improvedAt ?? record.createdAt;
-      for (const event of store.listEvents(workspaceId, { type: WORKFLOW_FEEDBACK_EVENT, entityId: record.id })) {
+      for (const event of store.listEvents(workspaceId, { type: "skill.changed", change: "grown_feedback", entityId: record.id })) {
         const absorbed = (event.payload as { absorbed?: string }).absorbed;
         if (!absorbed || event.createdAt <= since) continue;
         if (next.find((item) => item.id === absorbed)?.mergedInto?.id === record.id || settled(record.id, absorbed, event.createdAt)) continue;
         dropped += 1;
-        store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `${ABSORB_DROPPED_EVENT}:${record.id}:${absorbed}:${event.eventId}`, type: ABSORB_DROPPED_EVENT,
-          entityId: record.id, payload: { id: record.id, absorbed, by: "self_check" } });
+        store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `skill.grown.absorb_dropped:${record.id}:${absorbed}:${event.eventId}`, type: "job.ran",
+          entityId: record.id, payload: { id: record.id, absorbed, by: "self_check", job: "skill.grown.absorb", state: "dropped" } });
       }
     }
     if (drift.length || disorder.length) {

@@ -1,6 +1,9 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { CrosslineStore } from "@crossline/db";
-import { AGENT_HISTORY_SUMMARY, GATE_ATTEMPTED, GATE_JUDGED, GATE_OVERRIDDEN, MILESTONE_PARKED, type GateJudgedPayload, type StoredFormRun } from "@crossline/core";
+import { CrosslineStore, installRuleTelemetry, readTicks } from "@crossline/db";
+import { AGENT_HISTORY_SUMMARY, GATE_JUDGED, type GateJudgedPayload, type StoredFormRun } from "@crossline/core";
 import { fakeRuntime } from "../testing/fake-runtime";
 import { admissionGatePass } from "./admission";
 import { attentionBlocks, attentionHours } from "./attention";
@@ -13,6 +16,7 @@ import { PRIORITY_SKILL, priorityGatePass } from "./priority";
 /** The execution gates' worker passes (docs/plans/execution-gates-1124.md §四), against the shared Codex fake. */
 let store: CrosslineStore;
 let ws: string;
+let dataDir: string;
 const NOW = new Date("2026-11-24T15:00:00.000Z");
 const estimate = { p25Minutes: 40, p50Minutes: 60, p85Minutes: 90, source: "llm_prior" as const, observationCount: 0, confidence: "high" as const };
 const order = (id: string, extra: { milestoneId?: string; state?: string; payload?: Record<string, unknown> } = {}) => store.saveWorkOrder({ id, ownerId: "user-1", workspaceId: ws,
@@ -22,10 +26,13 @@ const item = (subject: string, verdict: string, detail: Record<string, unknown> 
 const judged = (gate: string) => store.listEvents(ws, { type: GATE_JUDGED }).map((event) => event.payload as GateJudgedPayload).filter((payload) => payload.gate === gate);
 
 beforeEach(() => {
+  // The gate attempts' log lives beside the data (packages/db/src/rule-telemetry.ts).
+  dataDir = mkdtempSync(path.join(tmpdir(), "crossline-gates-"));
+  installRuleTelemetry(dataDir);
   store = new CrosslineStore(":memory:");
   ws = store.createPrincipalWithWorkspace("user-1", "个人 workspace").workspace.id;
 });
-afterEach(() => store.close());
+afterEach(() => { store.close(); installRuleTelemetry(undefined); rmSync(dataDir, { recursive: true, force: true }); });
 
 test("a P1 outward task is judged twice with the evidence reversed; when the runs disagree the judgement is put to the person", async () => {
   order("send-draft"); order("read-paper");
@@ -51,18 +58,18 @@ test("a milestone in series with an open one is parked: back to draft, its unsta
   const milestone = (id: string, status: "approved" | "draft") => store.saveMilestone({ id, ownerId: "user-1", workspaceId: ws, identityId: "research", projectId: "paper", title: id, version: 1, status });
   milestone("first", "approved");
   // The first pass only records what was approved before the gate existed.
-  const idle = fakeRuntime([JSON.stringify({ items: [] })], "crossline:crossline-gate-admission");
+  const idle = fakeRuntime([JSON.stringify({ items: [] })], "crossline:crossline-milestone-review:admission");
   expect(await admissionGatePass({ store, workspaceId: ws, client: idle.rpc, cwd: "C:\\repo", now: NOW })).toEqual([]);
   expect(idle.turns()).toBe(0);
 
   milestone("second", "approved");
   order("second-step", { milestoneId: "second", payload: { backplan: { milestoneId: "second" } } });
-  const runtime = fakeRuntime([JSON.stringify({ items: [item("second", "park", { closeOrPark: "", unparkWhen: "first" })] })], "crossline:crossline-gate-admission");
+  const runtime = fakeRuntime([JSON.stringify({ items: [item("second", "park", { closeOrPark: "", unparkWhen: "first" })] })], "crossline:crossline-milestone-review:admission");
   const results = await admissionGatePass({ store, workspaceId: ws, client: runtime.rpc, cwd: "C:\\repo", now: NOW });
   expect(results.map((result) => result.output.verdict)).toEqual(["park"]);
   expect(store.listMilestones(ws).find((item) => item.id === "second")!.status).toBe("draft");
   expect(store.listWorkOrders(ws).find((item) => item.id === "second-step")!.state).toBe("archived");
-  expect(store.listEvents(ws, { type: MILESTONE_PARKED })[0]!.payload).toMatchObject({ milestoneId: "second", unparkWhen: "first", archivedTasks: ["second-step"] });
+  expect(store.listEvents(ws, { type: "milestone.changed", change: "parked" })[0]!.payload).toMatchObject({ milestoneId: "second", unparkWhen: "first", archivedTasks: ["second-step"] });
   const op = store.listEvents(ws, { type: "op.applied" }).at(-1)!.payload as { bySystem: boolean; inverse: { kind: string; items: Array<{ kind: string }> } };
   expect(op.bySystem).toBe(true);
   expect(op.inverse.items.map((entry) => entry.kind)).toEqual(["milestones.status", "work_order.restore"]);
@@ -89,17 +96,17 @@ test("a form is judged at night only: by day it goes, at night an irreversible o
   const run = { id: "form-1", host: "lu.ma", checklist: [{ pageNo: 1, field: "Email", source: "profile", shown: "a***@x" }],
     opportunity: { title: "Meetup", organizer: "Org", kind: "event", cost: null, consents: [] } } as unknown as StoredFormRun;
   const deps = (client: ReturnType<typeof fakeRuntime>["rpc"] | undefined, now: Date) => ({ store, workspaceId: ws, client, cwd: "C:\\repo", timeZone: "America/Chicago", now });
-  const day = fakeRuntime([JSON.stringify({ items: [] })], "crossline:crossline-gate-night");
+  const day = fakeRuntime([JSON.stringify({ items: [] })], "crossline:crossline-outward-check:pending");
   expect(await nightHoldForForm(deps(day.rpc, new Date("2026-11-24T18:00:00.000Z")), run)).toBeUndefined();
   expect(day.turns()).toBe(0);
   const night = new Date("2026-11-24T08:30:00.000Z"); // 02:30 in Chicago
   expect(await nightHoldForForm(deps(undefined, night), run)).toBe(NIGHT_HOLD);
-  const reversible = fakeRuntime([JSON.stringify({ items: [item("form-1", "reversible", { undo: "确认页可取消" })] })], "crossline:crossline-gate-night");
+  const reversible = fakeRuntime([JSON.stringify({ items: [item("form-1", "reversible", { undo: "确认页可取消" })] })], "crossline:crossline-outward-check:pending");
   expect(await nightHoldForForm(deps(reversible.rpc, night), run)).toBeUndefined();
-  const irreversible = fakeRuntime([JSON.stringify({ items: [item("form-1", "irreversible", { undo: "" })] })], "crossline:crossline-gate-night");
+  const irreversible = fakeRuntime([JSON.stringify({ items: [item("form-1", "irreversible", { undo: "" })] })], "crossline:crossline-outward-check:pending");
   expect(await nightHoldForForm(deps(irreversible.rpc, new Date("2026-11-24T08:31:00.000Z")), run)).toBe(NIGHT_HOLD);
   // Without a known zone every submission is judged, as if at night.
-  const unknown = fakeRuntime([JSON.stringify({ items: [item("form-1", "reversible", { undo: "确认页可取消" })] })], "crossline:crossline-gate-night");
+  const unknown = fakeRuntime([JSON.stringify({ items: [item("form-1", "reversible", { undo: "确认页可取消" })] })], "crossline:crossline-outward-check:pending");
   expect(await nightHoldForForm({ store, workspaceId: ws, client: unknown.rpc, cwd: "C:\repo", now: new Date("2026-11-24T18:02:00.000Z") }, run)).toBeUndefined();
   expect(unknown.turns()).toBe(1);
 });
@@ -112,7 +119,7 @@ test("a gate call that gives no answer throws, is recorded, and stops for the da
     const broken = fakeRuntime(["not json"], `crossline:${PRIORITY_SKILL}`);
     await expect(priorityGatePass({ store, workspaceId: ws, client: broken.rpc, cwd: "C:\repo", now })).rejects.toThrow("GATE_RUN_FAILED");
   }
-  expect(store.listEvents(ws, { type: GATE_ATTEMPTED })).toHaveLength(3);
+  expect(readTicks("gate-attempts", ws)).toHaveLength(3);
   const fourth = fakeRuntime([JSON.stringify({ items: [item("send-draft", "p1")] })], `crossline:${PRIORITY_SKILL}`);
   expect(await priorityGatePass({ store, workspaceId: ws, client: fourth.rpc, cwd: "C:\repo", now })).toEqual([]);
   expect(fourth.turns()).toBe(0);
@@ -136,8 +143,8 @@ test("the person's overrides of a gate ride along with its next run as calibrati
   await priorityGatePass({ store, workspaceId: ws, client: first.rpc, cwd: "C:\repo", now: NOW });
   expect(first.prompts()[0]).not.toContain("corrections");
   const judgedId = store.listEvents(ws, { type: GATE_JUDGED })[0]!.eventId;
-  store.appendEvent({ ownerId: "user-1", workspaceId: ws, type: GATE_OVERRIDDEN, entityId: judgedId, idempotencyKey: "o1",
-    payload: { judgedId, gate: "priority", subject: { kind: "task", id: "send-draft" }, from: "p1", to: "p1_external", note: "要发给导师" } });
+  store.appendEvent({ ownerId: "user-1", workspaceId: ws, type: "gate.changed", entityId: judgedId, idempotencyKey: "o1",
+    payload: { judgedId, gate: "priority", subject: { kind: "task", id: "send-draft" }, from: "p1", to: "p1_external", note: "要发给导师", change: "overridden" } });
   order("read-paper");
   const next = fakeRuntime([JSON.stringify({ items: [item("read-paper", "normal")] })], `crossline:${PRIORITY_SKILL}`);
   await priorityGatePass({ store, workspaceId: ws, client: next.rpc, cwd: "C:\repo", now: new Date(NOW.getTime() + 8 * 86_400_000) });

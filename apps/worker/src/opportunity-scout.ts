@@ -148,6 +148,6 @@ export async function afterScout(store: CrosslineStore, workspaceId: string, out
   const fresh = result.watches.map(({ lineId, ...proposal }) => watchFromProposal(lineId, proposal, today, now.toISOString(), "scout", true));
   const added = addScoutWatches(store, workspaceId, fresh.filter((watch) => !known.has(watch.id)));
   store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "system", workspaceId, idempotencyKey: `opportunity.scout.done:${outcome.taskId}`,
-    type: "opportunity.scout.done", entityId: outcome.taskId, payload: { kept, surfaced, watches: added, notes: result.notes } });
+    type: "job.ran", entityId: outcome.taskId, payload: { kept, surfaced, watches: added, notes: result.notes, job: "opportunity.scout", state: "done" } });
   return { kept, surfaced, watches: added };
 }

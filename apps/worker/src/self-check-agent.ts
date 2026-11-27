@@ -12,10 +12,10 @@ const STUCK_AFTER_MS = 15 * 60_000;
  */
 export function agentQuestionsProbe(store: CrosslineStore): Probe {
   return { id: "assistant", run: (workspaceId, now) => {
-    const asked = store.listEvents(workspaceId, { type: "agent.question.requested" });
+    const asked = store.listEvents(workspaceId, { type: "agent.changed", change: "question_requested" });
     if (!asked.length) return { status: "skipped", code: "", detail: "" };
-    const closed = new Set(store.listEvents(workspaceId, { type: ["agent.question.answered", "agent.question.expired"] }).map((event) => event.entityId));
-    const ended = new Set(store.listEvents(workspaceId, { type: ["agent.task.completed", "agent.task.blocked"] }).map((event) => event.entityId));
+    const closed = new Set(store.listEvents(workspaceId, { type: "agent.changed", change: ["question_answered", "question_expired"] }).map((event) => event.entityId));
+    const ended = new Set(store.listEvents(workspaceId, { type: "agent.changed", change: ["task_completed", "task_blocked"] }).map((event) => event.entityId));
     let stuck = 0, orphaned = 0;
     for (const event of asked) {
       if (closed.has(event.entityId)) continue;

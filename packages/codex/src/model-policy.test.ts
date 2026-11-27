@@ -1,10 +1,11 @@
+import { skillBase } from "@crossline/core";
 import { expect, test } from "vitest";
 import { DEFAULT_TIERS, SKILL_TIERS, routeForSkill, tierRoutes, shiftEffort } from "./model-policy";
 
 test("each Skill routes to its tier, with or without the plugin prefix", () => {
   expect(routeForSkill("crossline:crossline-onboarding", {})).toEqual(DEFAULT_TIERS.top);
-  expect(routeForSkill("crossline-milestone-gate", {})).toEqual(DEFAULT_TIERS.mid);
-  expect(routeForSkill("crossline:crossline-background-facts", {})).toEqual(DEFAULT_TIERS.low);
+  expect(routeForSkill("crossline-evidence-judge:milestone", {})).toEqual(DEFAULT_TIERS.mid);
+  expect(routeForSkill("crossline:crossline-capture-digest:background", {})).toEqual(DEFAULT_TIERS.low);
 });
 
 test("the three tiers are three models by credit price", () => {
@@ -21,7 +22,7 @@ test("a tier can be swapped for another model by environment, with or without an
   const env = { CROSSLINE_MODEL_MID: "local-llama:low", CROSSLINE_MODEL_LOW: "tiny-model" };
   expect(tierRoutes(env).mid).toEqual({ model: "local-llama", effort: "low" });
   expect(tierRoutes(env).low).toEqual({ model: "tiny-model" });
-  expect(routeForSkill("crossline-milestone-gate", env)).toEqual({ model: "local-llama", effort: "low" });
+  expect(routeForSkill("crossline-evidence-judge:milestone", env)).toEqual({ model: "local-llama", effort: "low" });
 });
 
 test("routing can be switched off wholesale", () => {
@@ -32,27 +33,26 @@ test("every routed Skill actually has a skill directory", async () => {
   const { existsSync } = await import("node:fs");
   const { join } = await import("node:path");
   const root = join(__dirname, "../../../skills/marketplace/plugins/crossline/skills");
-  // New Skills land with their phase; only the ones that exist today must resolve.
-  const pending = new Set(["crossline-due-diligence"]);
-  for (const name of Object.keys(SKILL_TIERS)) {
-    if (!pending.has(name)) expect(existsSync(join(root, name)), name).toBe(true);
-  }
+  // A key names a Skill or one of its modes (`crossline-research:diligence`); the directory is the Skill's.
+  // The weekly drill is the owner's own plugin's (`crossline-personal`) since the same day.
+  const personal = join(root, "../../crossline-personal/skills");
+  for (const name of Object.keys(SKILL_TIERS)) expect(existsSync(join(root, skillBase(name))) || existsSync(join(personal, name)), name).toBe(true);
 });
 
 test("in economy mode a Skill steps down one tier, and the lowest stays where it is", () => {
-  expect(routeForSkill("crossline-milestone-architect", {}, "economy")).toEqual(DEFAULT_TIERS.mid);
-  expect(routeForSkill("crossline-due-diligence", {}, "economy")).toEqual(DEFAULT_TIERS.low);
-  expect(routeForSkill("crossline-plan-explainer", {}, "economy")).toEqual(DEFAULT_TIERS.low);
+  expect(routeForSkill("crossline-milestone-architect:design", {}, "economy")).toEqual(DEFAULT_TIERS.mid);
+  expect(routeForSkill("crossline-research:diligence", {}, "economy")).toEqual(DEFAULT_TIERS.low);
+  expect(routeForSkill("crossline-schedule-advisor:explain", {}, "economy")).toEqual(DEFAULT_TIERS.low);
 });
 
 test("the gate and the capture analysis never step down", () => {
-  for (const skill of ["crossline-milestone-gate", "crossline-automation-stripper"]) {
+  for (const skill of ["crossline-evidence-judge:milestone", "crossline-automation-stripper"]) {
     expect(routeForSkill(skill, {}, "economy")).toEqual(routeForSkill(skill, {}, "normal"));
   }
 });
 
 test("the interview's Skills run on the top tier and never step down (2026-11-17)", () => {
-  for (const skill of ["crossline-onboarding", "crossline-onboarding-extract", "crossline-onboarding-research", "crossline-portrait-writer"]) {
+  for (const skill of ["crossline-onboarding", "crossline-onboarding-extract", "crossline-research:onboarding", "crossline-portrait:report"]) {
     expect(routeForSkill(skill, {}, "normal")).toEqual(DEFAULT_TIERS.top);
     expect(routeForSkill(skill, {}, "economy")).toEqual(DEFAULT_TIERS.top);
   }
@@ -62,7 +62,7 @@ test("one Skill can be pinned by environment, and a pin wins over the tier and t
   const env = { CROSSLINE_ROUTE_CROSSLINE_ONBOARDING: "local-llama:low" };
   expect(routeForSkill("crossline:crossline-onboarding", env)).toEqual({ model: "local-llama", effort: "low" });
   expect(routeForSkill("crossline-onboarding", env, "economy")).toEqual({ model: "local-llama", effort: "low" });
-  expect(routeForSkill("crossline-milestone-architect", env)).toEqual(DEFAULT_TIERS.top);
+  expect(routeForSkill("crossline-milestone-architect:design", env)).toEqual(DEFAULT_TIERS.top);
 });
 
 test("模型强度 moves each Skill's effort one step, to an effort the model takes", () => {

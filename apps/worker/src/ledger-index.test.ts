@@ -103,13 +103,13 @@ test("a context stored before the task index still reads", () => {
 
 for (const functionCalls of [true, false]) test(`the step planner's facts: ${functionCalls ? "an index with read_ledger where the route calls functions" : "whole where it does not"}`, async () => {
   if (!functionCalls) setProviderResolver(() => ({ provider: { id: "sf", kind: "chat", label: "SF", baseUrl: "https://api.siliconflow.cn/v1", model: "glm",
-    keyLast4: "abcd", updatedAt: now }, gatewayUrl: "http://127.0.0.1:5555/x", admitted: new Set(["crossline-step-planner"]), codexSignedIn: false, functionCalls: false }));
+    keyLast4: "abcd", updatedAt: now }, gatewayUrl: "http://127.0.0.1:5555/x", admitted: new Set(["crossline-task-planner:steps"]), codexSignedIn: false, functionCalls: false }));
   try {
     store.upsertProfileFact(fact("research", "ece548", "exam_scope", LONG));
     const plan = { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "", steps: [{ id: "s", role: "solve", title: "解题",
       deliverable: "答案", doneCriterion: "完成 1 题", share: 1, estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 50 }, dependsOn: [], notBefore: "", dueBy: "",
       schedulable: true, executor: "human", tickOutcome: "" }] };
-    const runtime = scriptedRuntime(["crossline:crossline-step-planner"], () => JSON.stringify(plan));
+    const runtime = scriptedRuntime(["crossline:crossline-task-planner:steps"], () => JSON.stringify(plan));
     await createStepPlanner(store, WS, "C:\\repo", () => runtime.rpc)("wo-hw");
     const prompt = runtime.prompts()[0]!;
     if (functionCalls) {

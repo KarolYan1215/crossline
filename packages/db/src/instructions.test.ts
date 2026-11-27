@@ -11,7 +11,7 @@ test("「给 Crossline 的话」: every version is a ledger event, an unchanged 
   setInstructions(store, { ...base, text: "先给结论", by: "assistant" });
   setInstructions(store, { ...base, text: "先给结论\n再给理由", by: "person", revertOf: 1 });
   expect(instructionVersionsOf(store, "w").map((item) => [item.version, item.by, item.revertOf ?? null])).toEqual([[1, "person", null], [2, "assistant", null], [3, "person", 1]]);
-  expect(store.listEvents("w", { type: "instructions.set" })).toHaveLength(3);
+  expect(store.listEvents("w", { type: "profile.changed", change: "instructions_set" })).toHaveLength(3);
   expect(() => setInstructions(store, { ...base, text: "字".repeat(4001), by: "person" })).toThrow("INSTRUCTIONS_TOO_LONG");
   expect(currentInstructionsOf(store, "other").version).toBe(0);
   store.close();

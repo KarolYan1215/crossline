@@ -50,7 +50,7 @@ export function createWriteLogin(store: CrosslineStore, deps: { session: () => P
           store.setSetting(workspaceId, WRITE_ACCOUNT, account.id);
           // Provenance only: that an account was chosen for writing, not which address.
           store.appendEvent({ ownerId: deps.ownerOf(workspaceId), workspaceId, idempotencyKey: `calendar.write.authorized:${Date.now()}`,
-            type: "calendar.write.authorized", entityId: workspaceId, payload: { via: "device_code" } });
+            type: "person.decided", entityId: workspaceId, payload: { via: "device_code", subject: "calendar.write", decision: "authorized" } });
           states.set(workspaceId, { state: "done", at: now().toISOString() });
         }).catch((error: unknown) => {
           const failed: WriteLoginState = { state: "failed", code: "GRAPH_LOGIN_FAILED",

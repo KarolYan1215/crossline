@@ -4,7 +4,7 @@ import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@cross
 import type { CrosslineStore } from "@crossline/db";
 
 import { ownerOf } from "./owner";
-export const FLYWHEEL_SKILL = "crossline:crossline-flywheel-scout";
+export const FLYWHEEL_SKILL = "crossline:crossline-cross-line-planner:flywheel";
 
 const INSTRUCTIONS = "Search the public web at night for what would help finish the person's approved milestones. Each finding names one "
   + "supplied milestoneId and cites the page you read, the date you read it and what would make it stale. A relation joins two DIFFERENT "
@@ -64,8 +64,8 @@ export function createFlywheelExpander(store: CrosslineStore, workspaceId: strin
       store.appendEvent({
         ownerId: ownerOf(store, workspaceId), workspaceId,
         idempotencyKey: `flywheel:finding:${day}:${index}`,
-        type: "flywheel.finding", entityId: finding.milestoneId,
-        payload: finding
+        type: "insight.changed", entityId: finding.milestoneId,
+        payload: { ...finding, change: "found" }
       });
     }
 
@@ -97,7 +97,7 @@ export function createFlywheelExpander(store: CrosslineStore, workspaceId: strin
       store.appendEvent({
         ownerId: ownerOf(store, workspaceId), workspaceId,
         idempotencyKey: `flywheel:relation:${day}:${id}`,
-        type: "flywheel.relation_proposed", entityId: id, payload: relation
+        type: "milestone_relation.changed", entityId: id, payload: { ...relation, change: "proposed" }
       });
       proposed += 1;
     }

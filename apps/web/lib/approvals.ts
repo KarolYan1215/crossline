@@ -77,10 +77,10 @@ export type AutoApproved = { id: string; intent: string; title: string; approved
 /** What took effect without a click in the last day, newest first, with whether it can still be undone. */
 export function recentAutoApprovals(ctx: AccessContext, now = Date.now()): AutoApproved[] {
   const store = getStore();
-  const revoked = new Set(store.listEvents(ctx.workspaceId, { type: "work_order.auto_approval_revoked" }).map((event) => event.entityId));
+  const revoked = new Set(store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "auto_approval_revoked" }).map((event) => event.entityId));
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
   const started = new Set(store.listExecutions(ctx.workspaceId).map((execution) => execution.workOrderId));
-  return store.listEvents(ctx.workspaceId, { type: "work_order.auto_approved" })
+  return store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "auto_approved" })
     .filter((event) => !revoked.has(event.entityId) && now - Date.parse(event.createdAt) < AUTO_APPROVAL_UNDO_MS)
     .flatMap((event) => {
       const order = orders.get(event.entityId);
@@ -101,11 +101,11 @@ export function revokeAutoApproval(ctx: AccessContext, workOrderId: string): { o
   const entry = recentAutoApprovals(ctx).find((item) => item.id === workOrderId);
   if (!entry) return { ok: false, code: "AUTO_APPROVAL_NOT_REVOCABLE" };
   if (!entry.undoable) return { ok: false, code: "WORK_ALREADY_STARTED" };
-  const attempt = store.listEvents(ctx.workspaceId, { type: "work_order.auto_approval_revoked", entityId: workOrderId }).length;
+  const attempt = store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "auto_approval_revoked", entityId: workOrderId }).length;
   const result = store.transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "approval.revoked", reason: "person_revoked_auto_approval" },
     `auto-approval-revoked:${workOrderId}:${attempt}`);
   if (!result.changed) return { ok: false, code: "AUTO_APPROVAL_NOT_REVOCABLE" };
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `work_order.auto_approval_revoked:${workOrderId}:${attempt}`,
-    type: "work_order.auto_approval_revoked", entityId: workOrderId, payload: {} });
+    type: "work_order.changed", entityId: workOrderId, payload: { change: "auto_approval_revoked" } });
   return { ok: true };
 }

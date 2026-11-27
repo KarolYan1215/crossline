@@ -2,7 +2,7 @@ import { tFor, type Locale } from "./i18n";
 
 /**
  * Older versions of a document (the owner's decision D11 of 2026-11-22): when the model confirms that two near-duplicate files are versions
- * of one document (Skill `crossline-source-digest`, candidates from `near-duplicates.ts`), the latest is read in full; the older one stays
+ * of one document (Skill `crossline-capture-digest:source`, candidates from `near-duplicates.ts`), the latest is read in full; the older one stays
  * stored as it is, and the interview reads a short note in its place — what it was, how it differs from the latest — and opens the original
  * only when it needs to. Kept in the ledger setting `sources.versions`.
  */

@@ -27,7 +27,7 @@ export function stagehandFallback(deps: { ask: (input: FormObserveInput) => Prom
       const { tree, elements } = observeTree(context.snapshot);
       if (!elements.size) return [];
       const llmClient = {
-        type: "crossline", modelName: "crossline-form-observer", hasVision: false, clientOptions: {},
+        type: "crossline", modelName: "crossline-form-page:observe", hasVision: false, clientOptions: {},
         createChatCompletion: async ({ options }: { options: ChatOptions }) => {
           const messages = options.messages.map((message) => ({ role: message.role, content: typeof message.content === "string" ? message.content : JSON.stringify(message.content) }));
           const answer = await deps.ask({ version: "crossline.form-observe.v1", messages });
@@ -79,7 +79,7 @@ export function browserUseFallback(deps: { python: () => string | undefined; exe
         const messages = (body.messages ?? []).map((message) => ({ role: String(message.role ?? "user"), content: redact(text(message.content)) }));
         const output = await deps.ask({ version: "crossline.form-browser.v1", messages }, browserUseSchema(body.response_format?.json_schema?.schema ?? { type: "object" }));
         if (output === undefined) throw new Error("FORM_BROWSER_NO_ANSWER");
-        return { id: `crossline-${Date.now()}`, object: "chat.completion", created: Math.floor(Date.now() / 1000), model: "crossline-form-browser-agent",
+        return { id: `crossline-${Date.now()}`, object: "chat.completion", created: Math.floor(Date.now() / 1000), model: "crossline-form-page:browser",
           choices: [{ index: 0, message: { role: "assistant", content: JSON.stringify(output) }, finish_reason: "stop" }], usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } };
       };
       const server = createServer((request, response) => {

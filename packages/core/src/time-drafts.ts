@@ -2,7 +2,7 @@
  * 拟计时 (the owner's decisions of 2026-11-11; docs/plans/2026-11-11-walkthrough-decisions.md §1): time entries drafted from the screen
  * record the 「应用与窗口」 level already keeps, for the person to confirm. Nothing new is captured. A stretch of work is attributed in this
  * order: the person's own rules (`ActivityRule` with a target), then the work block it falls in when its category fits the step's kind,
- * then — in the worker, for what is left — a model reading the window titles (Skill `crossline-time-attributor`), and otherwise it stays
+ * then — in the worker, for what is left — a model reading the window titles (Skill `crossline-line-filer:time`), and otherwise it stays
  * 「未归属的工作时间」. Only a confirmed draft becomes an execution (`inferred_confirmed`) and so measured time; an unconfirmed one never does.
  */
 import { PRODUCTIVE, type ActivityCategory, type ActivityRule } from "./activity-state";
@@ -123,7 +123,7 @@ export function draftTimeEntries(input: { segments: TitledSegment[]; rules: read
   });
 }
 
-/** The attribution model's answer (Skill `crossline-time-attributor`): per stretch, the open task and step it was for, or "" for none. */
+/** The attribution model's answer (Skill `crossline-line-filer:time`): per stretch, the open task and step it was for, or "" for none. */
 export type TimeAttribution = { items: Array<{ id: string; workOrderId: string; stepId: string; why: string }> };
 export const TIME_ATTRIBUTION_SCHEMA = { type: "object", additionalProperties: false, required: ["items"], properties: {
   items: { type: "array", maxItems: 40, items: { type: "object", additionalProperties: false, required: ["id", "workOrderId", "stepId", "why"], properties: {

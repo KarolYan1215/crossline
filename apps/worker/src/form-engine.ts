@@ -4,9 +4,10 @@ import {
   type ApplicationSlot, type LoginSecret, type FormChecklistItem, type FormAction, type FormCheckAnswer, type FormCheckContext, type FormFillAnswer, type FormFillContext,
   type FormPageRecord, type FormStop, type JudgeContext, type PageSignals, type SnapshotNode, type StoredFormRun
 } from "@crossline/core";
+import type { FormRunEvent } from "@crossline/db";
 
 /**
- * The page engine (docs/opportunity-agent.md §10.2–§10.6): read the page's accessibility snapshot, have `crossline-form-filler` propose
+ * The page engine (docs/opportunity-agent.md §10.2–§10.6): read the page's accessibility snapshot, have `crossline-form-page:fill` propose
  * actions, judge every one by the rules (packages/core/src/form-fill.ts), do the allowed ones, read each field back, and move on or
  * stop. It is written against `FormDriver` so the same loop runs on Playwright, on a test page, or later on a compute node's browser.
  *
@@ -74,7 +75,7 @@ export type EngineDeps = {
   propose: (context: FormFillContext) => Promise<FormFillAnswer | undefined>;
   check: (context: FormCheckContext) => Promise<FormCheckAnswer | undefined>;
   values: ProfileValues;
-  save: (run: StoredFormRun, event?: { type: string; payload?: Record<string, unknown> }) => StoredFormRun;
+  save: (run: StoredFormRun, event?: FormRunEvent) => StoredFormRun;
   /** The person is wanted (a stop, or a form ready for their submission): the window comes to the front and a message goes out. */
   notify: (run: StoredFormRun) => void;
   /** A security check met: the site is held for every reader and filler until the person goes on (§10.5, `siteHold`). */
@@ -111,7 +112,7 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
   const { driver } = deps;
   const { stoppedFor: _stop, stopDetail: _detail, missingSlot: _slot, ...rest } = start;
   let run = deps.save({ ...rest, state: "filling", sessionLost: false, pageNo: Math.max(1, start.pageNo) },
-    { type: options.resume ? "opportunity.form.continued" : "opportunity.form.started" });
+    { change: options.resume ? "form_continued" : "form_started" });
   const egress = async (on: boolean) => { try { await driver.egress?.(on); } catch { /* an older node without the guard */ } };
   await egress(true);
   const sensitive = await deps.values.sensitive();
@@ -148,7 +149,7 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
     await shoot("stop");
     if (stop === "captcha") deps.holdSite?.(detail);
     run = deps.save({ ...run, state: "waiting_person", stoppedFor: stop, stopDetail: scrub(detail).slice(0, 300), ...(slot ? { missingSlot: slot } : {}) },
-      { type: "opportunity.form.stopped", payload: { stop, detail: scrub(detail).slice(0, 300), ...(slot ? { slot } : {}) } });
+      { change: "form_stopped", payload: { stop, detail: scrub(detail).slice(0, 300), ...(slot ? { slot } : {}) } });
     // The window is the person's now: whatever they send from it is theirs to send.
     await egress(false);
     try { await driver.front(); } catch { /* the window may already be gone */ }
@@ -246,7 +247,7 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
     sensitiveTargets.push(...done.mask);
     if (done.filled.includes("password")) loginTries = 2;
     updatePage((item) => ({ ...item, loggedIn: saved.host }));
-    run = deps.save({ ...run, pageNo: run.pageNo + 1 }, { type: "opportunity.form.page", payload: { pageNo: run.pageNo + 1, login: saved.host } });
+    run = deps.save({ ...run, pageNo: run.pageNo + 1 }, { change: "form_page", payload: { pageNo: run.pageNo + 1, login: saved.host } });
     await driver.settle();
     retries = 0;
     refusedHere.length = 0;
@@ -262,7 +263,7 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
       verdict: verdict.verdict, ...("reason" in verdict ? { reason: verdict.reason } : {}), ...(verified !== undefined ? { verified } : {}) }] }));
 
   for (let step = 0; step < (deps.maxSteps ?? MAX_STEPS); step += 1) {
-    if (driver.closed()) return deps.save({ ...run, state: "waiting_person", stoppedFor: "engine_failed", stopDetail: "window closed", sessionLost: true }, { type: "opportunity.form.stopped", payload: { stop: "engine_failed" } }); // i18n-ignore: a code
+    if (driver.closed()) return deps.save({ ...run, state: "waiting_person", stoppedFor: "engine_failed", stopDetail: "window closed", sessionLost: true }, { change: "form_stopped", payload: { stop: "engine_failed" } }); // i18n-ignore: a code
     let { yaml, nodes } = await steady();
     const before = pageKey(driver.url(), nodes);
     const confirmed = confirmationOf(nodes);
@@ -283,7 +284,7 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
     // engine itself can do with the saved one (a username step with no password box yet).
     if (answer.pageKind === "login" && await tryLogin(nodes)) continue;
     if (answer.pageKind === "login" || answer.pageKind === "captcha" || answer.pageKind === "payment") return hold(answer.pageKind, answer.note || answer.pageKind);
-    if (answer.pageKind === "closed") return deps.save({ ...run, state: "stopped", stoppedFor: "not_allowed", stopDetail: answer.note.slice(0, 300) }, { type: "opportunity.form.stopped", payload: { stop: "closed" } });
+    if (answer.pageKind === "closed") return deps.save({ ...run, state: "stopped", stoppedFor: "not_allowed", stopDetail: answer.note.slice(0, 300) }, { change: "form_stopped", payload: { stop: "closed" } });
     const actions = answer.actions.map((action) => ({ ...action, value: action.value ?? undefined })) as FormAction[];
     const move = actions.length && /^(next|submit)$/.test(actions[actions.length - 1]!.op) ? actions[actions.length - 1] : undefined;
     const fields = move ? actions.slice(0, -1) : actions;
@@ -358,7 +359,7 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
       updatePage((item) => ({ ...item, actions: item.actions.map((action, index) => index === item.actions.length - 1 && action.verdict === "submit"
         ? { ...action, verdict: "allow" as const, reason: "opened the form" } : action) })); // i18n-ignore: a reason in the record
       const { submittedBy: _by, ...open } = run;
-      run = deps.save(open, { type: "opportunity.form.opened", payload: { button: verdict.node.name.slice(0, 80) } });
+      run = deps.save(open, { change: "form_opened", payload: { button: verdict.node.name.slice(0, 80) } });
     }
     if (fresh.length || after === before) {
       updatePage((item) => ({ ...item, errors: [...new Set([...item.errors, ...fresh])].slice(0, 12) }));
@@ -367,7 +368,7 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
     }
     retries = 0;
     refusedHere.length = 0;
-    run = deps.save({ ...run, pageNo: run.pageNo + 1 }, { type: "opportunity.form.page", payload: { pageNo: run.pageNo + 1 } });
+    run = deps.save({ ...run, pageNo: run.pageNo + 1 }, { change: "form_page", payload: { pageNo: run.pageNo + 1 } });
   }
   return hold("engine_failed", "too many pages"); // i18n-ignore: a code
 
@@ -393,7 +394,7 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
         run = { ...run, filled: [...run.filled, { pageNo: run.pageNo, target: `${action.target.role} "${action.target.name.slice(0, 120)}"`, ...(outcome.slot ? { slot: outcome.slot } : {}), verified: outcome.verified }] };
         if (outcome.verified) done += 1;
       }
-      run = deps.save(run, { type: "opportunity.form.fallback", payload: { engine: fallback.name, done, refused: refused.length } });
+      run = deps.save(run, { change: "form_fallback", payload: { engine: fallback.name, done, refused: refused.length } });
       if (done) return done;
     }
     return 0;
@@ -419,14 +420,14 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
     if (!problems.length && deps.night) { const held = await deps.night({ ...run, checklist }); if (held) problems.push(held); }
     await shoot("before-submit");
     if (problems.length) {
-      run = deps.save({ ...run, state: "ready_to_submit", heldBecause: problems }, { type: "opportunity.form.ready_to_submit", payload: { heldBecause: problems } });
+      run = deps.save({ ...run, state: "ready_to_submit", heldBecause: problems }, { change: "form_ready_to_submit", payload: { heldBecause: problems } });
       await egress(false);
       try { await driver.front(); } catch { /* gone */ }
       deps.notify(run);
       return run;
     }
     try { await driver.click({ ref: submit.ref, role: submit.role, name: submit.name }); } catch { return hold("verify_failed", `click ${submit.name}`); }
-    run = deps.save({ ...run, submittedBy: "system" }, { type: "opportunity.form.submit_clicked", payload: { button: submit.name.slice(0, 80) } });
+    run = deps.save({ ...run, submittedBy: "system" }, { change: "form_submit_clicked", payload: { button: submit.name.slice(0, 80) } });
     return "clicked";
   }
 
@@ -450,7 +451,7 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
   async function submitted(confirmation: NonNullable<ReturnType<typeof confirmationOf>>, by: "system" | "person"): Promise<StoredFormRun> {
     await shoot("confirmation");
     run = deps.save({ ...run, state: "submitted", submittedBy: run.submittedBy ?? by, confirmation: { quote: confirmation.quote.slice(0, 300), kind: confirmation.kind, at: new Date().toISOString() } },
-      { type: "opportunity.form.submitted", payload: { by: run.submittedBy ?? by, quote: confirmation.quote.slice(0, 300), kind: confirmation.kind } });
+      { change: "form_submitted", payload: { by: run.submittedBy ?? by, quote: confirmation.quote.slice(0, 300), kind: confirmation.kind } });
     deps.notify(run);
     return run;
   }

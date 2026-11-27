@@ -161,9 +161,9 @@ test("delivering the producing task hands its files to the using task: filed und
   store.transitionWorkOrder(W, "make-figs", { type: "human.completed" }, "done:figs", { evidence: [{ kind: "file", uri: pathToFileURL(file).href, description: "图表" }] });
   const docs = store.listSourceDocuments(W, { projectId: "media-project" });
   expect(docs).toEqual([expect.objectContaining({ fileName: "figures.md", kind: "text", extractionStatus: "done", extractedText: expect.stringContaining("I-V 曲线") })]);
-  expect(store.listEvents(W, { type: "artifact.handed_off", entityId: "video" })).toHaveLength(1);
-  expect(store.listEvents(W, { type: "task.steps_replan_requested", entityId: "video" })).toHaveLength(1);
-  expect((store.listEvents(W, { type: "task.note", entityId: "video" })[0]!.payload as { text: string }).text).toContain("figures.md");
+  expect(store.listEvents(W, { type: "artifact.changed", change: "handed_off", entityId: "video" })).toHaveLength(1);
+  expect(store.listEvents(W, { type: "task.changed", change: "steps_replan_requested", entityId: "video" })).toHaveLength(1);
+  expect((store.listEvents(W, { type: "task.changed", change: "note", entityId: "video" })[0]!.payload as { text: string }).text).toContain("figures.md");
   // Once per (artifact, producer, user).
   expect(handOffArtifacts(store, W)).toEqual([]);
   store.close();
@@ -199,6 +199,6 @@ test("a byproduct is an artifact of its main task: the landing task uses it and 
   store.transitionWorkOrder(W, "sim", { type: "human.started" }, "start:sim", { durationObserved: true });
   store.transitionWorkOrder(W, "sim", { type: "human.completed" }, "done:sim", { evidence: [{ kind: "file", uri: pathToFileURL(file).href, description: "日记" }] });
   expect(store.listSourceDocuments(W, { projectId: "xhs" }).map((doc) => doc.fileName)).toEqual(["diary.txt"]);
-  expect(store.listEvents(W, { type: "artifact.handed_off", entityId: "landing-sim-media" })).toHaveLength(1);
+  expect(store.listEvents(W, { type: "artifact.changed", change: "handed_off", entityId: "landing-sim-media" })).toHaveLength(1);
   store.close();
 });

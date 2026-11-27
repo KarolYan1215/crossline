@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { DEVICE_LIMITS, RECORDING_TRANSCRIBED_EVENT, SLEEP_TRACKING_CONSENT, SOURCE_FOLDERS_SETTING, sourceFolderIndexSetting } from "@crossline/core";
+import { DEVICE_LIMITS, SLEEP_TRACKING_CONSENT, SOURCE_FOLDERS_SETTING, sourceFolderIndexSetting } from "@crossline/core";
 import { createMemorySecretStore } from "@crossline/connectors";
 import { CrosslineStore } from "@crossline/db";
 import { ACTIVITY_DETAIL_CONSENT, LOCAL_ACTIVITY_CONSENT } from "../activity-recorder";
@@ -137,8 +137,8 @@ test("folder files are queued once each by sha256, transcripts go as recordings,
   doc("d2", "b".repeat(64), "Downloads/录音.m4a 转写.txt", "[00:01] 明天交报告");
   store.setSetting(ws, sourceFolderIndexSetting("f1"), JSON.stringify({ "syllabus.txt": { size: 1, mtimeMs: 1, documentId: "d1", created: true },
     "录音.m4a": { size: 1, mtimeMs: 1, documentId: "d2", audio: "done" } }));
-  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `t:${"c".repeat(64)}`, type: RECORDING_TRANSCRIBED_EVENT, entityId: "c".repeat(64),
-    payload: { fileName: "录音.m4a", seconds: 60, speechSeconds: 30, workMs: 1, wallMs: 1, documentId: "d2", folderId: "f1" } });
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `t:${"c".repeat(64)}`, type: "recording.changed", entityId: "c".repeat(64),
+    payload: { fileName: "录音.m4a", seconds: 60, speechSeconds: 30, workMs: 1, wallMs: 1, documentId: "d2", folderId: "f1", change: "transcribed" } });
 
   const state = readDeviceState(dir);
   const first = sourceItems(store, ws, state);

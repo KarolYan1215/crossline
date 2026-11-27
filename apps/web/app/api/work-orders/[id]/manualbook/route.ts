@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { tOf } from "../../../../../lib/locale";
 import path from "node:path";
 import { NextResponse } from "next/server";
+import { readTicks } from "@crossline/db";
 import { dataDirectory, getStore } from "../../../../../lib/crossline";
 import { resolveAccessContext } from "../../../../../lib/access-guard";
 
@@ -27,12 +28,16 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
   const root = path.resolve(dataDirectory(), "materials", id);
   // Where the latest build stands: running (asked for, or reporting progress, within the last two hours), stopped with a reason, or done.
-  const last = store.listEvents(access.ctx.workspaceId, { type: ["tutorial.requested", "manualbook.progress", "manualbook.built", "materials.blocked",
-    "tutorial.blocked", "materials.retry_requested"], entityId: id }).at(-1);
-  const building = Boolean(!closed && last && ["tutorial.requested", "manualbook.progress", "materials.retry_requested"].includes(last.type)
-    && Date.now() - Date.parse(last.createdAt) < 2 * 3_600_000);
-  const progress = building && last?.type === "manualbook.progress" ? last.payload : null;
-  const blocker = last && (last.type === "materials.blocked" || last.type === "tutorial.blocked") ? (last.payload as { message?: string }).message ?? tOf(access.ctx)("教程未能生成") : null;
+  // Progress is a tick in the worker's `manualbook-progress` log, not a ledger event (2026-11-27).
+  const last = store.listEvents(access.ctx.workspaceId, { type: "materials.changed", change: ["tutorial_requested", "manualbook_built", "blocked",
+    "tutorial_blocked", "retry_requested"], entityId: id }).at(-1);
+  const change = (last?.payload as { change?: string } | undefined)?.change ?? "";
+  const tick = last && ["tutorial_requested", "retry_requested"].includes(change)
+    ? readTicks("manualbook-progress", access.ctx.workspaceId, last.createdAt).filter((item) => item.entityId === id).at(-1) : undefined;
+  const building = Boolean(!closed && last && ["tutorial_requested", "retry_requested"].includes(change)
+    && Date.now() - Date.parse(tick?.at ?? last.createdAt) < 2 * 3_600_000);
+  const progress = building && tick ? tick.payload : null;
+  const blocker = last && ["blocked", "tutorial_blocked"].includes(change) ? (last.payload as { message?: string }).message ?? tOf(access.ctx)("教程未能生成") : null;
   if (!existsSync(path.join(root, "flow.json"))) return NextResponse.json({ built: false, building, closed, progress, blocker, materials: [] });
   const inside = (relative: string) => { const target = path.resolve(root, relative); return target.startsWith(root + path.sep) ? target : undefined; };
   let flow: { nodes: Array<{ id: string; title: string; kind: string; goal: string; stage: number }>; edges: Array<{ from: string; to: string }> };

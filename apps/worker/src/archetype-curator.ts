@@ -5,7 +5,7 @@ import { defaultSafeGetDeps, safeGet, type SafeGetDeps } from "./safe-fetch";
 import { citable, citableUrls } from "./cited-urls";
 import { ownerOf } from "./owner";
 
-export const ARCHETYPE_CURATOR = "crossline:crossline-archetype-curator";
+export const ARCHETYPE_CURATOR = "crossline:crossline-task-planner:archetype";
 const PERIOD_SETTING = "archetypes.curation.period";
 const PERIOD_DAYS = { biweekly: 14, monthly: 30 } as const;
 /** New preferences since the last run that bring the next one forward, whatever the period. */
@@ -31,7 +31,7 @@ export function curationDue(store: CrosslineStore, workspaceId: string, now = ne
   const period = store.getSetting(workspaceId, PERIOD_SETTING) ?? "biweekly";
   if (period === "off") return false;
   if (store.listStepPlans(workspaceId).length < MIN_PLANNED_TASKS) return false;
-  const last = store.listEvents(workspaceId, { type: "archetypes.curated" }).at(-1)?.createdAt;
+  const last = store.listEvents(workspaceId, { type: "job.ran", job: "archetypes.curate" }).at(-1)?.createdAt;
   if (!last) return true;
   const days = (now.getTime() - Date.parse(last)) / 86_400_000;
   const fresh = store.listPreferences(workspaceId).filter((entry) => entry.createdAt > last).length;
@@ -72,8 +72,8 @@ export function createArchetypeCurator(store: CrosslineStore, workspaceId: strin
       store.saveLearnedArchetype(workspaceId, shape, { basedOnTaskIds, sources, why, verifiedSource: opened });
       added.push(archetype.id);
     }
-    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `archetypes.curated:${Date.now()}`, type: "archetypes.curated",
-      entityId: workspaceId, payload: { added, dropped } });
+    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `archetypes.curated:${Date.now()}`, type: "job.ran",
+      entityId: workspaceId, payload: { added, dropped, job: "archetypes.curate", state: "done" } });
     return { added, dropped };
   };
 }

@@ -341,8 +341,8 @@ function writeApplicationMilestone(ctx: AccessContext, row: StoredOpportunity, t
     target: deadline ? row.url : t("滚动录取，越早越好：{{url}}", { url: row.url }), stakeholders: row.organizer ? [row.organizer] : [],
     sourceFactIds: watch?.basis.factIds ?? [], dependsOn: [], updatedAt: new Date().toISOString() });
   saveGoalSettings(ctx, saved.id, { confirmedDeadline: due, sourceQuote: row.deadlines.find((item) => item.day === deadline)?.quote ?? "" });
-  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `opportunity.milestone:${row.id}`, type: "opportunity.milestone_written",
-    entityId: row.id, payload: { milestoneId: saved.id, deadline: due, rolling: !deadline } });
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `opportunity.milestone:${row.id}`, type: "opportunity.changed",
+    entityId: row.id, payload: { milestoneId: saved.id, deadline: due, rolling: !deadline, change: "milestone_written" } });
   requestAutoBackplan(ctx);
   return { ok: true };
 }
@@ -357,7 +357,7 @@ export async function answerOpportunityOffer(ctx: AccessContext, ask: Ask, optio
   const t = tFor(localeFor(ctx));
   const at = now.toISOString();
   const record = (decision: string) => store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `opportunity.decided:${row.id}:${at}`,
-    type: "opportunity.decided", entityId: row.id, payload: { decision, title: row.title, lineId: row.lineId } });
+    type: "person.decided", entityId: row.id, payload: { decision, title: row.title, lineId: row.lineId, subject: "opportunity" } });
   const outcome = (value: OpportunityOutcome) => recordOpportunityOutcome(store, ctx.workspaceId, row.id, value, at);
   switch (optionId) {
     case "answer": {
@@ -374,8 +374,8 @@ export async function answerOpportunityOffer(ctx: AccessContext, ask: Ask, optio
     case "register": {
       // 报名 first shows what the form filler will use, field by field (§18.3); nothing is queued until 开始代填.
       openFormPreview(store, ctx.workspaceId, row.id, at);
-      store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `opportunity.form.previewed:${row.id}:${at}`, type: "opportunity.form.previewed",
-        entityId: row.id, payload: { title: row.title } });
+      store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `opportunity.form.previewed:${row.id}:${at}`, type: "opportunity.changed",
+        entityId: row.id, payload: { title: row.title, change: "form_previewed" } });
       return { ok: true };
     }
     case "cancel_preview":
@@ -471,8 +471,8 @@ function applicationsReady(ctx: AccessContext, today: string): ApplyReady[] {
   return store.listOpportunities(ctx.workspaceId).flatMap((row): ApplyReady[] => {
     if (row.decision !== "apply" || row.confirmedBy || runs.has(row.id)) return [];
     if (row.deadlines.length && !nextDeadline(row, today)) return [];
-    if (store.listEvents(ctx.workspaceId, { type: "opportunity.apply_self", entityId: row.id }).length) return [];
-    const written = store.listEvents(ctx.workspaceId, { type: "opportunity.milestone_written", entityId: row.id })[0];
+    if (store.listEvents(ctx.workspaceId, { type: "opportunity.changed", change: "apply_self", entityId: row.id }).length) return [];
+    const written = store.listEvents(ctx.workspaceId, { type: "opportunity.changed", change: "milestone_written", entityId: row.id })[0];
     const milestoneId = (written?.payload as { milestoneId?: string } | undefined)?.milestoneId;
     if (!milestoneId) return [];
     const work = orders.filter((order) => order.milestoneId === milestoneId && order.state !== "archived");
@@ -522,8 +522,8 @@ export function answerOpportunityApplyReady(ctx: AccessContext, ask: Ask, option
   const ready = applicationsReady(ctx, planToday(ctx, now)).find((item) => item.row.id === ask.entityId);
   if (!ready) return { ok: false, code: "OPPORTUNITY_NOT_READY" };
   if (optionId === "self") {
-    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `opportunity.apply_self:${ready.row.id}`, type: "opportunity.apply_self",
-      entityId: ready.row.id, payload: { milestoneId: ready.milestoneId } });
+    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `opportunity.apply_self:${ready.row.id}`, type: "opportunity.changed",
+      entityId: ready.row.id, payload: { milestoneId: ready.milestoneId, change: "apply_self" } });
     return { ok: true };
   }
   if (optionId !== "fill") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
@@ -706,7 +706,7 @@ export function quietUnusedReading(ctx: AccessContext, now = appNow()): Opportun
   const since = new Date(now.getTime() - 30 * DAY).toISOString();
   const types = new Map(store.listOpportunities(ctx.workspaceId).map((row) => [row.id, opportunityTypeOf(row)]));
   const counts = new Map<OpportunityType, { shown: number; useful: number }>();
-  for (const event of store.listEvents(ctx.workspaceId, { type: "opportunity.outcome" })) {
+  for (const event of store.listEvents(ctx.workspaceId, { type: "opportunity.changed", change: "outcome" })) {
     if (event.createdAt < since) continue;
     const type = types.get(event.entityId);
     const outcome = (event.payload as { outcome?: string }).outcome;

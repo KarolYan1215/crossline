@@ -31,17 +31,15 @@ test("a narrative is read into sections, each with the points it rests on and it
   expect(narrative.text.startsWith("## 人生叙事")).toBe(true);
 });
 
-test("a narrative is refused with every reason: no basis, unknown ids, a long quote, a source, the evidence words, a type, the third level after a safety turn", () => {
+test("a narrative is refused for its structure only: no basis, unknown ids, the third level after a safety turn", () => {
   const ids = new Set(["p1", "p2", "p3", "h2", "h5"]);
   expect(narrativeProblems(parseNarrative(TEXT), { ids, safety: false })).toEqual([]);
   const bad = parseNarrative(`## 人生叙事\n\n本人说「我从来没有真正为自己做过一个决定，一次都没有」。见 reply-3。\n\n<!-- basis: p9 level: 1 -->\n\n## 洞察\n\n证据显示本人是 INTJ。\n`);
   const problems = narrativeProblems(bad, { ids, safety: false });
   expect(problems.some((problem) => problem.includes("p9"))).toBe(true);
-  expect(problems.some((problem) => problem.includes("超过 15 个字"))).toBe(true);
-  expect(problems.some((problem) => problem.includes("回复编号"))).toBe(true);
   expect(problems.some((problem) => problem.includes("缺少"))).toBe(true);
-  expect(problems.some((problem) => problem.includes("证据"))).toBe(true);
-  expect(problems.some((problem) => problem.includes("人格类型"))).toBe(true);
+  // Wording (a long quote, a reply id, 「证据」, a type) is the Skill's since 2026-11-27.
+  expect(problems).toHaveLength(2);
   expect(narrativeProblems(parseNarrative(TEXT), { ids, safety: true })).toEqual(["访谈里有过艰难时期的处理，这份叙事不写第三级的节。"]);
   expect(narrativeProblems(parseNarrative("没有标题"), { ids, safety: false })[0]).toContain("至少");
 });

@@ -10,12 +10,12 @@ import { defaultIdentityPacks } from "@crossline/identity-packs";
 
 import { ownerOf } from "./owner";
 import { tOfWorkspace } from "./locale";
-export const MILESTONE_GATE_SKILL = "crossline:crossline-milestone-gate";
+export const MILESTONE_GATE_SKILL = "crossline:crossline-evidence-judge:milestone";
 // Enough of an artifact to judge, bounded so one large file cannot crowd out the rest of the evidence.
 const ARTIFACT_TEXT_LIMIT = 40_000;
 
 /** The scenario in short; the Skill holds the rules, the verdict table and the example. */
-const INSTRUCTIONS = "Judge the evidence handed in for this task, as the crossline-milestone-gate Skill describes, and return only the requested JSON. "
+const INSTRUCTIONS = "Judge the evidence handed in for this task, as the crossline-evidence-judge:milestone Skill describes, and return only the requested JSON. "
   + "`pass` accepts the task at once; any other verdict goes back to the person with your reasons, so observed, shortfall, reasoning and fit.why "
   + "say concretely what is there and what is missing. The verdict answers only whether the task delivered its evidenceContract (the standard the "
   + "person approved; add nothing to it) in the way the person's line skill (mineSkill) requires: copy every requirement back verbatim, and a covered "
@@ -148,11 +148,11 @@ function mineSkillText(store: CrosslineStore, workspaceId: string, lineId: strin
  * saying 「等待」 again with no reason. */
 function recordGateBlock(store: CrosslineStore, workspaceId: string, workOrderId: string,
   blocker: { code: string; message: string }): void {
-  const attempt = store.listEvents(workspaceId, { type: "milestone_gate.blocked", entityId: workOrderId }).length;
+  const attempt = store.listEvents(workspaceId, { type: "milestone_gate.changed", change: "blocked", entityId: workOrderId }).length;
   store.appendEvent({
     ownerId: ownerOf(store, workspaceId), workspaceId,
     idempotencyKey: `milestone-gate:blocked:${workOrderId}:${attempt}`,
-    type: "milestone_gate.blocked", entityId: workOrderId, payload: blocker
+    type: "milestone_gate.changed", entityId: workOrderId, payload: { ...blocker, change: "blocked" }
   });
 }
 
@@ -223,14 +223,14 @@ export function pendingMilestoneGates(store: CrosslineStore, workspaceId: string
   // timer, and an explicit request from the person reopens it.
   const decided = new Map<string, "closed" | "retry">();
   for (const event of store.listEvents(workspaceId, {
-    type: ["milestone_gate.blocked", "milestone_gate.auto_acceptance_revoked", "milestone_gate.retry_requested"]
+    type: "milestone_gate.changed", change: ["blocked", "auto_acceptance_revoked", "retry_requested"]
   })) {
     // A revoked acceptance closes the order to the timer just as a failed run does. Without it the
     // gate re-judged the same unchanged evidence on the next tick, passed it again, and undid the
     // person's override — a revoke button that revokes for fifteen minutes is not a revoke button.
-    if (event.type === "milestone_gate.blocked" || event.type === "milestone_gate.auto_acceptance_revoked") {
+    if ((event.type === "milestone_gate.changed" && (event.payload as { change?: string }).change === "blocked") || (event.type === "milestone_gate.changed" && (event.payload as { change?: string }).change === "auto_acceptance_revoked")) {
       decided.set(event.entityId, "closed");
-    } else if (event.type === "milestone_gate.retry_requested") decided.set(event.entityId, "retry");
+    } else if ((event.type === "milestone_gate.changed" && (event.payload as { change?: string }).change === "retry_requested")) decided.set(event.entityId, "retry");
   }
   return store.listWorkOrders(workspaceId)
     .filter((order) => order.state === "evidence_review" && order.milestoneId && decided.get(order.id) !== "closed")

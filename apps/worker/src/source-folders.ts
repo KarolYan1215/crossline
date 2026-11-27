@@ -243,7 +243,7 @@ function dropDocuments(store: CrosslineStore, workspaceId: string, folder: Sourc
     try { const file = fileURLToPath(gone.uri); if (path.resolve(file).startsWith(sources + path.sep)) rmSync(file, { force: true }); } catch { /* not a local copy */ }
   }
   if (removed) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `sources.folder_content_removed:${folder.id}:${randomUUID()}`,
-    type: "sources.folder_content_removed", entityId: folder.id, payload: { folderId: folder.id, label: folder.label, removed, reason } });
+    type: "person.decided", entityId: folder.id, payload: { folderId: folder.id, label: folder.label, removed, reason, subject: "sources", decision: "folder_content_removed" } });
   return removed;
 }
 
@@ -259,7 +259,7 @@ export function removeFolder(store: CrosslineStore, workspaceId: string, id: str
   save(store, workspaceId, before.filter((item) => item.id !== id));
   store.deleteSetting(workspaceId, sourceFolderIndexSetting(id));
   store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `sources.folder_revoked:${id}:${randomUUID()}`,
-    type: "sources.folder_revoked", entityId: id, payload: { folderId: id, label: folder.label, purged } });
+    type: "person.decided", entityId: id, payload: { folderId: id, label: folder.label, purged, subject: "sources", decision: "folder_revoked" } });
   return { removed: true, purged };
 }
 

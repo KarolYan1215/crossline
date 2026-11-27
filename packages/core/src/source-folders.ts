@@ -357,7 +357,7 @@ export function folderPathProblem(path: string, options: { home?: string; appDat
 /** The last part of a path, as the folder's default name. */
 export const folderLabel = (path: string) => path.trim().replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
 
-/** The classifier's answer (Skill `crossline-folder-classifier`): which lines each folder serves, possibly several, possibly none. */
+/** The classifier's answer (Skill `crossline-line-filer:folder`): which lines each folder serves, possibly several, possibly none. */
 export type FolderLinesAnswer = { folders: Array<{ id: string; lineIds: string[]; why: string }> };
 export const FOLDER_LINES_SCHEMA = { type: "object", additionalProperties: false, required: ["folders"], properties: {
   folders: { type: "array", maxItems: 20, items: { type: "object", additionalProperties: false, required: ["id", "lineIds", "why"], properties: {

@@ -18,7 +18,7 @@ export const BROWSER_USE_MIN_PYTHON: readonly [number, number] = [3, 11];
 /** One `propose_field` call as the runner reports it: the element's accessibility role and name in the copy, and the value named. */
 export type BrowserUseProposal = { role: string; name: string; op: string; value: string };
 
-/** `crossline-form-browser-agent`'s input: browser-use's own chat request, redacted, and the JSON schema it asked the answer to follow. */
+/** `crossline-form-page:browser`'s input: browser-use's own chat request, redacted, and the JSON schema it asked the answer to follow. */
 export type FormBrowserInput = { version: "crossline.form-browser.v1"; messages: Array<{ role: string; content: string }> };
 
 /** browser-use is told this; it states the profile items as `%slot%` placeholders and the rules the engine will apply anyway. */

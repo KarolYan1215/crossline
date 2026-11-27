@@ -78,7 +78,7 @@ function fileChanges(ctx: AccessContext, since: number): number[] {
 }
 
 function confirmedDays(ctx: AccessContext, since: string): string[] {
-  return [...new Set(getStore().listEvents(ctx.workspaceId, { type: "block.confirmed" })
+  return [...new Set(getStore().listEvents(ctx.workspaceId, { type: "work_order.changed", change: "block_confirmed" })
     .map((event) => String((event.payload as { day?: string }).day ?? "")).filter((day) => day >= since))];
 }
 

@@ -44,24 +44,24 @@ const base = { providerId: "p", model: "m", runtimeVersion: "v", ranAt: "2026-10
 
 test("admission: everything structured passes → served; what needs web, images or a shell never is", () => {
   const admitted = admittedSkills(summarizeConformance(base, allPassing()));
-  expect(admitted).toEqual(expect.arrayContaining(["crossline-milestone-gate", "crossline-automation-stripper", "crossline-concierge", "crossline-onboarding"]));
-  expect(admitted).not.toEqual(expect.arrayContaining(["crossline-due-diligence"]));
-  for (const skill of ["crossline-due-diligence", "crossline-portrait-illustrator", "crossline-agent", "crossline-flywheel-scout", "crossline-conformance"])
+  expect(admitted).toEqual(expect.arrayContaining(["crossline-evidence-judge:milestone", "crossline-automation-stripper", "crossline-concierge", "crossline-onboarding"]));
+  expect(admitted).not.toEqual(expect.arrayContaining(["crossline-research:diligence"]));
+  for (const skill of ["crossline-research:diligence", "crossline-portrait:figure", "crossline-agent:shell", "crossline-cross-line-planner:flywheel", "crossline-conformance"])
     expect(admitted).not.toContain(skill);
-  expect(capabilityGap("crossline-portrait-illustrator")).toContain("图片");
+  expect(capabilityGap("crossline-portrait:figure")).toContain("图片");
   // The interview's research thread is nothing but web lookups; the interview itself only may search, so it stays on a model without search.
-  expect(admitted).not.toContain("crossline-onboarding-research");
+  expect(admitted).not.toContain("crossline-research:onboarding");
   expect(admittedSkills(summarizeConformance(base, allPassing()), { ...THIRD_PARTY_CAPABILITIES, webSearch: true })).toEqual(
-    expect.arrayContaining(["crossline-onboarding", "crossline-onboarding-extract", "crossline-onboarding-research", "crossline-portrait-writer"]));
+    expect.arrayContaining(["crossline-onboarding", "crossline-onboarding-extract", "crossline-research:onboarding", "crossline-portrait:report"]));
 });
 
 test("admission: a model that never calls the offered function keeps the Skills that need functions out; a record from before the case is read as before", () => {
   const runs = allPassing().map((item) => item.caseId === "ADVERSARIAL_TOOLS" ? run("ADVERSARIAL_TOOLS", false) : item);
   const admitted = admittedSkills(summarizeConformance(base, runs));
-  for (const skill of ["crossline-agent-tools", "crossline-concierge", "crossline-onboarding-extract"]) expect(admitted).not.toContain(skill);
-  expect(admitted).toContain("crossline-task-titler");
+  for (const skill of ["crossline-agent:functions", "crossline-concierge", "crossline-onboarding-extract"]) expect(admitted).not.toContain(skill);
+  expect(admitted).toContain("crossline-goal-backplanner:title");
   const older = admittedSkills(summarizeConformance(base, allPassing().filter((item) => item.caseId !== "ADVERSARIAL_TOOLS")));
-  expect(older).toContain("crossline-agent-tools");
+  expect(older).toContain("crossline-agent:functions");
 });
 
 test("admission: one repair on a critical schema keeps that Skill out; a failure elsewhere keeps only its own Skill out", () => {
@@ -69,10 +69,10 @@ test("admission: one repair on a critical schema keeps that Skill out; a failure
   runs[runs.findIndex((item) => item.caseId === "MILESTONE_GATE_OUTPUT_SCHEMA")] = run("MILESTONE_GATE_OUTPUT_SCHEMA", true, 1);
   runs[runs.findIndex((item) => item.caseId === "TASK_TITLES_SCHEMA")] = run("TASK_TITLES_SCHEMA", false);
   const admitted = admittedSkills(summarizeConformance(base, runs));
-  expect(admitted).not.toContain("crossline-milestone-gate");
-  expect(admitted).not.toContain("crossline-task-titler");
+  expect(admitted).not.toContain("crossline-evidence-judge:milestone");
+  expect(admitted).not.toContain("crossline-goal-backplanner:title");
   expect(admitted).toContain("crossline-automation-stripper");
-  expect(admitted).toContain("crossline-goal-splitter");
+  expect(admitted).toContain("crossline-milestone-architect:split");
 });
 
 test("admission: under 90% overall, only critical Skills that passed every run remain", () => {
@@ -80,7 +80,7 @@ test("admission: under 90% overall, only critical Skills that passed every run r
   const runs = allPassing().map((item, index) => (index % 5 === 0 || item.caseId === "FORM_CHECK_SCHEMA") && !["MILESTONE_GATE_OUTPUT_SCHEMA", "ANALYSIS_OUTPUT_SCHEMA"].includes(item.caseId) ? { ...item, ok: false } : item);
   const record = summarizeConformance(base, runs);
   expect(record.passRate).toBeLessThan(0.9);
-  expect(admittedSkills(record).sort()).toEqual(["crossline-automation-stripper", "crossline-milestone-gate"]);
+  expect(admittedSkills(record).sort()).toEqual(["crossline-automation-stripper", "crossline-evidence-judge:milestone"]);
 });
 
 test("a record goes stale with another model, another runtime, or after thirty days", () => {
@@ -112,11 +112,11 @@ test("a record made before the interview was split into two schemas still admits
 
 test("interview parity (2026-11-26): the portrait's narrative is admitted on the long-text case, not without it", async () => {
   const { LONG_TEXT_CASE_ID } = await import("./provider-conformance");
-  expect(admittedSkills(summarizeConformance(base, allPassing()))).toContain("crossline-portrait-narrative");
+  expect(admittedSkills(summarizeConformance(base, allPassing()))).toContain("crossline-portrait:narrative");
   const failed = allPassing().map((item) => item.caseId === LONG_TEXT_CASE_ID ? run(LONG_TEXT_CASE_ID, false) : item);
-  expect(admittedSkills(summarizeConformance(base, failed))).not.toContain("crossline-portrait-narrative");
+  expect(admittedSkills(summarizeConformance(base, failed))).not.toContain("crossline-portrait:narrative");
   // A free-text Skill is not admitted by default: only one marked `freeText` is.
-  expect(Object.entries(SKILL_NEEDS).filter(([, needs]) => !needs.schemas.length && needs.freeText).map(([skill]) => skill)).toEqual(["crossline-portrait-narrative"]);
+  expect(Object.entries(SKILL_NEEDS).filter(([, needs]) => !needs.schemas.length && needs.freeText).map(([skill]) => skill)).toEqual(["crossline-portrait:narrative"]);
 });
 
 test("interview parity: a record from before the scout, the query review and the scale reading still admits the interview and its research", async () => {
@@ -124,25 +124,25 @@ test("interview parity: a record from before the scout, the query review and the
   const later = new Set(["WEB_SCOUT_SCHEMA", "QUERY_REVIEW_SCHEMA", "SCALE_ANALYSIS_SCHEMA", "INTERVIEW_CARD_TOOLS"]);
   const older = cases().filter((item) => !later.has(item.id)).flatMap((item) => Array.from({ length: item.runs }, () => run(item.id)));
   expect(admittedSkills(summarizeConformance(base, older), { ...THIRD_PARTY_CAPABILITIES, webSearch: true })).toEqual(expect.arrayContaining([
-    "crossline-onboarding", "crossline-onboarding-extract", "crossline-onboarding-research", "crossline-web-scout"]));
+    "crossline-onboarding", "crossline-onboarding-extract", "crossline-research:onboarding", "crossline-web-scout"]));
 });
 
 test("a record from before 2026-11-18 admits the Skills whose new schemas have a stand-in, and not method research, which has none", () => {
   const later = new Set(["FOLDER_SCREEN_SCHEMA", "SOURCE_VERSIONS_SCHEMA", "FILE_PROJECTS_SCHEMA", "CHAT_DIGEST_SCHEMA", "DELIVERABLE_CHECK_SCHEMA",
     "METHOD_RESEARCH_SCHEMA", "WEB_SCOUT_SCHEMA", "QUERY_REVIEW_SCHEMA", "SCALE_ANALYSIS_SCHEMA", "SKILL_INJECTION_CHECK_SCHEMA", "INTERVIEW_CARD_TOOLS"]);
   const capabilities = { ...THIRD_PARTY_CAPABILITIES, webSearch: true };
-  const proxied = ["crossline-folder-classifier", "crossline-source-digest", "crossline-deliverable-check"];
-  expect(admittedSkills(summarizeConformance(base, allPassing()), capabilities)).toEqual(expect.arrayContaining([...proxied, "crossline-method-research"]));
+  const proxied = ["crossline-line-filer:folder", "crossline-capture-digest:source", "crossline-evidence-judge:deliverable"];
+  expect(admittedSkills(summarizeConformance(base, allPassing()), capabilities)).toEqual(expect.arrayContaining([...proxied, "crossline-line-method:research"]));
   const older = conformanceCases().filter((item) => !later.has(item.id)).flatMap((item) => Array.from({ length: item.runs }, () => run(item.id)));
   const admitted = admittedSkills(summarizeConformance(base, older), capabilities);
   expect(admitted).toEqual(expect.arrayContaining(proxied));
-  expect(admitted).not.toContain("crossline-method-research");
+  expect(admitted).not.toContain("crossline-line-method:research");
   // The stand-in's failure withholds the Skill as its own would.
   const gateFailed = older.map((item) => item.caseId === "MILESTONE_GATE_OUTPUT_SCHEMA" ? run(item.caseId, false) : item);
-  expect(admittedSkills(summarizeConformance(base, gateFailed), capabilities)).not.toContain("crossline-deliverable-check");
+  expect(admittedSkills(summarizeConformance(base, gateFailed), capabilities)).not.toContain("crossline-evidence-judge:deliverable");
   // A record that ran the schema itself is judged on that run, not the stand-in's.
   const ownFailed = [...older, run("CHAT_DIGEST_SCHEMA", false)];
-  expect(admittedSkills(summarizeConformance(base, ownFailed), capabilities)).not.toContain("crossline-source-digest");
+  expect(admittedSkills(summarizeConformance(base, ownFailed), capabilities)).not.toContain("crossline-capture-digest:source");
 });
 
 test("interview parity: the card-tools case checks a question card's real schema, and its failure keeps only the interview off functions", async () => {

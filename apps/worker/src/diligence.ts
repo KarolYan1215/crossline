@@ -9,7 +9,7 @@ import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@cross
 import type { CrosslineStore, StoredDiligenceReport } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 
-export const DILIGENCE_SKILL = "crossline:crossline-due-diligence";
+export const DILIGENCE_SKILL = "crossline:crossline-research:diligence";
 import { ownerOf } from "./owner";
 import { localeOf } from "./locale";
 import { identityLines } from "./lines";
@@ -171,7 +171,7 @@ function decidedProposals(reports: StoredDiligenceReport[], identityId: string):
 
 /**
  * The facts recorded as constraints (a slot that names one). What else the person said rules something out (「不能花钱买课」「I can't work
- * on weekends」) is the model's to read from `facts`, which it is given in full (Skill `crossline-due-diligence`): the word list that used to
+ * on weekends」) is the model's to read from `facts`, which it is given in full (Skill `crossline-research:diligence`): the word list that used to
  * pick such sentences out was dropped on 2026-11-22.
  */
 // i18n-ignore-start: slot names, not the person's words
@@ -288,8 +288,8 @@ export function createDiligenceRunner(store: CrosslineStore, workspaceId: string
       ...(result.output.gaps.length || droppedSources || unsupported
         ? { note: [...result.output.gaps, ...(droppedSources ? [t("{{count}} 个来源无法核实，已丢弃。", { count: droppedSources })] : []),
             ...(unsupported ? [t("{{count}} 处引用与所引页面的内容对不上，已去掉。", { count: unsupported })] : [])].join(locale === "en" ? " " : "；") } : {}) });
-    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `diligence:done:${reportId}`, type: "diligence.done", entityId: reportId,
-      payload: { identityId, topic, findings: findings.length, proposals: proposals.length, droppedSources } });
+    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `diligence:done:${reportId}`, type: "job.ran", entityId: reportId,
+      payload: { identityId, topic, findings: findings.length, proposals: proposals.length, droppedSources, job: "diligence", state: "done" } });
     return { state: "done", reportId, findings: findings.length, proposals: proposals.length, droppedSources };
   };
 }

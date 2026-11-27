@@ -17,7 +17,7 @@ import { boardTasks, priorityLabels } from "./tasks";
  * model puts every block in a class and judges whether P1 outside gates were crowded out; the hours are summed here from its classes
  * (`computed`), since adding up a few hundred numbers is arithmetic, not judgement.
  */
-export const ATTENTION_SKILL = "crossline-gate-attention";
+export const ATTENTION_SKILL = "crossline-weekly-review:attention";
 export const ATTENTION_VERSION = "crossline.gate.attention.v1";
 const DETAIL = {
   type: "object", additionalProperties: false, required: ["classes", "unclear"],
@@ -145,7 +145,7 @@ export async function attentionGatePass(deps: { store: CrosslineStore; workspace
   return runGate({ store, workspaceId, client: deps.client, cwd: deps.cwd, gate: "attention", skill: ATTENTION_SKILL, promptVersion: ATTENTION_VERSION, input,
     detail: DETAIL, subjects: new Map([["week", subject]]), stableKeys: ["goal"], round: week.start,
     summary: `blocks ${blocks.length} (timer ${minutes("timer")} min, agent ${minutes("agent")} min, screen ${minutes("screen")} min, commits ${blocks.filter((block) => block.source === "commit").length}), p1 ${p1.length}`,
-    developerInstructions: "Audit the week as the crossline-gate-attention Skill describes: put every block id in `detail.classes`, then judge; return only the requested JSON with one item whose `subject` is `week`.",
+    developerInstructions: "Audit the week as the crossline-weekly-review:attention Skill describes: put every block id in `detail.classes`, then judge; return only the requested JSON with one item whose `subject` is `week`.",
     computed: (output) => attentionHours(blocks, output), now });
 }
 

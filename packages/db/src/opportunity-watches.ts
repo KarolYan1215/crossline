@@ -31,8 +31,8 @@ export function migrateNeedsToWatches(store: CrosslineStore, workspaceId: string
   try { polled = JSON.parse(store.getSetting(workspaceId, POLLED_SETTING) ?? "{}") as Record<string, string>; } catch { polled = {}; }
   const watches = needs.map((need) => watchFromNeed(need, now.toISOString(), polled[need.id]));
   store.setSetting(workspaceId, WATCHES_SETTING, JSON.stringify(watches));
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `opportunity.watches.migrated:${workspaceId}`, type: "opportunity.watches.migrated",
-    entityId: workspaceId, payload: { count: watches.length, active: watches.filter((watch) => watch.state === "active").length } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `opportunity.watches.migrated:${workspaceId}`, type: "job.ran",
+    entityId: workspaceId, payload: { count: watches.length, active: watches.filter((watch) => watch.state === "active").length, job: "opportunity.watches.migrate", state: "done" } });
   return watches.length;
 }
 
@@ -94,8 +94,8 @@ export function decideWatch(store: CrosslineStore, workspaceId: string, ownerId:
   const decided = updateWatch(store, workspaceId, id, (watch) => ({ ...watch, state: decision, decidedAt: now.toISOString(), updatedAt: now.toISOString(),
     ...(decision === "retired" ? { retiredBy: "person" as const } : { retiredBy: undefined }) }));
   if (!decided) return undefined;
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `opportunity.watch.decided:${id}:${now.toISOString()}`, type: "opportunity.watch.decided",
-    entityId: id, payload: { watchId: id, lineId: decided.lineId, decision, title: decided.title, origin: decided.origin } });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `opportunity.watch.decided:${id}:${now.toISOString()}`, type: "person.decided",
+    entityId: id, payload: { watchId: id, lineId: decided.lineId, decision, title: decided.title, origin: decided.origin, subject: "opportunity.watch" } });
   const waitingId = waitingIdForNeed(id);
   if (decision === "retired") {
     store.addPreference({ workspaceId, source: "opportunity_declined", scope: decided.lineId, weight: 1, refId: id,
@@ -120,8 +120,8 @@ export function decideWatch(store: CrosslineStore, workspaceId: string, ownerId:
 export function setWatchState(store: CrosslineStore, workspaceId: string, ownerId: string, id: string, state: "active" | "paused" | "retired", now = new Date()): StoredWatch | undefined {
   const next = updateWatch(store, workspaceId, id, (watch) => ({ ...watch, state, updatedAt: now.toISOString(),
     ...(state === "retired" ? { retiredBy: "person" as const } : { retiredBy: undefined }) }));
-  if (next) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `opportunity.watch.state:${id}:${now.toISOString()}`, type: "opportunity.watch.state",
-    entityId: id, payload: { watchId: id, lineId: next.lineId, state } });
+  if (next) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `opportunity.watch.state:${id}:${now.toISOString()}`, type: "opportunity.changed",
+    entityId: id, payload: { watchId: id, lineId: next.lineId, state, change: "watch_state" } });
   return next;
 }
 
@@ -142,8 +142,8 @@ export function editWatch(store: CrosslineStore, workspaceId: string, ownerId: s
       horizonDays: clampDays(edit.horizonDays, 7, 540, watch.horizonDays), targets,
       tools: [...new Set([...watch.tools, ...(fetched.length ? ["web_fetch" as const] : [])])], updatedAt: now.toISOString() };
   });
-  if (next) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `opportunity.watch.edited:${id}:${now.toISOString()}`, type: "opportunity.watch.edited",
-    entityId: id, payload: { watchId: id, lineId: next.lineId } });
+  if (next) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `opportunity.watch.edited:${id}:${now.toISOString()}`, type: "person.decided",
+    entityId: id, payload: { watchId: id, lineId: next.lineId, subject: "opportunity.watch", decision: "edited" } });
   return next;
 }
 
@@ -158,8 +158,8 @@ export function addPersonWatch(store: CrosslineStore, workspaceId: string, owner
     everyDays: clampDays(input.everyDays, 1, 180, 7), horizonDays: 120, state: "active", stats: emptyStats(), createdAt: now.toISOString(),
     updatedAt: now.toISOString(), decidedAt: now.toISOString(), leadDays: 14, prescreen: [], weight: 1, strictness: 0 };
   saveWatchList(store, workspaceId, [...readWatchList(store, workspaceId), watch]);
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `opportunity.watch.added:${watch.id}`, type: "opportunity.watch.added", entityId: watch.id,
-    payload: { watchId: watch.id, lineId: watch.lineId } });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `opportunity.watch.added:${watch.id}`, type: "person.decided", entityId: watch.id,
+    payload: { watchId: watch.id, lineId: watch.lineId, subject: "opportunity.watch", decision: "added" } });
   return watch;
 }
 
@@ -177,8 +177,8 @@ export function retireQuietWatches(store: CrosslineStore, workspaceId: string, n
   const next = list.map((watch) => retiring.has(watch.id) ? { ...watch, state: "retired" as const, retiredBy: "system" as const, updatedAt: now.toISOString() } : watch);
   saveWatchList(store, workspaceId, next);
   for (const watch of next.filter((item) => retiring.has(item.id))) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
-    idempotencyKey: `opportunity.watch.retired:${watch.id}:${now.toISOString()}`, type: "opportunity.watch.retired", entityId: watch.id,
-    payload: { watchId: watch.id, lineId: watch.lineId, runs: watch.stats.runs, cost: watch.stats.cost } });
+    idempotencyKey: `opportunity.watch.retired:${watch.id}:${now.toISOString()}`, type: "person.decided", entityId: watch.id,
+    payload: { watchId: watch.id, lineId: watch.lineId, runs: watch.stats.runs, cost: watch.stats.cost, subject: "opportunity.watch", decision: "retired" } });
   return next.filter((watch) => retiring.has(watch.id));
 }
 
@@ -195,8 +195,8 @@ export function recordOpportunityOutcome(store: CrosslineStore, workspaceId: str
   const row = store.listOpportunities(workspaceId, { id: opportunityId })[0];
   if (!row) return false;
   const key = outcome === "less" ? `opportunity.outcome:${opportunityId}:less:${ref}` : `opportunity.outcome:${opportunityId}:${outcome}`;
-  const written = store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: key, type: "opportunity.outcome", entityId: opportunityId,
-    payload: { opportunityId, outcome, watchId: row.needId ?? "", lineId: row.lineId, weight: OUTCOME_WEIGHT[outcome] } });
+  const written = store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: key, type: "opportunity.changed", entityId: opportunityId,
+    payload: { opportunityId, outcome, watchId: row.needId ?? "", lineId: row.lineId, weight: OUTCOME_WEIGHT[outcome], change: "outcome" } });
   if (!written.inserted) return false;
   if (isScoutFind(row)) {
     const stats = readScoutStats(store.getSetting(workspaceId, SCOUT_STATS_SETTING));
@@ -206,13 +206,13 @@ export function recordOpportunityOutcome(store: CrosslineStore, workspaceId: str
 }
 
 export const outcomesOf = (store: CrosslineStore, workspaceId: string, opportunityId: string): Set<OpportunityOutcome> =>
-  new Set(store.listEvents(workspaceId, { type: "opportunity.outcome", entityId: opportunityId }).map((event) => (event.payload as { outcome: OpportunityOutcome }).outcome));
+  new Set(store.listEvents(workspaceId, { type: "opportunity.changed", change: "outcome", entityId: opportunityId }).map((event) => (event.payload as { outcome: OpportunityOutcome }).outcome));
 
 /** The form filling confirmed the sign-up: the opportunity's own confirmed mark, written from the run (§17.8, replacing track A's mail match). */
 export function confirmOpportunityFromRun(store: CrosslineStore, workspaceId: string, run: Pick<StoredFormRun, "id" | "opportunityId">, at = new Date().toISOString()): boolean {
   const confirmed = store.confirmOpportunity(workspaceId, run.opportunityId, `form:${run.id}`, at);
-  if (confirmed) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `opportunity.confirmed:${run.opportunityId}`, type: "opportunity.confirmed",
-    entityId: run.opportunityId, payload: { formRun: run.id, at } });
+  if (confirmed) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `opportunity.confirmed:${run.opportunityId}`, type: "opportunity.changed",
+    entityId: run.opportunityId, payload: { formRun: run.id, at, change: "confirmed" } });
   return confirmed;
 }
 
@@ -225,7 +225,7 @@ export function settleOpportunityOutcomes(store: CrosslineStore, workspaceId: st
   let written = 0;
   const runs = new Map<string, StoredFormRun>();
   for (const run of readFormRuns(store, workspaceId)) if (!runs.has(run.opportunityId)) runs.set(run.opportunityId, run);
-  const milestoneOf = new Map(store.listEvents(workspaceId, { type: "opportunity.milestone_written" })
+  const milestoneOf = new Map(store.listEvents(workspaceId, { type: "opportunity.changed", change: "milestone_written" })
     .map((event) => [event.entityId, (event.payload as { milestoneId?: string }).milestoneId ?? ""]));
   const served = new Set(store.listWorkOrders(workspaceId).map((order) => order.milestoneId).filter(Boolean));
   for (const row of store.listOpportunities(workspaceId)) {
@@ -252,8 +252,8 @@ export function settleOpportunityOutcomes(store: CrosslineStore, workspaceId: st
 export function recordApplicationResult(store: CrosslineStore, workspaceId: string, ownerId: string, opportunityId: string, result: "accepted" | "rejected", at = new Date().toISOString()): boolean {
   const written = recordOpportunityOutcome(store, workspaceId, opportunityId, result, at);
   const row = store.listOpportunities(workspaceId, { id: opportunityId })[0];
-  if (written && row) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `opportunity.result:${opportunityId}`, type: "opportunity.result", entityId: opportunityId,
-    payload: { opportunityId, result, lineId: row.lineId } });
+  if (written && row) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `opportunity.result:${opportunityId}`, type: "opportunity.changed", entityId: opportunityId,
+    payload: { opportunityId, result, lineId: row.lineId, change: "result" } });
   return written;
 }
 
@@ -285,8 +285,8 @@ export function lessOpportunity(store: CrosslineStore, workspaceId: string, owne
   store.setSetting(workspaceId, WATCH_TUNING_SETTING, JSON.stringify(applied.tuning));
   store.setSetting(workspaceId, LESS_LOG_SETTING, JSON.stringify([...lessLog(store, workspaceId), entry].slice(-200)));
   recordOpportunityOutcome(store, workspaceId, row.id, "less", now.toISOString(), id);
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `opportunity.less:${id}`, type: "opportunity.less", entityId: row.id,
-    payload: { lessId: id, opportunityId: row.id, watchId: entry.watchId ?? "", scope: feedback.scope, reason: feedback.reason ?? "" } });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `opportunity.less:${id}`, type: "person.decided", entityId: row.id,
+    payload: { lessId: id, opportunityId: row.id, watchId: entry.watchId ?? "", scope: feedback.scope, reason: feedback.reason ?? "", subject: "opportunity", decision: "less" } });
   return entry;
 }
 
@@ -302,7 +302,7 @@ export function undoLessEntry(store: CrosslineStore, workspaceId: string, ownerI
   store.setSetting(workspaceId, WATCH_TUNING_SETTING, JSON.stringify(restored.tuning));
   if (entry.undo.preferenceRef) store.deletePreference(workspaceId, entry.undo.preferenceRef, now.toISOString());
   store.setSetting(workspaceId, LESS_LOG_SETTING, JSON.stringify(log.map((item) => item.id === id ? { ...item, undoneAt: now.toISOString() } : item)));
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `opportunity.less_undone:${id}`, type: "opportunity.less_undone", entityId: entry.opportunityId, payload: { lessId: id } });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `opportunity.less_undone:${id}`, type: "person.decided", entityId: entry.opportunityId, payload: { lessId: id, subject: "opportunity", decision: "less_undone" } });
   return true;
 }
 

@@ -4,7 +4,7 @@
  *
  *   compile    the media line's own skill (`crossline-mine:media`) from the person's materials — the first rule is the note the person
  *              left on the assistant's first Xiaohongshu outline (agent-97846949-1, 2026-10-14);
- *   assistant  a small media task run by the assistant, showing the line skill switched on beside `crossline-agent`;
+ *   assistant  a small media task run by the assistant, showing the line skill switched on beside `crossline-agent:shell`;
  *   gate       the real first outline (written as a cautious research report) judged against a contract it covers: the gate must answer
  *              `partial`, naming the broken rule.
  *
@@ -40,7 +40,7 @@ const { createMilestoneGate, MILESTONE_GATE_SKILL } = await import("../apps/work
 const step = process.argv[2] ?? "all";
 const store = new CrosslineStore(path.join(dataDir, "crossline.db"));
 const NOTE_TASK = "agent-97846949-1";
-const workspace = store.listWorkspaces().find((item) => store.listEvents(item.id, { type: "agent.task.reviewed", entityId: NOTE_TASK }).length)
+const workspace = store.listWorkspaces().find((item) => store.listEvents(item.id, { type: "agent.changed", change: "task_reviewed", entityId: NOTE_TASK }).length)
   ?? store.listWorkspaces()[0]!;
 const ws = workspace.id;
 const line = "media";
@@ -65,7 +65,7 @@ try {
     heading(`整理结果（${Math.round((Date.now() - started) / 1000)} 秒）：${JSON.stringify(outcome)}`);
     const version = currentMineVersion(readMineSkill(store.getSetting(ws, mineSkillSettingKey(line))));
     console.info(version?.markdown ?? "（没有写成）");
-    console.info(JSON.stringify(store.listEvents(ws, { type: "skill.mine.rewritten" }).map((event) => event.payload)));
+    console.info(JSON.stringify(store.listEvents(ws, { type: "skill.changed", change: "mine_rewritten" }).map((event) => event.payload)));
   }
 
   if (step === "assistant" || step === "all") {
@@ -77,7 +77,7 @@ try {
     const outcome = await run({ taskId: `demo-mine-${Date.now()}`, workOrderId: order.id, category: "read_research_organize",
       title: "小红书第二篇笔记：标题与开头", humanPart: "选定标题、拍摄与发布",
       what: "为小红书第二篇笔记（主题：科研如何实际发生）写 3 个标题备选和开头 5 句，存为 opening.md。" });
-    const completed = store.listEvents(ws, { type: "agent.task.completed" }).at(-1);
+    const completed = store.listEvents(ws, { type: "agent.changed", change: "task_completed" }).at(-1);
     console.info(JSON.stringify({ state: outcome.state, skills: (completed?.payload as { skills?: string[] } | undefined)?.skills ?? [],
       ...(outcome.state === "done" ? { artifacts: outcome.artifacts.map((item) => item.path), summary: outcome.summary.summary } : outcome) }, null, 1));
     if (outcome.state === "done") {

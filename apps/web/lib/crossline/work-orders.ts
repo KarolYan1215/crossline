@@ -158,7 +158,7 @@ export function retryMaterialPreparation(ctx: AccessContext, workOrderId: string
   getStore().appendEvent({
     ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
     idempotencyKey: `materials:retry:${workOrderId}:${Date.now()}`,
-    type: "materials.retry_requested", entityId: workOrderId, payload: { requestedBy: ctx.principalId }
+    type: "materials.changed", entityId: workOrderId, payload: { requestedBy: ctx.principalId, change: "retry_requested" }
   });
   return { ok: true };
 }
@@ -194,15 +194,15 @@ export function archiveWorkOrder(ctx: AccessContext, workOrderId: string, reason
   if (workOrder.state === "accepted") return { ok: false, code: "WORK_ORDER_ALREADY_ACCEPTED" };
   const store = getStore();
   // Keyed per attempt: a restored order can be archived again, and a fixed key would make that second archive a silent no-op.
-  const attempt = store.listEvents(ctx.workspaceId, { type: "work_order.archived", entityId: workOrderId }).length;
+  const attempt = store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "archived", entityId: workOrderId }).length;
   const suffix = attempt ? `:${attempt}` : "";
   // The reason rides on its own event rather than the transition: `transitionWorkOrder` carries only
   // the fields the state machine itself validates, and a discard reason is a note, not a state input.
   // It is optional — a slip or a duplicate needs no explanation. `from` is what a restore goes back to.
   store.appendEvent({
     ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `archive-reason:${workOrderId}${suffix}`,
-    type: "work_order.archived", entityId: workOrderId,
-    payload: { reason: reason.trim().slice(0, 200), from: workOrder.state, ...(options.bySystem ? { bySystem: true } : {}) }
+    type: "work_order.changed", entityId: workOrderId,
+    payload: { reason: reason.trim().slice(0, 200), from: workOrder.state, ...(options.bySystem ? { bySystem: true } : {}), change: "archived" }
   });
   const result = store.transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "archived" }, `archive:${workOrderId}${suffix}`);
   if (!result.changed) return { ok: false, code: "WORK_ORDER_NOT_ARCHIVABLE" };
@@ -215,7 +215,7 @@ export function restoreWorkOrder(ctx: AccessContext, workOrderId: string): Execu
   if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   if (workOrder.state !== "archived") return { ok: true };
   const store = getStore();
-  const archives = store.listEvents(ctx.workspaceId, { type: "work_order.archived", entityId: workOrderId });
+  const archives = store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "archived", entityId: workOrderId });
   const to = restoreTargetOf((archives.at(-1)?.payload as { from?: string } | undefined)?.from);
   const result = store.transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "archive.restored", to },
     `archive-restored:${workOrderId}:${archives.length}`);
@@ -252,15 +252,14 @@ export function inputsReady(order: { state: string; payload: unknown }): boolean
 
 /**
  * The step a session is about: started from a block, it is that block's step, not the task's first open one (2026-11-11, W-258: the
- * owner started step 7 from its block and the timer and the completion sheet said step 5). Kept as an event the timer reads
- * (`activeTimers`), so the executions table needs no new column. A step that is not the task's or is no longer open is not taken.
+ * owner started step 7 from its block and the timer and the completion sheet said step 5). Kept as a `task.changed` `step_focused` event the
+ * timer reads (`activeTimers`), so the executions table needs no new column. A step that is not the task's or is no longer open is not taken.
  */
-export const STEP_FOCUSED = "task.step_focused";
 export function focusStep(ctx: AccessContext, workOrderId: string, stepId: string): boolean {
   const store = getStore();
   if (!store.getStepPlan(ctx.workspaceId, workOrderId)?.steps.some((step) => step.id === stepId && step.status === "planned")) return false;
-  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `${STEP_FOCUSED}:${workOrderId}:${randomUUID()}`,
-    type: STEP_FOCUSED, entityId: workOrderId, payload: { stepId } });
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `task.step_focused:${workOrderId}:${randomUUID()}`,
+    type: "task.changed", entityId: workOrderId, payload: { stepId, change: "step_focused" } });
   return true;
 }
 
@@ -369,7 +368,7 @@ export function completeWorkOrderExecution(ctx: AccessContext, workOrderId: stri
     `completion-accepted:${workOrderId}:${run}`, { ...(at ? { occurredAt: at } : {}), ...(baseline ? { durationCalibrationBaseline: baseline } : {}) });
   const doneAt = at ?? new Date().toISOString();
   if (outcome) store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `work_order.outcome:${workOrderId}:${run}`,
-    type: "work_order.outcome_reported", entityId: workOrderId, payload: { level: outcome.level, note: outcome.note, at: doneAt, source: "completion" } });
+    type: "work_order.changed", entityId: workOrderId, payload: { level: outcome.level, note: outcome.note, at: doneAt, source: "completion", change: "outcome_reported" } });
   // The 「完成情况」 words were kept on the event and read by nothing: they are read for facts now (a score, a date, who said what).
   if (outcome?.note?.trim()) recordPersonNote(store, ctx.workspaceId, ctx.principalId,
     // i18n-ignore
@@ -381,7 +380,7 @@ export function completeWorkOrderExecution(ctx: AccessContext, workOrderId: stri
     const pending: PendingAssessment = { reason: rule.reason ?? "quality", question: rule.question ?? "", milestoneId: workOrder.milestoneId,
       askAfter: new Date(Date.parse(doneAt) + (rule.askAfterHours ?? 2) * 3_600_000).toISOString() };
     store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `assessment.pending:${workOrderId}:${run}`,
-      type: "assessment.pending", entityId: workOrderId, payload: pending });
+      type: "work_order.changed", entityId: workOrderId, payload: { ...pending, change: "assessment_pending" } });
   }
   return { ok: true, completion: { mode: rule.mode, ...(followUp && rule.question ? { followUp: rule.question } : {}) } };
 }
@@ -407,7 +406,7 @@ export function revokeAutoAcceptedWorkOrder(ctx: AccessContext, workOrderId: str
   // no-ops on a repeated idempotency key, `transitionWorkOrder` returned `changed: false`, and this
   // function returned `{ ok: true }` anyway without checking. The person saw the page reload and
   // believed the revoke worked; the ledger never left `accepted`.
-  const attempt = store.listEvents(ctx.workspaceId, { type: "milestone_gate.auto_acceptance_revoked", entityId: workOrderId }).length;
+  const attempt = store.listEvents(ctx.workspaceId, { type: "milestone_gate.changed", change: "auto_acceptance_revoked", entityId: workOrderId }).length;
   try {
     store.revokeAutoAcceptance(ctx.workspaceId, workOrderId, reason, `auto-acceptance-revoked:${workOrderId}:${attempt}`);
     return { ok: true };

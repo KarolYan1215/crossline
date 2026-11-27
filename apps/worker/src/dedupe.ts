@@ -120,9 +120,9 @@ export function applyMerge(store: CrosslineStore, workspaceId: string, group: Me
       // A part due earlier is a sub-deadline of the whole (「作业 3 的前两题」 by Thursday leaves 作业 3 due when it is), and the whole's
       // next plan is told the part and its day (model-facing; `recordFold` writes the same key and then adds nothing).
       if (partDue && (!payload.dueDate || partDue < payload.dueDate)) payload.partDeadlines = [...(payload.partDeadlines ?? []), { title: taskTitleOf(order), dueDate: partDue }];
-      store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `task.extended:${order.id}`, type: "task.steps_replan_requested", entityId: keep.id,
+      store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `task.extended:${order.id}`, type: "task.changed", entityId: keep.id,
         // i18n-ignore: the brief for the next plan (model-facing)
-        payload: { feedback: `并入本任务的一部分「${taskTitleOf(order)}」${partDue ? `，须在 ${partDue} 前完成（中间截止，本任务的截止日不变）` : ""}：${order.intent}`.slice(0, 600) } });
+        payload: { feedback: `并入本任务的一部分「${taskTitleOf(order)}」${partDue ? `，须在 ${partDue} 前完成（中间截止，本任务的截止日不变）` : ""}：${order.intent}`.slice(0, 600), change: "steps_replan_requested" } });
     // Otherwise the earlier due day holds: the kept task now has to deliver what the absorbed one promised by then.
     } else if (other.dueDate && (!payload.dueDate || other.dueDate < payload.dueDate)) payload.dueDate = other.dueDate;
     for (const material of store.listMaterials(workspaceId, order.id))
@@ -140,10 +140,10 @@ export function applyMerge(store: CrosslineStore, workspaceId: string, group: Me
   }
   const keepTitle = taskTitleOf(keep);
   for (const order of absorbed) {
-    const attempt = store.listEvents(workspaceId, { type: "work_order.archived", entityId: order.id }).length;
+    const attempt = store.listEvents(workspaceId, { type: "work_order.changed", change: "archived", entityId: order.id }).length;
     const suffix = attempt ? `:${attempt}` : "";
-    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `archive-reason:${order.id}${suffix}`, type: "work_order.archived", entityId: order.id,
-      payload: { reason: t("与「{{title}}」合并", { title: keepTitle }), from: order.state, bySystem: true, mergedInto: keep.id } });
+    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `archive-reason:${order.id}${suffix}`, type: "work_order.changed", entityId: order.id,
+      payload: { reason: t("与「{{title}}」合并", { title: keepTitle }), from: order.state, bySystem: true, mergedInto: keep.id, change: "archived" } });
     store.transitionWorkOrder(workspaceId, order.id, { type: "archived" }, `archive:${order.id}${suffix}`);
   }
   const merged = t("{{absorbed}}并入「{{keep}}」", { absorbed: absorbed.map((order) => quoted(taskTitleOf(order))).join(locale === "en" ? ", " : "、"), keep: keepTitle });
@@ -152,8 +152,8 @@ export function applyMerge(store: CrosslineStore, workspaceId: string, group: Me
   const opId = `op-${now.getTime().toString(36)}-${randomUUID().slice(0, 6)}`;
   store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `op.applied:${opId}`, type: "op.applied", entityId: opId,
     payload: { bySystem: true, label: label.slice(0, 160), inverse: { kind: "task.unmerge", keepId: keep.id, payload: beforePayload, plan: beforePlan, restore: absorbed.map((order) => order.id) } } });
-  store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `task.merged:${keep.id}:${opId}`, type: "task.merged", entityId: keep.id,
-    payload: { kind: group.kind, absorbed: absorbed.map((order) => order.id), reason: group.reason, opId } });
+  store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `task.merged:${keep.id}:${opId}`, type: "task.changed", entityId: keep.id,
+    payload: { kind: group.kind, absorbed: absorbed.map((order) => order.id), reason: group.reason, opId, change: "merged" } });
   return { keep: keep.id, absorbed: absorbed.map((order) => order.id), label, merged };
 }
 
@@ -253,8 +253,8 @@ export function renameByScope(store: CrosslineStore, workspaceId: string, now = 
     if (!order) continue;
     const before = taskTitleOf(order);
     store.saveWorkOrder({ ...order, payload: { ...((order.payload ?? {}) as Record<string, unknown>), title: rename.title } });
-    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `task.renamed:${order.id}:${rename.title}`, type: "task.renamed", entityId: order.id,
-      payload: { at: now.toISOString(), by: "system", before, title: rename.title, reason: tFor(localeOf(store, workspaceId))("与同名任务服务不同里程碑，名称注明「{{scope}}」", { scope: rename.scope }) } });
+    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `task.renamed:${order.id}:${rename.title}`, type: "task.changed", entityId: order.id,
+      payload: { at: now.toISOString(), by: "system", before, title: rename.title, reason: tFor(localeOf(store, workspaceId))("与同名任务服务不同里程碑，名称注明「{{scope}}」", { scope: rename.scope }), change: "renamed" } });
     done.push({ id: order.id, title: rename.title });
   }
   return done;

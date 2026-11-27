@@ -95,7 +95,7 @@ test("one triage run sorts the batch; a keep the rules find on the board becomes
   const captures = store.listCaptures(workspaceId);
   expect(captures.map((capture) => capture.id).sort()).toEqual(["import-todoist-6X7rM8997g3RQmvh", "import-todoist-6X7rfEVP8hvv25ZR"]);
   expect(captures.find((capture) => capture.id === "import-todoist-6X7rM8997g3RQmvh")!.context).toContain("2026-11-03");
-  expect(store.listEvents(workspaceId, { type: "task.duplicate_prevented", entityId: "notes" })).toHaveLength(1);
+  expect(store.listEvents(workspaceId, { type: "task.changed", change: "duplicate_prevented", entityId: "notes" })).toHaveLength(1);
   // Read again: nothing is offered twice, and confirming the same items again writes nothing.
   const again = await connectSource(deps, workspaceId, { kind: "todoist", token: "tok-123" });
   expect(again.ok && "batchId" in again ? again.batchId : undefined).toBeUndefined();

@@ -47,10 +47,10 @@ export function sweepLegacyDrills(store: CrosslineStore, workspaceId: string): S
 
 function archive(store: CrosslineStore, workspaceId: string, order: StoredWorkOrder, owner: string) {
   // Same event pair as 丢弃 (apps/web/lib/crossline.ts `archiveWorkOrder`): `from` is where 恢复 goes back to.
-  const attempt = store.listEvents(workspaceId, { type: "work_order.archived", entityId: order.id }).length;
+  const attempt = store.listEvents(workspaceId, { type: "work_order.changed", change: "archived", entityId: order.id }).length;
   const suffix = attempt ? `:${attempt}` : "";
-  store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `archive-reason:${order.id}${suffix}`, type: "work_order.archived",
-    entityId: order.id, payload: { reason: DRILL_ARCHIVE_REASON, from: order.state, drillSweep: true } });
+  store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `archive-reason:${order.id}${suffix}`, type: "work_order.changed",
+    entityId: order.id, payload: { reason: DRILL_ARCHIVE_REASON, from: order.state, drillSweep: true, change: "archived" } });
   store.transitionWorkOrder(workspaceId, order.id, { type: "archived" }, `archive:${order.id}${suffix}`);
 }
 
@@ -90,8 +90,8 @@ function rewriteOrder(store: CrosslineStore, order: StoredWorkOrder, backed: Rea
   }
   if (!changed) return false;
   store.appendEvent({ ownerId: order.ownerId, workspaceId: order.workspaceId, idempotencyKey: `work_order.drill_swept:${order.id}`,
-    type: "work_order.drill_swept", entityId: order.id, payload: { before: { intent: order.intent, humanCore: (order.payload as Record<string, unknown>)?.humanCore,
-      evidenceContract: (order.payload as Record<string, unknown>)?.evidenceContract } } });
+    type: "work_order.changed", entityId: order.id, payload: { before: { intent: order.intent, humanCore: (order.payload as Record<string, unknown>)?.humanCore,
+      evidenceContract: (order.payload as Record<string, unknown>)?.evidenceContract }, change: "drill_swept" } });
   store.saveWorkOrder({ ...order, intent, payload });
   return true;
 }

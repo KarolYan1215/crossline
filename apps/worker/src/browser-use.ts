@@ -107,7 +107,7 @@ async def propose_field(params: Propose, browser_session: BrowserSession):
 async def main():
     session = BrowserSession(browser_profile=BrowserProfile(cdp_url=cfg["cdpUrl"], allowed_domains=cfg["allowedDomains"], keep_alive=True,
         highlight_elements=False, captcha_solver=False, accept_downloads=False))
-    llm = ChatOpenAI(model="crossline-form-browser-agent", base_url=cfg["baseUrl"], api_key=cfg["apiKey"], max_retries=0)
+    llm = ChatOpenAI(model="crossline-form-page:browser", base_url=cfg["baseUrl"], api_key=cfg["apiKey"], max_retries=0)
     agent = Agent(task=cfg["task"], llm=llm, tools=tools, browser_session=session, use_vision=False, use_judge=False, use_thinking=False,
         max_failures=2, max_actions_per_step=10)
     try:

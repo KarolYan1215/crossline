@@ -255,8 +255,8 @@ export function createGraphSync(store: CrosslineStore, workspaceId: string, opti
       ownerId: ownerOf(store, workspaceId), workspaceId,
       // Keyed on what changed, not on how many: two different syncs a day with the same count used to collide and drop the second.
       idempotencyKey: `graph-sync:${createHash("sha1").update(JSON.stringify(changes)).digest("hex").slice(0, 20)}`,
-      type: "plan.reality_changed", entityId: current.id,
-      payload: { changes, resynced, skipped, ...(failed.length ? { failed } : {}) }
+      type: "plan.changed", entityId: current.id,
+      payload: { changes, resynced, skipped, ...(failed.length ? { failed } : {}), change: "reality_changed" }
     });
     return {
       state: "synced", imported: next.length, skipped,

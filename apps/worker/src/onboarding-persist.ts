@@ -168,7 +168,7 @@ export function persistExtraction(store: CrosslineStore, workspaceId: string, ex
   // Numbers in a confirmed fact that its sentences do not state: recorded to measure, never refused (people write 「九点半」).
   const warnings = citationWarnings(extraction);
   if (warnings.length) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:citation-warned:${sessionId}:${randomUUID()}`,
-    type: "onboarding.citation_warned", entityId: sessionId, payload: { facts: warnings } });
+    type: "job.ran", entityId: sessionId, payload: { facts: warnings, job: "onboarding.citation_check", state: "warned" } });
   persistFileDates(store, workspaceId, extraction, context);
 }
 
@@ -255,10 +255,6 @@ export function persistFileDates(store: CrosslineStore, workspaceId: string, ext
       dropped: [...new Map([...carried.flatMap((batch) => batch.dropped ?? []), ...dropped].map((item) => [item.title, item])).values()] } });
 }
 
-/** The event the drops of one reading are kept in: the date list shows them with their reasons, and the interview asks about them again. */
-export const DATES_UNRECORDED_EVENT = "dates.unrecorded";
-/** The same for facts, projects and hours keeping an extraction's answer left out (`prunedOnboardingItems`). */
-export const ONBOARDING_UNRECORDED_EVENT = "onboarding.unrecorded";
 
 /**
  * What a reading could not record, said (W-228). A duplicate is the same item twice, and an off-hours arrangement a meal or a commute the
@@ -266,6 +262,6 @@ export const ONBOARDING_UNRECORDED_EVENT = "onboarding.unrecorded";
  */
 function recordDateDrops(store: CrosslineStore, workspaceId: string, ownerId: string, sessionId: string | undefined, dropped: DateDrop[]): void {
   if (!dropped.length) return;
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `dates:unrecorded:${randomUUID()}`, type: DATES_UNRECORDED_EVENT, entityId: sessionId ?? "",
-    payload: { dropped: dropped.map(({ title, code }) => ({ title, code })) } });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `dates:unrecorded:${randomUUID()}`, type: "onboarding.changed", entityId: sessionId ?? "",
+    payload: { dropped: dropped.map(({ title, code }) => ({ title, code })), change: "dates_unrecorded" } });
 }

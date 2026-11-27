@@ -31,7 +31,7 @@ test("a previewed change writes nothing; applying it changes the step and record
 
   expect(applyChange(TEST_CTX, { kind: "estimate_delta", workOrderId: order.id, stepId: second.id, deltaMinutes: 120 })).toEqual({ ok: true });
   expect(store.getStepPlan(TEST_CTX.workspaceId, order.id)!.steps[1]!.estimate.p50Minutes).toBe(180);
-  expect(store.listEvents(TEST_CTX.workspaceId, { type: "estimate.adjusted", entityId: order.id })).toHaveLength(1);
+  expect(store.listEvents(TEST_CTX.workspaceId, { type: "person.decided", subject: "estimate", decision: "adjusted", entityId: order.id })).toHaveLength(1);
 
   expect(applyChange(TEST_CTX, { kind: "due", workOrderId: order.id, date: "2026-09-25" })).toEqual({ ok: true });
   expect((store.listWorkOrders(TEST_CTX.workspaceId).find((item) => item.id === order.id)!.payload as { dueDate?: string }).dueDate).toBe("2026-09-25");
@@ -64,7 +64,7 @@ test("the plan page's controls preview without writing, then apply: a repainted 
   const milestone = store.listMilestones(TEST_CTX.workspaceId).find((item) => item.status === "approved")!;
   expect(applyChange(TEST_CTX, { kind: "weight", milestoneId: milestone.id, weight: 90 })).toEqual({ ok: true });
   expect(effectiveWeight(TEST_CTX, milestone.id)).toBe(90);
-  const saved = store.listEvents(TEST_CTX.workspaceId, { type: "goal.settings_confirmed", entityId: milestone.id }).at(-1)!;
+  const saved = store.listEvents(TEST_CTX.workspaceId, { type: "goal.changed", change: "settings_confirmed", entityId: milestone.id }).at(-1)!;
   expect(saved.payload).toMatchObject({ next: { weight: 90, importance: "important" } });
   expect(typeof (saved.payload as { presetWeight?: unknown }).presetWeight).toBe("number");
 });

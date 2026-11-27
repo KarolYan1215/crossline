@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { MAIL_ACCOUNTS_SETTING, type CostSignal } from "@crossline/core";
+import { MAIL_ACCOUNTS_SETTING, modeField, skillBase, skillModeOf, type CostSignal } from "@crossline/core";
 import { LINE_SETTING } from "@crossline/identity-packs";
 import { runCodexAnalysis, type CodexRpcBoundary, type JsonLineRpcClient } from "@crossline/codex";
 import { createStepPlanner } from "./step-planner";
@@ -60,7 +60,12 @@ afterAll(() => { if (process.env.PROMPT_CACHE_REPORT) console.info(`skill\tshare
  * object put before the rest because the runs after it share it (the backplanner's second mode and rolling rounds on one milestone).
  */
 function expectShared(skill: string, runs: Captured[], stable: string[], same = stable.length) {
-  const [a, b] = runs.filter((run) => run.skill === skill);
+  // A merged Skill's mode is the input's first key (docs/plans/condense-1127.md §B): the same for every run of that mode.
+  const mode = skillModeOf(skill);
+  const lead = mode ? [modeField(skill)] : [];
+  stable = [...lead, ...stable];
+  same += lead.length;
+  const [a, b] = runs.filter((run) => run.skill === skillBase(skill) && (!mode || sentInput(run)[lead[0]!] === mode));
   expect(a && b, `two runs of ${skill}`).toBeTruthy();
   expect(b!.developer).toBe(a!.developer);
   const segment = (run: Captured) => {
@@ -70,7 +75,7 @@ function expectShared(skill: string, runs: Captured[], stable: string[], same = 
     expect(keys.slice(0, first.length)).toEqual(first);
     // The stable keys' serialization is the start of the input's own.
     const head = (list: string[]) => JSON.stringify(Object.fromEntries(list.map((key) => [key, input[key]]))).slice(0, -1);
-    expect(run.parts[0]!.startsWith(`$${skill}\n\n${head(first)}`)).toBe(true);
+    expect(run.parts[0]!.startsWith(`$${skillBase(skill)}\n\n${head(first)}`)).toBe(true);
     return head(stable.slice(0, same).filter((key) => key in input));
   };
   expect(segment(b!)).toBe(segment(a!));
@@ -110,22 +115,22 @@ const onExit: Array<() => void> = [];
 afterEach(() => { store.close(); for (const done of onExit.splice(0)) done(); });
 
 test("the step planner: one workspace's archetypes, tools and person first; each task after; its feedback after the input", async () => {
-  const { client, runs } = capturing(fakeRuntime(["{}"], "crossline:crossline-step-planner").rpc);
+  const { client, runs } = capturing(fakeRuntime(["{}"], "crossline:crossline-task-planner:steps").rpc);
   const plan = createStepPlanner(store, ws, "C:\\repo", () => client);
   await plan("wo1");
   await plan("wo2", "把复习拆成每讲一步");
-  expectShared("crossline:crossline-step-planner", runs, ["version", "archetypes", "stepTypes", "aiTools", "person", "personalPreferences", "lessons", "projectDates", "milestone"]);
+  expectShared("crossline:crossline-task-planner:steps", runs, ["version", "archetypes", "stepTypes", "aiTools", "person", "personalPreferences", "lessons", "projectDates", "milestone"]);
   // What only the second run was told is after its input, not in the instructions both share.
   expect(runs[1]!.parts.at(-1)).toMatch(/^Instructions for this run only.*\n Apply the feedback|^Instructions for this run only[^\n]*\nApply the feedback/s);
   expect(runs[1]!.developer).not.toContain("Apply the feedback");
 });
 
 test("the backplanner: the person and the project's work first; the milestone, its mode and the date after", async () => {
-  const { client, runs } = capturing(fakeRuntime([JSON.stringify({ steps: [], dateCandidates: [], blockers: [] })], "crossline:crossline-goal-backplanner").rpc);
+  const { client, runs } = capturing(fakeRuntime([JSON.stringify({ steps: [], dateCandidates: [], blockers: [] })], "crossline:crossline-goal-backplanner:backplan").rpc);
   const backplan = createGoalBackplanner(store, ws, "C:\\repo", () => client);
   await backplan("m1");
   await backplan("m2");
-  expectShared("crossline:crossline-goal-backplanner", runs, ["version", "personProfile", "existingTasks", "recentlyDone", "facts", "materials", "milestone", "artifacts"], 6);
+  expectShared("crossline:crossline-goal-backplanner:backplan", runs, ["version", "personProfile", "existingTasks", "recentlyDone", "facts", "materials", "milestone", "artifacts"], 6);
   expect(runs[0]!.developer).not.toContain("First mode");
   expect(runs[0]!.parts.at(-1)).toContain("First mode");
 });
@@ -191,10 +196,10 @@ test("mail sorting: the lines, open tasks and waits first; the mail after", asyn
 test("the line's own skill: the line and its material first; the date and, without the web, the note after", async () => {
   const owner = store.getWorkspaceOwnerId(ws)!;
   const review = (id: string, note: string) => {
-    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `req-${id}`, type: "agent.task.requested", entityId: id,
-      payload: { taskId: id, title: "小红书笔记提纲", category: "read_research_organize", workOrderId: "wo1" } });
-    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `rev-${id}`, type: "agent.task.reviewed", entityId: id,
-      payload: { taskId: id, decision: "accepted", note, category: "read_research_organize" } });
+    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `req-${id}`, type: "agent.changed", entityId: id,
+      payload: { taskId: id, title: "小红书笔记提纲", category: "read_research_organize", workOrderId: "wo1", change: "task_requested" } });
+    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `rev-${id}`, type: "agent.changed", entityId: id,
+      payload: { taskId: id, decision: "accepted", note, category: "read_research_organize", change: "task_reviewed" } });
   };
   review("t1", "研究的笔记要先给结论，再给推导。");
   const { client, runs } = capturing(fakeRuntime(["{}"], INSIGHT_COMPILER).rpc);

@@ -52,7 +52,7 @@ const supervisor = await startCodexSupervisor({
     name: "crossline",
     marketplacePath: path.join(repoRoot, "skills", "marketplace", ".agents", "plugins", "marketplace.json"),
     cwd: repoRoot,
-    requiredSkills: ["crossline:crossline-onboarding", "crossline:crossline-automation-stripper", "crossline:crossline-background-facts", "crossline:crossline-milestone-architect"]
+    requiredSkills: ["crossline:crossline-onboarding", "crossline:crossline-automation-stripper", "crossline:crossline-capture-digest:background", "crossline:crossline-milestone-architect:design"]
   }
 });
 const getClient = () => supervisor.client;

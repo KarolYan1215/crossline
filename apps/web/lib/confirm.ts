@@ -43,7 +43,7 @@ function instants(ctx: AccessContext, block: Block): { start: string; end: strin
   return { start: toZonedInstant(block.day, block.start, zone), end: toZonedInstant(block.day, block.end, zone) };
 }
 
-const answeredOf = (ctx: AccessContext, messageId: string) => getStore().listEvents(ctx.workspaceId, { type: "block.confirmed" })
+const answeredOf = (ctx: AccessContext, messageId: string) => getStore().listEvents(ctx.workspaceId, { type: "work_order.changed", change: "block_confirmed" })
   .find((event) => event.entityId === messageId)?.payload as { outcome: string; minutes?: number } | undefined;
 
 export function confirmView(ctx: AccessContext, messageId: string): ConfirmView | undefined {
@@ -92,9 +92,9 @@ export function confirmBlockAt(ctx: AccessContext, messageId: string, block: Blo
   const source = inferred ? "activity" as const : "one_tap" as const;
   const last = isLastStep(ctx, block);
   const record = (outcome: string, extra: Record<string, unknown> = {}) => {
-    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `block-confirmed:${messageId}`, type: "block.confirmed",
+    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `block-confirmed:${messageId}`, type: "work_order.changed",
       entityId: messageId, payload: { blockId: block.id, workOrderId: block.orderId, stepId: block.stepId, day: block.day, outcome, blockMinutes,
-        ...(block.energy ? { energy: block.energy } : {}), ...extra, ...(answer.via === "push" ? { source: "push" } : {}), ...(answer.inferred ? { inferred: true } : {}) } });
+        ...(block.energy ? { energy: block.energy } : {}), ...extra, ...(answer.via === "push" ? { source: "push" } : {}), ...(answer.inferred ? { inferred: true } : {}), change: "block_confirmed" } });
     // The card counts as answered, so the question is not taken as ignored (three ignored in a row would mute the kind).
     const card = payload?.card as Card | undefined;
     if (payload && card) store.updateConversationPayload(ctx.workspaceId, messageId, { ...payload, card: { ...card, clarify: { ...card.clarify, chosen: 0 } } });

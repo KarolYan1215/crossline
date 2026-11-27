@@ -29,8 +29,8 @@ export function setPermissionMode(ctx: AccessContext, enabled: boolean): { enabl
   }
   store.setSetting(ctx.workspaceId, MODE_KEY, enabled ? "on" : "off");
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
-    idempotencyKey: `permission:mode:${randomUUID()}`, type: "permission.mode_changed",
-    entityId: ctx.workspaceId, payload: { enabled } });
+    idempotencyKey: `permission:mode:${randomUUID()}`, type: "person.decided",
+    entityId: ctx.workspaceId, payload: { enabled, subject: "permission", decision: "mode_changed" } });
   return { enabled };
 }
 
@@ -55,9 +55,9 @@ export function permissionCandidates(ctx: AccessContext): PermissionCandidate[] 
         reason: eligible ? t("普通本地作业，可在前台满 5 分钟后默认批准") : t("风险或外部动作需要明确批准"),
         elapsedMs: readTimer(ctx, key).elapsedMs };
     });
-  const decided = new Set(store.listEvents(ctx.workspaceId, { type: ["insight.approved", "insight.rejected"] })
+  const decided = new Set(store.listEvents(ctx.workspaceId, { type: "insight.changed", change: ["approved", "rejected"] })
     .map((event) => event.entityId));
-  const insights = store.listEvents(ctx.workspaceId, { type: "flywheel.finding" })
+  const insights = store.listEvents(ctx.workspaceId, { type: "insight.changed", change: "found" })
     .filter((event) => !decided.has(event.eventId)).map((event) => {
       const finding = event.payload as { summary?: string; sourceUrl?: string; staleWhen?: string; milestoneId?: string };
       const eligible = Boolean(finding.summary?.trim() && finding.sourceUrl?.startsWith("https://")
@@ -73,24 +73,24 @@ export function permissionCandidates(ctx: AccessContext): PermissionCandidate[] 
 
 export function approveInsight(ctx: AccessContext, eventId: string, key: string): boolean {
   const store = getStore();
-  const finding = store.listEvents(ctx.workspaceId, { type: "flywheel.finding" }).find((event) => event.eventId === eventId);
+  const finding = store.listEvents(ctx.workspaceId, { type: "insight.changed", change: "found" }).find((event) => event.eventId === eventId);
   if (!finding || keyOf("insight", finding.eventId, finding.payload) !== key
     || !permissionCandidates(ctx).some((candidate) => candidate.key === key && candidate.eligible)
-    || store.listEvents(ctx.workspaceId, { type: ["insight.approved", "insight.rejected"] })
+    || store.listEvents(ctx.workspaceId, { type: "insight.changed", change: ["approved", "rejected"] })
       .some((event) => event.entityId === eventId)) return false;
   return store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
-    idempotencyKey: `insight:approved:${key}`, type: "insight.approved",
-    entityId: eventId, payload: { milestoneId: finding.entityId, findingEventId: eventId } }).inserted;
+    idempotencyKey: `insight:approved:${key}`, type: "insight.changed",
+    entityId: eventId, payload: { milestoneId: finding.entityId, findingEventId: eventId, change: "approved" } }).inserted;
 }
 
 export function revokeInsight(ctx: AccessContext, eventId: string): { ok: true } | { ok: false; code: string } {
   const store = getStore();
-  if (!store.listEvents(ctx.workspaceId, { type: "insight.approved", entityId: eventId }).length
-    || store.listEvents(ctx.workspaceId, { type: "insight.revoked", entityId: eventId }).length)
+  if (!store.listEvents(ctx.workspaceId, { type: "insight.changed", change: "approved", entityId: eventId }).length
+    || store.listEvents(ctx.workspaceId, { type: "insight.changed", change: "revoked", entityId: eventId }).length)
     return { ok: false, code: "INSIGHT_NOT_ACTIVE" };
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
-    idempotencyKey: `insight:revoked:${eventId}`, type: "insight.revoked", entityId: eventId,
-    payload: { reason: "user_revoked" } });
+    idempotencyKey: `insight:revoked:${eventId}`, type: "insight.changed", entityId: eventId,
+    payload: { reason: "user_revoked", change: "revoked" } });
   return { ok: true };
 }
 
@@ -132,8 +132,8 @@ export function permissionHeartbeat(ctx: AccessContext, keys: string[], visible:
     const changed = applyCandidate(ctx, candidate, "approved");
     if (!changed) continue;
     store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
-      idempotencyKey: `permission:auto:${candidate.key}`, type: "permission.auto_approved",
-      entityId: candidate.id, payload: { kind: candidate.kind, versionKey: candidate.key, visibleMs: timer.elapsedMs } });
+      idempotencyKey: `permission:auto:${candidate.key}`, type: "insight.changed",
+      entityId: candidate.id, payload: { kind: candidate.kind, versionKey: candidate.key, visibleMs: timer.elapsedMs, change: "auto_approved" } });
     applied.push(candidate.key);
   }
   return { candidates: permissionCandidates(ctx), applied };
@@ -147,12 +147,12 @@ export function rejectPermissionCandidate(ctx: AccessContext, key: string): { ok
     if (!applyCandidate(ctx, candidate, "excluded")) return { ok: false, code: "PERMISSION_CANDIDATE_STALE" };
   } else {
     store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
-      idempotencyKey: `insight:rejected:${key}`, type: "insight.rejected", entityId: candidate.id,
-      payload: { reason: "user_rejected" } });
+      idempotencyKey: `insight:rejected:${key}`, type: "insight.changed", entityId: candidate.id,
+      payload: { reason: "user_rejected", change: "rejected" } });
   }
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
-    idempotencyKey: `permission:reject-audit:${key}`, type: "permission.rejected",
-    entityId: candidate.id, payload: { kind: candidate.kind, versionKey: key } });
+    idempotencyKey: `permission:reject-audit:${key}`, type: "person.decided",
+    entityId: candidate.id, payload: { kind: candidate.kind, versionKey: key, subject: "permission", decision: "rejected" } });
   return { ok: true };
 }
 

@@ -2,8 +2,7 @@ import "server-only";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { AGENT_CATEGORIES, AGENT_CATEGORY_EXPLAINED, isSecretPath, type AccessContext, type AgentCategory } from "@crossline/core";
-import {
-  AGENT_FILES_CHECKED, CLEAN_RUNS_TO_TRUST, declinedCategories, isPaused, listAgentTasks, pendingAgentApprovals, pendingAgentQuestions, pendingCategoryRequests, readCategories, resultsAwaitingReview,
+import { CLEAN_RUNS_TO_TRUST, declinedCategories, isPaused, listAgentTasks, pendingAgentApprovals, pendingAgentQuestions, pendingCategoryRequests, readCategories, resultsAwaitingReview,
   type AgentApprovalRow, type AgentQuestionRow, type AgentTaskRow
 } from "@crossline/db";
 import { getStore } from "./crossline";
@@ -78,7 +77,7 @@ export type TaskAudit = {
 /** The task's directory as the ledger recorded it, and only if it still holds the audit file. Anything else is not served. */
 function taskDirectory(ctx: AccessContext, taskId: string): string | undefined {
   // The self-check may have found the run under the current root (`agent.task.files_checked`); the last record naming a folder wins.
-  const done = getStore().listEvents(ctx.workspaceId, { type: ["agent.task.completed", AGENT_FILES_CHECKED], entityId: taskId })
+  const done = getStore().listEvents(ctx.workspaceId, { type: "agent.changed", change: ["task_completed", "task_files_checked"], entityId: taskId })
     .filter((event) => typeof (event.payload as { directory?: unknown }).directory === "string" && (event.payload as { directory: string }).directory).at(-1);
   const directory = (done?.payload as { directory?: unknown } | undefined)?.directory;
   return typeof directory === "string" && existsSync(path.join(directory, "audit.json")) ? directory : undefined;
@@ -105,7 +104,7 @@ export function loadTaskAudit(ctx: AccessContext, taskId: string): TaskAudit | u
 export function outputNames(ctx: AccessContext, taskId: string, audit: Pick<TaskAudit, "artifacts">): Names {
   const texts = audit.artifacts.filter((item) => /\.(md|csv|txt)$/i.test(item.path))
     .map((item) => readTaskFile(ctx, taskId, item.path)?.body.toString("utf8") ?? "");
-  const requested = getStore().listEvents(ctx.workspaceId, { type: "agent.task.requested", entityId: taskId }).at(-1);
+  const requested = getStore().listEvents(ctx.workspaceId, { type: "agent.changed", change: "task_requested", entityId: taskId }).at(-1);
   const inputs = (requested?.payload as { inputs?: unknown } | undefined)?.inputs;
   if (Array.isArray(inputs)) texts.push(inputs.filter((item): item is string => typeof item === "string").join("\n"));
   return namesFrom(texts, getStore().listSourceDocuments(ctx.workspaceId).map((doc) => ({ sha256: doc.sha256, fileName: doc.fileName })));

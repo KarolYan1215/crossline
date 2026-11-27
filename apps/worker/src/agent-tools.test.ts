@@ -87,7 +87,7 @@ test("a tools-mode run declares Crossline's functions (no shell), records every 
   expect(started.sandbox).not.toBe("danger-full-access");
   expect((started.dynamicTools as Array<{ name: string }>).map((tool) => tool.name)).toEqual(expect.arrayContaining(["write_file", "read_document", "add_to_inbox"]));
   expect(store.listCaptures(workspaceId).map((capture) => capture.title)).toEqual(["10/28 前交 ECE 555 HW1"]);
-  const completed = store.listEvents(workspaceId, { type: "agent.task.completed", entityId: "t-tools" })[0]!.payload as Record<string, unknown>;
+  const completed = store.listEvents(workspaceId, { type: "agent.changed", change: "task_completed", entityId: "t-tools" })[0]!.payload as Record<string, unknown>;
   expect(completed).toMatchObject({ mode: "tools", commands: 2, captured: 1 });
   const audit = JSON.parse(readFileSync(path.join(root, "ai", "t-tools", "audit.json"), "utf8"));
   expect(audit.toolCalls.map((call: { tool: string }) => call.tool)).toEqual(["write_file", "add_to_inbox"]);
@@ -121,7 +121,7 @@ test("a run that calls no function is sent back: a summary of work never done is
   const outcome = await run({ taskId: "t-idle", title: "每日到期清单", what: "整理到期任务", category: "read_research_organize", humanPart: "" });
   expect(outcome.state).toBe("blocked");
   expect(prompts().some((prompt) => prompt.includes("一个函数都没有调用"))).toBe(true);
-  expect(store.listEvents(workspaceId, { type: "agent.task.completed", entityId: "t-idle" })).toHaveLength(0);
+  expect(store.listEvents(workspaceId, { type: "agent.changed", change: "task_completed", entityId: "t-idle" })).toHaveLength(0);
 });
 
 test("a run that fails leaves its inbox lines unapplied", async () => {
@@ -158,7 +158,7 @@ test("a sandboxed shell run is started under the task profile — writes in its 
   approveCategory(store, workspaceId, "read_research_organize");
   const summary = JSON.stringify({ summary: "整理完成。", artifacts: [], verification: [], needsHuman: [], notDone: [], assumptions: [] });
   const sandbox = { readable: ["/opt/codex"], deny: ["/data", "/state"] };
-  const { rpc, threadStarts } = fakeRuntime([summary], "crossline:crossline-agent",
+  const { rpc, threadStarts } = fakeRuntime([summary], "crossline:crossline-agent:shell",
     { threadResponse: { approvalPolicy: "untrusted", activePermissionProfile: { id: "crossline-task" }, sandbox: { type: "workspaceWrite" } } });
   const run = createAgentRunner(store, workspaceId, "/repo", () => rpc, { outputRoot: path.join(root, "ai"), mode: "sandbox", sandbox });
   const outcome = await run({ taskId: "t-sb", title: "整理", what: "整理", category: "read_research_organize", humanPart: "看结果" });
@@ -173,7 +173,7 @@ test("a sandboxed shell run is started under the task profile — writes in its 
   expect((config.shell_environment_policy as { inherit: string }).inherit).toBe("core");
   expect((started.dynamicTools as Array<{ name: string }>).map((tool) => tool.name)).toEqual(expect.arrayContaining(["add_to_inbox", "read_document"]));
   expect((started.dynamicTools as Array<{ name: string }>).map((tool) => tool.name)).not.toContain("write_file");
-  const { rpc: unsafe } = fakeRuntime([summary], "crossline:crossline-agent", { threadResponse: { approvalPolicy: "untrusted", sandbox: { type: "dangerFullAccess" } } });
+  const { rpc: unsafe } = fakeRuntime([summary], "crossline:crossline-agent:shell", { threadResponse: { approvalPolicy: "untrusted", sandbox: { type: "dangerFullAccess" } } });
   const refused = await createAgentRunner(store, workspaceId, "/repo", () => unsafe, { outputRoot: path.join(root, "ai"), mode: "sandbox", sandbox })(
     { taskId: "t-sb2", title: "整理", what: "整理", category: "read_research_organize", humanPart: "看结果" });
   expect(refused).toMatchObject({ state: "blocked", code: "SKILL_SANDBOX_UNSUPPORTED" });
@@ -250,7 +250,7 @@ test("a run that reads mail mid-way goes on in its own conversation without the 
   expect(prompts().at(-1)).toBeDefined();
   for (const capture of store.listCaptures(workspaceId))
     expect(store.captureProvenance(workspaceId, capture.id)).toEqual({ run: "t-mail", by: "assistant", tainted: true, sources: ["mail"] });
-  const completed = store.listEvents(workspaceId, { type: "agent.task.completed", entityId: "t-mail" })[0]!.payload as Record<string, unknown>;
+  const completed = store.listEvents(workspaceId, { type: "agent.changed", change: "task_completed", entityId: "t-mail" })[0]!.payload as Record<string, unknown>;
   expect(completed.tainted).toEqual(["mail"]);
 });
 
@@ -329,14 +329,14 @@ test("a sandboxed shell run offered the mailbox has no web search and no connect
   const summary = JSON.stringify({ summary: "整理完成。", artifacts: [], verification: [], needsHuman: [], notDone: [], assumptions: [] });
   const sandbox = { readable: ["/opt/codex"], deny: ["/data", "/state"] };
   const started = { approvalPolicy: "untrusted", activePermissionProfile: { id: "crossline-task" }, sandbox: { type: "workspaceWrite" } };
-  const withMail = fakeRuntime([summary], "crossline:crossline-agent", { threadResponse: started });
+  const withMail = fakeRuntime([summary], "crossline:crossline-agent:shell", { threadResponse: started });
   await createAgentRunner(store, workspaceId, "/repo", () => withMail.rpc, { outputRoot: path.join(root, "ai"), mode: "sandbox", sandbox, mail: mailbox })(
     { taskId: "t-sb-mail", title: "整理", what: "整理", category: "read_research_organize", humanPart: "看结果" });
   const mailStart = withMail.threadStarts()[0]!;
   expect(mailStart.config).toMatchObject({ web_search: "disabled" });
   expect(mailStart.config).not.toHaveProperty("features.apps");
   expect((mailStart.dynamicTools as Array<{ name: string }>).map((tool) => tool.name)).toContain("mail_read");
-  const plain = fakeRuntime([summary], "crossline:crossline-agent", { threadResponse: started });
+  const plain = fakeRuntime([summary], "crossline:crossline-agent:shell", { threadResponse: started });
   await createAgentRunner(store, workspaceId, "/repo", () => plain.rpc, { outputRoot: path.join(root, "ai"), mode: "sandbox", sandbox })(
     { taskId: "t-sb-plain", title: "整理", what: "整理", category: "read_research_organize", humanPart: "看结果" });
   expect((plain.threadStarts()[0]!.config as Record<string, unknown>).web_search).not.toBe("disabled");

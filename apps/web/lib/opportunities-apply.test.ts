@@ -23,8 +23,8 @@ function seed(statementState: StoredWorkOrder["state"]) {
     url: "https://jobs.example.org/intern", registrationHost: "jobs.example.org", deadlines: [{ day: "2026-12-01", quote: "Applications close on December 1, 2026" }],
     cost: null, eligibility: [], needsAccount: true, materials: [], consents: [], foundVia: "web", foundAt: "2026-11-01T00:00:00.000Z" }, terms: [], verdict: { state: "eligible", basis: [] } });
   store.decideOpportunity(ws, "opp-1", "apply", "2026-11-01T01:00:00.000Z");
-  store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: ws, idempotencyKey: "opportunity.milestone:opp-1", type: "opportunity.milestone_written",
-    entityId: "opp-1", payload: { milestoneId: "m-apply", deadline: "2026-12-01", rolling: false } });
+  store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: ws, idempotencyKey: "opportunity.milestone:opp-1", type: "opportunity.changed",
+    entityId: "opp-1", payload: { milestoneId: "m-apply", deadline: "2026-12-01", rolling: false, change: "milestone_written" } });
   store.saveWorkOrder(order("w-statement", "写研究陈述", statementState));
   store.saveWorkOrder(order("w-submit", "在官网提交申请", "approved"));
   const dir = mkdtempSync(path.join(tmpdir(), "opp-draft-"));

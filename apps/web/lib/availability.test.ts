@@ -169,7 +169,7 @@ test("only an explicit valid date on an approved goal becomes a hard scheduling 
     .toEqual({ ok: false, code: "GOAL_DEADLINE_INVALID" });
   expect(saveGoalSettings(TEST_CTX, "missing", { importance: "important", confirmedDeadline: null }))
     .toEqual({ ok: false, code: "GOAL_NOT_APPROVED" });
-  const event = store.listEvents(TEST_CTX.workspaceId, { type: "goal.settings_confirmed" });
+  const event = store.listEvents(TEST_CTX.workspaceId, { type: "goal.changed", change: "settings_confirmed" });
   expect(event).toHaveLength(1);
   expect(event[0]?.payload).toMatchObject({ next: { confirmedDeadline: "2026-09-19" } });
   const plan = await loadCurrentPlan(TEST_CTX);

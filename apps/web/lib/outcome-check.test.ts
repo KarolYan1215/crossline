@@ -68,7 +68,7 @@ test("how a draft went is asked with three one-tap levels; a level is a task rec
   const [ask] = outcomeAsks(TEST_CTX, later);
   expect(outcomeNudgeInputs(TEST_CTX, later)[0]!.options.map((option) => option.label)).toEqual(["顺利", "勉强", "有遗漏"]);
   expect(await answerAsk(TEST_CTX, ask!.id, "gaps", { note: "少了一张图" }, later)).toMatchObject({ ok: true });
-  expect(store.listEvents(ws, { type: "assessment.answered", entityId: "draft" })[0]?.payload).toMatchObject({ level: "gaps", note: "少了一张图" });
+  expect(store.listEvents(ws, { type: "work_order.changed", change: "assessment_answered", entityId: "draft" })[0]?.payload).toMatchObject({ level: "gaps", note: "少了一张图" });
   expect(store.listEvents(ws, { type: "milestone_gate.judged", entityId: "draft" })).toEqual([]);
   expect(outcomeAsks(TEST_CTX, later)).toEqual([]);
 });

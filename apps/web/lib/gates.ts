@@ -1,7 +1,7 @@
 import "server-only";
 import {
-  CANNOT_JUDGE, estimateRatio, GATE_CONFIRMED, GATE_GOAL_MAX_CHARS, GATE_GOAL_SETTING, GATE_IDS, GATE_JUDGED, GATE_LABEL, GATE_OVERRIDDEN, GATE_SPEC, GATE_VERDICT_LABEL, GATE_VERDICTS,
-  gateWeekStats, latestGateJudgements, MILESTONE_PARKED, MILESTONE_UNPARKED, nightCounts, OPEN_TASK_STATES, parkedMilestones, taskTitleOf, todaysFront, verdictOf,
+  CANNOT_JUDGE, estimateRatio, GATE_GOAL_MAX_CHARS, GATE_GOAL_SETTING, GATE_IDS, GATE_JUDGED, GATE_LABEL, GATE_SPEC, GATE_VERDICT_LABEL, GATE_VERDICTS,
+  gateWeekStats, latestGateJudgements, nightCounts, OPEN_TASK_STATES, parkedMilestones, taskTitleOf, todaysFront, verdictOf,
   type AccessContext, type Ask, type GateJudgedPayload, type GateJudgement, type GateOverriddenPayload, type GateWeekStats
 } from "@crossline/core";
 import { appNow, getStore, planToday, saveMilestoneEdit } from "./crossline";
@@ -14,7 +14,7 @@ import { localeFor } from "./locale";
  * (`gate.confirmed`), sees today's front task first on Today, reports a setback, and reads the week's gates in the weekly review.
  */
 const short = (text: string, max: number) => text.length > max ? `${text.slice(0, max - 1)}…` : text;
-const gateEvents = (workspaceId: string) => getStore().listEvents(workspaceId, { type: [GATE_JUDGED, GATE_OVERRIDDEN, GATE_CONFIRMED] });
+const gateEvents = (workspaceId: string) => getStore().listEvents(workspaceId, { type: [GATE_JUDGED, "gate.changed"] }).filter((event) => event.type === GATE_JUDGED || ["overridden", "confirmed"].includes((event.payload as { change?: string }).change ?? ""));
 /** A parked milestone is asked about once a month (the person's rule, §四 J2a). */
 const PARK_ASK_DAYS = 30;
 const DAY = 86_400_000;
@@ -35,9 +35,9 @@ function lastAnswers(events: ReturnType<typeof gateEvents>): Map<string, string>
   const judged = new Map(events.filter((event) => event.type === GATE_JUDGED).map((event) => [event.eventId, event.payload as GateJudgedPayload]));
   const out = new Map<string, string>();
   for (const event of [...events].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
-    const original = event.type === GATE_CONFIRMED || event.type === GATE_OVERRIDDEN ? judged.get(event.type === GATE_CONFIRMED ? event.entityId : (event.payload as GateOverriddenPayload).judgedId) : undefined;
+    const original = (event.type === "gate.changed" && (event.payload as { change?: string }).change === "confirmed") || (event.type === "gate.changed" && (event.payload as { change?: string }).change === "overridden") ? judged.get((event.type === "gate.changed" && (event.payload as { change?: string }).change === "confirmed") ? event.entityId : (event.payload as GateOverriddenPayload).judgedId) : undefined;
     if (!original) continue;
-    out.set(`${original.gate}:${original.subject.kind}:${original.subject.id}`, event.type === GATE_CONFIRMED ? original.output.verdict : (event.payload as GateOverriddenPayload).to);
+    out.set(`${original.gate}:${original.subject.kind}:${original.subject.id}`, (event.type === "gate.changed" && (event.payload as { change?: string }).change === "confirmed") ? original.output.verdict : (event.payload as GateOverriddenPayload).to);
   }
   return out;
 }
@@ -46,7 +46,7 @@ function lastAnswers(events: ReturnType<typeof gateEvents>): Map<string, string>
 export function gateCheckAsks(ctx: AccessContext, now = appNow()): Ask[] {
   const t = tFor(localeFor(ctx));
   const events = gateEvents(ctx.workspaceId);
-  const confirmed = new Set(events.filter((event) => event.type === GATE_CONFIRMED).map((event) => event.entityId));
+  const confirmed = new Set(events.filter((event) => (event.type === "gate.changed" && (event.payload as { change?: string }).change === "confirmed")).map((event) => event.entityId));
   const answered = lastAnswers(events);
   const asks: Ask[] = [];
   for (const gate of GATE_IDS.filter((id) => GATE_SPEC[id].asks)) {
@@ -76,9 +76,9 @@ export function gateCheckAsks(ctx: AccessContext, now = appNow()): Ask[] {
 function parkedAsks(ctx: AccessContext, now: Date): Ask[] {
   const t = tFor(localeFor(ctx));
   const store = getStore();
-  const parked = parkedMilestones(store.listEvents(ctx.workspaceId, { type: [MILESTONE_PARKED, MILESTONE_UNPARKED, "milestone.kept_parked"] }));
+  const parked = parkedMilestones(store.listEvents(ctx.workspaceId, { type: "milestone.changed", change: ["parked", "unparked", "kept_parked"] }));
   const kept = new Map<string, string>();
-  for (const event of store.listEvents(ctx.workspaceId, { type: "milestone.kept_parked" })) if ((kept.get(event.entityId) ?? "") < event.createdAt) kept.set(event.entityId, event.createdAt);
+  for (const event of store.listEvents(ctx.workspaceId, { type: "milestone.changed", change: "kept_parked" })) if ((kept.get(event.entityId) ?? "") < event.createdAt) kept.set(event.entityId, event.createdAt);
   const milestones = new Map(store.listMilestones(ctx.workspaceId).map((item) => [item.id, item]));
   return [...parked.entries()].flatMap(([id, entry]): Ask[] => {
     const milestone = milestones.get(id);
@@ -101,14 +101,14 @@ export function overrideGate(ctx: AccessContext, input: { judgedId: string; to: 
   const payload = judged.payload as GateJudgedPayload;
   const note = (input.note ?? "").trim().slice(0, 500);
   if (input.to === payload.output.verdict) {
-    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, type: GATE_CONFIRMED, entityId: input.judgedId,
-      idempotencyKey: `${GATE_CONFIRMED}:${input.judgedId}`, payload: { gate: payload.gate, subject: payload.subject, ...(note ? { note } : {}) } });
+    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, type: "gate.changed", entityId: input.judgedId,
+      idempotencyKey: `gate.confirmed:${input.judgedId}`, payload: { gate: payload.gate, subject: payload.subject, ...(note ? { note } : {}), change: "confirmed" } });
     return { ok: true };
   }
   if (!GATE_VERDICTS[payload.gate].includes(input.to) && input.to !== CANNOT_JUDGE) return { ok: false, code: "GATE_VERDICT_UNKNOWN" };
   const override: GateOverriddenPayload = { judgedId: input.judgedId, gate: payload.gate, subject: payload.subject, from: payload.output.verdict, to: input.to, ...(note ? { note } : {}) };
-  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, type: GATE_OVERRIDDEN, entityId: input.judgedId,
-    idempotencyKey: `${GATE_OVERRIDDEN}:${input.judgedId}:${Date.now()}`, payload: override });
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, type: "gate.changed", entityId: input.judgedId,
+    idempotencyKey: `gate.overridden:${input.judgedId}:${Date.now()}`, payload: { ...override, change: "overridden" } });
   return { ok: true };
 }
 
@@ -129,15 +129,15 @@ function answerParked(ctx: AccessContext, milestoneId: string, optionId: string)
   if (!milestone) return { ok: false, code: "MILESTONE_NOT_FOUND" };
   const at = Date.now();
   if (optionId === "keep") {
-    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, type: "milestone.kept_parked", entityId: milestoneId, idempotencyKey: `milestone.kept_parked:${milestoneId}:${at}`, payload: {} });
+    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, type: "milestone.changed", entityId: milestoneId, idempotencyKey: `milestone.kept_parked:${milestoneId}:${at}`, payload: { change: "kept_parked" } });
     return { ok: true };
   }
   if (optionId !== "open" && optionId !== "drop") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
   const saved = saveMilestoneEdit(ctx, { id: milestoneId, identityId: milestone.identityId, projectId: milestone.projectId ?? "", title: milestone.title,
     status: optionId === "open" ? "approved" : "archived", successCriteria: milestone.successCriteria ?? [], ...(milestone.templateId ? { templateId: milestone.templateId } : {}) });
   if (!saved.ok) return saved;
-  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, type: MILESTONE_UNPARKED, entityId: milestoneId, idempotencyKey: `${MILESTONE_UNPARKED}:${milestoneId}:${at}`,
-    payload: { by: "person", choice: optionId } });
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, type: "milestone.changed", entityId: milestoneId, idempotencyKey: `milestone.unparked:${milestoneId}:${at}`,
+    payload: { by: "person", choice: optionId, change: "unparked" } });
   return { ok: true };
 }
 
@@ -166,8 +166,8 @@ export function saveGateGoal(ctx: AccessContext, text: string): { ok: true } {
 export function reportSetback(ctx: AccessContext, text: string, line?: string): { ok: true; id: string } | { ok: false; code: string } {
   const clean = text.trim().slice(0, 2000);
   if (!clean) return { ok: false, code: "SETBACK_EMPTY" };
-  const written = getStore().appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, type: "setback.reported", entityId: ctx.workspaceId,
-    idempotencyKey: `setback.reported:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`, payload: { text: clean, ...(line ? { line } : {}) } });
+  const written = getStore().appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, type: "gate.changed", entityId: ctx.workspaceId,
+    idempotencyKey: `setback.reported:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`, payload: { text: clean, ...(line ? { line } : {}), change: "setback_reported" } });
   return { ok: true, id: written.eventId };
 }
 
@@ -191,7 +191,7 @@ export function loadGateReview(ctx: AccessContext, sinceIso: string, untilIso: s
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
   const completion = latestGateJudgements(events, "completion");
   const priority = latestGateJudgements(events, "priority");
-  const claimedNoEvidence = store.listEvents(ctx.workspaceId, { type: "human.completed" }).filter((event) => event.createdAt >= sinceIso && event.createdAt < untilIso).flatMap((event) => {
+  const claimedNoEvidence = store.listEvents(ctx.workspaceId, { type: "work_order.transitioned" }).filter((event) => (event.payload as { event?: { type?: string } }).event?.type === "human.completed").filter((event) => event.createdAt >= sinceIso && event.createdAt < untilIso).flatMap((event) => {
     const id = String((event.payload as { workOrderId?: string }).workOrderId ?? event.entityId);
     const label = priority.get(`task:${id}`);
     if (!label || verdictOf(label) === "normal") return [];
@@ -209,10 +209,10 @@ export function loadGateReview(ctx: AccessContext, sinceIso: string, untilIso: s
   const ratio = estimateRatio(store.listAllDurationObservations(ctx.workspaceId), now);
   const night = nightCounts(events, sinceIso, untilIso);
   const milestones = new Map(store.listMilestones(ctx.workspaceId).map((item) => [item.id, item]));
-  const parked = [...parkedMilestones(store.listEvents(ctx.workspaceId, { type: [MILESTONE_PARKED, MILESTONE_UNPARKED] })).entries()]
+  const parked = [...parkedMilestones(store.listEvents(ctx.workspaceId, { type: "milestone.changed", change: ["parked", "unparked"] })).entries()]
     .filter(([id]) => milestones.get(id)?.status === "draft").map(([id, entry]) => ({ id, title: milestones.get(id)?.title ?? id, unparkWhen: entry.unparkWhen, at: entry.at }));
   const judgedById = new Map(events.filter((event) => event.type === GATE_JUDGED).map((event) => [event.eventId, event.payload as GateJudgedPayload]));
-  const overrides = events.filter((event) => event.type === GATE_OVERRIDDEN && event.createdAt >= sinceIso && event.createdAt < untilIso).map((event) => {
+  const overrides = events.filter((event) => (event.type === "gate.changed" && (event.payload as { change?: string }).change === "overridden") && event.createdAt >= sinceIso && event.createdAt < untilIso).map((event) => {
     const payload = event.payload as GateOverriddenPayload;
     const judged = judgedById.get(payload.judgedId);
     const order = judged?.subject.kind === "task" ? orders.get(judged.subject.id) : undefined;

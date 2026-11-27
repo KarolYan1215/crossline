@@ -80,7 +80,7 @@ test("the reorganisation: payloads rewritten once, merges run, backplans request
   expect((get("scores").payload as { owner?: string }).owner).toBeUndefined();
   expect(onPersonsBoard(get("plan"))).toBe(true);
   expect(get("rules").state).toBe("approved");
-  const reruns = store.listEvents(ws, { type: "goal.backplan_rerun_requested" }).map((event) => event.entityId).sort();
+  const reruns = store.listEvents(ws, { type: "goal.changed", change: "backplan_rerun_requested" }).map((event) => event.entityId).sort();
   // The startup milestone lost its only task to the assistant.
   expect(reruns).toEqual(["pilot"]);
   const op = store.listEvents(ws, { type: "op.applied" }).at(-1)!.payload as { bySystem: boolean; inverse: { kind: string; entries: Array<{ id: string; payload: unknown; state: string }> } };

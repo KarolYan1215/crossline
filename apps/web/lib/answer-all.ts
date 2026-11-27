@@ -61,8 +61,6 @@ export async function runAnswerAll(ctx: AccessContext, now = appNow()): Promise<
 export const AUTO_ANSWER_AFTER_MS = 48 * 3_600_000;
 /** The asks (id and fingerprint) and proposals once settled by `autoAnswerDue`; the last 500. */
 export const AUTO_ANSWERED_SETTING = "asks.autoAnswered";
-/** Each settling by `autoAnswerDue`: its undo operation and the kinds it settled, so an undo can be read as 「ask me about this kind」. */
-export const AUTO_ANSWERED_EVENT = "ask.auto_answered";
 
 /**
  * Kinds the person no longer wants settled for them: their settling was undone `DO_THEN_TELL_REVERT_AFTER` times in the last thirty days.
@@ -73,7 +71,7 @@ export function revertedKinds(ctx: AccessContext, now = appNow()): Set<AskKind> 
   const since = new Date(now.getTime() - 30 * 86_400_000).toISOString();
   const undone = new Set(store.listEvents(ctx.workspaceId, { type: "op.undone" }).filter((event) => event.createdAt >= since).map((event) => event.entityId));
   const counts = new Map<AskKind, number>();
-  for (const event of store.listEvents(ctx.workspaceId, { type: AUTO_ANSWERED_EVENT }).filter((item) => item.createdAt >= since)) {
+  for (const event of store.listEvents(ctx.workspaceId, { type: "ask.changed", change: "auto_answered" }).filter((item) => item.createdAt >= since)) {
     const payload = event.payload as { opId?: string; kinds?: AskKind[] };
     if (!payload.opId || !undone.has(payload.opId)) continue;
     for (const kind of new Set(payload.kinds ?? [])) counts.set(kind, (counts.get(kind) ?? 0) + 1);
@@ -132,8 +130,8 @@ export async function autoAnswerDue(ctx: AccessContext, now = appNow()): Promise
   const result = await carryOut(ctx, { ...plan, asks, results: [], proposals, total }, autoAnsweredLabel(t, total, waited,
     asks[0] ? (open.get(asks[0].askId) && subjectOf(open.get(asks[0].askId)!)) || asks[0].title : proposals[0]!.title), now);
   if (result.done && result.op) {
-    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `${AUTO_ANSWERED_EVENT}:${result.op.id}`, type: AUTO_ANSWERED_EVENT,
-      entityId: result.op.id, payload: { opId: result.op.id, kinds: [...new Set(asks.filter((step) => result.settled.includes(step.askId)).map((step) => step.kind))] } });
+    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `ask.auto_answered:${result.op.id}`, type: "ask.changed",
+      entityId: result.op.id, payload: { opId: result.op.id, kinds: [...new Set(asks.filter((step) => result.settled.includes(step.askId)).map((step) => step.kind))], change: "auto_answered" } });
     // What each settled thing was, what was done to it, and where it can be seen (and changed) now: the bare 「已按推荐处理」 said none of it.
     const settled = new Set(result.settled);
     const items: AutoAnswered[] = [

@@ -13,7 +13,7 @@ import { enterUsageWorkspace, readCostSignal, runCodexSkill, setPrivateGuardProv
 import { MATERIAL_SEARCH_SCHEMA, validateMaterialSearch, type MaterialSearchContext, type PrivateGuard } from "../packages/core/src/index";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
-const SKILL = "crossline:crossline-material-researcher";
+const SKILL = "crossline:crossline-research:material";
 // A fictional person: what the run holds and what no query may carry.
 const guard: PrivateGuard = { terms: ["林晓舟", "xzlin.research@example.edu", "2021123456"],
   passages: ["本人正在准备关于低功耗存内计算芯片的博士资格考试，导师要求十二月前交初稿"] };

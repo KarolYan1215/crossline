@@ -2,12 +2,13 @@
  * Does the interview itself draw out what Crossline needs? (asked 2026-10-08: the real account's interview was fed a profile the person
  * had already organised, so it never showed whether the interview leads — and it skipped stages and never asked when ECE 548 meets.)
  *
- *   pnpm exec tsx scripts/onboarding-eval.ts [persona.md] [--turns 20] [--provider <config.json>:<id> | --sponsor [model]]
+ *   pnpm exec tsx scripts/onboarding-eval.ts [persona.md] [--turns 60] [--provider <config.json>:<id> | --sponsor [model]]
  *
  * A throwaway database and a fresh account. The person is played by Skill `crossline-eval-persona` from a hidden persona sheet (default:
  * the person's own profile under `data/profile/`, never committed): it answers only what it is asked, never volunteers, uploads a file only
- * when asked for one. The interview runs as it does for a real new user, from an empty first message, until it says it is done or the turn
- * limit. Dates it reads are confirmed as a person would; nothing else is answered for them. The report scores the interview against its
+ * when asked for one. It fills the scale page first, in character (`playScale`, stored as the scale route stores it, 2026-11-27). The
+ * interview runs as it does for a real new user, from an empty first message, until it says it is done or the checklist is complete
+ * (`--turns` is only a safety cap). Dates it reads are confirmed as a person would; nothing else is answered for them. The report scores the interview against its
  * own completion list (`interviewChecklistFor`, the interview's items only — the person's own clicks are not the interview's to earn; 「完整」 is
  * `interviewComplete`, which leaves out what the design defers to later: a project's details and the synthesis),
  * per course and project, and prints turns, questions and minutes. It spends real quota and takes hours; it is never run as a side effect.
@@ -48,6 +49,7 @@ import { createOnboardingExtractor, extractionSettled, requestExtraction } from 
 import { createOnboardingSessionRunner } from "../apps/worker/src/onboarding-session";
 import { readMatrixConfig, startProviderHarness, type ProviderSpec } from "./provider-harness";
 import { sponsorFromEnv } from "../apps/worker/src/sponsor";
+import { playScale, SCALE_PLAYER_SCHEMA, type ScaleTaps } from "./persona-scale";
 
 // The web library guards itself with `import "server-only"`, which only Next resolves; here it is an empty module.
 // A component's stylesheet (`import "./x.css"`, opening-card → CalendarSetupStep since 2026-11-22) is Next's to bundle: empty here too.
@@ -83,7 +85,7 @@ console.info(JSON.stringify({ residentHold: holding ? holdFile : "none (no resid
 const lite = args.includes("--lite");
 /** `--opening <file.json>`: another person's opening card (lines, base, fixed, tone, edition "full"), set through `setupLines` like `--lite`. */
 const openingFile = args.includes("--opening") ? args[args.indexOf("--opening") + 1] : undefined;
-const turnLimit = Number(args[args.indexOf("--turns") + 1]) || 20;
+const turnLimit = Number(args[args.indexOf("--turns") + 1]) || 60;
 const personaFile = args.find((arg) => arg.endsWith(".md"))
   ?? (lite ? path.join(repoRoot, "scripts", "personas", "office-worker-lite.md") : path.join(repoRoot, "data", "profile", "karolyan1215.profile.md"));
 if (!existsSync(personaFile)) throw new Error(`persona sheet not found: ${personaFile}`);
@@ -284,6 +286,24 @@ const PERSONA_SCHEMA = { type: "object", additionalProperties: false, required: 
 type PersonaAnswer = { answers: Array<{ questionId: string; picked: string[]; other: string }>; freeText: string; upload: string[] };
 
 const transcript: string[] = [];
+// The scale page comes first, as for a new account (2026-11-27): every item answered in character, stored as the route stores it. The
+// simulated person stays on the Codex sign-in, as below.
+{
+  (globalThis as { crosslineStore?: unknown }).crosslineStore = store;
+  const { changeScale } = await import("../apps/web/lib/profile-scale");
+  const ctx = { principalId: principal.id, workspaceId, role: "owner", identity: { provider: "credential", issuer: "onboarding-eval", subject: principal.id },
+    authMethod: "session", requestId: "onboarding-eval-scale" } as import("../packages/core/src/index").AccessContext;
+  const scale = await playScale(persona, async (context) => {
+    const played = await runCodexSkill<ScaleTaps>(client, context, { skillName: "crossline:crossline-eval-persona", cwd: repoRoot,
+      developerInstructions: "Play the person as the Skill describes. Return raw JSON only.", outputSchema: SCALE_PLAYER_SCHEMA, prepareInput: () => context,
+      validateOutput: (output) => output as ScaleTaps, onAudit: () => {}, timeoutMs: 30 * 60_000 });
+    return played.ok ? played.output : undefined;
+  });
+  const stored = changeScale(ctx, { action: "answers", answers: scale });
+  if (!stored.ok) throw new Error(`changeScale refused: ${stored.code}`);
+  changeScale(ctx, { action: "complete" });
+  transcript.push(`量表页：${scale.filter((answer) => answer.score !== null).length}/${scale.length} 题作答`);
+}
 // Every question shown, with the line it was asked under, for the domain-line report.
 const asked: Question[] = [];
 // The materials step: everything the person has is added before the first round, and the interview reads it before asking.

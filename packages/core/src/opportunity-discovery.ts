@@ -22,8 +22,8 @@ export const POLL_PERIOD_HOURS = 24;
 export const CANDIDATES_PER_NEED = 5;
 export const PAGES_PER_READING = 6;
 
-export const OPPORTUNITY_NEEDS_SKILL = "crossline:crossline-opportunity-needs";
-export const OPPORTUNITY_READER_SKILL = "crossline:crossline-opportunity-reader";
+export const OPPORTUNITY_NEEDS_SKILL = "crossline:crossline-research:needs";
+export const OPPORTUNITY_READER_SKILL = "crossline:crossline-page-reader:opportunity";
 
 // ── ① Needs (read by the watch migration and `watchFromProposal`; the Skill proposes watches since §17.2) ────────────────────────────────────────────────────────────────────────────────────────────────────────
 

@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import {
-  WORKFLOW_FEEDBACK_EVENT, classifyAgentFailure, finalVerdict, grownSkillFilesKey, grownSkillName, scanForDeclaredAccess, scanSkillFiles, skillFrontmatter, validateWorkflowManifest,
+import { classifyAgentFailure, finalVerdict, grownSkillFilesKey, grownSkillName, scanForDeclaredAccess, scanSkillFiles, skillFrontmatter, validateWorkflowManifest,
   workflowLineDiff, tFor, type GrownSkillRecord, type Locale, type Translate, type WorkflowManifest
 } from "@crossline/core";
 import type { CodexRpcBoundary } from "@crossline/codex";
@@ -57,19 +56,19 @@ export function improvementSignals(store: CrosslineStore, workspaceId: string, r
   const signals: ImprovementSignal[] = [];
   // A merge is a reason only while the absorbed workflow is still merged into this one: once undone (or the absorbed one removed), it is not taken over.
   const stillAbsorbed = new Set(readGrownSkills(store, workspaceId).filter((item) => item.mergedInto?.id === record.id).map((item) => item.id));
-  for (const event of store.listEvents(workspaceId, { type: WORKFLOW_FEEDBACK_EVENT, entityId: record.id })) {
+  for (const event of store.listEvents(workspaceId, { type: "skill.changed", change: "grown_feedback", entityId: record.id })) {
     if (!after(event.createdAt)) continue;
     const payload = event.payload as { text?: string; absorbed?: string };
     if (payload.absorbed && !stillAbsorbed.has(payload.absorbed)) continue;
     signals.push({ at: event.createdAt, kind: payload.absorbed ? "merge" : "feedback", text: String(payload.text ?? ""), ...(payload.absorbed ? { absorbed: payload.absorbed } : {}) });
   }
-  for (const event of store.listEvents(workspaceId, { type: "agent.task.reviewed" })) {
+  for (const event of store.listEvents(workspaceId, { type: "agent.changed", change: "task_reviewed" })) {
     const payload = event.payload as { taskId?: string; note?: string; decision?: string; by?: string };
     if (!String(payload.taskId ?? "").startsWith(prefix) || !payload.note?.trim() || payload.by === "system" || !after(event.createdAt)) continue;
     // i18n-ignore: a line of the reviser's brief (model-facing)
     signals.push({ at: event.createdAt, kind: "review", text: `${payload.decision === "accepted" ? "采纳时的意见" : "退回的理由"}：${payload.note.trim()}`, taskId: payload.taskId! });
   }
-  for (const event of store.listEvents(workspaceId, { type: "agent.retry_requested" })) {
+  for (const event of store.listEvents(workspaceId, { type: "agent.changed", change: "retry_requested" })) {
     const payload = event.payload as { taskId?: string; note?: string; by?: string };
     if (!String(payload.taskId ?? "").startsWith(prefix) || !payload.note?.trim() || payload.by !== "person" || !after(event.createdAt)) continue;
     signals.push({ at: event.createdAt, kind: "retry", text: `要求重做：${payload.note.trim()}`, taskId: payload.taskId! }); // i18n-ignore: model-facing
@@ -93,7 +92,7 @@ export function improvementDue(store: CrosslineStore, workspaceId: string, recor
   if (!person.length && signals.length < FAILURES_TO_IMPROVE) return undefined;
   // A merge is answered like what the person said: at once, then on the same cooldown.
   const since = record.improvedAt ?? record.createdAt;
-  const attempts = store.listEvents(workspaceId, { type: "skill.grown.improve_started", entityId: record.id }).filter((event) => event.createdAt > since);
+  const attempts = store.listEvents(workspaceId, { type: "job.ran", job: "skill.grown.improve", state: "started", entityId: record.id }).filter((event) => event.createdAt > since);
   const last = attempts.at(-1);
   // Something the person said after the last try starts one at once; otherwise the cooldown, and a bounded number of tries.
   if (last && !person.some((signal) => signal.at > last.createdAt)) {
@@ -138,8 +137,8 @@ export async function installRevision(store: CrosslineStore, workspaceId: string
   const t = tFor(locale);
   const summary = record.manifest.summary;
   const reject = (reason: string) => {
-    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `skill.grown.revision_rejected:${record.id}:${now.getTime()}`, type: "skill.grown.revision_rejected",
-      entityId: record.id, payload: { id: record.id, reason: reason.slice(0, 300) } });
+    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `skill.grown.revision_rejected:${record.id}:${now.getTime()}`, type: "skill.changed",
+      entityId: record.id, payload: { id: record.id, reason: reason.slice(0, 300), change: "grown_revision_rejected" } });
     return { state: "rejected" as const, reason };
   };
   // The person turned it off, reverted it or accepted new risks while the run worked: the revision was made for a state that is gone.
@@ -150,8 +149,8 @@ export async function installRevision(store: CrosslineStore, workspaceId: string
     return (current.version ?? 1) !== (record.version ?? 1) ? "version_changed" : undefined;
   };
   const skip = (reason: string) => {
-    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `skill.grown.revision_skipped:${record.id}:${now.getTime()}`, type: "skill.grown.revision_skipped",
-      entityId: record.id, payload: { id: record.id, reason, version: record.version ?? 1 } });
+    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `skill.grown.revision_skipped:${record.id}:${now.getTime()}`, type: "job.ran",
+      entityId: record.id, payload: { id: record.id, reason, version: record.version ?? 1, job: "skill.grown.revise", state: "skipped" } });
     return { state: "skipped" as const, reason };
   };
   const early = moved();
@@ -162,8 +161,8 @@ export async function installRevision(store: CrosslineStore, workspaceId: string
     const why = readRunFile(outcome.directory, "NO_CHANGE.md")?.trim() ?? "";
     if (why) {
       // Answered without a change: the signals are settled until something new comes (`improvedAt`).
-      store.appendEvent({ ownerId, workspaceId, idempotencyKey: `skill.grown.improve_skipped:${record.id}:${now.getTime()}`, type: "skill.grown.improve_skipped",
-        entityId: record.id, payload: { id: record.id, why: why.slice(0, 400) } });
+      store.appendEvent({ ownerId, workspaceId, idempotencyKey: `skill.grown.improve_skipped:${record.id}:${now.getTime()}`, type: "job.ran",
+        entityId: record.id, payload: { id: record.id, why: why.slice(0, 400), job: "skill.grown.improve", state: "skipped" } });
       writeGrownSkills(store, workspaceId, readGrownSkills(store, workspaceId).map((item) => item.id === record.id ? { ...item, improvedAt: now.toISOString() } : item));
       sayToPerson(store, workspaceId, t("看过对工作流「{{summary}}」的意见，这次没有改它：{{why}}", { summary, why: why.slice(0, 200) }), "workflow_improved", `improve-skip:${record.id}:${now.getTime()}`,
         [{ label: t("去看工作流"), href: `/automation/${encodeURIComponent(record.id)}` }], now);
@@ -226,7 +225,7 @@ export function revisionTaint(store: CrosslineStore, workspaceId: string, direct
   for (const directory of directories) {
     if (UNTRUSTED_MARKS.some((mark) => readRunFile(directory, mark) !== undefined)) found.add("marked");
     const run = runs.find((item) => item.directory && sameDirectory(item.directory, directory));
-    const requested = run ? store.listEvents(workspaceId, { type: "agent.task.requested", entityId: run.taskId }).at(-1)?.payload as Record<string, unknown> | undefined : undefined;
+    const requested = run ? store.listEvents(workspaceId, { type: "agent.changed", change: "task_requested", entityId: run.taskId }).at(-1)?.payload as Record<string, unknown> | undefined : undefined;
     if (!run || !requested) { found.add("unknown"); continue; }
     if (Array.isArray(requested.untrusted)) for (const label of requested.untrusted) found.add(String(label));
     else if (requested.untrusted === true) found.add("untrusted");
@@ -246,7 +245,7 @@ export function revisionTaint(store: CrosslineStore, workspaceId: string, direct
  * page, document…) and a hosted search (`searches`). Review of 2026-11-25: the tools mode never counts `searches`, so `tainted` is read too.
  */
 export function completedTaint(store: CrosslineStore, workspaceId: string, taskId: string): string[] {
-  const completed = store.listEvents(workspaceId, { type: "agent.task.completed", entityId: taskId }).at(-1)?.payload as { searches?: number; tainted?: unknown } | undefined;
+  const completed = store.listEvents(workspaceId, { type: "agent.changed", change: "task_completed", entityId: taskId }).at(-1)?.payload as { searches?: number; tainted?: unknown } | undefined;
   const found = Array.isArray(completed?.tainted) ? completed.tainted.map(String) : [];
   if (Number(completed?.searches ?? 0) > 0) found.push("web");
   return [...new Set(found)];
@@ -285,8 +284,8 @@ function holdRevision(store: CrosslineStore, workspaceId: string, record: GrownS
     pendingRevision: { taskId: next.taskId, directory: next.directory, digest: revisionDigest(next.files), fromVersion: record.version ?? 1, untrusted: next.untrusted,
       changes: next.changes.slice(0, 600), review: next.review, at } }));
   // The run's result is the decision: back on 待确认 even though it was accepted by itself.
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `agent.task.reopened:${next.taskId}:untrusted`, type: "agent.task.reopened",
-    entityId: next.taskId, payload: { taskId: next.taskId, why: "untrusted_revision", workflowId: record.id, untrusted: next.untrusted } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `agent.task.reopened:${next.taskId}:untrusted`, type: "agent.changed",
+    entityId: next.taskId, payload: { taskId: next.taskId, why: "untrusted_revision", workflowId: record.id, untrusted: next.untrusted, change: "task_reopened" } });
   sayToPerson(store, workspaceId, t("工作流「{{summary}}」按意见改好了，但这次修改读过别人写的内容（{{sources}}），要本人在待确认里看过改动再生效；不采纳就保持原样。",
     { summary: record.manifest.summary, sources }), "workflow_improved", `improve-held:${record.id}:${next.taskId}`, [{ label: t("去待确认"), href: "/approvals#assistant" }], now);
 }
@@ -316,7 +315,7 @@ export function applyPendingRevisions(store: CrosslineStore, workspaceId: string
     const drop = (reason: string) => {
       clear();
       store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.revision_rejected:${record.id}:${pending.taskId}`,
-        type: "skill.grown.revision_rejected", entityId: record.id, payload: { id: record.id, reason, taskId: pending.taskId, untrusted: pending.untrusted } });
+        type: "skill.changed", entityId: record.id, payload: { id: record.id, reason, taskId: pending.taskId, untrusted: pending.untrusted, change: "grown_revision_rejected" } });
       out.push({ id: record.id, state: "dropped", reason });
     };
     if (declined) { drop(run?.status === "rejected" ? "person_declined" : "not_reviewed"); continue; }
@@ -382,8 +381,8 @@ export function workflowImprovePass(store: CrosslineStore, workspaceId: string, 
       .slice(-2).map((run) => run.directory);
     // Judged before the run: what the folders it is handed hold decides whether its revision may go in force by itself.
     const untrusted = revisionTaint(store, workspaceId, results);
-    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.improve_started:${taskId}`, type: "skill.grown.improve_started",
-      entityId: record.id, payload: { id: record.id, taskId, signals: signals.map((signal) => signal.kind), ...(untrusted.length ? { untrusted } : {}) } });
+    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.improve_started:${taskId}`, type: "job.ran",
+      entityId: record.id, payload: { id: record.id, taskId, signals: signals.map((signal) => signal.kind), ...(untrusted.length ? { untrusted } : {}), job: "skill.grown.improve", state: "started" } });
     improving.add(workspaceId);
     const started = runFree(improveTask(record, current, signals, results, taskId, localeOf(store, workspaceId)), (outcome) => {
       // What the improving run itself read counts too: a revision written after it read mail or a page is held like one from such folders.

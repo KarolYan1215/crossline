@@ -234,7 +234,7 @@ const obj = (properties: Record<string, unknown>) => ({ type: "object", properti
 const roleEnum = { type: "string", enum: Object.keys(STEP_ROLES) };
 
 /**
- * The archetype curator's answer (Skill `crossline-archetype-curator`): at most three new archetypes drawn from tasks this person
+ * The archetype curator's answer (Skill `crossline-task-planner:archetype`): at most three new archetypes drawn from tasks this person
  * keeps doing that no built-in archetype fits well, each built from the same primitives and roles, resting on at least two of the
  * person's tasks and on a public standard or guide (a source the worker opens before keeping it).
  */

@@ -145,14 +145,16 @@ export function EnergyScatter({ map, width = 520 }: { map: PortraitReport["energ
   const t = useT();
   if (!map.length) return null;
   const groups = energyLegend(map);
-  // An older report has only high/low: placed in its quadrant.
-  const dots = groups.flatMap((group) => group.entries).map((item) => ({ key: `${item.number}`, number: item.number, filled: item.charge === "charge", title: item.activity,
+  // An older report has only high/low: placed in its quadrant. A score left null (nothing said places it) is not drawn; its legend line
+  // says 「未谈到」.
+  const unplaced = (item: { skillScore?: number | null; loveScore?: number | null }) => item.skillScore === null || item.loveScore === null;
+  const dots = groups.flatMap((group) => group.entries).filter((item) => !unplaced(item)).map((item) => ({ key: `${item.number}`, number: item.number, filled: item.charge === "charge", title: item.activity,
     x: item.skillScore ?? (item.skill === "high" ? 70 : 30), y: item.loveScore ?? (item.love === "high" ? 70 : 30) }));
   return <div className="pt-energy">
     <NumberedPlane dots={dots} width={width} height={Math.round(Math.min(380, width * 0.66))} r={12} shade="top-right" x={t("擅长 →")} y={t("热爱 ↑")} corner={t("擅长且热爱")} />
     <dl className="pt-legend">{groups.map((group) => <div key={group.category}>
       <dt>{t(group.category)}</dt>
-      {group.entries.map((entry) => <dd key={entry.number}><b>{entry.number}</b><span className="gen">{entry.activity}</span><small>{entry.charge === "charge" ? t("充电") : t("耗电")}</small></dd>)}
+      {group.entries.map((entry) => <dd key={entry.number}><b>{entry.number}</b><span className="gen">{entry.activity}</span><small>{entry.charge === "charge" ? t("充电") : t("耗电")}{unplaced(entry) ? ` · ${t("未谈到")}` : ""}</small></dd>)}
     </div>)}</dl>
   </div>;
 }

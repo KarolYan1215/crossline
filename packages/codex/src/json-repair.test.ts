@@ -89,7 +89,7 @@ function runtime(answer: string) {
   const client = new codex.JsonLineRpcClient((line) => {
     const req = JSON.parse(line);
     let result: unknown = {};
-    if (req.method === "skills/list") result = { data: [{ cwd: "C:\\repo", errors: [], skills: [{ name: "crossline:crossline-portrait-writer", path: "C:\\skill\\SKILL.md", enabled: true }] }] };
+    if (req.method === "skills/list") result = { data: [{ cwd: "C:\\repo", errors: [], skills: [{ name: "crossline:crossline-portrait", path: "C:\\skill\\SKILL.md", enabled: true }] }] };
     if (req.method === "account/read") result = { account: { type: "chatgpt" }, requiresOpenaiAuth: false };
     if (req.method === "model/list") result = { data: [] };
     if (req.method === "config/read") result = { config: {} };
@@ -111,7 +111,7 @@ function runtime(answer: string) {
 test("the runner takes a mended answer in the same turn and still validates it; an answer past mending is refused as before", async () => {
   const run = (answer: string, validate: (output: unknown) => unknown = (output) => output) => {
     const fake = runtime(answer);
-    return codex.runCodexSkill(fake.client, { task: "x" }, { skillName: "crossline:crossline-portrait-writer", cwd: "C:\\repo", developerInstructions: "Write.",
+    return codex.runCodexSkill(fake.client, { task: "x" }, { skillName: "crossline:crossline-portrait:report", cwd: "C:\\repo", developerInstructions: "Write.",
       outputSchema: SCHEMA, prepareInput: (value) => value, validateOutput: validate, onAudit: () => {} }).then((result) => ({ result, turns: fake.turns.length }));
   };
   const mended = await run(JSON.stringify(WHOLE).replace("\"impact\":3}]", "\"impact\":3}]}"));
@@ -129,7 +129,7 @@ test("the runner takes a mended answer in the same turn and still validates it; 
   expect(logged.some((line) => line.includes("skill.repair_repeated"))).toBe(true);
   // What is logged says where it broke and how long it was, never the text of the answer.
   const unparsed = logged.map((line) => { try { return JSON.parse(line) as Record<string, unknown>; } catch { return {}; } }).find((entry) => entry.type === "skill.json_unparsed");
-  expect(unparsed).toMatchObject({ skill: "crossline:crossline-portrait-writer", length: 40, closed: false, looping: false });
+  expect(unparsed).toMatchObject({ skill: "crossline:crossline-portrait:report", length: 40, closed: false, looping: false });
   expect(logged.join("\n")).not.toContain("她");
 });
 

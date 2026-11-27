@@ -23,7 +23,7 @@ test("eligible proposals take effect with the system as approver and are told in
   expect(states).toEqual({ prep: "approved", deep: "approved", send: "approved", pick: "awaiting_plan_approval" });
   const transition = store.listEvents("w", { type: "work_order.transitioned", entityId: "prep" }).at(-1)!;
   expect(JSON.stringify(transition.payload)).toContain(AUTO_APPROVER_ID);
-  expect(store.listEvents("w", { type: "work_order.auto_approved" }).map((event) => event.entityId).sort()).toEqual(["deep", "prep", "send"]);
+  expect(store.listEvents("w", { type: "work_order.changed", change: "auto_approved" }).map((event) => event.entityId).sort()).toEqual(["deep", "prep", "send"]);
   const said = nudges(store);
   expect(said).toHaveLength(1);
   const text = JSON.stringify(said[0]!.payload);
@@ -43,7 +43,7 @@ test("an automatic approval the person took back is not re-applied", () => {
   store.saveWorkOrder(order("prep", "整理复习提纲", "preparation"));
   autoApproveEligible(store, "w");
   store.transitionWorkOrder("w", "prep", { type: "approval.revoked", reason: "我自己来排" }, "revoke:prep:0");
-  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "rev:prep:0", type: "work_order.auto_approval_revoked", entityId: "prep", payload: {} });
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "rev:prep:0", type: "work_order.changed", entityId: "prep", payload: { change: "auto_approval_revoked" } });
   expect(store.listWorkOrders("w")[0]!.state).toBe("awaiting_plan_approval");
   expect(autoApproveEligible(store, "w")).toEqual([]);
   store.close();

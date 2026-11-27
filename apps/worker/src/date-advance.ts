@@ -2,10 +2,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import {
-  advanceResults, conservativeFinish, MILESTONE_PARKED, MILESTONE_UNPARKED, onPersonsBoard, parkedMilestones, taskTitleOf, daysBetween, engagementTier, MILESTONE_RISKS_SETTING, milestoneReadingOf, monthDay, parseMilestoneRisks, overdueTarget, RESULT_EXPIRE_DAYS, RESULT_REVIEW_DAYS, shiftWithChain, tFor, type Locale
+  advanceResults, conservativeFinish, onPersonsBoard, parkedMilestones, taskTitleOf, daysBetween, engagementTier, MILESTONE_RISKS_SETTING, milestoneReadingOf, monthDay, parseMilestoneRisks, overdueTarget, RESULT_EXPIRE_DAYS, RESULT_REVIEW_DAYS, shiftWithChain, tFor, type Locale
 } from "@crossline/core";
 import { localeOf } from "./locale";
-import { designKnob, DUE_ADVANCED_EVENT, listAgentTasks, overdueStartedTasks, SILENT_TASK_SHIFTS_MAX, reviewAgentTask, settleAgentResult, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
+import { type EventFilter, designKnob, listAgentTasks, overdueStartedTasks, SILENT_TASK_SHIFTS_MAX, reviewAgentTask, settleAgentResult, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
 import { DEADLINE_MARGIN_DAYS } from "@crossline/planner";
 import { localToday } from "./analysis";
 import { ownerOf } from "./owner";
@@ -62,7 +62,7 @@ export type AdvanceOutcome = {
 /** Milestones whose current deadline the person typed themselves (a `goal.settings_confirmed` of theirs is the latest that set one). */
 function personSetDeadlines(store: CrosslineStore, workspaceId: string): Set<string> {
   const latest = new Map<string, boolean>();
-  for (const event of store.listEvents(workspaceId, { type: "goal.settings_confirmed" })) {
+  for (const event of store.listEvents(workspaceId, { type: "goal.changed", change: "settings_confirmed" })) {
     const payload = event.payload as { next?: { confirmedDeadline?: unknown }; bySystem?: unknown };
     if (typeof payload.next?.confirmedDeadline === "string" && payload.next.confirmedDeadline) latest.set(event.entityId, !payload.bySystem);
   }
@@ -94,8 +94,8 @@ function writeLeftNotes(store: CrosslineStore, workspaceId: string, owner: strin
   const t = tFor(localeOf(store, workspaceId));
   const lines = left.length ? left.map((item) => item.why ? t("助手留下的待补：{{what}}（{{why}}）", item) : t("助手留下的待补：{{what}}", item))
     : row.needsHuman ? [t("助手留下 {{count}} 件待补，列在助手结果「{{title}}」里（原记录不在这台机器上）", { count: row.needsHuman, title: row.title })] : [];
-  lines.forEach((text, index) => store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `task.note:agent-left:${row.taskId}:${index}`, type: "task.note",
-    entityId: row.workOrderId!, payload: { text, kind: "agent_left", agentTaskId: row.taskId } }));
+  lines.forEach((text, index) => store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `task.note:agent-left:${row.taskId}:${index}`, type: "task.changed",
+    entityId: row.workOrderId!, payload: { text, kind: "agent_left", agentTaskId: row.taskId, change: "note" } }));
   return left.length || row.needsHuman;
 }
 
@@ -144,7 +144,7 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
   }
   // A result accepted in the person's place before its notes could be read (2026-10-21: results made on the owner's machine, read on the
   // server) gets them now; the keys are the same, so a note already written is not written again.
-  const noted = new Set(store.listEvents(workspaceId, { type: "task.note" })
+  const noted = new Set(store.listEvents(workspaceId, { type: "task.changed", change: "note" })
     .map((event) => (event.payload as { kind?: string; agentTaskId?: string })).filter((note) => note.kind === "agent_left").map((note) => note.agentTaskId));
   for (const row of rows) if (row.status === "accepted" && row.reviewedBy === "system" && row.needsHuman && !noted.has(row.taskId)) writeLeftNotes(store, workspaceId, owner, row);
   // A workflow grown from one task's steps was never an errand that came back: not a decision for the person (2026-11-11).
@@ -176,7 +176,7 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
   const sittingPrep: Array<{ order: StoredWorkOrder; why: string }> = [];
   // How many times this pass already moved each milestone by itself.
   const priorShifts = new Map<string, number>();
-  for (const event of store.listEvents(workspaceId, { type: "date.advanced" }))
+  for (const event of store.listEvents(workspaceId, { type: "job.ran", job: "date.advance" }))
     for (const item of (event.payload as { shifted?: Array<{ id?: string }> }).shifted ?? []) if (item.id) priorShifts.set(item.id, (priorShifts.get(item.id) ?? 0) + 1);
   const readings = parseMilestoneRisks(store.getSetting(workspaceId, MILESTONE_RISKS_SETTING));
   for (const milestone of approved) {
@@ -188,16 +188,16 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
       for (const order of open.filter((item) => item.milestoneId === milestone.id && item.state !== "active"))
         sittingPrep.push({ order, why: t("考试 {{day}} 已过，备考不再安排", { day: md(deadline, locale) }) });
       if (daysBetween(deadline, today) <= SITTING_ASK_DAYS && !judged.has(milestone.id)) {
-        const asked = store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `milestone-overdue:sitting:${milestone.id}:${deadline}`, type: "milestone.overdue",
-          entityId: milestone.id, payload: { deadline, why: "sitting" } });
+        const asked = store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `milestone-overdue:sitting:${milestone.id}:${deadline}`, type: "milestone.changed",
+          entityId: milestone.id, payload: { deadline, why: "sitting", change: "overdue" } });
         if (asked.inserted) outcome.asked.push({ id: milestone.id, title: milestone.title, deadline });
       }
       continue;
     }
     if (!deadline || deadline >= today || !open.some((order) => order.milestoneId === milestone.id)) continue;
     if (fixed(milestone)) {
-      const asked = store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `milestone-overdue:${milestone.id}:${deadline}`, type: "milestone.overdue",
-        entityId: milestone.id, payload: { deadline, why: courses.has(milestone.projectId ?? "") ? "course" : "person" } });
+      const asked = store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `milestone-overdue:${milestone.id}:${deadline}`, type: "milestone.changed",
+        entityId: milestone.id, payload: { deadline, why: courses.has(milestone.projectId ?? "") ? "course" : "person", change: "overdue" } });
       if (asked.inserted) outcome.asked.push({ id: milestone.id, title: milestone.title, deadline });
       continue;
     }
@@ -205,8 +205,8 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
     // watched one slide 11/1 → 11/5 → 11/9 → … for four weeks). From here it waits for the person, asked once, as a course's date is.
     const shifts = priorShifts.get(milestone.id) ?? 0;
     if (shifts >= SILENT_SHIFTS_MAX) {
-      const asked = store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `milestone-overdue:stalled:${milestone.id}:${deadline}`, type: "milestone.overdue",
-        entityId: milestone.id, payload: { deadline, why: "stalled", shifts } });
+      const asked = store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `milestone-overdue:stalled:${milestone.id}:${deadline}`, type: "milestone.changed",
+        entityId: milestone.id, payload: { deadline, why: "stalled", shifts, change: "overdue" } });
       if (asked.inserted) outcome.asked.push({ id: milestone.id, title: milestone.title, deadline });
       continue;
     }
@@ -229,8 +229,8 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
     const minutes = steps?.length ? steps.reduce((sum, step) => sum + step.estimate.p85Minutes, 0) : item.order.estimate.p85Minutes;
     const to = overdueTarget({ today, finish: conservativeFinish(today, minutes, daily), marginDays: DEADLINE_MARGIN_DAYS });
     store.saveWorkOrder({ ...item.order, payload: { ...(item.order.payload as object), dueDate: to } });
-    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `${DUE_ADVANCED_EVENT}:${item.order.id}:${item.due}`, type: DUE_ADVANCED_EVENT,
-      entityId: item.order.id, payload: { from: item.due, to, by: "date_advance" } });
+    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `work_order.due_advanced:${item.order.id}:${item.due}`, type: "work_order.changed",
+      entityId: item.order.id, payload: { from: item.due, to, by: "date_advance", change: "due_advanced" } });
     inverse.push({ kind: "work_order.field", id: item.order.id, field: "dueDate", value: item.due });
     tasksShifted.push({ id: item.order.id, title: taskTitleOf(item.order), from: item.due, to });
   }
@@ -240,10 +240,10 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
   const sittingIds = new Set(sittingPrep.map((item) => item.order.id));
   outcome.archived = archiveBySystem(store, workspaceId, [...sittingPrep, ...staleOpenWork(store, workspaceId, now, today).filter((item) => !sittingIds.has(item.order.id))], "date");
   const cutoff = new Date(now.getTime() - STALE_DAYS * DAY).toISOString();
-  const lastAt = (type: string) => { const out = new Map<string, string>(); for (const event of store.listEvents(workspaceId, { type })) if ((out.get(event.entityId) ?? "") < event.createdAt) out.set(event.entityId, event.createdAt); return out; };
-  const proposed = lastAt("milestone.proposed"), revised = lastAt("milestone.revised");
+  const lastAt = (filter: EventFilter) => { const out = new Map<string, string>(); for (const event of store.listEvents(workspaceId, filter)) if ((out.get(event.entityId) ?? "") < event.createdAt) out.set(event.entityId, event.createdAt); return out; };
+  const proposed = lastAt({ type: "milestone.proposed" }), revised = lastAt({ type: "milestone.changed", change: "revised" });
   // A milestone the admission gate parked (J2a) is a draft that waits for the one before it, not a stale proposal.
-  const parked = parkedMilestones(store.listEvents(workspaceId, { type: [MILESTONE_PARKED, MILESTONE_UNPARKED] }));
+  const parked = parkedMilestones(store.listEvents(workspaceId, { type: "milestone.changed", change: ["parked", "unparked"] }));
   for (const draft of store.listMilestones(workspaceId).filter((milestone) => milestone.status === "draft" && !revised.has(milestone.id) && !parked.has(milestone.id)
     && (proposed.get(milestone.id) ?? "") !== "" && proposed.get(milestone.id)! <= cutoff)) {
     store.saveMilestone({ ...draft, status: "archived" });
@@ -261,11 +261,11 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
       payload: { bySystem: true, label: delivered ? t("到期整理：{{summary}}（已交去验收的任务不撤回）", { summary: summaryCounts(outcome, locale) }) : t("到期整理：{{summary}}", { summary: summaryCounts(outcome, locale) }),
         inverse: inverse.length === 1 ? inverse[0] : { kind: "batch", items: inverse } } });
   }
-  store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `date.advanced:${today}`, type: "date.advanced", entityId: workspaceId,
+  store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `date.advanced:${today}`, type: "job.ran", entityId: workspaceId,
     payload: { day: today, superseded: outcome.superseded, adopted: outcome.adopted.map((item) => item.taskId), expired: outcome.expired,
       ...(outcome.notRepeated?.length ? { notRepeated: outcome.notRepeated } : {}),
       shifted: outcome.shifted, asked: outcome.asked.map((item) => item.id), archived: outcome.archived.map((item) => item.id), drafts: outcome.drafts.map((item) => item.id),
-      ...(outcome.opId ? { opId: outcome.opId } : {}) } });
+      ...(outcome.opId ? { opId: outcome.opId } : {}), job: "date.advance", state: "done" } });
   const text = advanceMessage(outcome, locale, reviewDays);
   if (text) sayToPerson(store, workspaceId, text, "date_advance", `date-advance:${today}`, [
     ...(outcome.opId ? [{ label: t("撤销"), action: { action: "undo", summary: t("撤销到期整理"), args: { opId: outcome.opId } } }] : []),

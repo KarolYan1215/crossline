@@ -5,7 +5,7 @@ import type { CrosslineStore } from "@crossline/db";
 import { ACTIVITY_DETAIL_CONSENT } from "./activity-recorder";
 import { identityLines } from "./lines";
 
-export const TIME_ATTRIBUTOR = "crossline:crossline-time-attributor";
+export const TIME_ATTRIBUTOR = "crossline:crossline-line-filer:time";
 const DAY = 86_400_000;
 /** Open tasks are the ones a stretch of work can still be for. */
 const OPEN = new Set(["approved", "preparing", "ready_for_human", "active"]);

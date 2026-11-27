@@ -12,7 +12,7 @@ export function milestonesBeingBackplanned(store: CrosslineStore, workspaceId: s
   const deadlines = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
   const served = new Set(store.listWorkOrders(workspaceId).filter(isPersonCoreOrder)
     .flatMap((order) => [order.milestoneId, ...((order.payload as { alsoServes?: string[] } | undefined)?.alsoServes ?? [])]));
-  const tried = new Set(store.listEvents(workspaceId, { type: ["goal.backplan_proposed", "goal.backplan_blocked", "goal.backplan_declined"] })
+  const tried = new Set(store.listEvents(workspaceId, { type: "goal.changed", change: ["backplan_proposed", "backplan_blocked", "backplan_declined"] })
     .map((event) => `${event.entityId}:${(event.payload as { milestoneVersion?: number }).milestoneVersion}`));
   return store.listMilestones(workspaceId).filter((milestone) => milestone.status === "approved" && milestone.projectId
     && !served.has(milestone.id) && !tried.has(`${milestone.id}:${milestone.version}`)

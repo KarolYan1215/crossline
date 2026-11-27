@@ -18,7 +18,7 @@ export function autoApproveEligible(store: CrosslineStore, workspaceId: string, 
   const locale = localeOf(store, workspaceId);
   const approved: Array<{ id: string; title: string; board: boolean; from?: string }> = [];
   // An automatic approval the person took back is never re-applied: their undo is a decision.
-  const revoked = new Set(store.listEvents(workspaceId, { type: "work_order.auto_approval_revoked" }).map((event) => event.entityId));
+  const revoked = new Set(store.listEvents(workspaceId, { type: "work_order.changed", change: "auto_approval_revoked" }).map((event) => event.entityId));
   for (const order of store.listWorkOrders(workspaceId)) {
     if (wanted && !wanted.has(order.id)) continue;
     const verdict = autoApprovalEligible(order, { revoked: revoked.has(order.id), locale });
@@ -32,7 +32,7 @@ export function autoApproveEligible(store: CrosslineStore, workspaceId: string, 
       throw error;
     }
     store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `work_order.auto_approved:${order.id}`,
-      type: "work_order.auto_approved", entityId: order.id, payload: { reason: verdict.reason } });
+      type: "work_order.changed", entityId: order.id, payload: { reason: verdict.reason, change: "auto_approved" } });
     // Written after a model read someone else's words and judged low-risk (docs/plans/harness-1125.md §10): said with where it came from.
     const provenance = readProvenance((order.payload as { provenance?: unknown } | undefined)?.provenance);
     approved.push({ id: order.id, title: taskTitleOf(order), board: onPersonsBoard(order), ...(provenance?.tainted ? { from: provenanceSaid(provenance, locale) } : {}) });

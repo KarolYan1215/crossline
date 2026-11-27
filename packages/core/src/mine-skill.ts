@@ -1,6 +1,6 @@
 /**
  * The person's own line skill (`crossline-mine:<line>`, docs/skills-library.md §1): how this person does this line's work — their plays,
- * preferences and hard red lines — compiled by `crossline-insight-compiler` from what they said and decided, one SKILL.md per line.
+ * preferences and hard red lines — compiled by `crossline-line-method:rules` from what they said and decided, one SKILL.md per line.
  *
  * Why it exists: on 2026-10-14 the assistant wrote the person's first Xiaohongshu note as a research report, because their content
  * play (「制造冲突、贩卖焦虑，再卖 solution」) had never been recorded anywhere a run could read, and the gate passed it on the task's

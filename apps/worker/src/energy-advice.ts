@@ -9,7 +9,7 @@ import { claimedTitleMatches } from "./diligence";
 import { localeOf, tOfWorkspace } from "./locale";
 import { defaultSafeGetDeps, htmlToText, safeGet, type SafeGetDeps } from "./safe-fetch";
 
-export const ENERGY_ADVISOR = "crossline:crossline-energy-advisor";
+export const ENERGY_ADVISOR = "crossline:crossline-schedule-advisor:energy";
 
 const INSTRUCTIONS = "Check the rule-made weekly energy advice once against published research on sleep, circadian timing and alertness, "
   + "and against this person's own evidence; the person's own reports outrank general findings. Search the web and cite only pages you opened, "

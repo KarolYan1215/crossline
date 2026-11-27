@@ -2,7 +2,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { RECORDING_CONSENT, RECORDING_TRANSCRIBED_EVENT, recordingPace, sourceFolderIndexSetting, type FolderIndexEntry, type SourceFolder } from "@crossline/core";
+import { RECORDING_CONSENT, recordingPace, sourceFolderIndexSetting, type FolderIndexEntry, type SourceFolder } from "@crossline/core";
 import { CrosslineStore } from "@crossline/db";
 import { recordingPass, transcribeConcurrency, transcribeNextRecording, type RecordingDeps } from "./recordings";
 import { addFolder, syncFolder } from "./source-folders";
@@ -75,7 +75,7 @@ test("a new recording is queued by the folder pass and becomes a transcript in t
   expect(doc!.extractionNote).toContain("录音没有保存副本");
   expect(index()["2026-10-20 09.30.m4a"]).toMatchObject({ audio: "done", documentId: doc!.id, created: true });
   expect(readdirSync(path.join(data, "sources")).every((name) => name.endsWith(".txt"))).toBe(true);
-  expect(store.listEvents(workspaceId, { type: RECORDING_TRANSCRIBED_EVENT })[0]!.payload).toMatchObject({ fileName: "2026-10-20 09.30.m4a", seconds: 120 });
+  expect(store.listEvents(workspaceId, { type: "recording.changed", change: "transcribed" })[0]!.payload).toMatchObject({ fileName: "2026-10-20 09.30.m4a", seconds: 120 });
   // Seen again unchanged: not queued again.
   await syncFolder(store, workspaceId, folder, folderDeps(true));
   expect(index()["2026-10-20 09.30.m4a"]!.audio).toBe("done");

@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from "node:
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { LEDGER_EVENT_TYPES, TELEMETRY_COUNT_FIELDS, TELEMETRY_FIELDS, TELEMETRY_TOKEN_FIELDS } from "@crossline/core";
-import { CrosslineStore } from "@crossline/db";
+import { LEDGER_EVENT_TYPES, type EventType, TELEMETRY_COUNT_FIELDS, TELEMETRY_FIELDS, TELEMETRY_TOKEN_FIELDS } from "@crossline/core";
+import { CrosslineStore, type LedgerEventInput } from "@crossline/db";
 import { TELEMETRY_CURSOR_SETTING, TELEMETRY_ENABLED_SETTING, telemetryPass } from "./telemetry";
 
 /**
@@ -29,11 +29,15 @@ afterEach(() => { store.close(); rmSync(dataDir, { recursive: true, force: true 
 function seed(): void {
   const text = SECRETS.join(" ");
   // Every passed-on type, each carrying free text in the places a payload keeps it, plus a code and a state that are allowed.
-  for (const [index, type] of LEDGER_EVENT_TYPES.entries()) store.appendEvent({ ownerId: "o", workspaceId, idempotencyKey: `k${index}`, type, entityId: RAW_ID,
-    payload: { title: text, intent: text, message: text, reason: text, to: type === "work_order.transitioned" ? "active" : text, kind: text,
-      code: type === "agent.task.blocked" ? "AGENT_RUN_LOST" : text, verdict: text, files: [{ name: SECRETS[1], url: SECRETS[2] }], nested: { deep: text } } });
+  for (const [index, wire] of LEDGER_EVENT_TYPES.entries()) {
+    const [type, change] = wire.split(":") as [EventType, string | undefined];
+    store.appendEvent({ ownerId: "o", workspaceId, idempotencyKey: `k${index}`, type, entityId: RAW_ID,
+      payload: { title: text, intent: text, message: text, reason: text, to: type === "work_order.transitioned" ? "active" : text, kind: text,
+        code: wire === "agent.changed:task_blocked" ? "AGENT_RUN_LOST" : text, verdict: text, files: [{ name: SECRETS[1], url: SECRETS[2] }], nested: { deep: text },
+        ...(change ? { change } : {}) } } as LedgerEventInput);
+  }
   // Types that are not on the list are not sent at all, whatever they hold.
-  store.appendEvent({ ownerId: "o", workspaceId, idempotencyKey: "note", type: "task.note", entityId: RAW_ID, payload: { text } });
+  store.appendEvent({ ownerId: "o", workspaceId, idempotencyKey: "note", type: "task.changed", entityId: RAW_ID, payload: { text, change: "note" } });
   store.saveModelUsage({ workspaceId, skill: "crossline:crossline-onboarding", tier: "top", model: "gpt", effort: "medium", spendMode: "normal",
     threadId: SECRETS[5]!, ok: false, errorCode: "SKILL_STALLED", repairs: 2, turns: 3, inputTokens: 1200, cachedInputTokens: 300, outputTokens: 90,
     reasoningTokens: 10, totalTokens: 1600, durationMs: 4200, at: new Date().toISOString() });
@@ -73,10 +77,10 @@ test("what leaves the machine is behaviour only: no free text, no raw id, no key
     if (event.counts) for (const key of Object.keys(event.counts as object)) expect(TELEMETRY_COUNT_FIELDS).toContain(key);
   }
   const types = new Set(batch.events.map((event) => event.type));
-  expect(types.has("task.note")).toBe(false);
+  expect(types.has("task.changed:note")).toBe(false);
   // What is meant to arrive does arrive, in its coded form.
   expect(batch.events.find((event) => event.type === "work_order.transitioned")).toMatchObject({ stage: "active", entity: expect.stringMatching(/^[0-9a-f]{16}$/) });
-  expect(batch.events.find((event) => event.type === "agent.task.blocked")).toMatchObject({ code: "AGENT_RUN_LOST" });
+  expect(batch.events.find((event) => event.type === "agent.changed:task_blocked")).toMatchObject({ code: "AGENT_RUN_LOST" });
   expect(batch.events.find((event) => event.type === "skill.run" && event.skill === "crossline-onboarding"))
     .toMatchObject({ ok: false, code: "SKILL_STALLED", repairs: 2, ms: 4200, tokens: { input: 1200, cached: 300, output: 90 } });
   expect(batch.events.find((event) => event.type === "onboarding.round")).toMatchObject({ stage: "lines", counts: { rounds: 2 } });

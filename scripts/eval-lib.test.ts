@@ -17,19 +17,19 @@ test("the person's corrections become golden cases, each with what the system sa
     event("e1", "op.applied", "op-1", { label: "把任务移到明天", inverse: { kind: "work_order.restore", ids: ["wo-1"] }, bySystem: true }),
     event("e2", "op.undone", "op-1", { label: "把任务移到明天" }),
     event("e3", "gate.judged", "wo-1", { gate: "completion", output: { verdict: "done", reason: "有提交记录" } }),
-    event("e4", "gate.overridden", "wo-1", { judgedId: "e3", gate: "completion", subject: { kind: "task", id: "wo-1" }, from: "done", to: "not_done", note: "只交了一半" }),
-    event("e5", "estimate.adjusted", "wo-1", { stepId: null, before: 60, after: 120 }),
-    event("e6", "work_order.due_changed", "wo-1", { before: "2026-11-21", after: "2026-11-24" }),
-    event("e7", "goal.backplan_declined", "m-1", { milestoneVersion: 2 }),
-    event("e8", "task.renamed", "wo-1", { by: "system", before: "a", title: "b" }),
-    event("e9", "task.renamed", "wo-1", { by: "person", before: "写周报", title: "写第 47 周周报" })
+    event("e4", "gate.changed", "wo-1", { judgedId: "e3", gate: "completion", subject: { kind: "task", id: "wo-1" }, from: "done", to: "not_done", note: "只交了一半", change: "overridden" }),
+    event("e5", "person.decided", "wo-1", { stepId: null, before: 60, after: 120, subject: "estimate", decision: "adjusted" }),
+    event("e6", "work_order.changed", "wo-1", { before: "2026-11-21", after: "2026-11-24", change: "due_changed" }),
+    event("e7", "goal.changed", "m-1", { milestoneVersion: 2, change: "backplan_declined" }),
+    event("e8", "task.changed", "wo-1", { by: "system", before: "a", title: "b", change: "renamed" }),
+    event("e9", "task.changed", "wo-1", { by: "person", before: "写周报", title: "写第 47 周周报", change: "renamed" })
   ], orders);
   const byKind = Object.fromEntries(cases.map((item) => [item.kind === "completion" ? item.id : item.kind, item]));
   expect(byKind.undo).toMatchObject({ bySystem: true, personSaid: "undone", modelSaid: { kind: "work_order.restore" } });
   expect(byKind.gate).toMatchObject({ modelSaid: { verdict: "done", reason: "有提交记录" }, personSaid: "not_done", note: "只交了一半" });
   expect(byKind.duration).toMatchObject({ modelSaid: 60, personSaid: 120, context: { title: "写第 47 周周报" } });
   expect(byKind.date).toMatchObject({ modelSaid: "2026-11-21", personSaid: "2026-11-24" });
-  expect(byKind.reject).toMatchObject({ source: "goal.backplan_declined", personSaid: "rejected" });
+  expect(byKind.reject).toMatchObject({ source: "goal.changed:backplan_declined", personSaid: "rejected" });
   expect(cases.filter((item) => item.kind === "rename")).toHaveLength(1);
   expect(byKind["completion:wo-2"]).toMatchObject({ modelSaid: null, personSaid: "needs_assessment" });
   expect(byKind["completion:wo-3"]).toMatchObject({ modelSaid: "needs_assessment", personSaid: "self_evident" });

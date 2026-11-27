@@ -125,8 +125,8 @@ export async function draftReplies(deps: ReplyDeps, workspaceId: string, candida
       for (const gone of next.slice(0, Math.max(0, next.length - MAIL_REPLIES_KEEP))) rmSync(path.join(dir, gone.file), { force: true });
       return next.slice(-MAIL_REPLIES_KEEP);
     });
-    deps.store.appendEvent({ ownerId: ownerOf(deps.store, workspaceId), workspaceId, idempotencyKey: `mail.reply.drafted:${id}`, type: "mail.reply.drafted", entityId: id,
-      payload: { accountId: candidate.accountId, replyBy: record.replyBy, points: record.points.length } });
+    deps.store.appendEvent({ ownerId: ownerOf(deps.store, workspaceId), workspaceId, idempotencyKey: `mail.reply.drafted:${id}`, type: "mail.changed", entityId: id,
+      payload: { accountId: candidate.accountId, replyBy: record.replyBy, points: record.points.length, change: "reply_drafted" } });
     drafted += 1;
   }
   return { drafted, notNeeded, skipped };

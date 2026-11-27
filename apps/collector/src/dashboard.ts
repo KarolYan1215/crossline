@@ -16,9 +16,12 @@ export type DashboardData = {
   snapshots: Array<{ id: string; install: string; version: string; receivedAt: string; bytes: number; feedback: string }>;
 };
 
-/** Steps after the interview, each counted when an install has at least one such event. */
-const LATER_STEPS: Array<[string, string]> = [["capture.created", "首次收集"], ["milestone.proposed", "首个里程碑"], ["human.started", "首次计时"],
-  ["portrait.written", "画像"], ["agent.task.completed", "首次助手任务"], ["evidence.accepted", "首次验收"]];
+/**
+ * Steps after the interview, each counted when an install has at least one such event. A step lists every wire name it arrived under:
+ * installs since 2026-11-27 send a `.changed` family as `<type>:<change>`, older ones the names before the condensation.
+ */
+const LATER_STEPS: Array<[string[], string]> = [[["capture.created"], "首次收集"], [["milestone.proposed"], "首个里程碑"], [["human.started"], "首次计时"],
+  [["portrait.written", "portrait.changed:written"], "画像"], [["agent.task.completed", "agent.changed:task_completed"], "首次助手任务"], [["evidence.accepted"], "首次验收"]];
 const STAGE_LABEL: Record<string, string> = { narrative: "访谈·叙事", orientation: "访谈·开场", lines: "访谈·主线", situation: "访谈·现状", compass: "访谈·指南针",
   energy: "访谈·精力", details: "访谈·细节" };
 const TERMINAL = new Set(["accepted", "archived"]);
@@ -33,12 +36,12 @@ export async function dashboardData(db: D1): Promise<DashboardData> {
   // orders (flow v2 puts the profile module first, 2026-10-31), so a later stage says nothing about an earlier one.
   const seen = new Map<string, Set<string>>();
   for (const round of rounds) seen.set(round.stage, (seen.get(round.stage) ?? new Set()).add(round.install));
-  const reached = (await db.prepare(`SELECT type, COUNT(DISTINCT install) AS installs FROM events WHERE type IN (${LATER_STEPS.map(() => "?").join(", ")}) GROUP BY type`)
-    .bind(...LATER_STEPS.map(([type]) => type)).all<{ type: string; installs: number }>()).results;
+  const reached = await Promise.all(LATER_STEPS.map(async ([types]) => Number((await db.prepare(`SELECT COUNT(DISTINCT install) AS n FROM events
+    WHERE type IN (${types.map(() => "?").join(", ")})`).bind(...types).first<{ n: number }>())?.n ?? 0)));
   const started = (await db.prepare("SELECT COUNT(*) AS n FROM installs").first<{ n: number }>())?.n ?? 0;
   const funnel = [{ step: "安装", installs: Number(started) },
     ...INTERVIEW_FLOW_STAGES.v2.map((stage) => ({ step: STAGE_LABEL[stage] ?? stage, installs: seen.get(stage)?.size ?? 0 })),
-    ...LATER_STEPS.map(([type, step]) => ({ step, installs: Number(reached.find((row) => row.type === type)?.installs ?? 0) }))];
+    ...LATER_STEPS.map(([, step], index) => ({ step, installs: reached[index] ?? 0 }))];
 
   // Where work orders are sitting now: each one's latest transition, grouped by the state it moved into.
   const latest = (await db.prepare(`SELECT e.stage, e.at FROM events e WHERE e.type = 'work_order.transitioned' AND e.stage IS NOT NULL

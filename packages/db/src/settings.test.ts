@@ -19,8 +19,8 @@ test("the person's latest own action: what they said, timed, answered or reporte
   const { CrosslineStore } = await import("./index");
   const store = new CrosslineStore(":memory:");
   expect(store.lastPersonActivity("w")).toBeUndefined();
-  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "sys", type: "manualbook.built", entityId: "x", payload: {} });
-  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "agent-step", type: "task.step_progress", entityId: "x", payload: { source: "agent" } });
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "sys", type: "materials.changed", entityId: "x", payload: { change: "manualbook_built" } });
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "agent-step", type: "task.changed", entityId: "x", payload: { source: "agent", change: "step_progress" } });
   expect(store.lastPersonActivity("w")).toBeUndefined();
   store.appendConversationMessage({ id: "m1", workspaceId: "w", conversationId: store.conversationFor("w", "2026-10-01").id, role: "person", text: "hi",
     payload: {}, createdAt: "2026-10-01T12:00:00.000Z" });
@@ -32,7 +32,7 @@ test("the person's latest own action: what they said, timed, answered or reporte
   expect(store.lastPersonActivity("w")).toBe("2026-10-03T09:00:00.000Z");
   store.appendOnboardingMessage({ sessionId: "s", workspaceId: "w", role: "user", content: { text: "a" }, createdAt: "2026-10-04T09:00:00.000Z" });
   expect(store.lastPersonActivity("w")).toBe("2026-10-04T09:00:00.000Z");
-  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "goal", type: "line.updated", entityId: "media", payload: {} });
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "goal", type: "line.changed", entityId: "media", payload: { change: "updated" } });
   expect(store.lastPersonActivity("w")! > "2026-10-04T09:00:00.000Z").toBe(true);
   store.close();
 });
@@ -57,9 +57,9 @@ test("an undoable change made on a page and an undo are the person acting; the w
 test("a public skill added by its link is the person acting; one the scout found is not", async () => {
   const { CrosslineStore } = await import("./index");
   const store = new CrosslineStore(":memory:");
-  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "scout", type: "skill.public.installed", entityId: "pub-a", payload: { id: "pub-a" } });
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "scout", type: "skill.changed", entityId: "pub-a", payload: { id: "pub-a", change: "public_installed" } });
   expect(store.lastPersonActivity("w")).toBeUndefined();
-  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "link", type: "skill.public.installed", entityId: "pub-b", payload: { id: "pub-b", via: "link" } });
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "link", type: "skill.changed", entityId: "pub-b", payload: { id: "pub-b", via: "link", change: "public_installed" } });
   expect(store.lastPersonActivity("w")).toBeDefined();
   store.close();
 });

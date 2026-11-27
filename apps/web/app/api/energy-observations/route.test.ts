@@ -96,13 +96,13 @@ describe("energy observation route", () => {
     expect((await post({ source: "self_report", level: "high", confidence: "high",
       aggregate: {}, context: "after_rest" })).status).toBe(200);
     expect(saved[1]?.aggregate).toMatchObject({ durationMinutes: 60, interruptionCount: 1 });
-    expect(events.find((event) => event.type === "energy.observed" &&
+    expect(events.find((event) => (event.type === "energy.changed" && (event.payload as { change?: string }).change === "observed") &&
       (event.payload as { context?: string }).context === "after_task")?.payload)
       .toMatchObject({ context: "after_task", workOrderId: "work-1",
       actualLoad: "high" });
-    expect(events.find((event) => event.type === "energy.transition_outcome")?.payload)
+    expect(events.find((event) => (event.type === "energy.changed" && (event.payload as { change?: string }).change === "transition_outcome"))?.payload)
       .toMatchObject({ before: "low", taskEnergy: "high", actual: "medium" });
-    expect(events.find((event) => event.type === "energy.observed" &&
+    expect(events.find((event) => (event.type === "energy.changed" && (event.payload as { change?: string }).change === "observed") &&
       (event.payload as { context?: string }).context === "after_rest")?.payload)
       .toMatchObject({ context: "after_rest" });
   });

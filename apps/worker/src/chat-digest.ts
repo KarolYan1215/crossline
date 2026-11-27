@@ -21,7 +21,7 @@ export const CHAT_NOTE_ID = "digest-chat-";
 
 /**
  * AI conversation exports (D14): an export is stored with only what the person typed (`readSourceText`), one `## ` section per
- * conversation. Here `crossline-source-digest` writes one summary per conversation, a few dozen at a time; once every conversation has
+ * conversation. Here `crossline-capture-digest:source` writes one summary per conversation, a few dozen at a time; once every conversation has
  * one, a note of the summaries is saved beside the export, and the interview reads the note in its place (`chatDigestedIds`), opening the
  * export with `read_file` for the person's own words. A conversation the model passes over twice is written into the note without one.
  */
@@ -50,7 +50,7 @@ export function createChatDigester(store: CrosslineStore, workspaceId: string, c
         const context = { version: "crossline.chat-digest.v1", source: next.doc.fileName,
           segments: batch.map((segment) => ({ id: `s${segment.index}`, heading: segment.heading, said: segment.said })) };
         const result = await runCodexSkill<ChatDigestAnswer>(client, context, { skillName: SOURCE_DIGEST, cwd,
-          developerInstructions: "Summarize each conversation of the person's AI chat export, as the crossline-source-digest Skill's chat-exports section "
+          developerInstructions: "Summarize each conversation of the person's AI chat export, as the crossline-capture-digest:source Skill's chat-exports section "
             + "describes. Return raw JSON only.", outputSchema: CHAT_DIGEST_SCHEMA,
           prepareInput: () => context, validateOutput: (output) => validateChatDigest(output, asked), onAudit: () => {}, timeoutMs: 20 * 60_000 });
         if (!result.ok) return { blocked: result.blocker.code };

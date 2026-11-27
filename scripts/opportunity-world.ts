@@ -7,7 +7,7 @@
  *   … --out=<file.md>                                          also write the report to a file
  *   … --only=<id>,<id>                                         the live run reads only these scenarios
  *
- * `--live` runs the real reader Skill (`crossline-opportunity-reader`) on a Codex home of its own: `CROSSLINE_STATE_DIR` (default
+ * `--live` runs the real reader Skill (`crossline-page-reader:opportunity`) on a Codex home of its own: `CROSSLINE_STATE_DIR` (default
  * `C:\Users\karol\codex-home-opp`, which holds `codex-home`, signed in beforehand). The resident app's Codex home is never used. The model
  * reads each scenario page as its text (fed as a mail the triage found, so no web search and no request leaves the machine); quotes,
  * eligibility, deadlines and feasibility are then judged by the code as in production, and a scenario passes a round when the outcome is

@@ -155,7 +155,7 @@ export function applyChange(ctx: AccessContext, requested: Change): { ok: true }
       store.setSetting(ctx.workspaceId, "schedule.preferences", JSON.stringify({ ...effectiveSchedulePreferences(ctx).preferences, timeZone: change.timeZone }));
     }
     store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `availability.saved:${Date.now()}`,
-      type: "availability.saved", entityId: ctx.workspaceId, payload: { windows: change.windows.length } });
+      type: "person.decided", entityId: ctx.workspaceId, payload: { windows: change.windows.length, subject: "availability", decision: "saved" } });
     return { ok: true };
   }
   if (change.kind === "params") return saveScheduleParams(ctx, change.params);
@@ -175,7 +175,7 @@ export function applyChange(ctx: AccessContext, requested: Change): { ok: true }
     const payload = (order.payload ?? {}) as Record<string, unknown>;
     store.saveWorkOrder({ ...order, payload: { ...payload, notBefore: change.date } });
     store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `work_order.deferred:${order.id}:${change.date}:${Date.now()}`,
-      type: "work_order.deferred", entityId: order.id, payload: { before: (payload.notBefore as string | undefined) ?? null, after: change.date } });
+      type: "work_order.changed", entityId: order.id, payload: { before: (payload.notBefore as string | undefined) ?? null, after: change.date, change: "deferred" } });
     return { ok: true };
   }
   if (change.kind === "due") {
@@ -183,7 +183,7 @@ export function applyChange(ctx: AccessContext, requested: Change): { ok: true }
     const payload = (order.payload ?? {}) as Record<string, unknown>;
     store.saveWorkOrder({ ...order, payload: { ...payload, dueDate: change.date } });
     store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `work_order.due_changed:${order.id}:${change.date}:${Date.now()}`,
-      type: "work_order.due_changed", entityId: order.id, payload: { before: (payload.dueDate as string | undefined) ?? null, after: change.date } });
+      type: "work_order.changed", entityId: order.id, payload: { before: (payload.dueDate as string | undefined) ?? null, after: change.date, change: "due_changed" } });
     return { ok: true };
   }
   const minutes = Math.round(change.p50Minutes);
@@ -202,8 +202,8 @@ export function applyChange(ctx: AccessContext, requested: Change): { ok: true }
   }
   const before = change.stepId ? undefined : resolvedEstimate(ctx, order).p50Minutes;
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `estimate.adjusted:${order.id}:${change.stepId ?? ""}:${Date.now()}`,
-    type: "estimate.adjusted", entityId: order.id, payload: { stepId: change.stepId ?? null, before: before ?? null, after: minutes,
-      family: (order.payload as { family?: string } | undefined)?.family ?? null, line: order.identityId } });
+    type: "person.decided", entityId: order.id, payload: { stepId: change.stepId ?? null, before: before ?? null, after: minutes,
+      family: (order.payload as { family?: string } | undefined)?.family ?? null, line: order.identityId, subject: "estimate", decision: "adjusted" } });
   // A manual edit is a weak signal next to measured time (which calibration learns from), so it is recorded with a low weight.
   const step = change.stepId ? store.getStepPlan(ctx.workspaceId, order.id)?.steps.find((item) => item.id === change.stepId) : undefined;
   store.addPreference({ workspaceId: ctx.workspaceId, source: "estimate", scope: order.identityId, weight: 0.3, refId: `${order.id}:${change.stepId ?? ""}`,

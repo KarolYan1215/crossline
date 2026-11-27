@@ -1,3 +1,5 @@
+import type { EventType } from "@crossline/core";
+import type { LedgerEventInput } from "./store";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   agentApprovalDecision, approveCategory, CLEAN_RUNS_TO_TRUST, CrosslineStore, declineCategory, decideAgentApproval, deliverAgentResult, isPaused, listAgentTasks, pendingAgentApprovals,
@@ -10,22 +12,22 @@ let ws: string;
 beforeEach(() => { store = new CrosslineStore(":memory:"); ws = store.createPrincipalWithWorkspace("u", "w").workspace.id; });
 afterEach(() => store.close());
 
-const event = (type: string, taskId: string, payload: object) => store.appendEvent({ ownerId: store.getWorkspaceOwnerId(ws)!, workspaceId: ws, idempotencyKey: `${type}:${taskId}:${JSON.stringify(payload).length}`, type, entityId: taskId, payload });
+const event = (type: EventType, taskId: string, payload: object) => store.appendEvent({ ownerId: store.getWorkspaceOwnerId(ws)!, workspaceId: ws, idempotencyKey: `${type}:${taskId}:${JSON.stringify(payload)}`, type, entityId: taskId, payload } as LedgerEventInput);
 const finish = (taskId: string, over: object = {}) => {
-  event("agent.task.requested", taskId, { title: "整理", category: "read_research_organize", workOrderId: "wo-1" });
-  event("agent.task.completed", taskId, { directory: "C:\\ai\\t", durationMs: 5000, commands: 4, denied: 1, artifacts: [{ path: "n.md", sha256: "x", bytes: 3 }], needsHuman: 0,
-    checksPassed: true, inputsModified: [], reviewRequired: true, ...over });
+  event("agent.changed", taskId, { title: "整理", category: "read_research_organize", workOrderId: "wo-1", change: "task_requested" });
+  event("agent.changed", taskId, { directory: "C:\\ai\\t", durationMs: 5000, commands: 4, denied: 1, artifacts: [{ path: "n.md", sha256: "x", bytes: 3 }], needsHuman: 0,
+    checksPassed: true, inputsModified: [], reviewRequired: true, ...over, change: "task_completed" });
 };
 
 test("a task's life is read back from the events: running, then waiting for review, then the person's verdict", () => {
-  event("agent.task.requested", "t1", { title: "整理", category: "read_research_organize", workOrderId: "wo-1" });
+  event("agent.changed", "t1", { title: "整理", category: "read_research_organize", workOrderId: "wo-1", change: "task_requested" });
   expect(listAgentTasks(store, ws)[0]).toMatchObject({ taskId: "t1", status: "running", workOrderId: "wo-1" });
-  event("agent.task.completed", "t1", { directory: "C:\\ai\\t1", durationMs: 9000, commands: 5, denied: 2, artifacts: [{ path: "a.md", sha256: "h", bytes: 10 }], needsHuman: 1, checksPassed: true, inputsModified: [], reviewRequired: true });
+  event("agent.changed", "t1", { directory: "C:\\ai\\t1", durationMs: 9000, commands: 5, denied: 2, artifacts: [{ path: "a.md", sha256: "h", bytes: 10 }], needsHuman: 1, checksPassed: true, inputsModified: [], reviewRequired: true, change: "task_completed" });
   expect(listAgentTasks(store, ws)[0]).toMatchObject({ status: "needs_review", commands: 5, denied: 2, needsHuman: 1, artifacts: [{ path: "a.md" }] });
 });
 
 test("a run with no outcome long after it started was lost with the process, not still going", () => {
-  event("agent.task.requested", "t2", { title: "x", category: "draft_text" });
+  event("agent.changed", "t2", { title: "x", category: "draft_text", change: "task_requested" });
   expect(listAgentTasks(store, ws, new Date(Date.now() + 9 * 3_600_000))[0]?.status).toBe("stale");
   expect(listAgentTasks(store, ws, new Date(Date.now() + 3_600_000))[0]?.status).toBe("running");
 });
@@ -33,8 +35,8 @@ test("a run with no outcome long after it started was lost with the process, not
 test("a result that needs no review is accepted by its checks, and a blocked run says why", () => {
   finish("t3", { reviewRequired: false });
   expect(listAgentTasks(store, ws)[0]?.status).toBe("accepted");
-  event("agent.task.requested", "t4", { title: "y", category: "draft_text" });
-  event("agent.task.blocked", "t4", { code: "SKILL_USAGE_LIMIT" });
+  event("agent.changed", "t4", { title: "y", category: "draft_text", change: "task_requested" });
+  event("agent.changed", "t4", { code: "SKILL_USAGE_LIMIT", change: "task_blocked" });
   expect(listAgentTasks(store, ws).find((task) => task.taskId === "t4")).toMatchObject({ status: "blocked", blockerCode: "SKILL_USAGE_LIMIT" });
 });
 
@@ -53,7 +55,7 @@ test("the person's verdict moves the kind's trust, and only a clean, accepted re
 });
 
 test("a task that is still running, or does not exist, cannot be reviewed", () => {
-  event("agent.task.requested", "t5", { title: "z", category: "draft_text" });
+  event("agent.changed", "t5", { title: "z", category: "draft_text", change: "task_requested" });
   expect(reviewAgentTask(store, ws, "t5", "accepted")).toEqual({ ok: false, code: "TASK_NOT_REVIEWABLE" });
   expect(reviewAgentTask(store, ws, "nope", "accepted")).toEqual({ ok: false, code: "TASK_NOT_FOUND" });
 });
@@ -102,8 +104,8 @@ test("a result is no longer a decision once its task is finished or archived, or
     order("gone", "archived");
     const run = (taskId: string, workOrderId: string, title: string, at: string) => {
       vi.setSystemTime(new Date(at));
-      event("agent.task.requested", taskId, { title, category: "read_research_organize", workOrderId });
-      event("agent.task.completed", taskId, { directory: "C:\\ai\\t", artifacts: [], needsHuman: 1, checksPassed: true, inputsModified: [], reviewRequired: true });
+      event("agent.changed", taskId, { title, category: "read_research_organize", workOrderId, change: "task_requested" });
+      event("agent.changed", taskId, { directory: "C:\\ai\\t", artifacts: [], needsHuman: 1, checksPassed: true, inputsModified: [], reviewRequired: true, change: "task_completed" });
     };
     run("old", "live", "清单 · 汇集讲义", "2026-10-09T00:00:00Z");
     run("new", "live", "清单 · 汇集讲义", "2026-10-15T00:00:00Z");
@@ -118,8 +120,8 @@ test("a result is no longer a decision once its task is finished or archived, or
     expect(listAgentTasks(store, ws).filter((task) => task.status === "needs_review")).toHaveLength(7);
     // Steps of one task whose titles have no step part (「任务 · 」) are different work, each still the person's to look at.
     run("s4", "live", "两个案例 · ", "2026-10-17T00:00:00Z");
-    event("agent.task.requested", "s5", { title: "两个案例 · ", category: "read_research_organize", workOrderId: "live", stepId: "v1s5" });
-    event("agent.task.completed", "s5", { directory: "C:\\ai\\t", artifacts: [], needsHuman: 1, checksPassed: true, inputsModified: [], reviewRequired: true });
+    event("agent.changed", "s5", { title: "两个案例 · ", category: "read_research_organize", workOrderId: "live", stepId: "v1s5", change: "task_requested" });
+    event("agent.changed", "s5", { directory: "C:\\ai\\t", artifacts: [], needsHuman: 1, checksPassed: true, inputsModified: [], reviewRequired: true, change: "task_completed" });
     expect(resultsAwaitingReview(store, ws).map((task) => task.taskId)).toEqual(expect.arrayContaining(["s4", "s5"]));
   } finally { vi.useRealTimers(); }
 });
@@ -163,10 +165,10 @@ test("the assistant's own item, once delivered, is accepted without the gate and
   order("core", { owner: "person" });
   order("prep", { owner: "assistant", prepares: "core" });
   store.saveStepPlan(ws, "core", { archetypeId: "research_decision", quantity: { basis: "", amount: 0, unit: "" }, rationale: "", units: [], questions: [], steps: [] }, owner, "t");
-  event("agent.task.requested", "tp", { title: "汇集规则", category: "read_research_organize", workOrderId: "prep", delegated: true });
-  event("agent.task.completed", "tp", { directory: "C:/ai/tp", durationMs: 5000, commands: 1, denied: 0, artifacts: [{ path: "规则.md", sha256: "x", bytes: 3 }],
-    needsHuman: 0, checksPassed: true, inputsModified: [], reviewRequired: false });
+  event("agent.changed", "tp", { title: "汇集规则", category: "read_research_organize", workOrderId: "prep", delegated: true, change: "task_requested" });
+  event("agent.changed", "tp", { directory: "C:/ai/tp", durationMs: 5000, commands: 1, denied: 0, artifacts: [{ path: "规则.md", sha256: "x", bytes: 3 }],
+    needsHuman: 0, checksPassed: true, inputsModified: [], reviewRequired: false, change: "task_completed" });
   expect(deliverAgentResult(store, ws, "tp")).toEqual({ delivered: true });
   expect(store.listWorkOrders(ws).find((item) => item.id === "prep")!.state).toBe("accepted");
-  expect(store.listEvents(ws, { type: "task.steps_replan_requested", entityId: "core" })[0]?.payload).toMatchObject({ prepared: "tp" });
+  expect(store.listEvents(ws, { type: "task.changed", change: "steps_replan_requested", entityId: "core" })[0]?.payload).toMatchObject({ prepared: "tp" });
 });

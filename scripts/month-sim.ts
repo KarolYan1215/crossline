@@ -81,7 +81,6 @@ const { prepareMaterialsAhead } = await import("../apps/worker/src/manualbook");
 // Optional, so the same script also runs on the code from before these existed (the before/after comparison of closed-loop-1030).
 type Measured = typeof import("../apps/web/lib/measured-capacity");
 const { measuredView, dayCapacityOf, measuredCapacityOn } = await import("../apps/web/lib/measured-capacity").catch(() => ({})) as Partial<Measured>;
-const { AUTO_CLOSED_EVENT = "work_order.auto_closed" } = await import("../apps/web/lib/auto-close").catch(() => ({})) as { AUTO_CLOSED_EVENT?: string };
 const { taskTitleOf, onPersonsBoard, bulkDoneRows } = await import("../packages/core/src/index");
 const { openNeedsOf } = await import("../packages/db/src/index");
 
@@ -599,13 +598,13 @@ const deadlines = [...dueAtStart].filter(([, due]) => due <= endDay).map(([id, d
   const warned = [firstWarned.get(`o:${id}`), order?.milestoneId ? firstWarned.get(`m:${order.milestoneId}`) : undefined].filter((day): day is string => Boolean(day)).sort()[0] ?? null;
   return { id, title: order ? taskTitleOf(order) : id, line: order?.identityId, due, finalDue: finalDue ?? null, state: order?.state ?? "gone", warned,
     acceptedDay: doneAt ? new Date(doneAt).toLocaleDateString("sv-SE", { timeZone: zone }) : null,
-    archivedBy: order?.state === "archived" ? (store.listEvents(ws, { type: "work_order.archived", entityId: id }).at(-1)?.payload as { reason?: string } | undefined)?.reason ?? "" : null };
+    archivedBy: order?.state === "archived" ? (store.listEvents(ws, { type: "work_order.changed", change: "archived", entityId: id }).at(-1)?.payload as { reason?: string } | undefined)?.reason ?? "" : null };
 });
 const truthDone = [...truth.values()].filter((item) => item.progress >= item.required).length;
 const result = { strategy, seed: SEED, start: START, days: DAYS, workspace: ws.slice(0, 8), runtimeS: Math.round((wall() - t0) / 1000), refusedFetches,
   persona: PERSONA, daysOut, deadlines, truth: { steps: truth.size, done: truthDone },
-  started: startedAll.length, standIns: STAND_INS ? standIns : null, autoClosed: store.listEvents(ws, { type: AUTO_CLOSED_EVENT }).length,
-  overdueAsked: store.listEvents(ws, { type: "task.overdue_resolved" }).length, events };
+  started: startedAll.length, standIns: STAND_INS ? standIns : null, autoClosed: store.listEvents(ws, { type: "work_order.changed", change: "auto_closed" }).length,
+  overdueAsked: store.listEvents(ws, { type: "task.changed", change: "overdue_resolved" }).length, events };
 mkdirSync(path.dirname(out), { recursive: true });
 writeFileSync(out, JSON.stringify(result, null, 1));
 console.log(`[${strategy}] wrote ${out} in ${result.runtimeS}s; refused fetches ${refusedFetches}`);

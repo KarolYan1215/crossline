@@ -1,0 +1,18 @@
+{
+  "name": "crossline-personal",
+  "version": "0.1.0",
+  "description": "The owner's own skills, kept out of the built-in Crossline plugin (2026-11-27): the weekly no-AI RTL bug-finding drill.",
+  "author": {
+    "name": "Crossline"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Crossline Personal",
+    "shortDescription": "The owner's own line skills",
+    "longDescription": "Skills that belong to one person's line rather than to Crossline itself: the weekly Verilog bug-finding drill (J7).",
+    "developerName": "Crossline",
+    "category": "Productivity",
+    "capabilities": ["Interactive"],
+    "brandColor": "#6D5EF5"
+  }
+}

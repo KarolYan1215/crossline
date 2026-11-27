@@ -70,7 +70,7 @@ test("purging a workspace removes every row it owns and its principal, and leave
     kind: "text", fileName: `${id}.txt`, mediaType: "text/plain", sha256: id, uri, extractedText: "", extractionStatus: "done", createdAt: new Date().toISOString() });
   for (const { principal, workspace } of [gone, kept]) {
     store.setSetting(workspace.id, "onboarding.tone", "neutral");
-    store.appendEvent({ ownerId: principal.id, workspaceId: workspace.id, idempotencyKey: "k", type: "x", entityId: "e", payload: {} });
+    store.appendEvent({ ownerId: principal.id, workspaceId: workspace.id, idempotencyKey: "k", type: "op.applied", entityId: "e", payload: {} });
   }
   doc(gone.workspace.id, gone.principal.id, "own", "file:///data/sources/own.txt");
   doc(gone.workspace.id, gone.principal.id, "shared", "file:///data/sources/shared.txt");
@@ -94,21 +94,21 @@ test("resetting a workspace empties what it built and keeps the account, its mem
   const other = store.createPrincipalWithWorkspace("auth-other", "B");
   for (const { principal, workspace } of [mine, other]) {
     store.setSetting(workspace.id, "onboarding.tone", "neutral");
-    store.appendEvent({ ownerId: principal.id, workspaceId: workspace.id, idempotencyKey: "k", type: "x", entityId: "e", payload: {} });
+    store.appendEvent({ ownerId: principal.id, workspaceId: workspace.id, idempotencyKey: "k", type: "op.applied", entityId: "e", payload: {} });
   }
   store.setSetting(mine.workspace.id, "deployment.runtimeOwner", "1");
   store.setSetting(mine.workspace.id, "model.provider", "{}");
-  store.appendEvent({ ownerId: mine.principal.id, workspaceId: mine.workspace.id, idempotencyKey: "c", type: "model.provider.conformance", entityId: "p", payload: {} });
+  store.appendEvent({ ownerId: mine.principal.id, workspaceId: mine.workspace.id, idempotencyKey: "c", type: "model.changed", entityId: "p", payload: { change: "provider_conformance" } });
   store.saveSourceDocument({ id: "doc", ownerId: mine.principal.id, workspaceId: mine.workspace.id, kind: "text", fileName: "a.txt", mediaType: "text/plain",
     sha256: "a", uri: "file:///data/sources/a.txt", extractedText: "", extractionStatus: "done", createdAt: new Date().toISOString() });
 
-  const result = store.resetWorkspace(mine.workspace.id, { settingPrefixes: ["deployment.", "model.provider"], eventTypePrefixes: ["model.provider"] });
+  const result = store.resetWorkspace(mine.workspace.id, { settingPrefixes: ["deployment.", "model.provider"], eventTypePrefixes: ["model.changed"] });
   expect(result.fileUris).toEqual(["file:///data/sources/a.txt"]);
   expect(store.listSourceDocuments(mine.workspace.id)).toEqual([]);
   expect(store.getSetting(mine.workspace.id, "onboarding.tone")).toBeUndefined();
   expect(store.getSetting(mine.workspace.id, "deployment.runtimeOwner")).toBe("1");
   expect(store.getSetting(mine.workspace.id, "model.provider")).toBe("{}");
-  expect(store.listEvents(mine.workspace.id).map((event) => event.type)).toEqual(["model.provider.conformance"]);
+  expect(store.listEvents(mine.workspace.id).map((event) => event.type)).toEqual(["model.changed"]);
   // Still the same signed-in account in the same workspace.
   expect(store.getPrincipalByBetterAuthId("auth-reset")).toBeDefined();
   expect(store.listWorkspaces().map((w) => w.id)).toContain(mine.workspace.id);

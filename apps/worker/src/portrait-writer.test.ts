@@ -7,7 +7,7 @@ import { ENERGY_CATEGORIES, PORTRAIT_SCHEMA_VERSION, SAY_DO_DIMENSIONS, SCHWARTZ
 import { createPortraitWriter, PORTRAIT_REWRITE_MARKER, PORTRAIT_WRITER, portraitRewriteDue } from "./portrait-writer";
 import { fakeRuntime } from "./testing/fake-runtime";
 
-const SKILL = readFileSync(path.resolve(import.meta.dirname, "../../../skills/marketplace/plugins/crossline/skills/crossline-portrait-writer/SKILL.md"), "utf8");
+const SKILL = readFileSync(path.resolve(import.meta.dirname, "../../../skills/marketplace/plugins/crossline/skills/crossline-portrait/SKILL.md"), "utf8");
 
 let store: CrosslineStore;
 let workspaceId: string;
@@ -28,6 +28,11 @@ const report = (overrides: Partial<PortraitReport> = {}): PortraitReport => ({
   insights: [], sensitive: [], ...overrides
 });
 const saved = () => JSON.parse(store.getSetting(workspaceId, "portrait.report")!) as { version: number; at: string; schema?: number; report: PortraitReport };
+// Since 2026-11-27 the narrative is the same Skill's other mode, so it runs here too: on a route of its own, where it fails and is left out
+// (as it was when the narrative was a Skill these tests did not install), and the report's turns and threads are counted apart from it.
+const writerRuntime = (answers: string[]) => fakeRuntime(answers, PORTRAIT_WRITER, { routes: [{ match: "\"mode\":\"narrative\"", answers: [""] }] });
+const reportPrompt = (runtime: ReturnType<typeof fakeRuntime>) => runtime.prompts().find((prompt) => prompt.includes("\"mode\":\"report\""))!;
+const reportThreads = (runtime: ReturnType<typeof fakeRuntime>) => runtime.threadStarts().filter((start) => String(start.developerInstructions).includes("画像报告"));
 
 test("the Skill describes the contract: core word, the ten values, six energy categories, five say–do dimensions and the ledger's doing", () => {
   expect(SKILL).toContain("coreWord");
@@ -39,11 +44,11 @@ test("the Skill describes the contract: core word, the ten values, six energy ca
 });
 
 test("the report is saved with its schema version, and the model is given what the ledger says was done", async () => {
-  const runtime = fakeRuntime([JSON.stringify(report())], PORTRAIT_WRITER);
+  const runtime = writerRuntime([JSON.stringify(report())]);
   expect(await createPortraitWriter(store, workspaceId, "C:\\repo", () => runtime.rpc)()).toEqual({ state: "written", version: 1 });
   expect(saved()).toMatchObject({ version: 1, schema: PORTRAIT_SCHEMA_VERSION });
-  expect(runtime.prompts()[0]).toContain("\"doing\"");
-  expect(runtime.prompts()[0]).toContain("\"sufficient\":false");
+  expect(reportPrompt(runtime)).toContain("\"doing\"");
+  expect(reportPrompt(runtime)).toContain("\"sufficient\":false");
 });
 
 test("an answer whose values stay incomplete after the repairs is kept; an unknown line is left out, not the whole report", async () => {
@@ -59,12 +64,12 @@ test("an answer whose values stay incomplete after the repairs is kept; an unkno
 
 test("three answers that never parse in one run are written again once in a fresh thread; a second failure stays blocked", async () => {
   const broken = `${JSON.stringify(report()).slice(0, 300)}"`;
-  const runtime = fakeRuntime([broken, broken, broken, JSON.stringify(report())], PORTRAIT_WRITER);
+  const runtime = writerRuntime([broken, broken, broken, JSON.stringify(report())]);
   expect(await createPortraitWriter(store, workspaceId, "C:\repo", () => runtime.rpc)()).toEqual({ state: "written", version: 1 });
-  expect(runtime.threadStarts()).toHaveLength(2);
-  const never = fakeRuntime([broken], PORTRAIT_WRITER);
+  expect(reportThreads(runtime)).toHaveLength(2);
+  const never = writerRuntime([broken]);
   expect(await createPortraitWriter(store, workspaceId, "C:\repo", () => never.rpc)()).toMatchObject({ state: "blocked", code: "SKILL_SCHEMA_INVALID" });
-  expect(never.threadStarts()).toHaveLength(2);
+  expect(reportThreads(never)).toHaveLength(2);
 });
 
 const NOW = new Date("2026-10-12T12:00:00.000Z");
@@ -87,7 +92,7 @@ test("an old report is rewritten once after the new version ships; never twice, 
   expect(portraitRewriteDue(store, workspaceId, NOW)).toBe("schema");
   keep({ version: 3, at: "2026-10-01T00:00:00.000Z", schema: 1, report: report() });
   expect(portraitRewriteDue(store, workspaceId, NOW)).toBe("schema");
-  store.appendEvent({ ownerId: "o", workspaceId, idempotencyKey: "req", type: "portrait.requested", entityId: workspaceId, payload: {} });
+  store.appendEvent({ ownerId: "o", workspaceId, idempotencyKey: "req", type: "portrait.changed", entityId: workspaceId, payload: { change: "requested" } });
   expect(portraitRewriteDue(store, workspaceId, new Date())).toBeNull();
   store.setSetting(workspaceId, PORTRAIT_REWRITE_MARKER, "2026-10-14T00:00:00.000Z");
   expect(portraitRewriteDue(store, workspaceId, NOW)).toBeNull();
@@ -125,8 +130,8 @@ test("a say–do rewrite replaces the gap only: the rest, the version and the fi
   expect(after.report).toEqual({ ...before, gap });
   expect(runtime.prompts()[0]).toContain("\"previous\"");
   expect(store.getSetting(workspaceId, "portrait.gap.at")).toBeTruthy();
-  expect(store.listEvents(workspaceId, { type: "portrait.gap_rewritten" })).toHaveLength(1);
-  expect(store.listEvents(workspaceId, { type: "portrait.written" })).toHaveLength(0);
+  expect(store.listEvents(workspaceId, { type: "portrait.changed", change: "gap_rewritten" })).toHaveLength(1);
+  expect(store.listEvents(workspaceId, { type: "portrait.changed", change: "written" })).toHaveLength(0);
 });
 
 // 2026-10-15 walkthrough: the first report was asked for only by the interview page that saw the last round land.
@@ -169,7 +174,29 @@ test("the report written at the end is projected into the profile; a field it le
 test("the report reads every confirmed fact, not the first 120 by line and slot", async () => {
   for (let index = 0; index < 150; index++) store.upsertProfileFact({ workspaceId, identityId: "research", projectId: "", slot: `note_${String(index).padStart(3, "0")}`,
     value: `事实 ${index}`, status: "confirmed", sourceRef: "reply-1", sourceQuote: "", updatedAt: "2026-10-01T00:00:00Z" });
-  const runtime = fakeRuntime([JSON.stringify(report())], PORTRAIT_WRITER);
+  const runtime = writerRuntime([JSON.stringify(report())]);
   expect(await createPortraitWriter(store, workspaceId, "C:\repo", () => runtime.rpc)()).toMatchObject({ state: "written" });
-  expect(runtime.prompts()[0]).toContain("note_149");
+  expect(reportPrompt(runtime)).toContain("note_149");
+});
+
+// 2026-11-27 (docs/plans/condense-1127.md A2): the values' scores are the scale's, never the writer's; a value the scale did not measure is
+// null in the report and keeps the profile's earlier score.
+test("the values' scores come from TwIVI, over whatever the writer wrote; an unmeasured value is null and the profile keeps its score", async () => {
+  const { PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, instrumentScores, EMPTY_PROFILE_MODEL } = await import("@crossline/core");
+  const { projectReport } = await import("./portrait-writer");
+  const unmeasured = SCHWARTZ_VALUES[0]!.name;
+  const answers = Object.fromEntries(PROFILE_ITEMS.filter((item) => item.instrument === "twivi" && item.dimension !== unmeasured)
+    .map((item, index) => [item.id, { itemId: item.id, score: 1 + (index % 6), by: "tapped", at: "2026-11-27T00:00:00Z" }]));
+  store.setSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING, JSON.stringify(answers));
+  const runtime = writerRuntime([JSON.stringify(report())]);
+  expect(await createPortraitWriter(store, workspaceId, "C:\repo", () => runtime.rpc)()).toMatchObject({ state: "written" });
+  expect(reportPrompt(runtime)).toContain("\"valueScores\"");
+  const scale = new Map(instrumentScores(answers as never, "twivi").map((score) => [score.dimension, score.score]));
+  expect([...scale.values()].filter((score) => score !== null)).toHaveLength(9);
+  const values = saved().report.compass.values!;
+  expect(values.find((value) => value.name === unmeasured)!.score).toBeNull();
+  for (const value of values.filter((item) => item.name !== unmeasured)) expect(value.score).toBe(scale.get(value.name));
+  expect(values.map((value) => value.evidence)).toEqual(report().compass.values!.map((value) => value.evidence));
+  const after = projectReport({ ...EMPTY_PROFILE_MODEL, values: [{ value: unmeasured, score: 77 }] }, saved().report);
+  expect(after.values.find((value) => value.value === unmeasured)).toEqual({ value: unmeasured, score: 77 });
 });

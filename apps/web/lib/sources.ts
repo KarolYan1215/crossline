@@ -161,8 +161,8 @@ export function removeUploadedSource(ctx: AccessContext, id: string, now = Date.
   const { kind, fileName, mediaType, sha256, uri, ownerId, projectId } = doc;
   const trash = purgeTrash(ctx, readTrash(ctx).filter((entry) => entry.id !== id), now);
   store.setSetting(ctx.workspaceId, TRASH_SETTING, JSON.stringify([...trash, { id, ownerId, kind, fileName, mediaType, sha256, uri, ...(projectId ? { projectId } : {}), at: now }].slice(-50)));
-  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `source.removed:${id}:${now}`, type: "source.removed", entityId: id,
-    payload: { fileName: doc.fileName, kind: doc.kind, by: "person" } });
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `source.removed:${id}:${now}`, type: "person.decided", entityId: id,
+    payload: { fileName: doc.fileName, kind: doc.kind, by: "person", subject: "source", decision: "removed" } });
   return { ok: true, fileName: doc.fileName };
 }
 
@@ -184,8 +184,8 @@ export async function restoreUploadedSource(ctx: AccessContext, id: string, now 
   const doc = store.saveSourceDocument({ id: entry.id, ownerId: entry.ownerId, workspaceId: ctx.workspaceId, ...(entry.projectId ? { projectId: entry.projectId } : {}),
     kind: entry.kind, fileName: entry.fileName, mediaType: entry.mediaType, sha256: entry.sha256, uri: entry.uri, extractedText: "", extractionStatus: "pending",
     createdAt: new Date(now).toISOString() });
-  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `source.restored:${id}:${now}`, type: "source.restored", entityId: doc.id,
-    payload: { fileName: entry.fileName, by: "person" } });
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `source.restored:${id}:${now}`, type: "person.decided", entityId: doc.id,
+    payload: { fileName: entry.fileName, by: "person", subject: "source", decision: "restored" } });
   // The same content uploaded again meanwhile is that row; otherwise the restored row is read again.
   if (doc.id === entry.id) {
     await requestCodexSupervisor<unknown>(ctx, "/v1/sources/extract", { method: "POST", headers: { "content-type": "application/json" },

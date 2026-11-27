@@ -123,7 +123,7 @@ test("a background request refused for load waits and tries the same model again
   const started = await startModelGateway({ resolve: () => ({ kind: "chat", baseUrl: provider.base, key: "k", fallback: () => ["m-other"] }),
     backoffMs: [10, 10, 10], quickRetryMs: 10, log: (event) => events.push(event) });
   closers.push(started.close);
-  const answer = await post(started.urlFor("ws", "sponsor"), "crossline:crossline-step-planner");
+  const answer = await post(started.urlFor("ws", "sponsor"), "crossline:crossline-task-planner:steps");
   expect(await answer.text()).toContain("response.completed");
   // Three requests, all to the same model: background work is not moved to another (dearer) model.
   expect(provider.seen.map((seen) => seen.body.model)).toEqual(["m-main", "m-main", "m-main"]);
@@ -175,9 +175,9 @@ test("the limit on requests in flight to one model halves on a refusal and grows
   closers.push(started.close);
   const url = started.urlFor("ws", "sponsor");
   // The first refusal halves 4 to 2: at most two of the six requests reach the model at once afterwards.
-  await post(url, "crossline:crossline-task-titler").then((answer) => answer.text());
+  await post(url, "crossline:crossline-goal-backplanner:title").then((answer) => answer.text());
   most = 0;
-  await Promise.all(Array.from({ length: 6 }, () => post(url, "crossline:crossline-task-titler").then((answer) => answer.text())));
+  await Promise.all(Array.from({ length: 6 }, () => post(url, "crossline:crossline-goal-backplanner:title").then((answer) => answer.text())));
   expect(most).toBeLessThanOrEqual(3);
   expect(most).toBeGreaterThanOrEqual(2);
 });
@@ -217,10 +217,10 @@ test("方案 C: a route says whose it is, and tokens a node run spent are taken 
     expect(takeMeteredUsage("t1").totalTokens).toBe(240);
     expect(takeMeteredUsage("t1").totalTokens).toBe(0);
     // A request that named no thread (or one no run takes) is still billed, once it has been quiet half an hour.
-    recordMeteredUsage({ workspaceId: "ws-a", skill: "crossline-step-planner", model: "m1" }, tokens, 0);
+    recordMeteredUsage({ workspaceId: "ws-a", skill: "crossline-task-planner:steps", model: "m1" }, tokens, 0);
     flushMeteredUsage(30 * 60_000, 10 * 60_000);
     expect(rows).toHaveLength(0);
     flushMeteredUsage(30 * 60_000, 31 * 60_000);
-    expect(rows).toEqual([expect.objectContaining({ workspaceId: "ws-a", skillName: "crossline-step-planner", model: "m1", totalTokens: 120, purpose: "node_unclaimed" })]);
+    expect(rows).toEqual([expect.objectContaining({ workspaceId: "ws-a", skillName: "crossline-task-planner:steps", model: "m1", totalTokens: 120, purpose: "node_unclaimed" })]);
   } finally { setUsageSink(undefined); }
 });

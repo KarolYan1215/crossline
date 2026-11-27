@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   ACTIVITY_HOURLY, ACTIVITY_HOURLY_DAYS, ACTIVITY_LAST_ACTIVE, ACTIVITY_LONG_GAPS, AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, DEVICE_DOCUMENTS_SETTING,
   DEVICE_FOLDERS_SETTING, DEVICE_IDEMPOTENCY_HEADER, DEVICE_LIMITS, DEVICE_LAST_SEEN_SETTING, DEVICE_SEEN_KEEP, DEVICE_SEEN_SETTING, INPUT_RHYTHM_BUCKETS, INPUT_RHYTHM_CONSENT,
-  NODE_COMPUTE_SETTING, NODE_STATUS_SETTING, RECORDING_SILENT_EVENT, RECORDING_TRANSCRIBED_EVENT, SLEEP_TRACKING_CONSENT, gitCommitEvent, type DeviceCommitsPayload,
+  NODE_COMPUTE_SETTING, NODE_STATUS_SETTING, SLEEP_TRACKING_CONSENT, gitCommitEvent, type DeviceCommitsPayload,
   type AccessContext, type ActivityHour, type DeviceActivityPayload, type DeviceFolder, type DeviceRecordingsPayload, type DeviceSourcesPayload, type InputRhythmBucket
 } from "@crossline/core";
 import { ACTIVITY_DETAIL_CONSENT, dataDirectory, getStore, LOCAL_ACTIVITY_CONSENT } from "./crossline";
@@ -235,7 +235,7 @@ export function applyDeviceRecordings(ctx: AccessContext, payload: Required<Devi
   const store = getStore(), ws = ctx.workspaceId;
   const counted = { transcripts: 0, silent: 0 };
   for (const item of payload.transcripts) {
-    if (store.listEvents(ws, { type: [RECORDING_TRANSCRIBED_EVENT, RECORDING_SILENT_EVENT], entityId: item.audioSha }).length) continue;
+    if (store.listEvents(ws, { type: "recording.changed", change: ["transcribed", "silent"], entityId: item.audioSha }).length) continue;
     const sha256 = createHash("sha256").update(item.text, "utf8").digest("hex");
     const doc = store.saveSourceDocument({ id: `device-rec-${item.audioSha.slice(0, 20)}`, ownerId: ctx.principalId, workspaceId: ws, kind: "text",
       // i18n-ignore: the name transcripts are known by, as the worker writes it
@@ -243,16 +243,16 @@ export function applyDeviceRecordings(ctx: AccessContext, payload: Required<Devi
       extractionStatus: "done", extractionNote: tOf(ctx)("电脑本机转写：录音 {{minutes}} 分钟，有人声约 {{speech}} 分钟；录音留在那台电脑上（sha256 {{sha}}）。",
         { minutes: Math.max(1, Math.round(item.seconds / 60)), speech: Math.round(item.speechSeconds / 60), sha: item.audioSha.slice(0, 12) }),
       createdAt: new Date().toISOString() });
-    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ws, idempotencyKey: `${RECORDING_TRANSCRIBED_EVENT}:${item.audioSha}`, type: RECORDING_TRANSCRIBED_EVENT,
+    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ws, idempotencyKey: `recording.transcribed:${item.audioSha}`, type: "recording.changed",
       entityId: item.audioSha, payload: { fileName: item.fileName, seconds: item.seconds, speechSeconds: item.speechSeconds, workMs: item.workMs, wallMs: item.wallMs,
-        documentId: doc.id, where: "device", folderId: item.folderId } });
+        documentId: doc.id, where: "device", folderId: item.folderId, change: "transcribed" } });
     counted.transcripts += 1;
   }
   for (const item of payload.silent) {
-    if (store.listEvents(ws, { type: [RECORDING_TRANSCRIBED_EVENT, RECORDING_SILENT_EVENT], entityId: item.audioSha }).length) continue;
-    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ws, idempotencyKey: `${RECORDING_SILENT_EVENT}:${item.audioSha}`, type: RECORDING_SILENT_EVENT,
+    if (store.listEvents(ws, { type: "recording.changed", change: ["transcribed", "silent"], entityId: item.audioSha }).length) continue;
+    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ws, idempotencyKey: `recording.silent:${item.audioSha}`, type: "recording.changed",
       entityId: item.audioSha, payload: { fileName: item.fileName, seconds: item.seconds, speechSeconds: item.speechSeconds, workMs: item.workMs, where: "device",
-        folderId: item.folderId } });
+        folderId: item.folderId, change: "silent" } });
     counted.silent += 1;
   }
   return counted;

@@ -1,7 +1,6 @@
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { gunzipSync } from "node:zlib";
-import { RECORDING_SILENT_EVENT, RECORDING_TRANSCRIBED_EVENT } from "@crossline/core";
 import { isWorkspaceMirror, replaceWorkspaceFrom, type CrosslineStore } from "@crossline/db";
 import { tOfWorkspace } from "../locale";
 import { folderDocuments } from "../source-folders";
@@ -31,7 +30,7 @@ const LOCAL_EVENTS = /^(?:recording\.(?:transcribed|silent)|sources\.folder_)/;
 /** Which local rows the device keeps over the mirror. */
 export function deviceKeeps(store: CrosslineStore, workspaceId: string): (table: string, row: Record<string, unknown>) => boolean {
   const documents = new Set(folderDocuments(store, workspaceId).keys());
-  for (const event of store.listEvents(workspaceId, { type: [RECORDING_TRANSCRIBED_EVENT, RECORDING_SILENT_EVENT] })) {
+  for (const event of store.listEvents(workspaceId, { type: "recording.changed", change: ["transcribed", "silent"] })) {
     const id = (event.payload as { documentId?: unknown }).documentId;
     if (typeof id === "string" && id) documents.add(id);
   }
@@ -75,7 +74,7 @@ export async function mirrorPass(input: { store: CrosslineStore; ledger: string;
     const mirror = JSON.parse(gunzipSync(Buffer.from(await response.arrayBuffer())).toString("utf8")) as unknown;
     if (!isWorkspaceMirror(mirror)) return failed("DEVICE_MIRROR_INVALID");
     await backupOnce(store, input.ledger, now);
-    const recordingShas = () => store.listEvents(workspaceId, { type: [RECORDING_TRANSCRIBED_EVENT, RECORDING_SILENT_EVENT] }).map((event) => event.entityId);
+    const recordingShas = () => store.listEvents(workspaceId, { type: "recording.changed", change: ["transcribed", "silent"] }).map((event) => event.entityId);
     const ours = new Set(recordingShas());
     replaceWorkspaceFrom(store, mirror, { workspaceId, keep: deviceKeeps(store, workspaceId), spare: ["activity_segments"] });
     // Recordings the site transcribed itself (the phone's inbox) are now in this ledger too: they are the site's, never this device's to send.

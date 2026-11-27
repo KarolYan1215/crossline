@@ -59,16 +59,23 @@ export async function loadEffectiveness(ctx: AccessContext, now = new Date()): P
   }
 
   // Decisions the person made this week: approvals, accepted drafts, answered follow-ups and relation decisions.
-  const decisionEvents = store.listEvents(ctx.workspaceId, { type: ["work_order.transitioned", "milestone.revised", "waiting.arrived", "waiting.deferred",
-    "waiting.cancelled", "milestone_relation.decided", "work_order.auto_approval_revoked", "ask.answered"] })
+  // `milestone_relation.changed` `decided`: read as `milestone_relation.decided` until 2026-11-27, a name its writer never used
+  // (it wrote `milestone_relations.decided`), so relation decisions were never counted.
+  const decisionEvents = [
+    ...store.listEvents(ctx.workspaceId, { type: "work_order.transitioned" }),
+    ...store.listEvents(ctx.workspaceId, { type: "milestone.changed", change: "revised" }),
+    ...store.listEvents(ctx.workspaceId, { type: "waiting.changed", change: ["arrived", "deferred", "cancelled"] }),
+    ...store.listEvents(ctx.workspaceId, { type: "milestone_relation.changed", change: "decided" }),
+    ...store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "auto_approval_revoked" }),
+    ...store.listEvents(ctx.workspaceId, { type: "ask.changed", change: "answered" })]
     .filter((event) => event.createdAt >= weekAgo && (event.type !== "work_order.transitioned"
       || (event.payload as { event?: { type?: string; approvalId?: string } }).event?.approvalId === ctx.principalId));
 
   // What deciding cost: seconds on screen that the cards measured (`ask.answered`, `ask.snoozed`), since 2026-10-18.
-  const timed = store.listEvents(ctx.workspaceId, { type: ["ask.answered", "ask.snoozed"] })
+  const timed = store.listEvents(ctx.workspaceId, { type: "ask.changed", change: ["answered", "snoozed"] })
     .filter((event) => event.createdAt >= weekAgo && typeof (event.payload as { seconds?: unknown }).seconds === "number");
   const timedSeconds = timed.reduce((sum, event) => sum + Number((event.payload as { seconds: number }).seconds), 0);
-  const timedDecisions = timed.filter((event) => event.type === "ask.answered").length;
+  const timedDecisions = timed.filter((event) => (event.type === "ask.changed" && (event.payload as { change?: string }).change === "answered")).length;
   // How often the plan moved under the person, per day of the last seven that the web's timer recorded.
   const planChurnDays = [...new Set(Array.from({ length: 7 }, (_, index) => planToday(ctx, new Date(now.getTime() - index * DAY))))].flatMap((day) => {
     try { const raw = store.getSetting(ctx.workspaceId, planChurnKey(day)); return raw ? [JSON.parse(raw) as PlanChurnDay] : []; } catch { return []; }

@@ -29,7 +29,7 @@ store.setSetting(workspace.id, "portrait.report", JSON.stringify({ version: 1, a
 const supervisor = await startCodexSupervisor({
   port: Number(process.env.CROSSLINE_CODEX_SUPERVISOR_PORT ?? 3397),
   plugin: { name: "crossline", marketplacePath: path.join(repoRoot, "skills", "marketplace", ".agents", "plugins", "marketplace.json"), cwd: repoRoot,
-    requiredSkills: ["crossline:crossline-portrait-illustrator"] }
+    requiredSkills: ["crossline:crossline-portrait:figure"] }
 });
 try {
   const started = Date.now();

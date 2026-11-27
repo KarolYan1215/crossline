@@ -38,8 +38,8 @@ test("nothing before the day starts, nothing twice, a daily cap, and nothing at 
   expect(planNotifications({ ...base, clock: "21:00", sent: new Set(["brief:2026-10-08"]) })).toEqual([]);
 });
 
-const gateBlocked = (store: CrosslineStore, id: string) => store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: `gate-${id}`, type: "milestone_gate.blocked",
-  entityId: id, payload: { message: "SKILL_UNAUTHENTICATED" } });
+const gateBlocked = (store: CrosslineStore, id: string) => store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: `gate-${id}`, type: "milestone_gate.changed",
+  entityId: id, payload: { message: "SKILL_UNAUTHENTICATED", change: "blocked" } });
 
 test("a pass delivers and records each message once; something awaited that is due is counted in the brief, not pushed", async () => {
   const store = new CrosslineStore(":memory:");
@@ -227,8 +227,8 @@ test("the morning brief says how many of last night's blocks wait to be confirme
     "scheduled:b": { id: "scheduled:b", end: "23:59", began: true },
     "scheduled:c": { id: "scheduled:c", end: "15:00", began: true },
     "scheduled:d": { id: "scheduled:d", end: "23:40", began: false } }));
-  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "block-confirmed:x", type: "block.confirmed", entityId: "x",
-    payload: { blockId: "scheduled:b", day: "2026-10-07", outcome: "as_planned" } });
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "block-confirmed:x", type: "work_order.changed", entityId: "x",
+    payload: { blockId: "scheduled:b", day: "2026-10-07", outcome: "as_planned", change: "block_confirmed" } });
   expect(unconfirmedLastNight(store, "w", "2026-10-08")).toBe(2);
   // The day was wrapped up (docs/rituals.md): only the blocks after the evening's questions stopped are left.
   store.setSetting("w", "wrap.done:2026-10-07", "2026-10-08T03:00:00.000Z");

@@ -30,7 +30,7 @@ test("legacy drill tasks are archived, drill steps skipped and drill clauses cut
 
   const orders = Object.fromEntries(store.listWorkOrders("w").map((item) => [item.id, item]));
   expect(orders.drill!.state).toBe("archived");
-  expect(store.listEvents("w", { type: "work_order.archived", entityId: "drill" })[0]!.payload)
+  expect(store.listEvents("w", { type: "work_order.changed", change: "archived", entityId: "drill" })[0]!.payload)
     .toMatchObject({ reason: DRILL_ARCHIVE_REASON, from: "approved" });
   expect(orders.mock!.intent).toBe("完成一套限时模拟题");
   expect(orders.clean!.intent).toBe("写完报告");

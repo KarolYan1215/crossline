@@ -48,8 +48,8 @@ async function once(store: CrosslineStore, workspaceId: string, runtime: AppsRun
     const { result, ledger: next } = await publishToGoogle(call, blocks, ledger, now);
     store.setSetting(workspaceId, CALENDAR_GOOGLE_LEDGER_SETTING, JSON.stringify(next));
     store.setSetting(workspaceId, CALENDAR_GOOGLE_LAST_SETTING, JSON.stringify({ at: now.toISOString(), ...result }));
-    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `calendar:published:google:${now.getTime()}`, type: "calendar.published.google",
-      entityId: workspaceId, payload: { ...result } });
+    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `calendar:published:google:${now.getTime()}`, type: "job.ran",
+      entityId: workspaceId, payload: { ...result, job: "calendar.publish.google", state: "done" } });
     return { state: "published", result };
   } catch (error) {
     if (error instanceof GoogleInterruptedError) store.setSetting(workspaceId, CALENDAR_GOOGLE_LEDGER_SETTING, JSON.stringify(error.ledger));

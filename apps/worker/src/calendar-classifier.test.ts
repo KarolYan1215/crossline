@@ -23,7 +23,7 @@ test("calendar events are filed under lines by title, once per recurring title, 
     { key: "ece 555 lecture", lineId: "research", why: "研究者主线下的课程", unclear: false, rest: false, cancelled: false },
     { key: "dentist", lineId: "", why: "个人事务", unclear: false, rest: false, cancelled: false },
     { key: "ece 548 midterm", lineId: "nonexistent", why: "", unclear: false, rest: false, cancelled: false }] };
-  const runtime = fakeRuntime([JSON.stringify(answer)], "crossline:crossline-calendar-classifier");
+  const runtime = fakeRuntime([JSON.stringify(answer)], "crossline:crossline-line-filer:calendar");
   expect(await createCalendarClassifier(store, ws, "C:\repo", () => runtime.rpc)()).toEqual({ filed: 3 });
   const filing = readCalendarLines(store, ws);
   expect(calendarLineOf(filing, "ECE 555 Lecture")).toBe("research");
@@ -55,7 +55,7 @@ test("an entry filed before the rest and cancelled marks is read once more; the 
   const answer = { items: [
     { key: "lunch", lineId: "", why: "用餐", unclear: false, rest: true, cancelled: false },
     { key: "canceled: lab sync", lineId: "", why: "组织者已取消", unclear: false, rest: false, cancelled: true }] };
-  const runtime = fakeRuntime([JSON.stringify(answer)], "crossline:crossline-calendar-classifier");
+  const runtime = fakeRuntime([JSON.stringify(answer)], "crossline:crossline-line-filer:calendar");
   await createCalendarClassifier(store, ws, "C:\\repo", () => runtime.rpc)();
   const filing = readCalendarLines(store, ws);
   expect(filing.entries["lunch"]).toMatchObject({ by: "person", rest: true, cancelled: false });

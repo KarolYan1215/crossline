@@ -21,9 +21,9 @@ import { mergeTools, READ_LEDGER_INSTRUCTIONS } from "./ledger-index";
 import { ASK_PERSON_INSTRUCTIONS, withAskTool } from "./ask-tool";
 
 import { libraryInstruction, librarySkillsFor } from "./skill-library";
-const PLANNER = "crossline:crossline-step-planner";
+const PLANNER = "crossline:crossline-task-planner:steps";
 const REVIEWER = "crossline:crossline-validation-reviewer";
-const JUDGE = "crossline:crossline-progress-judge";
+const JUDGE = "crossline:crossline-evidence-judge:progress";
 /** States in which a task is committed and its steps get time on the calendar. */
 const PLANNABLE = ["approved", "preparing", "ready_for_human", "active"];
 const day = (iso: string) => iso.slice(0, 10);
@@ -124,7 +124,7 @@ export function tasksAwaitingStepPlan(store: CrosslineStore, workspaceId: string
   const capacity = new Set(defaultIdentityPacks().filter((pack) => pack.kind === "capacity").map((pack) => pack.id));
   const plans = new Map(store.listStepPlans(workspaceId).map((plan) => [plan.workOrderId, plan.plannedAt]));
   const replan = new Map<string, string>();
-  for (const event of store.listEvents(workspaceId, { type: "task.steps_replan_requested" })) replan.set(event.entityId, event.createdAt);
+  for (const event of store.listEvents(workspaceId, { type: "task.changed", change: "steps_replan_requested" })) replan.set(event.entityId, event.createdAt);
   const proposal = (order: StoredWorkOrder) => Number(order.state === "awaiting_plan_approval");
   return store.listWorkOrders(workspaceId)
     .filter((order) => (PLANNABLE.includes(order.state) || order.state === "awaiting_plan_approval") && !capacity.has(order.identityId)
@@ -133,7 +133,7 @@ export function tasksAwaitingStepPlan(store: CrosslineStore, workspaceId: string
       && onPersonsBoard(order))
     .filter((order) => !plans.has(order.id) || (replan.get(order.id) ?? "") > plans.get(order.id)!)
     // A plan that failed for a reason of its own is not retried every tick; a request to replan (or a new day) does.
-    .filter((order) => !store.listEvents(workspaceId, { type: "task.steps_blocked", entityId: order.id })
+    .filter((order) => !store.listEvents(workspaceId, { type: "task.changed", change: "steps_blocked", entityId: order.id })
       .some((event) => event.createdAt > (replan.get(order.id) ?? "") && day(event.createdAt) === day(new Date().toISOString())))
     .reverse()
     .sort((a, b) => proposal(b) - proposal(a) || Number(plans.has(b.id)) - Number(plans.has(a.id)))
@@ -167,7 +167,7 @@ export function requestFinerSplits(store: CrosslineStore, workspaceId: string, n
   const plans = stepPlans.map((plan) => ({ orderId: plan.workOrderId, version: plan.version,
     openStepIds: plan.steps.filter((step) => step.status === "planned" && step.schedulable && step.executor !== "agent").map((step) => step.id) }));
   const troubles: StepTrouble[] = [];
-  const confirmed = store.listEvents(workspaceId, { type: "block.confirmed" }).map((event) => event.payload as { blockId?: string; workOrderId?: string; stepId?: string; day?: string; outcome?: string });
+  const confirmed = store.listEvents(workspaceId, { type: "work_order.changed", change: "block_confirmed" }).map((event) => event.payload as { blockId?: string; workOrderId?: string; stepId?: string; day?: string; outcome?: string });
   for (const answer of confirmed) if (answer.outcome === "not_done" && answer.workOrderId && answer.stepId && answer.day)
     troubles.push({ kind: "not_done", orderId: answer.workOrderId, stepId: answer.stepId, day: answer.day });
   // The blocks the nudge pass saw under way (`nudge.blocks:<day>`, apps/web/lib/nudges.ts): one with no timer started that day and no
@@ -185,7 +185,7 @@ export function requestFinerSplits(store: CrosslineStore, workspaceId: string, n
       troubles.push({ kind: "not_started", orderId: block.orderId, stepId: block.stepId, day: dayKey });
   }
   // 「昨天排的没做」 rolled forward: the steps that task had blocks for that day.
-  for (const event of store.listEvents(workspaceId, { type: "missed.handled" })) {
+  for (const event of store.listEvents(workspaceId, { type: "work_order.changed", change: "missed_handled" })) {
     const { askId, how } = event.payload as { askId?: string; how?: string };
     const [, orderId, missedDay] = (askId ?? "").split(":");
     if (!orderId || !missedDay || !["roll", "later"].includes(how ?? "")) continue;
@@ -197,7 +197,7 @@ export function requestFinerSplits(store: CrosslineStore, workspaceId: string, n
     const nudge = message.payload.nudge as { kind?: string; step?: { orderId: string; stepId: string } } | undefined;
     if (nudge?.kind === "timer_overrun" && nudge.step) troubles.push({ kind: "overrun", ...nudge.step, day: localDay(message.createdAt, zone) });
   }
-  const asked = store.listEvents(workspaceId, { type: "task.steps_replan_requested" }).flatMap((event) => {
+  const asked = store.listEvents(workspaceId, { type: "task.changed", change: "steps_replan_requested" }).flatMap((event) => {
     const split = (event.payload as { finerSplit?: { stepId: string; version: number } }).finerSplit;
     return split ? [{ orderId: event.entityId, stepId: split.stepId, version: split.version, at: event.createdAt }] : [];
   });
@@ -205,9 +205,9 @@ export function requestFinerSplits(store: CrosslineStore, workspaceId: string, n
   for (const split of splits) {
     const title = stepPlans.find((plan) => plan.workOrderId === split.orderId)?.steps.find((step) => step.id === split.stepId)?.title ?? "";
     store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `task.steps_finer_split:${split.orderId}:${split.stepId}:${split.version}`,
-      type: "task.steps_replan_requested", entityId: split.orderId,
+      type: "task.changed", entityId: split.orderId,
       // i18n-ignore: the brief for the next plan (model-facing); the page builds its own line from `finerSplit`
-      payload: { feedback: `「${title}」${split.days.length} 天没做成：${FINER_SPLIT_FEEDBACK}`, finerSplit: { stepId: split.stepId, version: split.version, title, days: split.days } } });
+      payload: { feedback: `「${title}」${split.days.length} 天没做成：${FINER_SPLIT_FEEDBACK}`, finerSplit: { stepId: split.stepId, version: split.version, title, days: split.days }, change: "steps_replan_requested" } });
   }
   return splits;
 }
@@ -228,7 +228,7 @@ export const STEP_TYPES_FEEDBACK = "按统一步骤类型表重排：每一步�
  */
 export function requestOutdatedReplans(store: CrosslineStore, workspaceId: string, now = new Date()): string[] {
   const soon = startingWithin(store, workspaceId, now);
-  const asked = new Set(store.listEvents(workspaceId, { type: "task.steps_replan_requested" }).filter((event) => (event.payload as { outdated?: boolean }).outdated)
+  const asked = new Set(store.listEvents(workspaceId, { type: "task.changed", change: "steps_replan_requested" }).filter((event) => (event.payload as { outdated?: boolean }).outdated)
     .map((event) => `${event.entityId}|${(event.payload as { reason?: string }).reason ?? "first_action"}`));
   const live = new Set(store.listWorkOrders(workspaceId).filter((order) => PLANNABLE.includes(order.state)).map((order) => order.id));
   const out: string[] = [];
@@ -239,8 +239,8 @@ export function requestOutdatedReplans(store: CrosslineStore, workspaceId: strin
     const reason = !plan.steps.some((step) => step.firstAction || step.aiAssist) ? "first_action" : !plan.steps.some((step) => step.product) ? "step_types" : "";
     if (!reason || asked.has(`${plan.workOrderId}|${reason}`)) continue;
     store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `task.steps_outdated:${plan.workOrderId}:${plan.version}:${reason}`,
-      type: "task.steps_replan_requested", entityId: plan.workOrderId,
-      payload: { feedback: reason === "first_action" ? OUTDATED_PLAN_FEEDBACK : STEP_TYPES_FEEDBACK, outdated: true, reason, version: plan.version } });
+      type: "task.changed", entityId: plan.workOrderId,
+      payload: { feedback: reason === "first_action" ? OUTDATED_PLAN_FEEDBACK : STEP_TYPES_FEEDBACK, outdated: true, reason, version: plan.version, change: "steps_replan_requested" } });
     out.push(plan.workOrderId);
     asked.add(`${plan.workOrderId}|${reason}`);
   }
@@ -292,7 +292,7 @@ export function requestGranularityReplans(store: CrosslineStore, workspaceId: st
     if (!live.has(plan.workOrderId)) continue;
     if (plan.steps.filter((step) => step.status === "planned" && step.executor !== "agent").length < 2) continue;
     store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `task.steps_granularity:${plan.workOrderId}:${plan.version}`,
-      type: "task.steps_replan_requested", entityId: plan.workOrderId, payload: { feedback: GRANULARITY_FEEDBACK, reason: "granularity", version: plan.version } });
+      type: "task.changed", entityId: plan.workOrderId, payload: { feedback: GRANULARITY_FEEDBACK, reason: "granularity", version: plan.version, change: "steps_replan_requested" } });
     out.push(plan.workOrderId);
   }
   store.setSetting(workspaceId, GRANULARITY_REPLAN, new Date().toISOString());
@@ -381,7 +381,7 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
       feedback,
       // Every earlier instruction about this task's steps still holds unless the latest one says otherwise: a replan used to see only
       // the last one, and an answer to a plan question undid the person's 「本人只做推导、解题和自测」 a minute after they said it.
-      earlierFeedback: store.listEvents(workspaceId, { type: "task.steps_replan_requested", entityId: workOrderId })
+      earlierFeedback: store.listEvents(workspaceId, { type: "task.changed", change: "steps_replan_requested", entityId: workOrderId })
         .map((event) => String((event.payload as { feedback?: string }).feedback ?? "").trim()).filter((text) => text && text !== feedback).slice(-8)
     };
     // The line's own skill and the public skills that fit the task, read beside the planner's: how this work is done shapes the steps.
@@ -404,7 +404,7 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
         withoutTools: (value) => ({ ...(value as object), materials: grounding.material.fallback(),
           person: { ...(value as { person: object }).person, facts: grounding.person } }) },
       /* i18n-ignore-start: model instructions */
-      developerInstructions: "Write this task's steps as the crossline-step-planner Skill describes and return only the requested JSON. The steps are "
+      developerInstructions: "Write this task's steps as the crossline-task-planner:steps Skill describes and return only the requested JSON. The steps are "
         + "what the person sees on the task and what the scheduler puts on the calendar. Read `materials` first and count the units from them, each quoting "
         + "its file verbatim. The person's steps are whole deliverables: one step per thing the person hands in or finishes (「完成 ECE 555 作业 4」), "
         + "split only where the person would do the parts apart (two different deliverables, or two stretches with someone's feedback between them); "
@@ -452,8 +452,8 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
       factChars: JSON.stringify((materialMode as "tools" | "fallback") === "tools" ? grounding.factIndex.index : grounding.person).length, ...grounding.factIndex.stats() }));
     if (!result.ok) {
       if (!/^(SKILL_|CODEX_)/.test(result.blocker.code)) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
-        idempotencyKey: `task.steps_blocked:${workOrderId}:${Date.now()}`, type: "task.steps_blocked", entityId: workOrderId,
-        payload: { code: result.blocker.code, message: result.blocker.message.slice(0, 300) } });
+        idempotencyKey: `task.steps_blocked:${workOrderId}:${Date.now()}`, type: "task.changed", entityId: workOrderId,
+        payload: { code: result.blocker.code, message: result.blocker.message.slice(0, 300), change: "steps_blocked" } });
       return { state: "blocked", code: result.blocker.code, message: result.blocker.message };
     }
     // Every account has the assistant in one mode or another (assistantMode: the owner's shell, else Crossline's tools on any model), so
@@ -494,8 +494,8 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     // a word list in code used to pick such questions out by their wording (2026-11-22, removed).
     assumeAnswers(store, workspaceId, order, normalized.questions.filter((question) => question.ask !== true));
     if (warnings.length) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
-      idempotencyKey: `validation.warned:task_steps:${workOrderId}:${saved.version}`, type: "validation.warned", entityId: workOrderId,
-      payload: { subject: "task_steps", version: saved.version, warnings, revised: Boolean(feedback) } });
+      idempotencyKey: `validation.warned:task_steps:${workOrderId}:${saved.version}`, type: "validation.changed", entityId: workOrderId,
+      payload: { subject: "task_steps", version: saved.version, warnings, revised: Boolean(feedback), change: "warned" } });
     return { state: "planned", version: saved.version, warnings };
   };
 }
@@ -570,8 +570,8 @@ function assumeAnswers(store: CrosslineStore, workspaceId: string, order: { iden
 
 /** Progress reports nobody has read yet (`task.progress_reported` without a `task.progress_judged` for the same report). */
 export function reportsAwaitingJudgement(store: CrosslineStore, workspaceId: string, limit = 2) {
-  const judged = new Set(store.listEvents(workspaceId, { type: "task.progress_judged" }).map((event) => (event.payload as { reportId: string }).reportId));
-  return store.listEvents(workspaceId, { type: "task.progress_reported" })
+  const judged = new Set(store.listEvents(workspaceId, { type: "task.changed", change: "progress_judged" }).map((event) => (event.payload as { reportId: string }).reportId));
+  return store.listEvents(workspaceId, { type: "task.changed", change: "progress_reported" })
     .map((event) => ({ workOrderId: event.entityId, ...(event.payload as { reportId: string; text: string }) }))
     .filter((report) => !judged.has(report.reportId)).slice(0, limit);
 }
@@ -586,8 +586,8 @@ export function createProgressJudge(store: CrosslineStore, workspaceId: string, 
     if (!client) return undefined;
     const order = store.listWorkOrders(workspaceId).find((item) => item.id === report.workOrderId);
     const done = (assessment: ProgressAssessment | null, code = "") => store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
-      idempotencyKey: `task.progress_judged:${report.reportId}`, type: "task.progress_judged", entityId: report.workOrderId,
-      payload: { reportId: report.reportId, ...(assessment ? { summary: assessment.summary } : { code }) } });
+      idempotencyKey: `task.progress_judged:${report.reportId}`, type: "task.changed", entityId: report.workOrderId,
+      payload: { reportId: report.reportId, ...(assessment ? { summary: assessment.summary } : { code }), change: "progress_judged" } });
     if (!order) { done(null, "WORK_ORDER_NOT_FOUND"); return undefined; }
     const steps = store.getStepPlan(workspaceId, order.id)?.steps ?? [];
     const milestone = store.listMilestones(workspaceId).filter((item) => item.id === order.milestoneId).at(-1);
@@ -596,7 +596,7 @@ export function createProgressJudge(store: CrosslineStore, workspaceId: string, 
       steps: steps.map((step) => ({ id: step.id, title: step.title, doneCriterion: step.doneCriterion, quarters: step.progressQuarter, status: step.status })),
       criteria: criteria.map((criterion) => ({ id: criterion.id, statement: criterion.statement })) };
     const result = await runCodexSkill<ProgressAssessment>(client, input, { skillName: JUDGE, cwd,
-      developerInstructions: "Read the person's progress report against this task's steps and standards, as the crossline-progress-judge Skill describes, "
+      developerInstructions: "Read the person's progress report against this task's steps and standards, as the crossline-evidence-judge:progress Skill describes, "
         + "and return only the requested JSON. A reading moves a step forward on the task card, so give one only for what the report speaks to, and 4 "
         + "only when the report shows the done criterion met.",
       outputSchema: PROGRESS_ASSESSMENT_SCHEMA, prepareInput: () => input,
@@ -610,8 +610,8 @@ export function createProgressJudge(store: CrosslineStore, workspaceId: string, 
         store.updateStepProgress(workspaceId, order.id, step.id, item.quarters >= 4 ? { status: "done" } : { progressQuarter: item.quarters }, ownerOf(store, workspaceId), "assessment");
     }
     if (result.output.criteria.length) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
-      idempotencyKey: `criteria.assessed:${report.reportId}`, type: "criteria.assessed", entityId: order.id,
-      payload: { reportId: report.reportId, criteria: result.output.criteria } });
+      idempotencyKey: `criteria.assessed:${report.reportId}`, type: "task.changed", entityId: order.id,
+      payload: { reportId: report.reportId, criteria: result.output.criteria, change: "criteria_assessed" } });
     done(result.output);
     return result.output;
   };
@@ -619,9 +619,9 @@ export function createProgressJudge(store: CrosslineStore, workspaceId: string, 
 
 /** Warnings no reviewer has looked at yet, oldest first: a task's step plan or a candidate cross-line relation. */
 export function warningsAwaitingReview(store: CrosslineStore, workspaceId: string, limit = 1) {
-  const reviewed = new Set(store.listEvents(workspaceId, { type: "validation.reviewed" })
+  const reviewed = new Set(store.listEvents(workspaceId, { type: "validation.changed", change: "reviewed" })
     .map((event) => `${event.entityId}:${(event.payload as { version?: number }).version}`));
-  return store.listEvents(workspaceId, { type: "validation.warned" })
+  return store.listEvents(workspaceId, { type: "validation.changed", change: "warned" })
     .filter((event) => !reviewed.has(`${event.entityId}:${(event.payload as { version?: number }).version}`))
     .slice(0, limit)
     .map((event) => ({ entityId: event.entityId, ...(event.payload as { subject: string; version: number; warnings: StepWarning[]; revised: boolean; milestoneIds?: string[] }) }));
@@ -639,8 +639,8 @@ export function createWarningReviewer(store: CrosslineStore, workspaceId: string
     const client = getClient();
     if (!client) return undefined;
     const record = (verdict: ValidationReview) => store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
-      idempotencyKey: `validation.reviewed:${item.entityId}:${item.version}`, type: "validation.reviewed", entityId: item.entityId,
-      payload: { subject: item.subject, version: item.version, ...verdict } });
+      idempotencyKey: `validation.reviewed:${item.entityId}:${item.version}`, type: "validation.changed", entityId: item.entityId,
+      payload: { subject: item.subject, version: item.version, ...verdict, change: "reviewed" } });
     const input = item.subject === "milestone_relation" ? relationSubject(store, workspaceId, item)
       : item.subject === "milestone_line" ? lineSubject(store, workspaceId, item)
       : item.subject === "analysis" ? analysisSubject(store, workspaceId, item) : stepSubject(store, workspaceId, item);

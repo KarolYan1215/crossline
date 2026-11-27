@@ -21,7 +21,7 @@ test("a replay's metrics: questions and reflection per round, repeats, cards rat
   store.recordQuestion(ws, { kind: "interview", key: "iq:s1:1:q0", text: "a", status: "open", at });
   store.recordQuestion(ws, { kind: "interview", key: "iq:s1:2:q0", text: "b", status: "open", repeats: 1, at });
   store.setSetting(ws, ONBOARDING_INSIGHTS, JSON.stringify({ "s1#1#0": { verdict: "off", stage: "narrative" }, "s1#2#0": { verdict: "fits", stage: "narrative" }, "s2#1#0": { verdict: "off" } }));
-  store.appendEvent({ ownerId, workspaceId: ws, idempotencyKey: "e1", type: "onboarding.round_edited", entityId: "s1", payload: { removed: [{ text: "", why: "x" }], added: [] } });
+  store.appendEvent({ ownerId, workspaceId: ws, idempotencyKey: "e1", type: "onboarding.changed", entityId: "s1", payload: { removed: [{ text: "", why: "x" }], added: [], change: "round_edited" } });
   expect(interviewMetrics(store, ws, "s1")).toEqual({ rounds: 3, questionsPerRound: 1.33, reflectionPerQuestion: 1, repeatRate: 0.5, cardsOff: 0.5,
     agreeOpenings: 0.33, leftOut: 1, cardTools: "tools",
     stages: [{ stage: "narrative", rounds: 2, minutes: 30 }, { stage: "situation", rounds: 1, minutes: 0 }] });

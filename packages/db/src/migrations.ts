@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import { copyFileSync, existsSync } from "node:fs";
 import { migratedTags } from "@crossline/core";
+import { condenseEventTypes } from "./event-condense";
 import { RETIRED_TABLES } from "./schema";
 
 /** What the migrations need from the store: its connection and the few helpers a step shares with a restore or a read. */
@@ -544,7 +545,10 @@ export function runMigrations(ledger: MigrationLedger, path: string): void {
           PRIMARY KEY(workspace_id, id));
         CREATE INDEX IF NOT EXISTS workflow_turns_by_thread ON workflow_turns(workspace_id, thread_id, ord);`);
       ledger.adoptLegacyWorkflowSettings();
-    } }
+    } },
+    // 2026-11-27 (docs/plans/condense-1127.md §C): about 340 event names condensed into 47 families, history included; the two progress
+    // ticks left the ledger. The mapping lives only in event-condense.ts, which `importSnapshot` also runs on what it reads.
+    { version: 28, up: () => { condenseEventTypes(ledger.db); } }
   ];
 
   const current = Number(ledger.db.pragma("user_version", { simple: true }));

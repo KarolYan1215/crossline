@@ -49,7 +49,7 @@ export function setCourseTarget(ctx: AccessContext, input: { projectId: string; 
   store.upsertProfileFact({ workspaceId: ctx.workspaceId, identityId: project.identityId, projectId: project.id, slot: "target_grade",
     value, status: "confirmed", sourceRef: "manual", sourceQuote: value, updatedAt: now });
   const ownerId = store.getWorkspaceOwnerId(ctx.workspaceId);
-  if (ownerId) store.appendEvent({ ownerId, workspaceId: ctx.workspaceId, idempotencyKey: `target:set:${project.id}:${now}`, type: "target.set", entityId: project.id,
-    payload: { projectId: project.id, value } });
+  if (ownerId) store.appendEvent({ ownerId, workspaceId: ctx.workspaceId, idempotencyKey: `target:set:${project.id}:${now}`, type: "person.decided", entityId: project.id,
+    payload: { projectId: project.id, value, subject: "target", decision: "set" } });
   return { ok: true, identityId: project.identityId };
 }

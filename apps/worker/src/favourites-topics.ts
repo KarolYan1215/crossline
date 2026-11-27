@@ -350,8 +350,8 @@ export function installFavouritesTopicsWorkflow(store: CrosslineStore, workspace
     status: "needs_consent", pinned: true, createdAt: at, updatedAt: at, lastUsedAt: at };
   store.setSetting(workspaceId, grownSkillFilesKey(id), JSON.stringify({ files: [{ path: "SKILL.md", text }] }));
   writeGrownSkills(store, workspaceId, [...records, record]);
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.created:${id}`, type: "skill.grown.created", entityId: id,
-    payload: { id, name: record.name, lines: record.lines, category: record.category, trigger: "on_request", final: "usable", origin: "asked" } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.created:${id}`, type: "skill.changed", entityId: id,
+    payload: { id, name: record.name, lines: record.lines, category: record.category, trigger: "on_request", final: "usable", origin: "asked", change: "grown_created" } });
   enableTopicMode(store, workspaceId, id);
   return record;
 }
@@ -378,13 +378,13 @@ export function createFavouritesTopicsService(store: CrosslineStore, now = () =>
  * end as `failed` with `interrupted`, so the page stops showing it as running and the next run is not held for it.
  */
 export function closeInterruptedCollections(store: CrosslineStore, workspaceId: string): string[] {
-  const ended = new Set(store.listEvents(workspaceId, { type: "collect.ran" }).map((event) => (event.payload as { taskId?: string }).taskId));
+  const ended = new Set(store.listEvents(workspaceId, { type: "job.ran", job: "collect", state: "done" }).map((event) => (event.payload as { taskId?: string }).taskId));
   const closed: string[] = [];
-  for (const event of store.listEvents(workspaceId, { type: "collect.started" })) {
+  for (const event of store.listEvents(workspaceId, { type: "job.ran", job: "collect", state: "started" })) {
     const taskId = (event.payload as { taskId?: string }).taskId;
     if (!taskId || ended.has(taskId)) continue;
-    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `collect.ran:${taskId}`, type: "collect.ran", entityId: event.entityId,
-      payload: { taskId, state: "failed", interrupted: true, mode: "catch_up", listed: 0, listEnded: false, read: 0, gone: 0, pending: 0 } });
+    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `collect.ran:${taskId}`, type: "job.ran", entityId: event.entityId,
+      payload: { taskId, result: "failed", interrupted: true, mode: "catch_up", listed: 0, listEnded: false, read: 0, gone: 0, pending: 0, job: "collect", state: "done" } });
     closed.push(taskId);
   }
   return closed;

@@ -13,7 +13,7 @@ function runtime() {
     requests.push(req);
     let result: unknown = {};
     if (req.method === "skills/list") result = { data: [{ cwd: "C:\\repo", errors: [], skills: [
-      { name: "crossline:crossline-step-planner", path: "C:\\skill\\SKILL.md", enabled },
+      { name: "crossline:crossline-task-planner", path: "C:\\skill\\SKILL.md", enabled },
       { name: "crossline-mine:research", path: "C:\\mine\\SKILL.md", enabled: false }] }] };
     if (req.method === "skills/config/write") { if (req.params.path === "C:\\skill\\SKILL.md") enabled = req.params.enabled; result = { effectiveEnabled: req.params.enabled }; }
     if (req.method === "account/read") result = { account: { type: "chatgpt" }, requiresOpenaiAuth: false };
@@ -34,7 +34,7 @@ function runtime() {
 
 test("a structured run's thread neither generates nor uses Codex memory", async () => {
   const fake = runtime();
-  const result = await codex.runCodexSkill(fake.client, { task: "x" }, { skillName: "crossline:crossline-step-planner", cwd: "C:\\repo",
+  const result = await codex.runCodexSkill(fake.client, { task: "x" }, { skillName: "crossline:crossline-task-planner:steps", cwd: "C:\\repo",
     developerInstructions: "Plan.", outputSchema: { type: "object" }, prepareInput: (value) => value, validateOutput: (output) => output, onAudit: () => {} });
   expect(result.ok).toBe(true);
   const config = fake.requests.find((request) => request.method === "thread/start")!.params.config as Record<string, unknown>;
@@ -44,7 +44,7 @@ test("a structured run's thread neither generates nor uses Codex memory", async 
 test("the first message carries the Skill and the input with its stable keys first, then the library skills and the run note", async () => {
   const fake = runtime();
   const input = { version: "v1", today: "2026-10-21", task: { title: "作业 2" }, profile: ["上午精力最好"], archetypes: ["problem_set"] };
-  await codex.runCodexSkill(fake.client, input, { skillName: "crossline:crossline-step-planner", cwd: "C:\\repo", developerInstructions: "Plan.",
+  await codex.runCodexSkill(fake.client, input, { skillName: "crossline:crossline-task-planner:steps", cwd: "C:\\repo", developerInstructions: "Plan.",
     stableKeys: ["version", "archetypes", "profile", "missing"], runNote: " Apply the feedback. ", extraSkills: ["crossline-mine:research"],
     outputSchema: { type: "object" }, prepareInput: (value) => value, validateOutput: (output) => output, onAudit: () => {} });
   const start = fake.requests.find((request) => request.method === "thread/start")!.params;
@@ -52,7 +52,7 @@ test("the first message carries the Skill and the input with its stable keys fir
   expect(String(start.developerInstructions)).toBe(`Plan.\n\n${codex.STYLE_INSTRUCTIONS}`);
   const parts = (fake.requests.find((request) => request.method === "turn/start")!.params.input as Array<{ text: string }>).map((item) => item.text);
   expect(parts).toEqual([
-    `$crossline:crossline-step-planner\n\n${JSON.stringify({ version: "v1", archetypes: ["problem_set"], profile: ["上午精力最好"], today: "2026-10-21", task: { title: "作业 2" } })}`,
+    `$crossline:crossline-task-planner\n\n${JSON.stringify({ mode: "steps", version: "v1", archetypes: ["problem_set"], profile: ["上午精力最好"], today: "2026-10-21", task: { title: "作业 2" } })}`,
     "$crossline-mine:research",
     `${codex.RUN_NOTE_LEAD}\nApply the feedback.`]);
   // Nothing is added or left out, only moved; with no stable keys and no note the message is as it was.

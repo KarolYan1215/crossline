@@ -88,11 +88,11 @@ export function loadWorkflowDetail(ctx: AccessContext, id: string): WorkflowDeta
   const turns: WorkflowTurnView[] = threads.flatMap((thread) => store.listWorkflowTurns(ctx.workspaceId, thread.id))
     .map((turn) => ({ id: turn.id, role: turn.role, text: turn.text, state: turn.state, createdAt: turn.createdAt, items: turn.items }));
   if (kind === "grown" && workflowId) {
-    for (const event of store.listEvents(ctx.workspaceId, { entityId: workflowId }).filter((entry) => ["skill.grown.revised", "skill.grown.reverted", "skill.grown.restored"].includes(entry.type))) {
+    for (const event of store.listEvents(ctx.workspaceId, { type: "skill.changed", change: ["grown_revised", "grown_reverted", "grown_restored"], entityId: workflowId })) {
       const payload = event.payload as { version?: number; to?: number; changes?: string; restoredFrom?: number };
       const version = payload.version ?? payload.to ?? 0;
       turns.push({ id: event.eventId, role: "system", state: "done", createdAt: event.createdAt,
-        text: event.type === "skill.grown.revised" ? t("助手改好并通过检查：{{changes}}", { changes: (payload.changes ?? "").slice(0, 300) })
+        text: (event.type === "skill.changed" && (event.payload as { change?: string }).change === "grown_revised") ? t("助手改好并通过检查：{{changes}}", { changes: (payload.changes ?? "").slice(0, 300) })
           : payload.restoredFrom ? t("回到第 {{from}} 版", { from: payload.restoredFrom }) : t("撤回了上一次修改"),
         items: version ? [{ type: "version", version, note: "" }] : [] });
     }

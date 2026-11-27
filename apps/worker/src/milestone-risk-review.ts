@@ -9,7 +9,7 @@ import { localToday } from "./analysis";
 import { identityLines } from "./lines";
 import { ownerOf } from "./owner";
 
-export const MILESTONE_RISK_REVIEWER = "crossline:crossline-milestone-risk-reviewer";
+export const MILESTONE_RISK_REVIEWER = "crossline:crossline-milestone-review:risk";
 /** Drafts reviewed in one run: one architect run makes three to five a line. */
 const PER_RUN = 12;
 
@@ -77,7 +77,7 @@ export function riskReviewContext(store: CrosslineStore, workspaceId: string, id
   const graded = new Set(store.listProfileFacts(workspaceId).filter((fact) => fact.slot === "grading" || fact.slot === "target_grade").map((fact) => fact.projectId));
   const lineOf = new Map(live.map((item) => [item.milestone.id, item.milestone.identityId]));
   const adjustments = new Map<string, number[]>();
-  for (const event of store.listEvents(workspaceId, { type: "goal.settings_confirmed" })) {
+  for (const event of store.listEvents(workspaceId, { type: "goal.changed", change: "settings_confirmed" })) {
     const payload = event.payload as { next?: { weight?: number }; presetWeight?: number | null };
     const line = lineOf.get(event.entityId);
     if (!line || typeof payload.next?.weight !== "number" || typeof payload.presetWeight !== "number") continue;
@@ -122,7 +122,7 @@ export function createMilestoneRiskReviewer(store: CrosslineStore, workspaceId: 
     const result = await runCodexSkill<MilestoneRiskAnswer>(client, context, {
       skillName: MILESTONE_RISK_REVIEWER, cwd, outputSchema: MILESTONE_RISK_SCHEMA,
       developerInstructions: "Review each milestone for what could keep it from being reached on its date, and weigh it and say whether it is a sitting, "
-        + "as the crossline-milestone-risk-reviewer Skill describes, and return only the requested JSON. The person sees each risk as a tag on the 主线 page before approving, and a medium or high risk " // i18n-ignore: model-facing
+        + "as the crossline-milestone-review:risk Skill describes, and return only the requested JSON. The person sees each risk as a tag on the 主线 page before approving, and a medium or high risk " // i18n-ignore: model-facing
         + "on an approved milestone is put to them as a question. One entry per milestone; `risks: []` when nothing follows from the dates, numbers, "
         + "criteria and competing milestones given. Each note is one clause of at most 60 characters that names the figure it rests on, never advice.",
       // The prompt cache (docs/token-economy.md §2.5): the week's hours and the competing milestones before the ones under review and the date.
@@ -153,8 +153,8 @@ export function createMilestoneRiskReviewer(store: CrosslineStore, workspaceId: 
       stored[id] = entry;
       if (!risks || reweighed) { if (reweighed) reviewed += 1; continue; }
       reviewed += 1;
-      store.appendEvent({ ownerId, workspaceId, idempotencyKey: `milestone:risk:${id}:${fingerprint}`, type: "milestone.risk_reviewed", entityId: id,
-        payload: { fingerprint, risks } });
+      store.appendEvent({ ownerId, workspaceId, idempotencyKey: `milestone:risk:${id}:${fingerprint}`, type: "milestone.changed", entityId: id,
+        payload: { fingerprint, risks, change: "risk_reviewed" } });
     }
     store.setSetting(workspaceId, MILESTONE_RISKS_SETTING, JSON.stringify(stored));
     return result.ok || reviewed ? { reviewed, failed: ids.length - reviewed } : { blocked: result.blocker.code };

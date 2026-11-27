@@ -50,7 +50,7 @@ test("a thread's configuration may hold only the keys the server's runners send,
     "apps._default.default_tools_approval_mode": "writes", "apps._default.destructive_enabled": false, "mcp_servers.codex-security.enabled": false,
     "plugins._default.enabled": false, "plugins.crossline@crossline-local.enabled": true,
     "model_providers.crossline-sponsor": { name: "开发者模型", base_url: "http://127.0.0.1:3215/abc", wire_api: "responses", requires_openai_auth: false,
-      supports_websockets: false, stream_idle_timeout_ms: 600_000, request_max_retries: 2, stream_max_retries: 2, http_headers: { "x-crossline-skill": "crossline-step-planner" } },
+      supports_websockets: false, stream_idle_timeout_ms: 600_000, request_max_retries: 2, stream_max_retries: 2, http_headers: { "x-crossline-skill": "crossline-task-planner:steps" } },
     model_context_window: 128_000, model_auto_compact_token_limit: 102_400, "skills.include_instructions": false
   };
   expect(refusal("thread/start", { sandbox: "read-only", config: sent })).toBeUndefined();

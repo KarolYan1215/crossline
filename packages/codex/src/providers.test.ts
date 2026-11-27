@@ -1,6 +1,6 @@
 import { readdirSync } from "node:fs";
 import path from "node:path";
-import { SKILL_NEEDS } from "@crossline/core";
+import { SKILL_NEEDS, skillBase } from "@crossline/core";
 import { expect, test } from "vitest";
 import { SKILL_TIERS, parseRoute } from "./model-policy";
 import { decideRoute, normalizeProviderBaseUrl, providerConfigProblem, type ProviderConfig, type ProviderRouting } from "./providers";
@@ -11,7 +11,7 @@ const routing = (admitted: string[], codexSignedIn: boolean): ProviderRouting =>
   ({ provider, gatewayUrl: "http://127.0.0.1:5555/0123", admitted: new Set(admitted), codexSignedIn });
 
 test("an admitted Skill goes to the provider, on a thread-only provider definition that carries no key", () => {
-  const decision = decideRoute("crossline:crossline-task-titler", routing(["crossline-task-titler"], false));
+  const decision = decideRoute("crossline:crossline-goal-backplanner:title", routing(["crossline-goal-backplanner:title"], false));
   expect(decision).toEqual({ via: "provider", provider: { id: "crossline-deepseek", model: "deepseek-chat", definition: expect.objectContaining({
     base_url: "http://127.0.0.1:5555/0123", wire_api: "responses", requires_openai_auth: false, supports_websockets: false }) } });
   expect(JSON.stringify(decision)).not.toMatch(/abcd|env_key|bearer/i);
@@ -19,30 +19,30 @@ test("an admitted Skill goes to the provider, on a thread-only provider definiti
 
 test("what the provider cannot do or has not passed goes to the workspace's own Codex sign-in; with none, a blocker that says why", () => {
   // Web search is never the provider's, however its conformance went.
-  expect(decideRoute("crossline-due-diligence", routing(["crossline-due-diligence"], true))).toEqual({ via: "codex" });
-  expect(decideRoute("crossline-due-diligence", routing(["crossline-due-diligence"], false)))
+  expect(decideRoute("crossline-research:diligence", routing(["crossline-research:diligence"], true))).toEqual({ via: "codex" });
+  expect(decideRoute("crossline-research:diligence", routing(["crossline-research:diligence"], false)))
     .toEqual({ via: "blocked", code: "MODEL_CAPABILITY_MISSING", message: expect.stringContaining("联网") });
-  expect(decideRoute("crossline-milestone-gate", routing([], false)))
+  expect(decideRoute("crossline-evidence-judge:milestone", routing([], false)))
     .toEqual({ via: "blocked", code: "MODEL_NOT_ADMITTED", message: expect.stringContaining("验收判定") });
-  expect(decideRoute("crossline-agent", routing([], false))).toMatchObject({ via: "blocked", code: "MODEL_CAPABILITY_MISSING" });
+  expect(decideRoute("crossline-agent:shell", routing([], false))).toMatchObject({ via: "blocked", code: "MODEL_CAPABILITY_MISSING" });
   // No provider configured: nothing changes.
-  expect(decideRoute("crossline-milestone-gate", undefined)).toEqual({ via: "codex" });
+  expect(decideRoute("crossline-evidence-judge:milestone", undefined)).toEqual({ via: "codex" });
 });
 
 test("a Skill with a model of its own runs on it, and on the provider's own model when the main model is asked for", () => {
-  const withPlanning = { ...routing(["crossline-step-planner", "crossline-milestone-gate"], false),
-    modelFor: (skill: string) => skill === "crossline-step-planner" ? "glm" : undefined };
-  expect(decideRoute("crossline-step-planner", withPlanning)).toMatchObject({ via: "provider", provider: { model: "glm" } });
-  expect(decideRoute("crossline-step-planner", withPlanning, { mainModel: true })).toMatchObject({ via: "provider", provider: { model: "deepseek-chat" } });
-  expect(decideRoute("crossline-milestone-gate", withPlanning)).toMatchObject({ via: "provider", provider: { model: "deepseek-chat" } });
+  const withPlanning = { ...routing(["crossline-task-planner:steps", "crossline-evidence-judge:milestone"], false),
+    modelFor: (skill: string) => skill === "crossline-task-planner:steps" ? "glm" : undefined };
+  expect(decideRoute("crossline-task-planner:steps", withPlanning)).toMatchObject({ via: "provider", provider: { model: "glm" } });
+  expect(decideRoute("crossline-task-planner:steps", withPlanning, { mainModel: true })).toMatchObject({ via: "provider", provider: { model: "deepseek-chat" } });
+  expect(decideRoute("crossline-evidence-judge:milestone", withPlanning)).toMatchObject({ via: "provider", provider: { model: "deepseek-chat" } });
 });
 
 test("with Crossline's own search configured, a web Skill may go to the provider; the assistant still may not", () => {
-  const withSearch = { ...routing(["crossline-due-diligence", "crossline-agent"], false), capabilities: { webSearch: true } };
-  expect(decideRoute("crossline-due-diligence", withSearch)).toMatchObject({ via: "provider" });
-  expect(decideRoute("crossline-agent", withSearch)).toMatchObject({ via: "blocked", code: "MODEL_CAPABILITY_MISSING" });
+  const withSearch = { ...routing(["crossline-research:diligence", "crossline-agent:shell"], false), capabilities: { webSearch: true } };
+  expect(decideRoute("crossline-research:diligence", withSearch)).toMatchObject({ via: "provider" });
+  expect(decideRoute("crossline-agent:shell", withSearch)).toMatchObject({ via: "blocked", code: "MODEL_CAPABILITY_MISSING" });
   // An image API makes no gap, but the illustrator has no schema to pass, so it is never admitted: it draws through the image API directly.
-  expect(decideRoute("crossline-portrait-illustrator", { ...routing([], true), capabilities: { image: true } })).toEqual({ via: "codex" });
+  expect(decideRoute("crossline-portrait:figure", { ...routing([], true), capabilities: { image: true } })).toEqual({ via: "codex" });
 });
 
 test("a provider address must be https, or http on this computer; no credentials or query in it", () => {
@@ -91,7 +91,9 @@ test("every Skill — routed or in the plugin — says what it needs (a new Skil
   expect(Object.keys(SKILL_TIERS).filter((skill) => !SKILL_NEEDS[skill])).toEqual([]);
   const dir = path.resolve(import.meta.dirname, "../../../skills/marketplace/plugins/crossline/skills");
   const skills = readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
-  expect(skills.filter((skill) => !SKILL_NEEDS[skill])).toEqual([]);
+  // Since 2026-11-27 the needs are per mode (`crossline-agent:shell`); every Skill directory has at least one.
+  const said = new Set(Object.keys(SKILL_NEEDS).map(skillBase));
+  expect(skills.filter((skill) => !said.has(skill))).toEqual([]);
 });
 
 test("a model id with its own colon is not split into model and effort", () => {

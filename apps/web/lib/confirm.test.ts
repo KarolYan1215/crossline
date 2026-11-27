@@ -106,7 +106,7 @@ test("未执行 writes no session and moves nothing", async () => {
   expect(confirmBlock(TEST_CTX, message.id, { kind: "not_done" })).toEqual({ ok: true, done: "not_done" });
   expect(store.listExecutions(ws, "ece555-hw3")).toEqual([]);
   expect(store.getStepPlan(ws, "ece555-hw3")!.steps.every((item) => item.status === "planned")).toBe(true);
-  expect(store.listEvents(ws, { type: "block.confirmed" })[0]!.payload).toMatchObject({ outcome: "not_done" });
+  expect(store.listEvents(ws, { type: "work_order.changed", change: "block_confirmed" })[0]!.payload).toMatchObject({ outcome: "not_done" });
 });
 
 test("a block moved elsewhere before it began is never asked about", async () => {

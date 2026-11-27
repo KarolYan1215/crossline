@@ -82,7 +82,7 @@ export function loadWrap(ctx: AccessContext, now = appNow(), requestedDay?: stri
   const answered = new Map<string, string>();
   // Minutes already recorded against each step (`order#step`), for whether a worked block could have finished it.
   const recorded = new Map<string, number>();
-  for (const event of store.listEvents(ctx.workspaceId, { type: "block.confirmed" })) {
+  for (const event of store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "block_confirmed" })) {
     const payload = event.payload as { blockId?: string; day?: string; outcome?: string; workOrderId?: string; stepId?: string; minutes?: number; blockMinutes?: number };
     if (payload.day === day && payload.blockId) answered.set(payload.blockId, String(payload.outcome ?? ""));
     if (payload.workOrderId && payload.outcome !== "not_done") {
@@ -98,7 +98,7 @@ export function loadWrap(ctx: AccessContext, now = appNow(), requestedDay?: stri
     return minutes + (recorded.get(`${orderId}#${stepId}`) ?? 0) >= usual * 0.9;
   };
   const snoozes = new Map<string, number>();
-  for (const event of store.listEvents(ctx.workspaceId, { type: "block.snoozed" })) {
+  for (const event of store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "block_snoozed" })) {
     const payload = event.payload as { blockId?: string; day?: string };
     if (payload.day === day && payload.blockId) snoozes.set(payload.blockId, (snoozes.get(payload.blockId) ?? 0) + 1);
   }

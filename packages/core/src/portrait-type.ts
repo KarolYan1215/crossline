@@ -79,31 +79,6 @@ export const TYPE_TABLE: Record<string, { name: string; quote: string; blurb: st
   WUHG: { name: "百晓生", quote: "江湖上的事，问我就对了", blurb: "和 AI 聊遍各个领域，什么都懂一点，什么都想试" }
 };
 
-/**
- * What stops the writer's personal type summary from being shown: it must speak to the person (「你…」), and it must not name a type or a
- * code — the page ends it with 「你是某神秘光头。」 itself, from the scores, so the two can never disagree.
- */
-// The problems are repair messages to the portrait writer, not interface text. An English report speaks to "you" and is held to the
-// English type names as well.
-/* i18n-ignore-start */
-export function typeSummaryProblem(summary: string): string | null {
-  const text = summary.trim();
-  if (!text) return null;
-  if (!text.startsWith("你") && !/^you\b/i.test(text)) return "type.summary 须以「你」开头，直接对本人说";
-  const en = tFor("en");
-  // A name is refused only as a label for the person (「你是军师」「军师型」, "you are a Strategist"): 「大学生」「甲方」「军师」 are also plain
-  // words, and refusing them anywhere cost two full portrait rewrites (2026-11-14 audit). Codes are never plain words.
-  const escape = (word: string) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const labels = (word: string) => new RegExp(`(你|您)(就|也|还|更)?(是|算|属于)(一个|一位|个|位|典型的?)?${escape(word)}|${escape(word)}(型|类型|人格)`, "u").test(text);
-  const labelsEn = (word: string) => new RegExp(`\\byou(?:'re| are)(?: an?| the)? ${escape(word)}\\b|\\b${escape(word)} type\\b`, "i").test(text);
-  const named = Object.keys(TYPE_TABLE).find((code) => new RegExp(`\\b${code}\\b`).test(text))
-    ?? Object.values(TYPE_TABLE).map((type) => type.name).find(labels)
-    ?? Object.values(TYPE_TABLE).map((type) => en(type.name)).find((word) => word !== "" && /[A-Za-z]/.test(word) && labelsEn(word))
-    ?? (/人格|MBTI|[EI][NS][TF][JP]|personality type/i.test(text) ? "外部人格类型" : undefined);
-  return named ? `type.summary 不要写类型名或代码（含「${named}」）；结尾的「你是 …」由页面补上` : null;
-}
-/* i18n-ignore-end */
-
 export type PortraitType = {
   code: string; name: string; quote: string; blurb: string;
   group: { key: string; name: string; colour: string; tint: string; blurb: string };
@@ -157,14 +132,17 @@ export function portraitLabels(report: PortraitReport, options: { lineLabel: (id
   if (coreWord) cells.push({ title: t("核心词"), value: coreWord });
   const values = report.compass.values ?? [];
   const names = SCHWARTZ_VALUES.map((value) => value.name as string);
+  // A value the scale did not measure (null) is not a candidate; with none measured there is no cell.
   if (values.length === names.length && names.every((name) => values.some((value) => value.name === name))) {
-    const top = names.map((name) => values.find((value) => value.name === name)!).reduce((best, value) => (value.score > best.score ? value : best));
-    cells.push({ title: t("价值核心"), value: t(top.name) });
+    const scored = names.map((name) => values.find((value) => value.name === name)!).filter((value) => value.score !== null);
+    const top = scored.reduce<(typeof scored)[number] | undefined>((best, value) => (!best || value.score! > best.score! ? value : best), undefined);
+    if (top) cells.push({ title: t("价值核心"), value: t(top.name) });
   }
   const ranked = [...report.lines.items].sort((a, b) => (b.targetShare ?? 0) - (a.targetShare ?? 0));
   const base = ranked[0];
   if (base?.targetShare) cells.push({ title: t("建议底座"), value: options.lineLabel(base.lineId), detail: t("建议投入约 {{share}}%", { share: base.targetShare }) });
-  const identities = ranked.slice(base?.targetShare ? 1 : 0).map((item) => ({ lineId: item.lineId, label: options.lineLabel(item.lineId), target: item.targetShare ?? 0, now: item.share ?? null }));
+  const identities = ranked.slice(base?.targetShare ? 1 : 0).flatMap((item) => item.targetShare === null ? []
+    : [{ lineId: item.lineId, label: options.lineLabel(item.lineId), target: item.targetShare ?? 0, now: item.share ?? null }]);
   return { cells, identities };
 }
 

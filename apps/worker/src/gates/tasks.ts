@@ -1,4 +1,4 @@
-import { GATE_JUDGED, GATE_OVERRIDDEN, latestGateJudgements, onPersonsBoard, OPEN_TASK_STATES, PRIORITY_LABELS, taskTitleOf, verdictOf } from "@crossline/core";
+import { GATE_JUDGED, latestGateJudgements, onPersonsBoard, OPEN_TASK_STATES, PRIORITY_LABELS, taskTitleOf, verdictOf } from "@crossline/core";
 import type { CrosslineStore, StoredWorkOrder } from "@crossline/db";
 
 /** What the gates show the model about a task: never its state or the person's own claim about it (§四.0 防宽松 1). */
@@ -43,7 +43,7 @@ const NEITHER: PriorityLabel = { p1: false, external: false };
 
 /** The current P1 and outward labels (J1a), the person's overrides applied. */
 export function priorityLabels(store: CrosslineStore, workspaceId: string): Map<string, PriorityLabel> {
-  const events = [...store.listEvents(workspaceId, { type: GATE_JUDGED }), ...store.listEvents(workspaceId, { type: GATE_OVERRIDDEN })];
+  const events = [...store.listEvents(workspaceId, { type: GATE_JUDGED }), ...store.listEvents(workspaceId, { type: "gate.changed", change: "overridden" })];
   const out = new Map<string, PriorityLabel>();
   for (const judgement of latestGateJudgements(events, "priority").values()) out.set(judgement.payload.subject.id, PRIORITY_LABELS[verdictOf(judgement)] ?? NEITHER);
   return out;

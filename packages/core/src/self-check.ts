@@ -5,7 +5,6 @@
  */
 export const SELF_CHECK_SETTING = "selfcheck.last";
 export const SELF_CHECK_DAY_SETTING = "selfcheck.day";
-export const SELF_CHECK_EVENT = "selfcheck.ran";
 
 export type CheckStatus = "ok" | "repaired" | "failing" | "skipped";
 export type CheckResult = {

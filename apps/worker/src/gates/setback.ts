@@ -13,9 +13,8 @@ import { runGate, type GateResult } from "./run";
  * in the 72 hours after a setback the person's judgement is worse, so the model classifies and the person decides (`goal_wrong` and
  * `execution_wrong` are in the gate's `askOn`).
  */
-export const SETBACK_SKILL = "crossline-gate-setback";
+export const SETBACK_SKILL = "crossline-weekly-review:setback";
 export const SETBACK_VERSION = "crossline.gate.setback.v1";
-export const SETBACK_REPORTED = "setback.reported";
 const DETAIL = { type: "object", additionalProperties: false, required: ["change", "baseRate"], properties: { change: { type: "string" }, baseRate: { type: "string" } } };
 
 export type Setback = { subject: string; kind: "rejected" | "missed" | "reported"; title: string; at: string; what: string; line: string; milestone: string };
@@ -25,20 +24,20 @@ function setbacksSince(store: CrosslineStore, workspaceId: string, sinceIso: str
   const opportunities = new Map(store.listOpportunities(workspaceId).map((row) => [row.id, row]));
   const milestones = new Map(store.listMilestones(workspaceId).map((milestone) => [milestone.id, milestone]));
   const out: Setback[] = [];
-  for (const event of store.listEvents(workspaceId, { type: "opportunity.outcome" })) {
+  for (const event of store.listEvents(workspaceId, { type: "opportunity.changed", change: "outcome" })) {
     if (event.createdAt < sinceIso || (event.payload as { outcome?: string }).outcome !== "rejected") continue;
     const row = opportunities.get(event.entityId);
     out.push({ subject: `rejected:${event.eventId}`, kind: "rejected", title: row?.title ?? event.entityId, at: event.createdAt,
       what: `${row?.kind === "application" ? "申请" : "报名"}被拒：${row?.title ?? ""}（${row?.organizer ?? ""}）`, line: row?.lineId ?? "", milestone: "" });
   }
-  for (const event of store.listEvents(workspaceId, { type: "milestone.overdue" })) {
+  for (const event of store.listEvents(workspaceId, { type: "milestone.changed", change: "overdue" })) {
     if (event.createdAt < sinceIso) continue;
     const milestone = milestones.get(event.entityId);
     const payload = event.payload as { deadline?: string; why?: string };
     out.push({ subject: `missed:${event.eventId}`, kind: "missed", title: milestone?.title ?? event.entityId, at: event.createdAt,
       what: `里程碑过期未完成：${milestone?.title ?? ""}，截止 ${payload.deadline ?? ""}（${payload.why ?? ""}）`, line: milestone?.identityId ?? "", milestone: event.entityId });
   }
-  for (const event of store.listEvents(workspaceId, { type: SETBACK_REPORTED })) {
+  for (const event of store.listEvents(workspaceId, { type: "gate.changed", change: "setback_reported" })) {
     if (event.createdAt < sinceIso) continue;
     const payload = event.payload as { text?: string; line?: string };
     out.push({ subject: `reported:${event.eventId}`, kind: "reported", title: (payload.text ?? "").slice(0, 60), at: event.createdAt,
@@ -57,7 +56,7 @@ export function pendingSetbacks(store: CrosslineStore, workspaceId: string, now:
 /** Every recorded outcome of an application or registration, for the model to find the similar tries in. */
 function outcomes(store: CrosslineStore, workspaceId: string) {
   const opportunities = new Map(store.listOpportunities(workspaceId).map((row) => [row.id, row]));
-  return store.listEvents(workspaceId, { type: "opportunity.outcome" }).slice(-GATE_LIMITS.outcomesShown).map((event) => {
+  return store.listEvents(workspaceId, { type: "opportunity.changed", change: "outcome" }).slice(-GATE_LIMITS.outcomesShown).map((event) => {
     const row = opportunities.get(event.entityId);
     return { at: event.createdAt, outcome: String((event.payload as { outcome?: string }).outcome ?? ""), kind: row?.kind ?? "", line: row?.lineId ?? "",
       title: row?.title ?? event.entityId, organizer: row?.organizer ?? "" };

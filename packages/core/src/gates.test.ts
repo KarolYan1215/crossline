@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { estimateRatio, GATE_ATTEMPTED, gateNeedsPerson, pendingGateSubjects, gateRunsDisagree, latestGateJudgements, maskPrivate, MILESTONE_PARKED, MILESTONE_UNPARKED, parkedMilestones, pdkHit, readPdkTerms,
+import { estimateRatio, gateNeedsPerson, pendingGateSubjects, gateRunsDisagree, latestGateJudgements, maskPrivate, parkedMilestones, pdkHit, readPdkTerms,
   todaysFront, type GateJudgedPayload, type GateOutput } from "./gates";
 
 /** The parts of the execution gates code decides by itself (docs/plans/execution-gates-1124.md §四.0): comparisons, never judgements. */
@@ -23,14 +23,14 @@ test("the person is asked when the runs disagree, or when being wrong goes outsi
 
 test("what is left to judge: not judged in the period, and not failed three times today", () => {
   const now = new Date("2026-11-24T12:00:00.000Z");
-  const attempt = (id: string, payload: unknown, at = "2026-11-24T10:00:00.000Z") => event(id, GATE_ATTEMPTED, "x", payload, at);
-  const events = [
-    event("j", "gate.judged", "a", judged("priority", { kind: "task", id: "a" }, output("p1")), "2026-11-20T00:00:00.000Z"),
-    ...[1, 2, 3].map((n) => attempt(`f${n}`, { gate: "priority", round: "r", subjects: ["b", "c"], ok: false, missing: [] })),
-    attempt("m", { gate: "priority", round: "r", subjects: ["d"], ok: true, missing: ["d"] }),
-    attempt("old", { gate: "priority", round: "r", subjects: ["e"], ok: false, missing: [] }, "2026-11-22T00:00:00.000Z")
+  const attempt = (payload: unknown, at = "2026-11-24T10:00:00.000Z") => ({ at, payload });
+  const events = [event("j", "gate.judged", "a", judged("priority", { kind: "task", id: "a" }, output("p1")), "2026-11-20T00:00:00.000Z")];
+  const attempts = [
+    ...[1, 2, 3].map(() => attempt({ gate: "priority", round: "r", subjects: ["b", "c"], ok: false, missing: [] })),
+    attempt({ gate: "priority", round: "r", subjects: ["d"], ok: true, missing: ["d"] }),
+    attempt({ gate: "priority", round: "r", subjects: ["e"], ok: false, missing: [] }, "2026-11-22T00:00:00.000Z")
   ];
-  expect(pendingGateSubjects(events, "priority", ["a", "b", "d", "e"], now)).toEqual(["d", "e"]);
+  expect(pendingGateSubjects(events, "priority", ["a", "b", "d", "e"], now, "", attempts)).toEqual(["d", "e"]);
   // Judged before this period's start: due again.
   expect(pendingGateSubjects(events, "priority", ["a"], now, "2026-11-23T00:00:00.000Z")).toEqual(["a"]);
 });
@@ -38,7 +38,7 @@ test("what is left to judge: not judged in the period, and not failed three time
 test("the latest judgement per subject carries the person's override; today's front pick is gone once turned over", () => {
   const events = [event("j1", "gate.judged", "2026-11-24", judged("front", { kind: "day", id: "2026-11-24" }, { ...output("front"), detail: { task: "t1", costOfDelay: "晚一天", minutes: 20 } }))];
   expect(todaysFront(events, "2026-11-24")).toEqual({ eventId: "j1", task: "t1", costOfDelay: "晚一天", minutes: 20 });
-  const overridden = [...events, event("o1", "gate.overridden", "j1", { judgedId: "j1", gate: "front", subject: { kind: "day", id: "2026-11-24" }, from: "front", to: "none" })];
+  const overridden = [...events, event("o1", "gate.changed", "j1", { judgedId: "j1", gate: "front", subject: { kind: "day", id: "2026-11-24" }, from: "front", to: "none", change: "overridden" })];
   expect(latestGateJudgements(overridden, "front").get("day:2026-11-24")!.overridden?.to).toBe("none");
   expect(todaysFront(overridden, "2026-11-24")).toBeNull();
 });
@@ -63,6 +63,6 @@ test("PDK terms match as whole words or extensions, and private text is masked",
 
 test("a milestone is parked until an unpark event follows", () => {
   const parked = { milestoneId: "m2", judgedId: "j", unparkWhen: "m1", reason: "", archivedTasks: [] };
-  expect([...parkedMilestones([event("p", MILESTONE_PARKED, "m2", parked)]).keys()]).toEqual(["m2"]);
-  expect(parkedMilestones([event("p", MILESTONE_PARKED, "m2", parked), event("u", MILESTONE_UNPARKED, "m2", {}, "2026-11-25T00:00:00.000Z")]).size).toBe(0);
+  expect([...parkedMilestones([event("p", "milestone.changed", "m2", { ...parked, change: "parked" })]).keys()]).toEqual(["m2"]);
+  expect(parkedMilestones([event("p", "milestone.changed", "m2", { ...parked, change: "parked" }), event("u", "milestone.changed", "m2", { change: "unparked" }, "2026-11-25T00:00:00.000Z")]).size).toBe(0);
 });

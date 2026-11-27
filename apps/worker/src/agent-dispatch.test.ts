@@ -44,10 +44,10 @@ test("owned work (docs/work-split.md): the assistant's item is handed over whole
   owned("prep", "汇集期中考试规则与往年卷", { owner: "assistant", prepares: "core", automationParts: [{ id: "a", intent: "汇集期中考试规则与往年卷" }] });
   owned("q", "整理本学期已出成绩", { owner: "ask", prepares: "core", question: "已出的成绩是多少？" });
   // A step of it ran before it was reorganised to the assistant: it is still the assistant's to do whole.
-  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "step-run", type: "agent.task.requested", entityId: "agent-x-v1s1-1",
-    payload: { title: "一步", category: "read_research_organize", workOrderId: "prep", stepId: "v1s1" } });
-  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "step-done", type: "agent.task.completed", entityId: "agent-x-v1s1-1",
-    payload: { directory: "", artifacts: [], checksPassed: true, inputsModified: [], reviewRequired: false } });
+  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "step-run", type: "agent.changed", entityId: "agent-x-v1s1-1",
+    payload: { title: "一步", category: "read_research_organize", workOrderId: "prep", stepId: "v1s1", change: "task_requested" } });
+  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "step-done", type: "agent.changed", entityId: "agent-x-v1s1-1",
+    payload: { directory: "", artifacts: [], checksPassed: true, inputsModified: [], reviewRequired: false, change: "task_completed" } });
   expect(dispatchCandidates(store, ws)).toEqual(["prep"]);
   const task = taskFromWorkOrder(store, ws, "prep");
   if (!task.ok) throw new Error(task.message);
@@ -69,7 +69,7 @@ test("a declined kind is left alone, a paused assistant starts nothing, and an o
   setPaused(store, ws, true);
   expect(dispatchCandidates(store, ws)).toEqual([]);
   setPaused(store, ws, false);
-  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "r1", type: "agent.task.requested", entityId: "t1", payload: { title: "x", category: "data_code_sim", workOrderId: "wo-1" } });
+  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "r1", type: "agent.changed", entityId: "t1", payload: { title: "x", category: "data_code_sim", workOrderId: "wo-1", change: "task_requested" } });
   expect(dispatchCandidates(store, ws)).toEqual([]);
   order("wo-2", "写脚本画图", ["写 Python 脚本画图"]);
   declineCategory(store, ws, "data_code_sim");
@@ -93,7 +93,7 @@ test("a question for the person is answered from the ledger, and declined if nob
   const silent = ledgerAsk(store, ws, "t1", { timeoutMs: 30, pollMs: 10, sleep: async () => {} });
   expect(await silent({ ...request, subject: "git push" })).toBe(false);
   expect(pendingAgentApprovals(store, ws)).toEqual([]);
-  const expired = store.listEvents(ws, { type: "agent.approval.requested" }).at(-1)!;
+  const expired = store.listEvents(ws, { type: "agent.changed", change: "approval_requested" }).at(-1)!;
   expect(agentApprovalDecision(store, ws, expired.entityId)).toBe("declined");
 });
 
@@ -159,8 +159,8 @@ test("a preparation step the runtime lost (a stall, a restart) is tried again, u
   setCategoryMode(store, "w", "read_research_organize", "review");
   const stepId = store.getStepPlan("w", "wo")!.steps[0]!.id;
   const run = (n: number, code: string) => {
-    store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: `r${n}`, type: "agent.task.requested", entityId: `t${n}`, payload: { taskId: `t${n}`, workOrderId: "wo", stepId, title: "x", category: "read_research_organize" } });
-    store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: `b${n}`, type: "agent.task.blocked", entityId: `t${n}`, payload: { taskId: `t${n}`, code, message: "" } });
+    store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: `r${n}`, type: "agent.changed", entityId: `t${n}`, payload: { taskId: `t${n}`, workOrderId: "wo", stepId, title: "x", category: "read_research_organize", change: "task_requested" } });
+    store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: `b${n}`, type: "agent.changed", entityId: `t${n}`, payload: { taskId: `t${n}`, code, message: "", change: "task_blocked" } });
   };
   run(1, "SKILL_CANCELED");
   // Tried again once the backoff after the interruption is over, not at once.
@@ -189,10 +189,10 @@ test("one course's catalogue is made once: a second order in the same project do
   expect(stepDispatchCandidates(store, "w").map((item) => item.orderId).sort()).toEqual(["essay", "hw1", "hw2"]);
   const stepId = store.getStepPlan("w", "hw1")!.steps[0]!.id;
   // hw1's run finished and waits for review: its catalogue exists, so hw2 (same course) waits on it, the other course does not.
-  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "r1", type: "agent.task.requested", entityId: "t1",
-    payload: { taskId: "t1", workOrderId: "hw1", stepId, title: "hw1 · 汇集课程讲义、作业与样题，形成材料目录", category: "read_research_organize" } });
-  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "c1", type: "agent.task.completed", entityId: "t1",
-    payload: { taskId: "t1", reviewRequired: true, artifacts: [] } });
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "r1", type: "agent.changed", entityId: "t1",
+    payload: { taskId: "t1", workOrderId: "hw1", stepId, title: "hw1 · 汇集课程讲义、作业与样题，形成材料目录", category: "read_research_organize", change: "task_requested" } });
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "c1", type: "agent.changed", entityId: "t1",
+    payload: { taskId: "t1", reviewRequired: true, artifacts: [], change: "task_completed" } });
   expect(stepDispatchCandidates(store, "w").map((item) => item.orderId)).toEqual(["essay"]);
   store.close();
 });
@@ -240,7 +240,7 @@ describe("自动交给 Agent", () => {
     setAutoHandoff(store, ws, true);
     startsAt({ [`wo#${a}`]: "2026-10-12T15:00:00.000Z", [`wo#${b}`]: "2026-10-12T15:05:00.000Z" });
     expect(autoHandoffCandidates(store, ws, NOW).due).toEqual([{ orderId: "wo", stepId: a }]);
-    store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "r1", type: "agent.task.requested", entityId: "t1", payload: { taskId: "t1", workOrderId: "wo", stepId: a, title: "x", category: "read_research_organize" } });
+    store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "r1", type: "agent.changed", entityId: "t1", payload: { taskId: "t1", workOrderId: "wo", stepId: a, title: "x", category: "read_research_organize", change: "task_requested" } });
     // The first step is handed over and not done yet: the second still waits for it.
     expect(autoHandoffCandidates(store, ws, NOW).due).toEqual([]);
     store.updateStepProgress(ws, "wo", a, { status: "done" }, "o", "agent");

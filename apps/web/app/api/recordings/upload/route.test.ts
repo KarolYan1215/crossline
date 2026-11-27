@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { RECORDING_SERVER_CONSENT, RECORDING_TRANSCRIBED_EVENT } from "@crossline/core";
+import { RECORDING_SERVER_CONSENT } from "@crossline/core";
 vi.mock("server-only", () => ({}));
 import { issueDeviceToken } from "../../../../lib/energy";
 import { setServerRecordingConsent } from "../../../../lib/recordings";
@@ -82,7 +82,7 @@ test("the same audio uploaded again is recognised on arrival: not kept while one
   // Transcribed and gone from the inbox: still recognised by the ledger's record of it.
   const sha = (JSON.parse(readFileSync(path.join(inbox(), readdirSync(inbox()).find((name) => name.endsWith(".json"))!), "utf8")) as { sha256: string }).sha256;
   rmSync(inbox(), { recursive: true, force: true });
-  store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId, idempotencyKey: `recording.transcribed:${sha}`, type: RECORDING_TRANSCRIBED_EVENT, entityId: sha, payload: {} });
+  store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId, idempotencyKey: `recording.transcribed:${sha}`, type: "recording.changed", entityId: sha, payload: { change: "transcribed" } });
   expect(await (await send(recording, audio, "新录音 3")).json()).toMatchObject({ ok: true, duplicate: true });
   expect(existsSync(inbox()) ? readdirSync(inbox()).filter((name) => !name.endsWith(".json")) : []).toHaveLength(0);
 });

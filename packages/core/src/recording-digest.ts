@@ -1,5 +1,5 @@
 /**
- * What a recording's transcript becomes (docs/phone-recording.md 「录音之后」, 2026-10-20): Skill `crossline-recording-digest` reads it and
+ * What a recording's transcript becomes (docs/phone-recording.md 「录音之后」, 2026-10-20): Skill `crossline-capture-digest:recording` reads it and
  * decides whether it is worth keeping (a meeting, a lecture, a call, the person's own spoken note) or not (small talk, a video playing,
  * noise); for a kept one it writes a summary, and pulls out the commitments the person made, facts about the person and their work, and
  * the days named. The worker turns those into the ledger's own things: a commitment of the person's becomes a capture (analysed like
@@ -11,7 +11,6 @@
  * transcript; a quote that is not in it drops the item.
  */
 import { tFor, type Locale } from "./i18n";
-export const RECORDING_DIGESTED_EVENT = "recording.digested";
 /** A transcript with less speech than this (timestamps and the header left out) is noise by rule, never sent to a model. */
 export const DIGEST_MIN_CHARS = 60;
 /** Text of one transcript a run reads at most; a longer one is cut in the middle, keeping its opening and close. */

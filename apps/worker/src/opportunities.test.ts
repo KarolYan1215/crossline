@@ -56,11 +56,11 @@ test("watches are not derived before the account is set up; a result, a gate or 
   setUp();
   expect(watchesDeriveDue(store, ws, NOW)).toContain("research");
   expect(lineNodeEventsSince(store, ws, NOW.toISOString()).size).toBe(0);
-  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "r1", type: "opportunity.result", entityId: "opp-1", payload: { lineId: "research", result: "rejected" } });
-  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "x1", type: "capture.discarded", entityId: "c-1", payload: { lineId: "media" } });
+  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "r1", type: "opportunity.changed", entityId: "opp-1", payload: { lineId: "research", result: "rejected", change: "result" } });
+  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "x1", type: "capture.changed", entityId: "c-1", payload: { lineId: "media", change: "discarded" } });
   const nodes = lineNodeEventsSince(store, ws, "");
   expect([...nodes.keys()]).toEqual(["research"]);
-  expect(nodes.get("research")?.[0]?.type).toBe("opportunity.result");
+  expect(nodes.get("research")?.[0]?.type).toBe("opportunity.changed:result");
 });
 
 test("old needs become watches one to one, decisions kept, and a migrated deadline list is run without a model", async () => {
@@ -142,7 +142,7 @@ test("an infeasible find is kept but never surfaced", async () => {
   });
   expect(result).toMatchObject({ fresh: 1, surfaced: 0 });
   expect(store.listOpportunities(ws)[0]?.feasibility).toMatchObject({ state: "infeasible" });
-  expect(store.listEvents(ws, { type: "opportunity.outcome" })).toEqual([]);
+  expect(store.listEvents(ws, { type: "opportunity.changed", change: "outcome" })).toEqual([]);
 });
 
 test("exploration waits once it has had its 20% of the week", () => {

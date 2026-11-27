@@ -7,7 +7,7 @@ export type { StoredActivitySegment, RecentActivityEntry, StoredModelUsage, Mode
 export { isDeviceLeaseValid } from "./account-types";
 export type { StoredPrincipal, StoredInvite, StoredWorkspace, StoredWorkspaceMember, StoredDeviceLease, StoredTailscaleBinding, StoredAuditEvent } from "./account-types";
 export { workflowSettingRoute, CrosslineStore } from "./store";
-export type { CrosslineSnapshot } from "./store";
+export type { CrosslineSnapshot, EventFilter, LedgerEvent, LedgerEventBody, LedgerEventInput } from "./store";
 export { latestFileDates } from "./file-dates";
 export * from "./agent";
 export * from "./mirror";

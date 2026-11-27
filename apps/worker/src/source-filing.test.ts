@@ -16,7 +16,7 @@ test("an upload is filed under the one project its name or opening names; one th
   doc("d", "profile.md", "ECE 555 与 ECE 548 合计每周约 15 小时");
   expect(fileSourceDocuments(store, ws)).toEqual([{ id: "a", projectId: "ece555" }, { id: "b", projectId: "ece548" }]);
   expect(store.listSourceDocuments(ws).map((item) => [item.id, item.projectId ?? null])).toEqual([["a", "ece555"], ["b", "ece548"], ["c", null], ["d", null]]);
-  expect(store.listEvents(ws, { type: "source.project_inferred" }).map((event) => (event.payload as { basis: string }).basis)).toEqual(["文件名", "正文开头"]);
+  expect(store.listEvents(ws, { type: "source.changed", change: "project_inferred" }).map((event) => (event.payload as { basis: string }).basis)).toEqual(["文件名", "正文开头"]);
   // Run again: nothing new.
   expect(fileSourceDocuments(store, ws)).toEqual([]);
   store.close();
@@ -38,7 +38,7 @@ test("files code left unfiled are read by the model once; only a known project i
   const read = createFileProjectReader(store, ws, "C:\\repo", () => runtime.rpc);
   expect(await read()).toEqual({ filed: 1 });
   expect(store.listSourceDocuments(ws).map((item) => [item.id, item.projectId ?? null])).toEqual([["a", "p1"], ["b", null], ["c", null]]);
-  expect(store.listEvents(ws, { type: "source.project_inferred" }).map((event) => event.payload)).toEqual([expect.objectContaining({ projectId: "p1", basis: "模型判断" })]);
+  expect(store.listEvents(ws, { type: "source.changed", change: "project_inferred" }).map((event) => event.payload)).toEqual([expect.objectContaining({ projectId: "p1", basis: "模型判断" })]);
   // Each file is asked once.
   expect(await read()).toEqual({ filed: 0 });
   store.close();

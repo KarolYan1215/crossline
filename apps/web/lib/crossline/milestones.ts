@@ -74,8 +74,8 @@ export function saveMilestoneEdit(ctx: AccessContext, input: MilestoneInput): { 
   store.appendEvent({
     ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
     idempotencyKey: `milestone:saved:${id}:${version}`,
-    type: existing ? "milestone.revised" : "milestone.created", entityId: id,
-    payload: { version, status: input.status, title, criteria: input.successCriteria.length }
+    type: "milestone.changed", entityId: id,
+    payload: { version, status: input.status, title, criteria: input.successCriteria.length, change: existing ? "revised" : "created" }
   });
   // A cross-line relation is approved together with its downstream milestone (batch or single approval alike).
   if (input.status === "approved" && existing?.status !== "approved") approveArtifactRelationsFor(store, ctx.workspaceId, ctx.principalId, id);
@@ -92,7 +92,7 @@ export type MilestoneTemplateInput = {
 /**
  * A user (or, via the assistant widget's `templateProposal`, the assistant on the user's explicit
  * request) adding a new milestone template directly — not a draft needing a second approval step, the
- * same way editing a milestone's own fields is not. `crossline-milestone-architect` only ever reads
+ * same way editing a milestone's own fields is not. `crossline-milestone-architect:design` only ever reads
  * `approved`-equivalent templates when proposing, and every template saved here is immediately usable.
  */
 export function saveMilestoneTemplate(ctx: AccessContext, input: MilestoneTemplateInput):
@@ -147,7 +147,7 @@ export function decideMilestoneRelations(ctx: AccessContext, ids: string[], deci
  */
 export function milestonesRetiredBySystem(ctx: AccessContext): Set<string> {
   const store = getStore();
-  const touched = new Set(store.listEvents(ctx.workspaceId, { type: "milestone.revised" }).map((event) => event.entityId));
+  const touched = new Set(store.listEvents(ctx.workspaceId, { type: "milestone.changed", change: "revised" }).map((event) => event.entityId));
   return new Set(store.listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "archived" && !touched.has(milestone.id))
     .map((milestone) => milestone.id));
 }

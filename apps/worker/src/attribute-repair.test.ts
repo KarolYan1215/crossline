@@ -21,8 +21,8 @@ function seed() {
   const store = new CrosslineStore(":memory:");
   store.setSetting(ws, "lines.profiles", JSON.stringify(profiles));
   store.setSetting(ws, "lines.v1", JSON.stringify([{ id: "research", label: "研究者", goalParts: ["神经形态计算", "把脑机制转化为计算机制与硬件结构"] }]));
-  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "split", type: "line.candidates_split", entityId: "research",
-    payload: { attributes: ["把脑机制转化为计算机制与硬件结构", "以真实技术链条和可复现证据工作"] } });
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "split", type: "line.changed", entityId: "research",
+    payload: { attributes: ["把脑机制转化为计算机制与硬件结构", "以真实技术链条和可复现证据工作"], change: "candidates_split" } });
   return store;
 }
 

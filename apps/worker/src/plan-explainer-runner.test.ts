@@ -33,7 +33,7 @@ test("a well-formed explanation is written back as a plan.explained event", asyn
   const explain = createPlanExplainer(store, WORKSPACE, "C:\\repo", () => rpc);
   const outcome = await explain("2026-09-27");
   expect(outcome).toMatchObject({ state: "ready" });
-  expect(store.listEvents(WORKSPACE, { type: "plan.explained" })).toHaveLength(1);
+  expect(store.listEvents(WORKSPACE, { type: "plan.changed", change: "explained" })).toHaveLength(1);
 });
 
 test("nothing to explain is a blocker, not an empty success", async () => {

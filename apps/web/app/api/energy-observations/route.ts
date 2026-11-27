@@ -83,32 +83,31 @@ export async function POST(request: Request) {
   });
   store.appendEvent({
     ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
-    idempotencyKey: `energy-observed:${id}`, type: "energy.observed", entityId: id,
+    idempotencyKey: `energy-observed:${id}`, type: "energy.changed", entityId: id,
     payload: { source, level, confidence, context,
       ...(workOrderId ? { workOrderId } : {}), ...(actualLoad ? { actualLoad } : {}),
-      ...executionFacts }
+      ...executionFacts, change: "observed" }
   });
   if (context === "before_task" && order) {
     const taskEnergy = ((order.payload as { humanCore?: Array<{ energy?: string }> }).humanCore ?? [])[0]?.energy;
     if (taskEnergy === "low" || taskEnergy === "medium" || taskEnergy === "high") {
-      const outcomes = readTransitionOutcomes(store.listEvents(ctx.workspaceId, { type: "energy.transition_outcome" }));
+      const outcomes = readTransitionOutcomes(store.listEvents(ctx.workspaceId, { type: "energy.changed", change: "transition_outcome" }));
       const prediction = predictEnergyTransition(level as EnergyLevel, taskEnergy, outcomes);
       store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
-        idempotencyKey: `energy-predicted:${id}`, type: "energy.transition_predicted", entityId: order.id,
-        payload: { observationId: id, before: level, taskEnergy, ...prediction } });
+        idempotencyKey: `energy-predicted:${id}`, type: "energy.changed", entityId: order.id,
+        payload: { observationId: id, before: level, taskEnergy, ...prediction, change: "transition_predicted" } });
     }
   }
   if (context === "after_task" && order) {
-    const events = store.listEvents(ctx.workspaceId, { type: ["energy.transition_predicted",
-      "energy.transition_outcome"], entityId: order.id });
-    const used = new Set(events.filter((event) => event.type === "energy.transition_outcome")
+    const events = store.listEvents(ctx.workspaceId, { type: "energy.changed", change: ["transition_predicted", "transition_outcome"], entityId: order.id });
+    const used = new Set(events.filter((event) => (event.type === "energy.changed" && (event.payload as { change?: string }).change === "transition_outcome"))
       .map((event) => (event.payload as { observationId?: string }).observationId));
-    const prediction = [...events].reverse().find((event) => event.type === "energy.transition_predicted" &&
+    const prediction = [...events].reverse().find((event) => (event.type === "energy.changed" && (event.payload as { change?: string }).change === "transition_predicted") &&
       !used.has((event.payload as { observationId?: string }).observationId));
     if (prediction) store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
-      idempotencyKey: `energy-outcome:${id}`, type: "energy.transition_outcome", entityId: order.id,
+      idempotencyKey: `energy-outcome:${id}`, type: "energy.changed", entityId: order.id,
       payload: { ...(prediction.payload as Record<string, unknown>), actual: level,
-        recordedAt: observedAt } });
+        recordedAt: observedAt, change: "transition_outcome" } });
   }
   return NextResponse.json({ ok: true, id });
 }

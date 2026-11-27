@@ -54,39 +54,39 @@ test("a thinking variant is priced as its base model, and only off or a token co
 
 test("a simple background Skill runs on the cheapest candidate that passed it; the rest stay on the chosen model; fallbacks exclude the model", () => {
   const models = parseSponsorModels("main=2:8:1024,flash=0.5:2:1024,mid=1:4:1024,short=0.1:0.1:32");
-  const classifierCase = SKILL_NEEDS["crossline-calendar-classifier"]!.schemas[0]!;
+  const classifierCase = SKILL_NEEDS["crossline-line-filer:calendar"]!.schemas[0]!;
   const evaluations = [
     { model: "main", record: record("main"), yuanPerRun: 0.05 },
     { model: "flash", record: record("flash"), yuanPerRun: 0.01 },
     { model: "mid", record: record("mid"), yuanPerRun: 0.02 },
     { model: "short", record: record("short"), yuanPerRun: 0.001 }
   ];
-  expect(SPONSOR_SIMPLE_SKILLS).toContain("crossline-mail-triage");
-  expect(sponsorModelForSkill("crossline-calendar-classifier", "main", models, evaluations)).toBe("flash");
-  expect(sponsorModelForSkill("crossline-step-planner", "main", models, evaluations)).toBe("main");
+  expect(SPONSOR_SIMPLE_SKILLS).toContain("crossline-inbox-triage:mail");
+  expect(sponsorModelForSkill("crossline-line-filer:calendar", "main", models, evaluations)).toBe("flash");
+  expect(sponsorModelForSkill("crossline-task-planner:steps", "main", models, evaluations)).toBe("main");
   // A candidate that failed the Skill's own case is not used for it.
   const failing = evaluations.map((item) => item.model === "flash" ? { ...item, record: record("flash", classifierCase) } : item);
-  expect(sponsorModelForSkill("crossline-calendar-classifier", "main", models, failing)).toBe("mid");
+  expect(sponsorModelForSkill("crossline-line-filer:calendar", "main", models, failing)).toBe("mid");
   // Next models for a person's turn refused for load: cheapest first, never the one refused (a thinking variant counts as its base).
   expect(sponsorFallbacks("crossline-onboarding", "main@think:off", models, evaluations)).toEqual(["flash", "mid"]);
 });
 
 test("a planning Skill runs on the owner's planning model only when that model passed it, never on the cheapest that did", () => {
   const models = parseSponsorModels("main=2:8:1024,glm=0.8:2.8:1024,flash=0.5:2:1024");
-  const stepCase = SKILL_NEEDS["crossline-step-planner"]!.schemas[0]!;
+  const stepCase = SKILL_NEEDS["crossline-task-planner:steps"]!.schemas[0]!;
   const evaluations = [
     { model: "main", record: record("main"), yuanPerRun: 0.05 },
     { model: "glm", record: record("glm"), yuanPerRun: 0.02 },
     { model: "flash", record: record("flash"), yuanPerRun: 0.01 }
   ];
-  expect(SPONSOR_PLANNING_SKILLS).toEqual(["crossline-step-planner", "crossline-goal-backplanner"]);
-  expect(sponsorModelForSkill("crossline-step-planner", "main", models, evaluations)).toBe("main");
-  expect(sponsorModelForSkill("crossline-step-planner", "main", models, evaluations, undefined, "glm")).toBe("glm");
-  expect(sponsorModelForSkill("crossline-goal-backplanner", "main", models, evaluations, undefined, "glm")).toBe("glm");
+  expect(SPONSOR_PLANNING_SKILLS).toEqual(["crossline-task-planner:steps", "crossline-goal-backplanner:backplan"]);
+  expect(sponsorModelForSkill("crossline-task-planner:steps", "main", models, evaluations)).toBe("main");
+  expect(sponsorModelForSkill("crossline-task-planner:steps", "main", models, evaluations, undefined, "glm")).toBe("glm");
+  expect(sponsorModelForSkill("crossline-goal-backplanner:backplan", "main", models, evaluations, undefined, "glm")).toBe("glm");
   // A planning model that failed the Skill's own case, or one nobody measured, leaves it on the chosen model.
   const failing = evaluations.map((item) => item.model === "glm" ? { ...item, record: record("glm", stepCase) } : item);
-  expect(sponsorModelForSkill("crossline-step-planner", "main", models, failing, undefined, "glm")).toBe("main");
-  expect(sponsorModelForSkill("crossline-step-planner", "main", models, evaluations, undefined, "unmeasured")).toBe("main");
+  expect(sponsorModelForSkill("crossline-task-planner:steps", "main", models, failing, undefined, "glm")).toBe("main");
+  expect(sponsorModelForSkill("crossline-task-planner:steps", "main", models, evaluations, undefined, "unmeasured")).toBe("main");
   // The planning model does not reach any other Skill.
   expect(sponsorModelForSkill("crossline-automation-stripper", "main", models, evaluations, undefined, "glm")).toBe("main");
 });
@@ -142,7 +142,7 @@ test("a simple Skill goes to the candidate whose run of it costs least: cached i
   // Same tokens on both: `cache` lists a cache-hit price, `nocache` (like Qwen on SiliconFlow) bills cached input as input.
   const models = parseSponsorModels("main=2:8:1024,cache=1:4:1024:0.1,nocache=0.8:4:1024");
   const tokens = { input: 100_000, cached: 80_000, output: 10_000, runs: 10 };
-  const triage = SKILL_NEEDS["crossline-mail-triage"]!.schemas[0]!;
+  const triage = SKILL_NEEDS["crossline-inbox-triage:mail"]!.schemas[0]!;
   const plain = (model: string) => summarizeConformance({ providerId: "sponsor", model, runtimeVersion: "r", ranAt: "2026-10-18T00:00:00Z" },
     conformanceCases().flatMap((item) => Array.from({ length: item.runs }, () => ({ caseId: item.id, ok: true, repairs: 0, ms: 1000 }))));
   const evaluations = [
@@ -153,7 +153,7 @@ test("a simple Skill goes to the candidate whose run of it costs least: cached i
   // cache: (20k×1 + 80k×0.1 + 10k×4)/1M/10 = 0.0068; nocache: (100k×0.8 + 10k×4)/1M/10 = 0.012.
   expect(evaluationYuanPerRun(evaluations[1]!, models)).toBe(0.0068);
   expect(evaluationYuanPerRun(evaluations[2]!, models)).toBe(0.012);
-  expect(sponsorModelForSkill("crossline-mail-triage", "main", models, evaluations)).toBe("cache");
+  expect(sponsorModelForSkill("crossline-inbox-triage:mail", "main", models, evaluations)).toBe("cache");
   // A record whose mail sorting needed a repair every run costs about twice per run of it;
   // a Skill none of whose cases was repaired costs a little under the average.
   const repaired = summarizeConformance({ providerId: "sponsor", model: "cache", runtimeVersion: "r", ranAt: "2026-10-18T00:00:00Z" },
@@ -162,8 +162,8 @@ test("a simple Skill goes to the candidate whose run of it costs least: cached i
   const costly = { ...evaluations[1]!, record: repaired };
   const overall = repaired.repairRate;
   expect(overall).toBeGreaterThan(0);
-  expect(skillYuanPerRun(costly, "crossline-mail-triage", models)).toBeCloseTo(0.0068 / (1 + overall) * 2, 4);
-  expect(skillYuanPerRun(costly, "crossline-task-titler", models)).toBeCloseTo(0.0068 / (1 + overall), 4);
-  expect(sponsorModelForSkill("crossline-mail-triage", "main", models, [evaluations[0]!, costly, evaluations[2]!])).toBe("nocache");
-  expect(sponsorModelForSkill("crossline-task-titler", "main", models, [evaluations[0]!, costly, evaluations[2]!])).toBe("cache");
+  expect(skillYuanPerRun(costly, "crossline-inbox-triage:mail", models)).toBeCloseTo(0.0068 / (1 + overall) * 2, 4);
+  expect(skillYuanPerRun(costly, "crossline-goal-backplanner:title", models)).toBeCloseTo(0.0068 / (1 + overall), 4);
+  expect(sponsorModelForSkill("crossline-inbox-triage:mail", "main", models, [evaluations[0]!, costly, evaluations[2]!])).toBe("nocache");
+  expect(sponsorModelForSkill("crossline-goal-backplanner:title", "main", models, [evaluations[0]!, costly, evaluations[2]!])).toBe("cache");
 });

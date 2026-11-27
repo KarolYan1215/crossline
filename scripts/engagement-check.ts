@@ -47,7 +47,7 @@ console.log(`last own action: ${last ?? "none"} → ${tier}; with the quota norm
 await recordScheduledToday(ctx, now);
 let upcoming: string[] = [];
 try { upcoming = JSON.parse(store.getSetting(ws, "schedule.upcoming") ?? "[]") as string[]; } catch { /* none */ }
-const built = new Set(store.listEvents(ws, { type: "manualbook.built" }).map((event) => event.entityId));
+const built = new Set(store.listEvents(ws, { type: "materials.changed", change: "manualbook_built" }).map((event) => event.entityId));
 const orders = new Map(store.listWorkOrders(ws).map((order) => [order.id, order]));
 const oldTutorials = upcoming.filter((id) => { const order = orders.get(id);
   return order && ["approved", "ready_for_human", "active"].includes(order.state) && !built.has(id) && Boolean(store.getStepPlan(ws, id)); });
@@ -60,7 +60,7 @@ console.log(`assistant whole errands — unwindowed: ${dispatchCandidates(store,
 // What the last seven days spent on work that never started.
 const since = new Date(now.getTime() - 7 * 86_400_000).toISOString();
 const started = new Set(store.listExecutions(ws).map((execution) => execution.workOrderId));
-const tutorialsBuilt = store.listEvents(ws, { type: "manualbook.built" }).filter((event) => event.createdAt >= since);
+const tutorialsBuilt = store.listEvents(ws, { type: "materials.changed", change: "manualbook_built" }).filter((event) => event.createdAt >= since);
 const agentRuns = listAgentTasks(store, ws).filter((task) => task.requestedAt >= since);
 console.log(`last 7 days: ${tutorialsBuilt.length} manuals built, ${tutorialsBuilt.filter((event) => !started.has(event.entityId)).length} for work never started; `
   + `${agentRuns.length} assistant runs, ${agentRuns.filter((task) => !started.has(task.workOrderId)).length} for work never started`);

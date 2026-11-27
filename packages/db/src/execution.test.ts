@@ -245,7 +245,7 @@ test("a confirmed session ends the open one with the confirmed minutes, or is wr
   expect(rows).toHaveLength(2);
   expect(rows[1]).toMatchObject({ id: second.executionId, startedAt: "2026-09-15T14:00:00.000Z", endedAt: "2026-09-15T15:00:00.000Z", outcome: "confirmed" });
   expect(store.listWorkOrders("w")[0]!.state).toBe("active");
-  expect(store.listEvents("w", { type: "execution.confirmed" })).toHaveLength(2);
+  expect(store.listEvents("w", { type: "execution.changed", change: "confirmed" })).toHaveLength(2);
 });
 
 test("an active order with no open session opens a new one", () => {

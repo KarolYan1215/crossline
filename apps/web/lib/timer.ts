@@ -1,6 +1,6 @@
 import "server-only";
 import type { AccessContext } from "@crossline/core";
-import { getStore, resolvedEstimate, STEP_FOCUSED } from "./crossline";
+import { getStore, resolvedEstimate } from "./crossline";
 
 export type ActiveTimer = {
   workOrderId: string; intent: string; stepId?: string; stepTitle?: string;
@@ -29,7 +29,7 @@ export function activeTimers(ctx: AccessContext): ActiveTimer[] {
     const sessionStart = last?.resumedAt ?? execution.startedAt;
     // The step this session was started on (a block's own step, `focusStep`), while it is still open; else the task's first open one.
     const open = (store.getStepPlan(ctx.workspaceId, order.id)?.steps ?? []).filter((item) => item.status === "planned" && item.schedulable);
-    const focused = store.listEvents(ctx.workspaceId, { type: STEP_FOCUSED, entityId: order.id })
+    const focused = store.listEvents(ctx.workspaceId, { type: "task.changed", change: "step_focused", entityId: order.id })
       .filter((event) => event.createdAt >= execution.startedAt).at(-1)?.payload as { stepId?: string } | undefined;
     const step = open.find((item) => item.id === focused?.stepId) ?? open[0];
     const before = executions.filter((item) => item.workOrderId === order.id && item.durationObserved && item.id !== execution.id && item.endedAt)

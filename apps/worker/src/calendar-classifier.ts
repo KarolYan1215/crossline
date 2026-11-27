@@ -4,7 +4,7 @@ import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
 
-export const CALENDAR_CLASSIFIER = "crossline:crossline-calendar-classifier";
+export const CALENDAR_CLASSIFIER = "crossline:crossline-line-filer:calendar";
 const BATCH = 40;
 // i18n-ignore: the classifier's input (model-facing)
 const WEEKDAY = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];

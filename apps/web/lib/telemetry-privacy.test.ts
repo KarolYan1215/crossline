@@ -71,7 +71,7 @@ test("the gate keeps only whitelisted keys whose values pass their checks, whate
     expect(Object.keys(out!.tokens ?? {}).every((key) => (TELEMETRY_TOKEN_FIELDS as readonly string[]).includes(key))).toBe(true);
     expect(Object.keys(out!.counts ?? {}).every((key) => (TELEMETRY_COUNT_FIELDS as readonly string[]).includes(key))).toBe(true);
   }
-  expect(kept).toBeGreaterThan(30);
+  expect(kept).toBe((LEDGER_EVENT_TYPES.length + DERIVED_EVENT_TYPES.length) * POISON.length);
   // An event without a valid time or version is not sent at all.
   expect(sanitizeTelemetryEvent({ type: "capture.created", at: "yesterday", version: "0.2.0" }, pages)).toBeUndefined();
   expect(sanitizeTelemetryEvent({ type: "capture.created", at: "2026-10-13T12:00:00.000Z", version: "some text" }, pages)).toBeUndefined();

@@ -12,7 +12,9 @@ import { sentSeenSince } from "./sent-mail";
  * first; anything not plainly reversible waits at the submit button for the morning. Once a week the person's own outward actions at
  * night (sent mail, commits) are judged for the weekly review; nothing of theirs is held.
  */
-export const NIGHT_SKILL = "crossline-gate-night";
+export const NIGHT_SKILL = "crossline-outward-check:pending";
+/** The week's review of the person's own night actions: the same Skill's `week` mode. */
+export const NIGHT_WEEK_SKILL = "crossline-outward-check:week";
 export const NIGHT_VERSION = "crossline.gate.night.v1";
 /** The reason a held form carries (shown on the run with the other `heldBecause`). */
 export const NIGHT_HOLD = "深夜，早上确认"; // i18n-ignore: a reason kept on the run, translated where shown
@@ -70,7 +72,7 @@ export async function nightWeekPass(deps: { store: CrosslineStore; workspaceId: 
   const week = previousWeek(now, deps.timeZone);
   const actions = nightActions(store, workspaceId, now, deps.timeZone);
   const subjects = new Map<string, GateSubject>(actions.map((action) => [action.subject, { kind: "action", id: action.subject }]));
-  const results = actions.length ? await runGate({ store, workspaceId, client: deps.client, cwd: deps.cwd, gate: "night", skill: NIGHT_SKILL, promptVersion: NIGHT_VERSION,
+  const results = actions.length ? await runGate({ store, workspaceId, client: deps.client, cwd: deps.cwd, gate: "night", skill: NIGHT_WEEK_SKILL, promptVersion: NIGHT_VERSION,
     input: { version: NIGHT_VERSION, mode: "week", actions }, detail: DETAIL, subjects, round: `week:${week.start}`,
     summary: `night actions ${actions.length} (mail ${actions.filter((item) => item.kind === "mail").length}, commit ${actions.filter((item) => item.kind === "commit").length})`, now }) : [];
   store.setSetting(workspaceId, WEEK_DONE, week.start);

@@ -1,4 +1,5 @@
 import { ONBOARDING_STAGES } from "./onboarding-turn-schema";
+import type { EventType } from "./event-types";
 
 /**
  * What an installed copy may tell the owner's collector about how it is used (docs/local-installer.md, 回传). Behaviour, never
@@ -45,15 +46,25 @@ export const APP_PAGES = ["/", "/approvals", "/assistant", "/automation", "/auto
   "/ledger", "/onboarding", "/outputs", "/plan", "/portrait", "/privacy", "/reports", "/reports/[id]", "/reset-password", "/return", "/review", "/set-password", "/settings", "/signup", "/workbench", "/workbench/[id]",
   "/workbench/[id]/material", "/wrap"] as const;
 
-/** Ledger event types that are passed on (as themselves), and the ones made here from other tables. */
-export const LEDGER_EVENT_TYPES = [
-  "capture.created", "capture.discarded", "analysis.proposed", "analysis.accepted", "plan.approved", "approval.revoked",
-  "work_order.transitioned", "work_order.archived", "work_order.deferred", "work_order.auto_approved", "human.started", "human.completed",
-  "evidence.accepted", "milestone.proposed", "milestone.revised", "milestone_gate.judged", "milestone_gate.blocked",
-  "milestone_gate.auto_accepted", "ask.answered", "ask.snoozed", "op.undone", "dates.decided", "portrait.written",
-  "agent.task.requested", "agent.task.completed", "agent.task.blocked", "agent.delivered", "notification.sent",
-  "goal.backplan_proposed", "goal.backplan_blocked", "task.progress_reported", "materials.ready", "manualbook.built"
-] as const;
+/**
+ * Ledger events that are passed on: the whole type, or for a `.changed` family the changes listed. On the wire a change is
+ * `<type>:<change>` (since the condensation of 2026-11-27; installs before it send the old names, which the collector reads too).
+ */
+const LEDGER_TELEMETRY: Partial<Record<EventType, true | readonly string[]>> = {
+  "capture.created": true, "capture.changed": ["discarded"], "work_order.transitioned": true, "work_order.changed": ["archived", "deferred", "auto_approved"],
+  "milestone.proposed": true, "milestone.changed": ["revised"], "milestone_gate.judged": true, "milestone_gate.changed": ["blocked", "auto_accepted"],
+  "ask.changed": ["answered", "snoozed"], "op.undone": true, "dates.decided": true, "portrait.changed": ["written"],
+  "agent.changed": ["task_requested", "task_completed", "task_blocked"], "notification.sent": true,
+  "goal.changed": ["backplan_proposed", "backplan_blocked"], "task.changed": ["progress_reported"], "materials.changed": ["manualbook_built"]
+};
+/** The wire names of the ledger events passed on, and below the ones made here from other tables. */
+export const LEDGER_EVENT_TYPES: readonly string[] = Object.entries(LEDGER_TELEMETRY)
+  .flatMap(([type, changes]) => changes === true ? [type] : (changes ?? []).map((change) => `${type}:${change}`));
+/** A ledger event's wire name: its type, or `<type>:<change>` for a `.changed` family. */
+export const telemetryTypeOf = (event: { type: string; payload: unknown }) => {
+  const change = (event.payload as { change?: unknown } | null)?.change;
+  return event.type.endsWith(".changed") && typeof change === "string" ? `${event.type}:${change}` : event.type;
+};
 export const DERIVED_EVENT_TYPES = ["skill.run", "page.viewed", "onboarding.round", "counts.today", "install.started"] as const;
 const EVENT_TYPES = new Set<string>([...LEDGER_EVENT_TYPES, ...DERIVED_EVENT_TYPES]);
 
@@ -125,12 +136,13 @@ export function sanitizeTelemetryBatch(input: { install: string; account?: strin
 /** Turns one ledger event into its telemetry form, or undefined when its type is not passed on. Only coded fields are read. */
 export function telemetryFromLedgerEvent(event: { type: string; entityId: string; payload: unknown; createdAt: string },
   context: { entity: (id: string) => string; version: string }): Record<string, unknown> | undefined {
-  if (!(LEDGER_EVENT_TYPES as readonly string[]).includes(event.type)) return undefined;
+  const type = telemetryTypeOf(event);
+  if (!LEDGER_EVENT_TYPES.includes(type)) return undefined;
   const payload = (event.payload && typeof event.payload === "object" ? event.payload : {}) as Record<string, unknown>;
   const stage = event.type === "work_order.transitioned" ? payload.to
-    : event.type === "ask.answered" || event.type === "ask.snoozed" ? payload.kind
+    : type === "ask.changed:answered" || type === "ask.changed:snoozed" ? payload.kind
     : event.type === "milestone_gate.judged" ? payload.verdict ?? payload.result : undefined;
-  return { type: event.type, at: event.createdAt, version: context.version, entity: context.entity(event.entityId),
+  return { type, at: event.createdAt, version: context.version, entity: context.entity(event.entityId),
     ...(typeof stage === "string" ? { stage } : {}), ...(typeof payload.code === "string" ? { code: payload.code } : {}) };
 }
 

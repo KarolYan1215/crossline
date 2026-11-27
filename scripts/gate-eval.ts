@@ -21,7 +21,7 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
-import { CANNOT_JUDGE, GATE_JUDGED, GATE_OVERRIDDEN, GATE_SPEC, latestGateJudgements, type GateJudgedPayload } from "../packages/core/src/index";
+import { CANNOT_JUDGE, GATE_JUDGED, GATE_SPEC, latestGateJudgements, type GateJudgedPayload } from "../packages/core/src/index";
 import { CrosslineStore } from "../packages/db/src/index";
 import { startCodexSupervisor } from "../packages/codex/src/index";
 import { COMPLETION_SKILL, COMPLETION_WINDOW_DAYS, completionEvidence, judgeCompletion } from "../apps/worker/src/gates/completion";
@@ -63,7 +63,7 @@ async function backfill(file: string | undefined) {
   const store = new CrosslineStore(file);
   const workspaceId = pickWorkspace(store, (id) => store.listWorkOrders(id).length);
   const from = since();
-  const finishedAt = new Map(store.listEvents(workspaceId, { type: "human.completed" }).map((event) => [String((event.payload as { workOrderId?: string }).workOrderId ?? event.entityId), event.createdAt]));
+  const finishedAt = new Map(store.listEvents(workspaceId, { type: "work_order.transitioned" }).filter((event) => (event.payload as { event?: { type?: string } }).event?.type === "human.completed").map((event) => [String((event.payload as { workOrderId?: string }).workOrderId ?? event.entityId), event.createdAt]));
   const judged = new Set(store.listEvents(workspaceId, { type: GATE_JUDGED }).filter((event) => (event.payload as GateJudgedPayload).gate === "completion").map((event) => event.entityId));
   const orders = boardTasks(store, workspaceId).filter((order) => !judged.has(order.id) && (isOpen(order) || (isFinished(order) && (finishedAt.get(order.id) ?? "") >= from)));
   console.log(`backfill: ${orders.length} tasks in workspace ${workspaceId} since ${from.slice(0, 10)}`);
@@ -90,7 +90,7 @@ function exportCases(file: string | undefined, out: string | undefined) {
   const store = new CrosslineStore(scratch);
   const workspaceId = pickWorkspace(store, (id) => store.listEvents(id, { type: GATE_JUDGED }).length);
   const from = since();
-  const events = [...store.listEvents(workspaceId, { type: GATE_JUDGED }), ...store.listEvents(workspaceId, { type: GATE_OVERRIDDEN })];
+  const events = [...store.listEvents(workspaceId, { type: GATE_JUDGED }), ...store.listEvents(workspaceId, { type: "gate.changed", change: "overridden" })];
   const pairs = new Map(events.filter((event) => event.type === GATE_JUDGED && (event.payload as GateJudgedPayload).run === 2)
     .map((event) => [(event.payload as GateJudgedPayload).pairedWith ?? "", event.payload as GateJudgedPayload]));
   const orders = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order]));

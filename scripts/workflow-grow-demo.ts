@@ -74,7 +74,7 @@ try {
   heading(`生长任务（助手，带 $${SKILL_CREATOR}）：${input.title}`);
   const started = Date.now();
   const outcome = await createAgentRunner(store, ws, repoRoot, () => supervisor.client, { outputRoot: path.join(dataDir, "ai-output"), libraryDir, ask: async () => false })(input);
-  const completed = store.listEvents(ws, { type: "agent.task.completed", entityId: input.taskId }).at(-1);
+  const completed = store.listEvents(ws, { type: "agent.changed", change: "task_completed", entityId: input.taskId }).at(-1);
   console.info(JSON.stringify({ state: outcome.state, seconds: Math.round((Date.now() - started) / 1000),
     skillsOn: (completed?.payload as { skills?: string[] } | undefined)?.skills ?? [], ...(outcome.state === "done" ? { directory: outcome.directory } : outcome) }, null, 1));
   if (outcome.state === "done") {
@@ -115,7 +115,7 @@ try {
       const ran = await finished as Awaited<ReturnType<typeof runner>> | undefined;
       if (ran) console.info(JSON.stringify({ state: ran.state, seconds: Math.round((Date.now() - runStarted) / 1000),
         ...(ran.state === "done" ? { directory: ran.directory, summary: ran.summary.summary, artifacts: ran.artifacts, needsHuman: ran.summary.needsHuman,
-          verification: ran.summary.verification, skills: (store.listEvents(ws, { type: "agent.task.completed", entityId: ran.taskId }).at(-1)?.payload as { skills?: string[] })?.skills }
+          verification: ran.summary.verification, skills: (store.listEvents(ws, { type: "agent.changed", change: "task_completed", entityId: ran.taskId }).at(-1)?.payload as { skills?: string[] })?.skills }
           : ran) }, null, 1));
       const told = store.listRecentNudges(ws, new Date(Date.now() - 3_600_000).toISOString()).at(-1);
       console.info(`对本人说：${(told?.payload.card as { clarify?: { question?: string } } | undefined)?.clarify?.question ?? "（无）"}`);

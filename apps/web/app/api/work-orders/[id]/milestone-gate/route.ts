@@ -25,7 +25,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   store.appendEvent({
     ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
     idempotencyKey: `milestone-gate:retry:${id}:${Date.now()}`,
-    type: "milestone_gate.retry_requested", entityId: id, payload: { requestedBy: ctx.principalId }
+    type: "milestone_gate.changed", entityId: id, payload: { requestedBy: ctx.principalId, change: "retry_requested" }
   });
   await requestCodexSupervisor(ctx, `/v1/work-orders/${id}/milestone-gate`, {
     method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(10_000)

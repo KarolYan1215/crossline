@@ -1,6 +1,6 @@
 /**
  * The system's suggested importance (0–100) for a milestone, before the person moves the slider. Since 2026-11-22 it is the milestone
- * risk reviewer's `weight` (`MilestoneReading`, Skill `crossline-milestone-risk-reviewer`), which reads what the point score used to add
+ * risk reviewer's `weight` (`MilestoneReading`, Skill `crossline-milestone-review:risk`), which reads what the point score used to add
  * up — the line's place in the person's order, the cross-line relations through it, what is at stake (a graded course, the deadline),
  * how the person moved this line's sliders before — and says why in one line. Before a review, the neutral middle.
  */

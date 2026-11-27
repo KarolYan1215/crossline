@@ -42,15 +42,15 @@ export const INTERACTIVE_SKILLS: readonly string[] = ["crossline-onboarding", "c
  * 信息再进行规划和准备」; mail sorting had not run once while 20 step plans and 43 tutorial runs went ahead): a plan made before the mail
  * that changes it is read is made twice. They wait behind a person's turn and still count as background for the slot kept for a person.
  */
-export const INTAKE_SKILLS: readonly string[] = ["crossline-mail-triage", "crossline-automation-stripper", "crossline-calendar-classifier",
-  "crossline-folder-classifier", "crossline-source-digest", "crossline-recording-digest", "crossline-onboarding-extract", "crossline-background-facts", "crossline-import-triage", "crossline-time-attributor"];
+export const INTAKE_SKILLS: readonly string[] = ["crossline-inbox-triage:mail", "crossline-automation-stripper", "crossline-line-filer:calendar",
+  "crossline-line-filer:folder", "crossline-capture-digest:source", "crossline-capture-digest:recording", "crossline-onboarding-extract", "crossline-capture-digest:background", "crossline-inbox-triage:import", "crossline-line-filer:time"];
 /**
  * Background Skills that turn what the person just did (approved milestones, a finished interview, an analysed capture) into work on their
  * board. They go after intake and before discretionary runs (tutorials, research, the assistant): after 12 milestones were approved the
  * first task took 22 minutes, queued behind web research and tutorials nobody was waiting for (2026-10-17 walkthrough, W-28).
  */
-export const PLANNING_SKILLS: readonly string[] = ["crossline-goal-backplanner", "crossline-step-planner", "crossline-milestone-architect",
-  "crossline-artifact-planner"];
+export const PLANNING_SKILLS: readonly string[] = ["crossline-goal-backplanner:backplan", "crossline-task-planner:steps", "crossline-milestone-architect:design",
+  "crossline-cross-line-planner:artifacts"];
 const named = (list: readonly string[], skillName: string) => list.some((name) => skillName === name || skillName.endsWith(`:${name}`));
 export const priorityForSkill = (skillName: string): ModelPriority =>
   named(INTERACTIVE_SKILLS, skillName) ? "interactive" : named(INTAKE_SKILLS, skillName) ? "intake"

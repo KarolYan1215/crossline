@@ -41,8 +41,8 @@ export async function extractDocument(documentId: string, workspaceId: string) {
     if (gone && !gone.uriInUse) {
       try { const file = path.resolve(fileURLToPath(gone.uri)); if (file.startsWith(path.resolve(dataDir, "sources") + path.sep)) rmSync(file, { force: true }); } catch { /* not a local copy */ }
     }
-    analysisStore.appendEvent({ ownerId: ownerOf(analysisStore, workspaceId), workspaceId, idempotencyKey: `source.refused:${doc.id}`, type: "source.refused", entityId: doc.id,
-      payload: { fileName: doc.fileName, code: verdict.code } });
+    analysisStore.appendEvent({ ownerId: ownerOf(analysisStore, workspaceId), workspaceId, idempotencyKey: `source.refused:${doc.id}`, type: "source.changed", entityId: doc.id,
+      payload: { fileName: doc.fileName, code: verdict.code, change: "refused" } });
     return { state: "refused" as const, documentId: doc.id, fileName: doc.fileName, code: verdict.code, message: verdict.message };
   }
   const note = [result.note, verdict.note].filter(Boolean).join(t("；"));

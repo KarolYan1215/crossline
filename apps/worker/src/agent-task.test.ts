@@ -86,8 +86,8 @@ test("the ledger keeps where it came from and what it made, never the content", 
   const outcome = await runner(rpc)({ ...input, taskId: "t3" });
   if (outcome.state !== "done") throw new Error(JSON.stringify(outcome));
   expect(outcome.artifacts[0]).toMatchObject({ path: "notes.md", sha256: expect.stringMatching(/^[0-9a-f]{64}$/), bytes: expect.any(Number) });
-  const events = store.listEvents(workspaceId, { type: ["agent.task.requested", "agent.task.completed"] });
-  expect(events.map((event) => event.type)).toEqual(["agent.task.requested", "agent.task.completed"]);
+  const events = store.listEvents(workspaceId, { type: "agent.changed", change: ["task_requested", "task_completed"] });
+  expect(events.map((event) => (event.payload as { change?: string }).change)).toEqual(["task_requested", "task_completed"]);
   expect(JSON.stringify(events)).not.toContain("SECRET-BODY");
   expect(events[1]!.payload).toMatchObject({ artifacts: [{ path: "notes.md" }], inputsModified: [], checksPassed: true, reviewRequired: false });
 });
@@ -189,7 +189,7 @@ test("the owner's shell runs under a profile chosen from what it is handed, held
   expect(decisions).toEqual(["t-research:curl:decline", "t-research:pip:accept", "t-mail:curl:decline", "t-mail:pip:decline"]);
   const audit = JSON.parse(readFileSync(path.join(root, "ai", "t-mail", "audit.json"), "utf8"));
   expect(audit).toMatchObject({ profile: "untrusted-input", isolation: "guard-only", untrusted: ["mail"], egress: "none" });
-  expect(store.listEvents(workspaceId, { type: "agent.task.requested", entityId: "t-mail" })[0]!.payload).toMatchObject({ profile: "untrusted-input", isolation: "guard-only" });
+  expect(store.listEvents(workspaceId, { type: "agent.changed", change: "task_requested", entityId: "t-mail" })[0]!.payload).toMatchObject({ profile: "untrusted-input", isolation: "guard-only" });
 });
 
 test("on Windows with MXC the owner's shell runs in Codex's sandbox: task directory writable, secrets denied, packages only from PyPI and npm", async () => {
@@ -208,7 +208,7 @@ test("on Windows with MXC the owner's shell runs in Codex's sandbox: task direct
   expect(profile.filesystem).toMatchObject({ ":root": "read", [path.join(root, "ai", "t-mxc")]: "write", "C:\\Users\\karol\\.ssh": "deny" });
   expect((config.shell_environment_policy as { set: Record<string, string> }).set.TEMP).toBe(path.join(root, "ai", "t-mxc", ".tmp"));
   expect(JSON.parse(readFileSync(path.join(root, "ai", "t-mxc", "audit.json"), "utf8"))).toMatchObject({ profile: "research", isolation: "mxc", egress: "packages" });
-  expect(store.listEvents(workspaceId, { type: "agent.task.requested", entityId: "t-mxc" })[0]!.payload).toMatchObject({ isolation: "mxc" });
+  expect(store.listEvents(workspaceId, { type: "agent.changed", change: "task_requested", entityId: "t-mxc" })[0]!.payload).toMatchObject({ isolation: "mxc" });
   // Handed a mail: the same sandbox with no network and no proxy.
   const mail = fake([summary()], { windowsSandbox: { status: "ready" }, threadResponse: started, script: async () => { writeFileSync(path.join(root, "ai", "t-mxc-mail", "notes.md"), "笔记"); } });
   expect(await runner(mail.rpc, { platform: "win32" })({ ...input, taskId: "t-mxc-mail", untrusted: ["mail"] })).toMatchObject({ state: "done", sandbox: "mxc" });
@@ -235,7 +235,7 @@ test("on Windows without MXC: an elevated sandbox already set up is used; with n
     expect(await runner(none.rpc, { platform: "win32" })({ ...input, taskId: "t-none", untrusted: ["mail"] })).toMatchObject({ state: "blocked", code: "AGENT_SANDBOX_UNAVAILABLE" });
     expect(none.threadStarts()).toHaveLength(0);
   }
-  expect(store.listEvents(workspaceId, { type: "agent.task.requested", entityId: "t-none" })).toHaveLength(0);
+  expect(store.listEvents(workspaceId, { type: "agent.changed", change: "task_requested", entityId: "t-none" })).toHaveLength(0);
   // A research run still runs, behind the guard alone and with no network from its shell.
   const decisions: string[] = [];
   const research = fake([summary()], { windowsSandbox: { status: "updateRequired", configured: "elevated" }, script: async ({ ask }) => {
@@ -271,7 +271,7 @@ test("a delivered data file counts only when the run's script makes it again; ot
   const other = await runner(fake([table], { script: write("t-other", "import { writeFileSync } from 'node:fs';\nwriteFileSync('table.csv', 'a,b\\n3,4\\n');\n") }).rpc)({ ...input, category: "data_code_sim", taskId: "t-other" });
   expect(other).toMatchObject({ state: "done", reviewRequired: true, reproduced: false, reviewReasons: ["重新运行 run 脚本生成的 table.csv 与交付的不一致"] });
   expect(JSON.parse(readFileSync(path.join(root, "ai", "t-other", "audit.json"), "utf8"))).toMatchObject({ reproduced: false, reproduction: { problem: "mismatch" } });
-  expect(store.listEvents(workspaceId, { type: "agent.task.completed", entityId: "t-other" })[0]!.payload).toMatchObject({ reproduced: false, reviewRequired: true });
+  expect(store.listEvents(workspaceId, { type: "agent.changed", change: "task_completed", entityId: "t-other" })[0]!.payload).toMatchObject({ reproduced: false, reviewRequired: true });
 }, 30_000);
 
 test("on the account's node, the shell runs in the node's task directory, its inputs are copies and its results come back to the server", async () => {
@@ -292,7 +292,7 @@ test("on the account's node, the shell runs in the node's task directory, its in
   expect(readFileSync(path.join(root, "ai", "t-node", "notes.md"), "utf8")).toBe("笔记");
   expect(readFileSync(original, "utf8")).toBe("原文");
   expect(outcome.inputsModified).toEqual([original]);
-  expect(store.listEvents(workspaceId, { type: "agent.task.requested" }).at(-1)!.payload).toMatchObject({ mode: "node", node: "PC-A" });
+  expect(store.listEvents(workspaceId, { type: "agent.changed", change: "task_requested" }).at(-1)!.payload).toMatchObject({ mode: "node", node: "PC-A" });
   // A node gone before the run starts: the run is lost, and retried like any lost run.
   link.disconnect();
   expect(await nodeRunner({ ...input, taskId: "t-node-2" })).toMatchObject({ state: "blocked", code: "AGENT_RUN_LOST" });
@@ -309,20 +309,20 @@ test("outside the owner's own shell a run takes only inputs this workspace owns,
   const mine = path.join(data, "sources", "syllabus.txt");
   for (const file of [db, auth, mine, path.join(ai, "agent-other", "notes.md"), path.join(ai, "agent-mine", "notes.md")]) writeFileSync(file, "x");
   own(mine);
-  store.appendEvent({ ownerId: "user-1", workspaceId, idempotencyKey: "req-mine", type: "agent.task.requested", entityId: "agent-mine", payload: { taskId: "agent-mine", title: "前一次" } });
+  store.appendEvent({ ownerId: "user-1", workspaceId, idempotencyKey: "req-mine", type: "agent.changed", entityId: "agent-mine", payload: { taskId: "agent-mine", title: "前一次", change: "task_requested" } });
   // The other account's run is in the same output root but in its own workspace's ledger.
   const other = store.createPrincipalWithWorkspace("user-2", "别人").workspace.id;
-  store.appendEvent({ ownerId: "user-2", workspaceId: other, idempotencyKey: "req-other", type: "agent.task.requested", entityId: "agent-other", payload: { taskId: "agent-other", title: "别人的" } });
+  store.appendEvent({ ownerId: "user-2", workspaceId: other, idempotencyKey: "req-other", type: "agent.changed", entityId: "agent-other", payload: { taskId: "agent-other", title: "别人的", change: "task_requested" } });
   // A folder the person authorized that happens to hold the data folder is refused too.
   store.setSetting(workspaceId, "sources.folders", JSON.stringify([{ id: "f1", path: root, label: "全部", addedAt: "2026-11-03T00:00:00.000Z", lines: [] }]));
   const asked = [db, auth, data, path.join(ai, "agent-other"), mine, path.join(ai, "agent-mine"), path.join(data, "materials", "wo-x")];
   expect(ownedInputs(store, workspaceId, asked, { outputRoot: ai, dataDir: data, stateDir: state }).kept).toEqual([mine, path.join(ai, "agent-mine")]);
 
   // Every mode but the owner's shell goes through it: what the tools run is handed is what it records.
-  const { rpc } = sharedRuntime([summary()], "crossline:crossline-agent-tools");
+  const { rpc } = sharedRuntime([summary()], "crossline:crossline-agent:functions");
   const tools = createAgentRunner(store, workspaceId, "C:\\repo", () => rpc, { outputRoot: ai, mode: "tools", confine: { dataDir: data, stateDir: state } });
   await tools({ ...input, taskId: "t-confined", inputs: asked });
-  expect(store.listEvents(workspaceId, { type: "agent.task.requested", entityId: "t-confined" })[0]!.payload).toMatchObject({ inputs: [mine, path.join(ai, "agent-mine")] });
+  expect(store.listEvents(workspaceId, { type: "agent.changed", change: "task_requested", entityId: "t-confined" })[0]!.payload).toMatchObject({ inputs: [mine, path.join(ai, "agent-mine")] });
   // And a node is sent copies of those only.
   const tasksRoot = path.join(root, "node-tasks");
   const { rpc: nodeRpc } = fake([summary()]);

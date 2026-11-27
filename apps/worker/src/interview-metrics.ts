@@ -40,7 +40,7 @@ export function interviewMetrics(store: CrosslineStore, workspaceId: string, ses
   const sentences = rounds.reduce((sum, round) => sum + ((round.content.reply ?? "").match(SENTENCE) ?? []).filter((text) => text.trim()).length, 0);
   const asked = store.listQuestions(workspaceId, { kind: "interview", keyPrefix: `iq:${sessionId}:` });
   const ratings = Object.entries(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS))).filter(([key]) => key.startsWith(`${sessionId}#`));
-  const leftOut = store.listEvents(workspaceId, { type: "onboarding.round_edited" }).filter((event) => event.entityId === sessionId)
+  const leftOut = store.listEvents(workspaceId, { type: "onboarding.changed", change: "round_edited" }).filter((event) => event.entityId === sessionId)
     .reduce((sum, event) => sum + ((event.payload as { removed?: unknown[] }).removed?.length ?? 0), 0);
   const stages: InterviewMetrics["stages"] = [];
   rounds.forEach((round, index) => {

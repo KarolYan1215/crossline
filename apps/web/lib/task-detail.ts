@@ -38,15 +38,15 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
   const preparedFor = new Map(store.listWorkOrders(workspaceId).filter((order) => ids.has(preparesOf(order))).map((order) => [order.id, preparesOf(order)]));
   const agentTasks = listAgentTasks(store, workspaceId).filter((task) => ids.has(task.workOrderId) || preparedFor.has(task.workOrderId))
     .map((task) => preparedFor.has(task.workOrderId) ? { ...task, workOrderId: preparedFor.get(task.workOrderId)!, stepId: "" } : task);
-  const confirmed = store.listEvents(workspaceId, { type: "criterion.confirmed" });
-  const assessed = store.listEvents(workspaceId, { type: "criteria.assessed" });
-  const notes = store.listEvents(workspaceId, { type: "task.note" }).filter((event) => ids.has(event.entityId));
+  const confirmed = store.listEvents(workspaceId, { type: "task.changed", change: "criterion_confirmed" });
+  const assessed = store.listEvents(workspaceId, { type: "task.changed", change: "criteria_assessed" });
+  const notes = store.listEvents(workspaceId, { type: "task.changed", change: "note" }).filter((event) => ids.has(event.entityId));
   const artifactPlan = readStoredArtifactPlan(store, workspaceId);
   const artifactsById = new Map(artifactPlan.artifacts.map((artifact) => [artifact.id, artifact]));
   const liveOrders = store.listWorkOrders(workspaceId).filter((order) => order.state !== "archived");
   const label = (line: string) => labels.get(line) ?? line;
   const artifactRelations = relations.filter((relation) => relation.artifactId);
-  const planBlocked = new Set(store.listEvents(workspaceId, { type: "task.steps_blocked" }).map((event) => event.entityId));
+  const planBlocked = new Set(store.listEvents(workspaceId, { type: "task.changed", change: "steps_blocked" }).map((event) => event.entityId));
   const capacity = new Set(defaultIdentityPacks().filter((pack) => pack.kind === "capacity").map((pack) => pack.id));
   // Answers to step questions are kept per project (`step_answer_<hash>`): the person's own, or an assumption the app wrote (「假设：」).
   const stepAnswers = new Map(store.listProfileFacts(workspaceId).filter((fact) => fact.slot.startsWith(STEP_ANSWER_SLOT))
@@ -310,7 +310,7 @@ function flywheelTouching(relations: StoredMilestoneRelation[], milestoneId: str
 function materialBlockerFrom(events: StoredEvent[], locale?: Locale): TaskDetail["materialBlocker"] {
   let blocker: TaskDetail["materialBlocker"];
   for (const event of events) {
-    if (event.type === "materials.blocked") {
+    if ((event.type === "materials.changed" && (event.payload as { change?: string }).change === "blocked")) {
       const detail = event.payload as { code?: string; message?: string };
       blocker = { message: detail.message ?? detail.code ?? tFor(locale)("材料准备被阻塞") };
     } else blocker = undefined;
@@ -374,7 +374,7 @@ function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
     // A tutorial built before steps named their product (2026-10-22) is not shown on work that no longer warrants one (a delivery check,
     // a fix to the person's own system), unless the person asked for it.
     preparedMaterials: deps.materials.filter((item) => !TUTORIAL_FILE.test(item.uri) || (deps.extras.preparation?.level ?? "tutorial") === "tutorial"
-      || getStore().listEvents(ctx.workspaceId, { type: "tutorial.requested", entityId: order.id }).length > 0)
+      || getStore().listEvents(ctx.workspaceId, { type: "materials.changed", change: "tutorial_requested", entityId: order.id }).length > 0)
       .map((item) => ({ id: item.id, uri: item.uri, fileName: item.uri.split("/").pop() ?? item.uri, mediaType: item.mediaType })),
     executions,
     ...(payload.blocker ? { blocker: payload.blocker } : {}),
@@ -454,9 +454,9 @@ export function loadTaskDetail(ctx: AccessContext, workOrderId: string): TaskDet
   return assembleTaskDetail(ctx, order, {
     milestone, materials: store.listMaterials(ctx.workspaceId, workOrderId),
     executions: store.listExecutions(ctx.workspaceId, workOrderId),
-    materialEvents: store.listEvents(ctx.workspaceId, { type: ["materials.blocked", "materials.retry_requested"], entityId: workOrderId }),
+    materialEvents: store.listEvents(ctx.workspaceId, { type: "materials.changed", change: ["blocked", "retry_requested"], entityId: workOrderId }),
     archivedEvents: order.state === "archived"
-      ? store.listEvents(ctx.workspaceId, { type: "work_order.archived", entityId: workOrderId }) : [],
+      ? store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "archived", entityId: workOrderId }) : [],
     relatedFlywheel: flywheelTouching(relations, order.milestoneId, titleOf),
     background: store.getBackgroundFacts(ctx.workspaceId, order.identityId),
     extras: taskExtras(store, ctx.workspaceId, [order], localeFor(ctx), todayFor(ctx)).get(order.id)!
@@ -532,10 +532,10 @@ export function loadTaskDetailsBatch(ctx: AccessContext, workOrderIds: string[])
   const materialsByOrder = groupBy(store.listMaterials(ctx.workspaceId), (item) => item.workOrderId);
   const executionsByOrder = groupBy(store.listExecutions(ctx.workspaceId), (item) => item.workOrderId);
   const materialEventsByOrder = groupBy(
-    store.listEvents(ctx.workspaceId, { type: ["materials.blocked", "materials.retry_requested"] }),
+    store.listEvents(ctx.workspaceId, { type: "materials.changed", change: ["blocked", "retry_requested"] }),
     (event) => event.entityId);
   const archivedEventsByOrder = groupBy(
-    store.listEvents(ctx.workspaceId, { type: "work_order.archived" }), (event) => event.entityId);
+    store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "archived" }), (event) => event.entityId);
   const relations = store.listMilestoneRelations(ctx.workspaceId);
   const titleOf = (id: string) => milestoneById.get(id)?.title ?? id;
   // Facts are per-identity, not per-order — a handful of distinct identities across however many orders

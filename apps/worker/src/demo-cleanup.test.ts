@@ -16,7 +16,7 @@ test("demo orders are archived with a readable reason once the person has work o
   expect(retireShadowedDemos(store, "w")).toEqual(["research-starter-work-order"]);
   const states = Object.fromEntries(store.listWorkOrders("w").map((item) => [item.id, item.state]));
   expect(states).toMatchObject({ "research-starter-work-order": "archived", "old-demo": "accepted", mine: "awaiting_plan_approval" });
-  expect(store.listEvents("w", { type: "work_order.archived" }).map((event) => (event.payload as { reason: string }).reason))
+  expect(store.listEvents("w", { type: "work_order.changed", change: "archived" }).map((event) => (event.payload as { reason: string }).reason))
     .toEqual([DEMO_RETIRED_REASON]);
   expect(retireShadowedDemos(store, "w")).toEqual([]);
   store.close();

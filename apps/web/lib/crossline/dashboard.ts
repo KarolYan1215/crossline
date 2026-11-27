@@ -165,7 +165,7 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
     .filter((order) => !capacityIdentityIds.has(order.identityId) && ACTIONABLE.includes(order.state) && !libraryUntil(ctx, order, libraryDay))
     .sort((a, b) => ACTIONABLE.indexOf(a.state) - ACTIONABLE.indexOf(b.state) || a.id.localeCompare(b.id));
   const capacity = latestCapacity(ctx, now);
-  const outcomes = readTransitionOutcomes(store.listEvents(ctx.workspaceId, { type: "energy.transition_outcome" }));
+  const outcomes = readTransitionOutcomes(store.listEvents(ctx.workspaceId, { type: "energy.changed", change: "transition_outcome" }));
   const forecast = capacity.level === "uncalibrated" ? {} : Object.fromEntries(active.flatMap((order) => {
     const needed = humanCoreOf(order)?.energy;
     return needed === "low" || needed === "medium" || needed === "high"
@@ -186,7 +186,7 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
   }).format(now);
   const acceptedAt = firstAcceptedAt(ctx.workspaceId);
   const progress = { ...acceptanceProgress([...acceptedAt.values()], timeZone, now),
-    weekSteps: stepsDoneSince(store.listEvents(ctx.workspaceId, { type: "task.step_progress" }), new Date(now.getTime() - 7 * 86_400_000)) };
+    weekSteps: stepsDoneSince(store.listEvents(ctx.workspaceId, { type: "task.changed", change: "step_progress" }), new Date(now.getTime() - 7 * 86_400_000)) };
 
   // Today's own capacity read: the weekly pattern for today only, not the calendar-adjusted multi-week
   // forecast Plan already owns.
@@ -301,7 +301,7 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
   })();
 
   const stepPlans = new Map(store.listStepPlans(ctx.workspaceId).map((plan) => [plan.workOrderId, plan]));
-  const planBlocked = new Set(store.listEvents(ctx.workspaceId, { type: "task.steps_blocked" }).map((event) => event.entityId));
+  const planBlocked = new Set(store.listEvents(ctx.workspaceId, { type: "task.changed", change: "steps_blocked" }).map((event) => event.entityId));
   const readyProposals = orders.filter((order) => order.state === "awaiting_plan_approval" && !(order.payload as { seeded?: boolean } | undefined)?.seeded
     && proposalReady(order, stepPlans.get(order.id), { planBlocked: planBlocked.has(order.id), exempt: capacityIdentityIds.has(order.identityId) }));
   // Unapproved work is never scheduled, so a proposal due within a week is named above 「下一步」 (W-31).

@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
 import { createReadStream, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
-import {
-  RECORDING_FAILED_EVENT, RECORDING_INBOX_SEGMENTS, RECORDING_SERVER_CONSENT, RECORDING_SILENT_EVENT, inTranscribeWindow, TRANSCRIBE_WINDOW
+import { RECORDING_INBOX_SEGMENTS, RECORDING_SERVER_CONSENT, inTranscribeWindow, TRANSCRIBE_WINDOW
 } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 import { ownerOf } from "./owner";
@@ -17,7 +16,7 @@ import type { BlockTranscript, WindowRecogniser } from "./sensevoice";
  * is transcribed, found silent, a copy of one already done, or unreadable — the audio is never kept and never backed up. A run cut off by
  * the night ending or the consent being withdrawn leaves the file for the next night.
  */
-export { RECORDING_FAILED_EVENT };
+export { };
 export const inboxDir = (dataDir: string, workspaceId: string) => path.join(dataDir, ...RECORDING_INBOX_SEGMENTS, workspaceId);
 export const serverRecordingsOn = (store: CrosslineStore, workspaceId: string) => store.getSetting(workspaceId, RECORDING_SERVER_CONSENT) === "granted";
 
@@ -68,8 +67,8 @@ export async function processInbox(store: CrosslineStore, workspaceId: string, d
     let result: BlockTranscript;
     try { result = await deps.transcribe(item.file, deps.recognise(), () => !open()); }
     catch (error) {
-      store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `${RECORDING_FAILED_EVENT}:${audioSha}`, type: RECORDING_FAILED_EVENT,
-        entityId: audioSha, payload: { fileName: item.name, message: error instanceof Error ? error.message.slice(0, 300) : "未知错误" } });
+      store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `recording.failed:${audioSha}`, type: "recording.changed",
+        entityId: audioSha, payload: { fileName: item.name, message: error instanceof Error ? error.message.slice(0, 300) : "未知错误", change: "failed" } });
       remove(item);
       outcomes.push({ state: "failed", name: item.name });
       continue;
@@ -78,8 +77,8 @@ export async function processInbox(store: CrosslineStore, workspaceId: string, d
     if (result.state === "stopped" || !serverRecordingsOn(store, workspaceId)) { outcomes.push({ state: "stopped", name: item.name }); break; }
     const wallMs = now().getTime() - began;
     if (result.state === "silent") {
-      store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `${RECORDING_SILENT_EVENT}:${audioSha}`, type: RECORDING_SILENT_EVENT,
-        entityId: audioSha, payload: { fileName: item.name, seconds: result.seconds, speechSeconds: result.speechSeconds, workMs: result.workMs, wallMs, where: "server" } });
+      store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `recording.silent:${audioSha}`, type: "recording.changed",
+        entityId: audioSha, payload: { fileName: item.name, seconds: result.seconds, speechSeconds: result.speechSeconds, workMs: result.workMs, wallMs, where: "server", change: "silent" } });
     } else {
       // The shortcut uploads when the recording is saved, so it ended about when it arrived.
       saveTranscript(store, workspaceId, { dataDir: deps.dataDir, timeZone: deps.timeZone, label: "手机上传" /* i18n-ignore: a folder label in the transcript's file name */, file: item.name, endedAtMs: item.receivedAt, audioSha,
@@ -115,8 +114,8 @@ export async function computerInboxPass(store: CrosslineStore, workspaceId: stri
     if (!result || (result.state !== "transcribed" && result.state !== "silent") || !serverRecordingsOn(store, workspaceId)) break;
     const done = { text: result.text ?? "", seconds: result.seconds ?? 0, speechSeconds: result.speechSeconds ?? 0, workMs: result.workMs ?? 0, wallMs: now().getTime() - began };
     if (result.state === "silent") {
-      store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `${RECORDING_SILENT_EVENT}:${audioSha}`, type: RECORDING_SILENT_EVENT,
-        entityId: audioSha, payload: { fileName: item.name, seconds: done.seconds, speechSeconds: done.speechSeconds, workMs: done.workMs, wallMs: done.wallMs, where: "computer" } });
+      store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `recording.silent:${audioSha}`, type: "recording.changed",
+        entityId: audioSha, payload: { fileName: item.name, seconds: done.seconds, speechSeconds: done.speechSeconds, workMs: done.workMs, wallMs: done.wallMs, where: "computer", change: "silent" } });
     } else {
       saveTranscript(store, workspaceId, { dataDir: deps.dataDir, timeZone: deps.timeZone, label: "手机上传" /* i18n-ignore: a folder label in the transcript's file name */, file: item.name, endedAtMs: item.receivedAt, audioSha,
         where: tOfWorkspace(store, workspaceId)("电脑转写"), result: done, extra: { where: "computer" }, now: now() });

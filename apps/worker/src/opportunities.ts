@@ -26,15 +26,14 @@ import { citable, citableUrls } from "./cited-urls";
 
 /**
  * The opportunity agent's watches on the worker (docs/opportunity-agent.md §17.2, track ①; first built as needs in §5–7). Skill
- * `crossline-opportunity-needs` proposes each line's watches; every active watch runs on its period, looks for change in code first (a
- * page's hash, a board's postings, a list's entries) and calls `crossline-opportunity-reader` only for what is new; quotes are checked by
+ * `crossline-research:needs` proposes each line's watches; every active watch runs on its period, looks for change in code first (a
+ * page's hash, a board's postings, a list's entries) and calls `crossline-page-reader:opportunity` only for what is new; quotes are checked by
  * code, eligibility is the reader's fit (2026-11-25) and time–space is judged by code. Only the machine owner's workspace runs it. The passes take their fetch, clock, runtime,
  * feasibility and cost reader from `deps`, so the synthetic world (§17.9 ③) can drive them.
  */
 
-export const OPPORTUNITY_NEEDS = "crossline:crossline-opportunity-needs";
-export const OPPORTUNITY_READER = "crossline:crossline-opportunity-reader";
-export const NEEDS_DERIVED = "opportunity.needs.derived";
+export const OPPORTUNITY_NEEDS = "crossline:crossline-research:needs";
+export const OPPORTUNITY_READER = "crossline:crossline-page-reader:opportunity";
 /** Opportunities the mail triage found, waiting to be read (`MailCandidate[]`). */
 export const MAIL_CANDIDATES_SETTING = "opportunity.mailCandidates";
 export type MailCandidate = { key: string; lineId: string; subject: string; from: string; text: string; url: string; at: string };
@@ -137,17 +136,25 @@ export function withClassification(opportunity: Opportunity, raw: Partial<RawCla
 
 type DerivedRun = { lineId: string; at: string; basis: string; code?: string };
 const derivedRuns = (store: CrosslineStore, workspaceId: string): DerivedRun[] =>
-  store.listEvents(workspaceId, { type: NEEDS_DERIVED }).map((event) => event.payload as DerivedRun);
+  store.listEvents(workspaceId, { type: "opportunity.changed", change: "needs_derived" }).map((event) => event.payload as DerivedRun);
 
-/** The node events of §17.4 that make a line's watches be derived again: work accepted, a gate judged, a result, a sign-up confirmed. */
-export const NODE_EVENTS = ["evidence.accepted", "milestone_gate.judged", "opportunity.result", "opportunity.form.confirmed", "opportunity.confirmed"] as const;
+/**
+ * The node events of §17.4 that make a line's watches be derived again: work accepted (its transition into `accepted`; an
+ * `evidence.accepted` event was read here until 2026-11-27, a type never written), a gate judged, a result, a sign-up confirmed.
+ */
+function nodeEvents(store: CrosslineStore, workspaceId: string) {
+  return [...store.listEvents(workspaceId, { type: "work_order.transitioned" }).filter((event) => (event.payload as { to?: string }).to === "accepted"),
+    ...store.listEvents(workspaceId, { type: "milestone_gate.judged" }),
+    ...store.listEvents(workspaceId, { type: "opportunity.changed", change: ["result", "form_confirmed", "confirmed"] })]
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
 
 /** The lines that reached a node since `sinceIso`, with what each was: the line's new state is what the next derivation reads. */
 export function lineNodeEventsSince(store: CrosslineStore, workspaceId: string, sinceIso: string): Map<string, Array<{ type: string; title: string; at: string }>> {
   const orders = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order]));
   const opportunities = new Map(store.listOpportunities(workspaceId).map((row) => [row.id, row]));
   const out = new Map<string, Array<{ type: string; title: string; at: string }>>();
-  for (const event of store.listEvents(workspaceId, { type: [...NODE_EVENTS] })) {
+  for (const event of nodeEvents(store, workspaceId)) {
     if (event.createdAt < sinceIso) continue;
     const payload = (event.payload ?? {}) as { opportunityId?: string; lineId?: string };
     const order = orders.get(event.entityId);
@@ -155,7 +162,8 @@ export function lineNodeEventsSince(store: CrosslineStore, workspaceId: string, 
     const lineId = order?.identityId ?? payload.lineId ?? opportunity?.lineId;
     if (!lineId) continue;
     const title = order ? order.intent.slice(0, 80) : opportunity?.title.slice(0, 80) ?? "";
-    out.set(lineId, [...(out.get(lineId) ?? []), { type: event.type, title, at: event.createdAt }]);
+    const change = (event.payload as { change?: string }).change ?? (event.type === "work_order.transitioned" ? "accepted" : undefined);
+    out.set(lineId, [...(out.get(lineId) ?? []), { type: change ? `${event.type}:${change}` : event.type, title, at: event.createdAt }]);
   }
   return out;
 }
@@ -186,8 +194,8 @@ const factId = (fact: { identityId: string; projectId: string; slot: string }) =
 export async function deriveWatches(store: CrosslineStore, workspaceId: string, lineId: string, deps: Clients): Promise<{ proposed: number } | { blocked: string }> {
   const now = deps.now?.() ?? new Date();
   const previous = derivedRuns(store, workspaceId).filter((run) => run.lineId === lineId && !run.code).at(-1);
-  const record = (code?: string, count = 0) => store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `${NEEDS_DERIVED}:${lineId}:${now.toISOString()}`,
-    type: NEEDS_DERIVED, entityId: lineId, payload: { lineId, at: now.toISOString(), basis: lineBasis(store, workspaceId, lineId), count, ...(code ? { code } : {}) } });
+  const record = (code?: string, count = 0) => store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `opportunity.needs.derived:${lineId}:${now.toISOString()}`,
+    type: "opportunity.changed", entityId: lineId, payload: { lineId, at: now.toISOString(), basis: lineBasis(store, workspaceId, lineId), count, ...(code ? { code } : {}), change: "needs_derived" } });
   const client = deps.client();
   if (!client) { record("CODEX_SUPERVISOR_UNAVAILABLE"); return { blocked: "CODEX_SUPERVISOR_UNAVAILABLE" }; }
   const web = (deps.webBlocker ?? webResearchBlocker)();

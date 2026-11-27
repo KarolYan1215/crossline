@@ -243,10 +243,10 @@ test("goal confirmation and permission-mode rejection persist through the real p
 
   const store = openStore();
   try { store.appendEvent({ ownerId: "e2e-tester", workspaceId: realWorkspaceId(store),
-    idempotencyKey: "e2e:insight-candidate", type: "flywheel.finding", entityId: "research-starter",
+    idempotencyKey: "e2e:insight-candidate", type: "insight.changed", entityId: "research-starter",
     payload: { milestoneId: "research-starter", summary: "可复用的实验记录模板",
       sourceUrl: "https://example.org/source", sourceTitle: "记录模板", retrievedAt: "2026-09-14T00:00:00Z",
-      staleWhen: "方法变更" } }); }
+      staleWhen: "方法变更", change: "found" } }); }
   finally { store.close(); }
   // The default-approval switch lives on 自动化 (moved from 设置 on 2026-11-10), and every decision on an insight is made in the weekly review.
   await page.goto("/automation#capabilities");
@@ -262,7 +262,7 @@ test("goal confirmation and permission-mode rejection persist through the real p
   await page.getByRole("radiogroup", { name: "低风险提案默认批准" }).getByRole("radio", { name: "逐项批准" }).click();
   await expect(page.locator(".st-ok").first()).toBeVisible();
   const rejected = openStore();
-  try { expect(rejected.listEvents(realWorkspaceId(rejected), { type: "insight.rejected" })).toHaveLength(1); }
+  try { expect(rejected.listEvents(realWorkspaceId(rejected), { type: "insight.changed", change: "rejected" })).toHaveLength(1); }
   finally { rejected.close(); }
   // Deliberately `page.request`, not `apiFetch`: a forged `Origin` header is exactly what this test
   // needs to send, and the Fetch spec makes `Origin` a forbidden header a page's own `fetch()` can never
@@ -436,8 +436,8 @@ test("Today points at what only the person knows; 待确认 asks it with options
     const workspaceId = realWorkspaceId(store);
     const milestone = store.listMilestones(workspaceId).filter((item) => item.status === "approved").at(-1)!;
     milestoneTitle = milestone.title;
-    store.appendEvent({ ownerId: "e2e-tester", workspaceId, idempotencyKey: "e2e:backplan-blocked", type: "goal.backplan_blocked", entityId: milestone.id,
-      payload: { milestoneVersion: milestone.version, code: "BACKPLAN_SCHEMA_INVALID", message: "答案不完整" } });
+    store.appendEvent({ ownerId: "e2e-tester", workspaceId, idempotencyKey: "e2e:backplan-blocked", type: "goal.changed", entityId: milestone.id,
+      payload: { milestoneVersion: milestone.version, code: "BACKPLAN_SCHEMA_INVALID", message: "答案不完整", change: "backplan_blocked" } });
     store.saveWaitingItem({ id: "wait-e2e", ownerId: "e2e-tester", workspaceId, title: "实测数据", who: "师兄", expectedAt: "2026-09-14",
       approximate: true, followUpAt: "2026-09-14", state: "open", blocks: [], source: "manual" });
   } finally { store.close(); }
@@ -479,8 +479,8 @@ test("Today points at what only the person knows; 待确认 asks it with options
   try {
     const workspaceId = realWorkspaceId(after);
     expect(after.listWaitingItems(workspaceId).find((item) => item.id === "wait-e2e")!.followUpAt).toBe("2026-09-16");
-    expect(after.listEvents(workspaceId, { type: "goal.backplan_declined" })).toHaveLength(1);
-    expect(after.listEvents(workspaceId, { type: "ask.answered" })).toHaveLength(2);
+    expect(after.listEvents(workspaceId, { type: "goal.changed", change: "backplan_declined" })).toHaveLength(1);
+    expect(after.listEvents(workspaceId, { type: "ask.changed", change: "answered" })).toHaveLength(2);
   } finally { after.close(); }
 });
 

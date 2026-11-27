@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { ENERGY_CATEGORIES, PORTRAIT_SCHEMA, PORTRAIT_SCHEMA_VERSION, SAY_DO_DIMENSIONS, SCHWARTZ_VALUES, redactPortrait, validatePortrait, type PortraitReport } from "./portrait";
-import { CHARACTER_STANDARD, TYPE_AXES, TYPE_TABLE, characterPrompt, portraitLabels, portraitType, typeSummaryProblem } from "./portrait-type";
+import { CHARACTER_STANDARD, TYPE_AXES, TYPE_TABLE, characterPrompt, portraitLabels, portraitType } from "./portrait-type";
 
 const report: PortraitReport = {
   cover: { portrait: "在 UW–Madison 读博的研究者，想把研究连到产品。", coreConflict: "并行承诺多于可用注意力", keywords: ["研究者"] },
@@ -61,10 +61,26 @@ test("the person's own appearance replaces the neutral defaults; the base line's
   expect(characterPrompt({ ...typed, character: { ...typed.character!, appearance: "" } })).toContain("main colour deep blue");
 });
 
-test("shares are scaled to a whole", () => {
+test("shares are kept as written, a null one stays null: nothing is scaled to a whole (2026-11-27)", () => {
   const checked = validatePortrait({ ...report, lines: { allocation: "", items: [
-    { lineId: "research", description: "", goals: [], feeds: [], share: 60, targetShare: 30 }, { lineId: "media", description: "", goals: [], feeds: [], share: 60, targetShare: 30 }] } }, ["research", "media"]);
-  expect(checked.lines.items.map((item) => [item.share, item.targetShare])).toEqual([[50, 50], [50, 50]]);
+    { lineId: "research", description: "", goals: [], feeds: [], share: 60, targetShare: null }, { lineId: "media", description: "", goals: [], feeds: [], share: null, targetShare: 30 }] } }, ["research", "media"]);
+  expect(checked.lines.items.map((item) => [item.share, item.targetShare])).toEqual([[60, null], [null, 30]]);
+});
+
+test("the numbers only evidence can give accept null in the schema, and the values and pairs stay complete with a null score", () => {
+  const props = PORTRAIT_SCHEMA.properties as Record<string, any>;
+  const nullable = (field: { anyOf?: Array<{ type: string }> }) => field.anyOf?.some((option) => option.type === "null");
+  expect(nullable(props.compass.properties.values.items.properties.score)).toBe(true);
+  expect(nullable(props.energy.properties.map.items.properties.skillScore)).toBe(true);
+  expect(nullable(props.energy.properties.map.items.properties.loveScore)).toBe(true);
+  expect(nullable(props.lines.properties.items.items.properties.share)).toBe(true);
+  expect(nullable(props.lines.properties.items.items.properties.targetShare)).toBe(true);
+  expect(nullable(props.gap.properties.pairs.items.properties.says)).toBe(true);
+  const unknown = validatePortrait({ ...report, compass: { ...report.compass, values: SCHWARTZ.map((name) => ({ name, score: null, evidence: "" })) },
+    gap: { ...report.gap, pairs: SAY_DO.map((dimension) => ({ dimension, says: null, evidence: "" })) } }, ["research", "media"]);
+  expect(unknown.compass.values!.every((value) => value.score === null)).toBe(true);
+  expect(unknown.gap.pairs).toHaveLength(5);
+  expect(portraitLabels(unknown, { lineLabel: (id) => id }).cells.some((cell) => cell.title === "价值核心")).toBe(false);
 });
 
 const SCHWARTZ = ["自主", "刺激", "享乐", "成就", "权力", "安全", "遵从", "传统", "仁慈", "普世"];
@@ -128,21 +144,12 @@ test("the labels are computed: core word, top Schwartz value, base line, and the
   for (const title of ["飞轮形态", "充电方式", "工作时段"]) expect(cells.some((cell) => cell.title === title)).toBe(false);
 });
 
-test("类型名互不共用字词；字母是英文词首字母；个人简介对本人说、不写类型名", () => {
+test("类型名互不共用字词；字母是英文词首字母", () => {
   const names = Object.values(TYPE_TABLE).map((type) => type.name);
   expect(new Set(names).size).toBe(16);
   for (const name of names) expect(names.filter((other) => other !== name && (other.includes(name) || name.includes(other)))).toEqual([]);
   for (const type of Object.values(TYPE_TABLE)) expect(type.quote.length).toBeGreaterThan(3);
   for (const axis of TYPE_AXES) for (const side of [axis.left, axis.right]) expect(side.en.replace(/[^A-Z]/g, "")[0]).toBe(side.letter);
-  expect(typeSummaryProblem("你习惯把几条线接在一起，代价是收尾常被打断，")).toBeNull();
-  expect(typeSummaryProblem("习惯把几条线接在一起")).toContain("「你」");
-  expect(typeSummaryProblem("你是军师")).toContain("军师");
-  expect(typeSummaryProblem("你属于典型的甲方型")).toContain("甲方");
-  expect(typeSummaryProblem("你是 ROBA")).toContain("ROBA");
-  // The names are plain words too: used as words, not as the person's label, they pass (2026-11-14 audit).
-  expect(typeSummaryProblem("你像大学生备考一样把每周排满，所以先把一条线做深。")).toBeNull();
-  expect(typeSummaryProblem("你常替甲方想好验收标准，再把活交给 AI。")).toBeNull();
-  expect(typeSummaryProblem("你像 ENTP 一样")).toContain("外部人格类型");
 });
 
 test("the redesigned report: hypotheses keep verbatim quotes and the person's rating, careers and the formulation cite only kept hypotheses", () => {

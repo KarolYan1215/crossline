@@ -1,6 +1,6 @@
 import {
   AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, AI_TOOLS_SETTING, NODE_COMPUTE_SETTING, NODE_STATUS_SETTING, RUNTIME_OWNER_SETTING, GROWN_LIBRARY_SETTING, SKILL_LIBRARY_SETTING, allAiTools, detectedAiTools, personAiTool, readPersonAiTools, grownSkillFilesKey, grownSkillId, isScriptFile, mineSkillSettingKey, publicSkillFilesKey, scriptsAllowable, scriptsDigest, scriptsRunnable,
-  readGrownLibrary, readMineSkill, keptOnReset, grownKeptSettingKeys, readSkillLibrary, tFor, GROWN_VERSIONS_KEPT, WORKFLOW_FEEDBACK_EVENT, grownVersionsKey, agreedScopeOf, widensAgreed,
+  readGrownLibrary, readMineSkill, keptOnReset, grownKeptSettingKeys, readSkillLibrary, tFor, GROWN_VERSIONS_KEPT, grownVersionsKey, agreedScopeOf, widensAgreed,
   type AgreedScope, type AiTool, type GrownSkillRecord, type WorkflowAccess, type GrownSkillVersion, type WorkflowManifest, type PublicSkillRecord, type StoredMineSkill, type Weekday, type WorkflowSchedule
 } from "@crossline/core";
 import { createHash, randomUUID } from "node:crypto";
@@ -21,9 +21,9 @@ export function saveMineVersion(store: CrosslineStore, workspaceId: string, line
   const number = Math.max(0, ...stored.versions.map((item) => item.version)) + 1;
   const next: StoredMineSkill = { lineId, current: number, versions: [...stored.versions, { ...version, version: number }] };
   store.setSetting(workspaceId, mineSkillSettingKey(lineId), JSON.stringify(next));
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.mine:${lineId}:v${number}`, type: "skill.mine.rewritten", entityId: lineId,
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.mine:${lineId}:v${number}`, type: "skill.changed", entityId: lineId,
     payload: { lineId, version: number, by: version.by, rules: version.rules?.length ?? 0, ...(version.fingerprint ? { fingerprint: version.fingerprint } : {}),
-      ...(version.restoredFrom ? { restoredFrom: version.restoredFrom } : {}) } });
+      ...(version.restoredFrom ? { restoredFrom: version.restoredFrom } : {}), change: "mine_rewritten" } });
   return number;
 }
 
@@ -70,7 +70,7 @@ export function resetWorkspaceKeepingWorkflows(store: CrosslineStore, workspaceI
  */
 export function grownHomeLine(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord): string | undefined {
   if (record.origin.kind === "asked") {
-    const asked = store.listEvents(workspaceId, { type: "workflow.requested", entityId: record.origin.requestId }).at(-1);
+    const asked = store.listEvents(workspaceId, { type: "skill.changed", change: "workflow_requested", entityId: record.origin.requestId }).at(-1);
     const line = (asked?.payload as { lineId?: string } | undefined)?.lineId;
     return line || (record.lines.length === 1 ? record.lines[0] : undefined);
   }
@@ -108,8 +108,8 @@ export function allowSkillScripts(store: CrosslineStore, workspaceId: string, ki
   const record = kind === "public" ? change(readPublicSkills(store, workspaceId), (next) => writePublicSkills(store, workspaceId, next))
     : change(readGrownSkills(store, workspaceId), (next) => writeGrownSkills(store, workspaceId, next));
   if (!record) return false;
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.scripts:${kind}:${id}:${at}`, type: allow ? "skill.scripts_allowed" : "skill.scripts_revoked",
-    entityId: id, payload: { id, kind, files: record.files.filter((file) => isScriptFile(file.path)).map((file) => file.path),
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.scripts:${kind}:${id}:${at}`, type: "person.decided",
+    entityId: id, payload: { subject: "skill", decision: allow ? "scripts_allowed" : "scripts_revoked", id, kind, files: record.files.filter((file) => isScriptFile(file.path)).map((file) => file.path),
       findings: record.scan.findings.map((finding) => `${finding.file}:${finding.line} ${finding.rule}`).slice(0, 20) } });
   return true;
 }
@@ -123,8 +123,8 @@ export function updateGrownSkill(store: CrosslineStore, workspaceId: string, id:
   // One that reads an account is switched on only by accepting its risks (`consentToGrownSkill`), never by the plain on/off.
   if (patch.status === "active" && record.status === "needs_consent") return false;
   writeGrownSkills(store, workspaceId, records.map((item) => item.id === id ? { ...item, ...patch, updatedAt: now.toISOString() } : item));
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.updated:${id}:${now.toISOString()}`, type: "skill.grown.updated",
-    entityId: id, payload: { id, ...patch } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.updated:${id}:${now.toISOString()}`, type: "skill.changed",
+    entityId: id, payload: { id, ...patch, change: "grown_updated" } });
   return true;
 }
 
@@ -139,8 +139,8 @@ export function consentToGrownSkill(store: CrosslineStore, workspaceId: string, 
   const at = now.toISOString();
   const agreed = agreedScopeOf(record.manifest);
   writeGrownSkills(store, workspaceId, records.map((item) => item.id === id ? { ...item, status: "active" as const, consentedAt: at, agreed, updatedAt: at } : item));
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.consented:${id}:${at}`, type: "skill.grown.consented",
-    entityId: id, payload: { id, access: agreed.access, risks: agreed.risks, external: agreed.external ?? [], version: record.version ?? 1 } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.consented:${id}:${at}`, type: "skill.changed",
+    entityId: id, payload: { id, access: agreed.access, risks: agreed.risks, external: agreed.external ?? [], version: record.version ?? 1, change: "grown_consented" } });
   return true;
 }
 
@@ -150,7 +150,7 @@ export function consentToGrownSkill(store: CrosslineStore, workspaceId: string, 
  */
 export function agreedScope(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord): AgreedScope | undefined {
   if (record.agreed) return record.agreed;
-  const event = store.listEvents(workspaceId, { type: "skill.grown.consented", entityId: record.id }).at(-1);
+  const event = store.listEvents(workspaceId, { type: "skill.changed", change: "grown_consented", entityId: record.id }).at(-1);
   if (!event) return undefined;
   const payload = event.payload as { access?: WorkflowAccess[]; risks?: string[]; external?: string[] };
   return { access: payload.access ?? [], risks: payload.risks ?? [], ...(payload.external ? { external: payload.external } : {}) };
@@ -158,7 +158,7 @@ export function agreedScope(store: CrosslineStore, workspaceId: string, record: 
 
 /** The number a new version of a workflow gets: past every number it ever had, a reverted one included, so no two versions share one. */
 export function nextGrownVersion(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord): number {
-  const revised = store.listEvents(workspaceId, { type: "skill.grown.revised", entityId: record.id }).map((event) => Number((event.payload as { version?: number }).version) || 0);
+  const revised = store.listEvents(workspaceId, { type: "skill.changed", change: "grown_revised", entityId: record.id }).map((event) => Number((event.payload as { version?: number }).version) || 0);
   return Math.max(record.version ?? 1, ...readGrownVersions(store, workspaceId, record.id).map((version) => version.version), ...revised) + 1;
 }
 
@@ -167,8 +167,8 @@ export function recordGrownLogin(store: CrosslineStore, workspaceId: string, id:
   const at = now.toISOString();
   writeGrownSkills(store, workspaceId, readGrownSkills(store, workspaceId).map((item) => item.id === id ? { ...item, logins: { ...(item.logins ?? {}), [service]: at },
     ...(browser ? { loginBrowsers: { ...(item.loginBrowsers ?? {}), [service]: browser } } : {}) } : item));
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.logged_in:${id}:${at}`, type: "skill.grown.logged_in",
-    entityId: id, payload: { id, service } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.logged_in:${id}:${at}`, type: "person.decided",
+    entityId: id, payload: { id, service, subject: "skill.grown", decision: "logged_in" } });
 }
 
 /** Removes a grown workflow and its files (`skill.grown.removed` keeps why and by whom). */
@@ -178,8 +178,8 @@ export function removeGrownSkill(store: CrosslineStore, workspaceId: string, id:
   if (!record) return false;
   writeGrownSkills(store, workspaceId, records.filter((item) => item.id !== id));
   store.deleteSetting(workspaceId, grownSkillFilesKey(id));
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.removed:${id}:${now.toISOString()}`, type: "skill.grown.removed",
-    entityId: id, payload: { id, name: record.name, reason, by } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.removed:${id}:${now.toISOString()}`, type: "skill.changed",
+    entityId: id, payload: { id, name: record.name, reason, by, change: "grown_removed" } });
   return true;
 }
 
@@ -190,8 +190,8 @@ export function removePublicSkill(store: CrosslineStore, workspaceId: string, id
   if (!record) return false;
   writePublicSkills(store, workspaceId, records.filter((item) => item.id !== id));
   store.deleteSetting(workspaceId, publicSkillFilesKey(id));
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.public.removed:${id}:${now.toISOString()}`, type: "skill.public.removed",
-    entityId: id, payload: { id, name: record.name, repo: record.source.repo, path: record.source.path, commit: record.commit, reason, by } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.public.removed:${id}:${now.toISOString()}`, type: "skill.changed",
+    entityId: id, payload: { id, name: record.name, repo: record.source.repo, path: record.source.path, commit: record.commit, reason, by, change: "public_removed" } });
   return true;
 }
 
@@ -217,16 +217,16 @@ export function createReminderWorkflow(store: CrosslineStore, workspaceId: strin
     scan: { risk: "low", injection: false, findings: [] }, review: { verdict: "usable", reasons: [tFor(readLocale(store, workspaceId))("本人在输入框里设的提醒，没有脚本")], final: "usable" },
     status: "active", pinned: true, createdAt: at, updatedAt: at, lastUsedAt: at };
   writeGrownSkills(store, workspaceId, [...records, record]);
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.created:${id}`, type: "skill.grown.created", entityId: id,
-    payload: { id, name: record.name, trigger: "schedule", schedule, action: "remind", origin: "asked" } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.created:${id}`, type: "skill.changed", entityId: id,
+    payload: { id, name: record.name, trigger: "schedule", schedule, action: "remind", origin: "asked", change: "grown_created" } });
   return record;
 }
 
 /** The person asked, in words, for a workflow (「以后每周五把素材剪成一条 vlog」): recorded for the worker's next growing pass. Returns its id. */
 export function requestWorkflow(store: CrosslineStore, workspaceId: string, text: string, lineId: string, ownerId: string): string {
   const id = `wfreq-${randomUUID().slice(0, 8)}`;
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `workflow.requested:${id}`, type: "workflow.requested", entityId: id,
-    payload: { text: text.slice(0, 1000), lineId } });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `workflow.requested:${id}`, type: "skill.changed", entityId: id,
+    payload: { text: text.slice(0, 1000), lineId, change: "workflow_requested" } });
   return id;
 }
 
@@ -339,10 +339,10 @@ export function mergeGrownSkills(store: CrosslineStore, workspaceId: string, kee
   const at = now.toISOString();
   writeGrownSkills(store, workspaceId, records.map((item) => item.id !== absorbId ? item
     : { ...item, status: "off" as const, mergedInto: { id: keepId, at, why: why.slice(0, 200), status: item.status }, updatedAt: at }));
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.merged:${absorbId}:${at}`, type: "skill.grown.merged",
-    entityId: keepId, payload: { keep: keepId, absorbed: absorbId, why: why.slice(0, 200) } });
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `${WORKFLOW_FEEDBACK_EVENT}:${keepId}:merge:${absorbId}:${at}`, type: WORKFLOW_FEEDBACK_EVENT,
-    entityId: keepId, payload: { id: keepId, text: brief.slice(0, 2_000), by: "system", absorbed: absorbId } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.merged:${absorbId}:${at}`, type: "skill.changed",
+    entityId: keepId, payload: { keep: keepId, absorbed: absorbId, why: why.slice(0, 200), change: "grown_merged" } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.feedback:${keepId}:merge:${absorbId}:${at}`, type: "skill.changed",
+    entityId: keepId, payload: { id: keepId, text: brief.slice(0, 2_000), by: "system", absorbed: absorbId, change: "grown_feedback" } });
   return true;
 }
 
@@ -354,8 +354,8 @@ export function unmergeGrownSkill(store: CrosslineStore, workspaceId: string, ab
   const { mergedInto, ...rest } = absorb;
   const at = now.toISOString();
   writeGrownSkills(store, workspaceId, records.map((item) => item.id !== absorbId ? item : { ...rest, status: mergedInto.status, updatedAt: at }));
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.unmerged:${absorbId}:${at}`, type: "skill.grown.unmerged",
-    entityId: mergedInto.id, payload: { keep: mergedInto.id, absorbed: absorbId, by: "person" } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.unmerged:${absorbId}:${at}`, type: "skill.changed",
+    entityId: mergedInto.id, payload: { keep: mergedInto.id, absorbed: absorbId, by: "person", change: "grown_unmerged" } });
   return true;
 }
 
@@ -363,8 +363,8 @@ export function unmergeGrownSkill(store: CrosslineStore, workspaceId: string, ab
 export function addWorkflowFeedback(store: CrosslineStore, workspaceId: string, id: string, text: string, now = new Date()): boolean {
   const words = text.trim().slice(0, 2_000);
   if (!words || !readGrownSkills(store, workspaceId).some((record) => record.id === id)) return false;
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `${WORKFLOW_FEEDBACK_EVENT}:${id}:${now.toISOString()}`, type: WORKFLOW_FEEDBACK_EVENT,
-    entityId: id, payload: { id, text: words, by: "person" } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.feedback:${id}:${now.toISOString()}`, type: "skill.changed",
+    entityId: id, payload: { id, text: words, by: "person", change: "grown_feedback" } });
   return true;
 }
 
@@ -393,8 +393,8 @@ export function reviseGrownSkill(store: CrosslineStore, workspaceId: string, id:
   store.setSetting(workspaceId, grownSkillFilesKey(id), JSON.stringify({ files: next.files }));
   writeGrownSkills(store, workspaceId, records.map((item) => item.id !== id ? item : { ...item, manifest, files: fileHashes(next.files), scan: next.scan, review: next.review,
     version, improvedAt: at, updatedAt: at, ...(needsConsent ? { status: "needs_consent" as const, agreed: baseline } : {}) }));
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.revised:${id}:${version}:${at}`, type: "skill.grown.revised",
-    entityId: id, payload: { id, version, changes: next.changes.slice(0, 600), taskId: next.taskId, needsConsent, final: next.review.final } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.revised:${id}:${version}:${at}`, type: "skill.changed",
+    entityId: id, payload: { id, version, changes: next.changes.slice(0, 600), taskId: next.taskId, needsConsent, final: next.review.final, change: "grown_revised" } });
   return { version, needsConsent };
 }
 
@@ -416,8 +416,8 @@ export function revertGrownSkill(store: CrosslineStore, workspaceId: string, id:
   store.setSetting(workspaceId, grownSkillFilesKey(id), JSON.stringify({ files: previous.files }));
   writeGrownSkills(store, workspaceId, records.map((item) => item.id !== id ? item : { ...item, manifest: previous.manifest, files: fileHashes(previous.files),
     scan: previous.scan, review: previous.review, version: previous.version, improvedAt: at, updatedAt: at, ...(reactivate ? { status: "active" as const } : {}) }));
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.reverted:${id}:${at}`, type: "skill.grown.reverted",
-    entityId: id, payload: { id, from: record.version ?? 1, to: previous.version, ...(reactivate ? { status: "active" } : {}) } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.reverted:${id}:${at}`, type: "skill.changed",
+    entityId: id, payload: { id, from: record.version ?? 1, to: previous.version, ...(reactivate ? { status: "active" } : {}), change: "grown_reverted" } });
   return previous.version;
 }
 
@@ -448,8 +448,8 @@ export function restoreGrownVersion(store: CrosslineStore, workspaceId: string, 
   writeGrownSkills(store, workspaceId, records.map((item) => item.id !== id ? item : { ...item, manifest, files: fileHashes(target.files), scan: target.scan,
     review: target.review, version: number, improvedAt: at, updatedAt: at,
     ...(needsConsent ? { status: "needs_consent" as const, agreed: baseline } : reactivate ? { status: "active" as const } : {}) }));
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.restored:${id}:${number}:${at}`, type: "skill.grown.restored",
-    entityId: id, payload: { id, from: record.version ?? 1, to: number, restoredFrom: version, needsConsent } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.restored:${id}:${number}:${at}`, type: "skill.changed",
+    entityId: id, payload: { id, from: record.version ?? 1, to: number, restoredFrom: version, needsConsent, change: "grown_restored" } });
   return { version: number, needsConsent };
 }
 

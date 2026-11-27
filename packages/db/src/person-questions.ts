@@ -3,12 +3,11 @@ import { personAnswerSlot, questionSimilarity, SAME_QUESTION, type LedgerQuestio
 import type { CrosslineStore } from "./index";
 
 /**
- * The ledger side of `ask_person` (docs/plans/harness-1125.md 「主动提问」). A question is one `person.question.asked` event (its reader:
- * the 待确认 card `skill_question` in `apps/web/lib/asks.ts`, and `ask-tool.ts` looking for an open one to join) plus a row in the question
- * ledger (`ask:pq:<id>`), which carries its status and answer like every other question the person was asked. Another run asking the same
- * question while it is open writes one more event on the same id (`join`), so its answer reruns that run too: one card, several waiters.
+ * The ledger side of `ask_person` (docs/plans/harness-1125.md 「主动提问」). A question is one `ask.changed` `question_asked` event (its reader: the 待确认 card `skill_question` in `apps/web/lib/asks.ts`, and `ask-tool.ts` looking
+ * for an open one to join) plus a row in the question ledger (`ask:pq:<id>`), which carries its status and answer like every other question
+ * the person was asked. Another run asking the same question while it is open writes one more event on the same id (`join`), so its answer
+ * reruns that run too: one card, several waiters.
  */
-export const PERSON_QUESTION_EVENT = "person.question.asked";
 export const personQuestionKey = (id: string) => `ask:pq:${id}`;
 
 export type PersonQuestionAsker = { skill: string; ref: PersonQuestionRef; blocking: boolean; askedAt: string };
@@ -18,7 +17,7 @@ export type PersonQuestionRow = PersonQuestionAsked & { askedAt: string; askers:
 export function recordPersonQuestion(store: CrosslineStore, workspaceId: string, asked: Omit<PersonQuestionAsked, "id">, at: string): string {
   const ownerId = store.getWorkspaceOwnerId(workspaceId) ?? "";
   const id = `pq-${randomUUID().slice(0, 8)}`;
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `person:question:${id}`, type: PERSON_QUESTION_EVENT, entityId: id, payload: { ...asked, id } });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `person:question:${id}`, type: "ask.changed", entityId: id, payload: { ...asked, id, change: "question_asked" } });
   store.recordQuestion(workspaceId, { kind: "ask", key: personQuestionKey(id), text: asked.question, options: asked.options,
     identityId: asked.identityId, projectId: asked.projectId, status: "open", at });
   return id;
@@ -27,14 +26,14 @@ export function recordPersonQuestion(store: CrosslineStore, workspaceId: string,
 /** Another run waits on an open question: its blocking answer reruns that run as well. Once per run target. */
 export function joinPersonQuestion(store: CrosslineStore, workspaceId: string, id: string, asker: Omit<PersonQuestionAsker, "askedAt">): void {
   const ownerId = store.getWorkspaceOwnerId(workspaceId) ?? "";
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `person:question:${id}:join:${asker.ref.kind}:${asker.ref.id}`, type: PERSON_QUESTION_EVENT,
-    entityId: id, payload: { join: true, skill: asker.skill, ref: asker.ref, blocking: asker.blocking } });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `person:question:${id}:join:${asker.ref.kind}:${asker.ref.id}`, type: "ask.changed",
+    entityId: id, payload: { join: true, skill: asker.skill, ref: asker.ref, blocking: asker.blocking, change: "question_asked" } });
 }
 
 /** Every question asked with `ask_person`, with who waits on it and its status on the question ledger. */
 export function personQuestions(store: CrosslineStore, workspaceId: string): PersonQuestionRow[] {
   const rows = new Map<string, PersonQuestionRow>();
-  for (const event of store.listEvents(workspaceId, { type: PERSON_QUESTION_EVENT })) {
+  for (const event of store.listEvents(workspaceId, { type: "ask.changed", change: "question_asked" })) {
     const payload = event.payload as Partial<PersonQuestionAsked> & { join?: boolean; skill?: string; ref?: PersonQuestionRef; blocking?: boolean };
     const asker = { skill: payload.skill ?? "", ref: payload.ref ?? { kind: "task" as const, id: "" }, blocking: payload.blocking === true, askedAt: event.createdAt };
     const row = rows.get(event.entityId);

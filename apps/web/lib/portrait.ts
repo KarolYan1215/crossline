@@ -65,7 +65,7 @@ export function loadPortrait(ctx: AccessContext): PortraitState {
   const now = process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date();
   let saved: { version?: number; at?: string; report?: PortraitReport } = {};
   try { saved = JSON.parse(store.getSetting(ctx.workspaceId, "portrait.report") ?? "{}"); } catch { /* none yet */ }
-  const last = store.listEvents(ctx.workspaceId, { type: ["portrait.requested", "portrait.written", "portrait.blocked"] }).at(-1);
+  const last = store.listEvents(ctx.workspaceId, { type: "portrait.changed", change: ["requested", "written", "blocked"] }).at(-1);
   const lines = identityLines(ctx);
   const milestones = store.listMilestones(ctx.workspaceId);
   // The person's figure, whichever report version drew it: a rewritten report keeps the figure (2026-10-21).
@@ -75,8 +75,8 @@ export function loadPortrait(ctx: AccessContext): PortraitState {
     images: figure ? { character: figureUrl(figure) } : {},
     sayDo: sayDoFor(store, ctx.workspaceId, now),
     rhythm: portraitRhythm(ctx, now),
-    writing: last?.type === "portrait.requested" && Date.now() - Date.parse(last.createdAt) < 3_600_000,
-    blocker: last?.type === "portrait.blocked" ? String((last.payload as { message?: string }).message ?? tOf(ctx)("未能生成")) : null,
+    writing: (last?.type === "portrait.changed" && (last.payload as { change?: string }).change === "requested") && Date.now() - Date.parse(last.createdAt) < 3_600_000,
+    blocker: (last?.type === "portrait.changed" && (last.payload as { change?: string }).change === "blocked") ? String((last.payload as { message?: string }).message ?? tOf(ctx)("未能生成")) : null,
     lines: lines.map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard) })),
     next: {
       lines: lines.map((line) => ({ id: line.id, label: line.label,
@@ -144,13 +144,13 @@ export async function answerPortrait(ctx: AccessContext, answer: PortraitAnswer,
   const ownerId = store.getWorkspaceOwnerId(ctx.workspaceId) ?? ctx.principalId;
   if (answer === "yes") {
     store.setSetting(ctx.workspaceId, PROFILE_CONFIRMED, JSON.stringify({ fingerprint: portraitFingerprint(profile), at: now }));
-    store.appendEvent({ ownerId, workspaceId: ctx.workspaceId, idempotencyKey: `profile:confirmed:portrait:${now}`, type: "profile.confirmed",
-      entityId: ctx.workspaceId, payload: { via: "portrait", ...(note ? { note } : {}) } });
+    store.appendEvent({ ownerId, workspaceId: ctx.workspaceId, idempotencyKey: `profile:confirmed:portrait:${now}`, type: "profile.changed",
+      entityId: ctx.workspaceId, payload: { via: "portrait", ...(note ? { note } : {}), change: "confirmed" } });
     return { ok: true, message: t("已确认，访谈不再问这一题") };
   }
   if (!note.trim()) return { ok: false, code: "PORTRAIT_NOTE_REQUIRED", message: t("写一句哪里要改") };
-  store.appendEvent({ ownerId, workspaceId: ctx.workspaceId, idempotencyKey: `profile:feedback:portrait:${now}`, type: "profile.portrait_feedback",
-    entityId: ctx.workspaceId, payload: { answer, note } });
+  store.appendEvent({ ownerId, workspaceId: ctx.workspaceId, idempotencyKey: `profile:feedback:portrait:${now}`, type: "person.decided",
+    entityId: ctx.workspaceId, payload: { answer, note, subject: "profile", decision: "portrait_feedback" } });
   const session = store.getLatestOnboardingSession(ctx.workspaceId);
   if (!session) return { ok: true, message: t("已记下") };
   const locale = interviewLocale(store, ctx.workspaceId) ?? readLocale(store, ctx.workspaceId);

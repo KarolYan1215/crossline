@@ -238,7 +238,7 @@ test("a confirmed time draft (拟计时) is a closed, observed session marked in
   const executions = store.listExecutions("w", "w1");
   expect(executions.find((item) => item.id === first.executionId)).toMatchObject({ endedAt: "2026-09-14T09:50:00.000Z", durationObserved: true, source: "inferred_confirmed" });
   expect(executions.filter((item) => !item.endedAt)).toHaveLength(1);
-  expect(store.listEvents("w", { type: "execution.confirmed" }).map((event) => event.payload)).toEqual([expect.objectContaining({ minutes: 45, source: "inferred_confirmed", stepId: "s1" })]);
+  expect(store.listEvents("w", { type: "execution.changed", change: "confirmed" }).map((event) => event.payload)).toEqual([expect.objectContaining({ minutes: 45, source: "inferred_confirmed", stepId: "s1" })]);
   store.transitionWorkOrder("w", "w1", { type: "human.completed" }, "done:w1", { occurredAt: "2026-09-15T09:30:00.000Z", durationCalibrationBaseline: BASELINE });
   expect(store.listDurationObservations("w", "research", "deep_work")).toMatchObject([{ observedMinutes: 75, actualSource: "activity" }]);
 });

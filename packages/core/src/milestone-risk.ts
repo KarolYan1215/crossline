@@ -7,7 +7,7 @@ import { clipWidth } from "./text-width";
  * `milestone_risk_review` ask, 2026-10-15); only once they accept that current review (`schedule.riskDecisions`) does the scheduler aim
  * the milestone's work to finish a day or two early (`riskBufferDays`) — never silently. The risk never blocks anything.
  *
- * Two sources, one shape. The model's review (Skill `crossline-milestone-risk-reviewer`, run by the worker after drafts are saved) is
+ * Two sources, one shape. The model's review (Skill `crossline-milestone-review:risk`, run by the worker after drafts are saved) is
  * stored per milestone under `MILESTONE_RISKS_SETTING`, keyed by a fingerprint of what it read, so an edited milestone's old review is not
  * shown as current. Until there is one, the page shows `ruleMilestoneRisks`: deterministic checks on dates, dependencies, criteria and
  * the forecast, labelled as an estimate. The same rules are handed to the model as `ruleFindings`, to confirm, correct or extend.

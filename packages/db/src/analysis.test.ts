@@ -139,7 +139,7 @@ test("milestone gate auto-accepts, can be revoked without losing evidence, and r
     };
     expect(store.applyMilestoneGate("w", "wo", result, ["three records support reuse"], "gate:wo"))
       .toMatchObject({ state: "accepted" });
-    expect(store.listEvents("w").some((event) => event.type === "milestone_gate.auto_accepted")).toBe(true);
+    expect(store.listEvents("w").some((event) => (event.type === "milestone_gate.changed" && (event.payload as { change?: string }).change === "auto_accepted"))).toBe(true);
     // A spent key must not quietly record a second acceptance that never moved the work order.
     expect(() => store.applyMilestoneGate("w", "wo", result, ["three records support reuse"], "gate:wo"))
       .toThrow();
@@ -242,7 +242,7 @@ test("the ledger reads back in the order things happened, even within one millis
   const store = new CrosslineStore(":memory:");
   try {
     for (let i = 0; i < 40; i++) {
-      store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: `k${i}`, type: "probe", entityId: "e", payload: { i } });
+      store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: `k${i}`, type: "op.applied", entityId: "e", payload: { i } });
     }
     // These all land in the same millisecond; a UUID tiebreak would shuffle them.
     expect(store.listEvents("w").map((event) => (event.payload as { i: number }).i))
@@ -256,16 +256,16 @@ test("a raw capture can be thrown away (reason optional), restored, and discarde
     store.capture({ id: "c1", ownerId: "o", workspaceId: "w", title: "重复的一条", context: "" }, "cap:c1");
     expect(store.discardCapture("w", "c1", "和上一条重了")).toEqual({ changed: true });
     expect(store.listCaptures("w")[0]?.state).toBe("discarded");
-    expect(store.listEvents("w").find((event) => event.type === "capture.discarded")?.payload)
-      .toEqual({ reason: "和上一条重了", from: "captured" });
+    expect(store.listEvents("w").find((event) => (event.type === "capture.changed" && (event.payload as { change?: string }).change === "discarded"))?.payload)
+      .toEqual({ reason: "和上一条重了", from: "captured", change: "discarded" });
     // Idempotent: the second click after a slow reload must not append a second reason.
     expect(store.discardCapture("w", "c1", "再来一次")).toEqual({ changed: false });
-    expect(store.listEvents("w").filter((event) => event.type === "capture.discarded")).toHaveLength(1);
+    expect(store.listEvents("w").filter((event) => (event.type === "capture.changed" && (event.payload as { change?: string }).change === "discarded"))).toHaveLength(1);
     // Restored to where it was, and a second discard (with no reason) really happens rather than hitting the first key.
     expect(store.restoreCapture("w", "c1")).toEqual({ changed: true });
     expect(store.listCaptures("w")[0]?.state).toBe("captured");
     expect(store.discardCapture("w", "c1", "  ")).toEqual({ changed: true });
-    expect(store.listEvents("w").filter((event) => event.type === "capture.discarded")).toHaveLength(2);
+    expect(store.listEvents("w").filter((event) => (event.type === "capture.changed" && (event.payload as { change?: string }).change === "discarded"))).toHaveLength(2);
 
     // Once promoted the WorkOrder is the live thing; discarding the archived raw text would hide it.
     store.capture({ id: "c2", ownerId: "o", workspaceId: "w", title: "已上板", context: "" }, "cap:c2");

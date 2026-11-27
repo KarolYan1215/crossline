@@ -30,7 +30,8 @@ export type AgentKit = {
   week: { hours: number; basis: string; assumed: boolean; windows: string[]; fixed: string[] };
   type: { name: string; quote: string; group: string; summary: string;
     axes: Array<{ dimension: string; left: string; right: string; score: number; leaning: string; percent: number; evidence: string }> } | null;
-  values: Array<{ name: string; means: string; score: number; evidence: string }>;
+  /** `score` is the scale's (TwIVI), null for a value it did not measure (2026-11-27). */
+  values: Array<{ name: string; means: string; score: number | null; evidence: string }>;
   energy: { bestHours: string; usualSleep: string; sleepAssumed: boolean; midSleepFreeDays: string; socialJetlagHours: number | null;
     summary: string; flow: string[]; charges: string[]; drains: string[] };
   portrait: { tagline: string; text: string; keywords: string[]; workView: string; lifeView: string; trueNorth: string } | null;
@@ -83,7 +84,7 @@ export function buildAgentKit(input: AgentKitInput, t: Translate): AgentKit {
     type: type ? { name: type.name, quote: type.quote, group: type.group.name, summary: type.summary,
       axes: type.axes.map((axis) => ({ dimension: t(TYPE_AXES.find((item) => item.id === axis.id)!.name), left: axis.left, right: axis.right,
         score: axis.score, leaning: axis.label, percent: axis.percent, evidence: axis.evidence })) } : null,
-    values: [...(report?.compass.values ?? [])].sort((a, b) => b.score - a.score).map((value) => ({ name: t(value.name),
+    values: [...(report?.compass.values ?? [])].sort((a, b) => (b.score ?? -1) - (a.score ?? -1)).map((value) => ({ name: t(value.name),
       means: t(SCHWARTZ_VALUES.find((item) => item.name === value.name)?.means ?? ""), score: value.score, evidence: value.evidence })),
     energy: { bestHours: input.rhythm.best.map((window) => `${clock(window.start)}–${clock(window.end)}`).join(t("、")),
       usualSleep: `${clock(input.rhythm.sleep.from)}–${clock(input.rhythm.sleep.to)}`, sleepAssumed: input.rhythm.nights === 0,
@@ -134,7 +135,7 @@ export function agentKitMarkdown(kit: AgentKit, t: Translate): string {
   }
   if (kit.values.length) {
     add("", t("## 价值排序（施瓦茨十项，0–100）"), "");
-    bullets(kit.values.map((value) => t("{{name}}（{{means}}）：{{score}}。{{evidence}}", value)));
+    bullets(kit.values.map((value) => t("{{name}}（{{means}}）：{{score}}。{{evidence}}", { ...value, score: value.score ?? t("未谈到") })));
   }
 
   add("", t("## 精力节律"), "");

@@ -30,6 +30,8 @@ Answer the way a busy new user does, so the test shows what the interview manage
 - `goOn`: true when this person would press 「好，往下」 under `next` — they are fine moving on to it. False when `next` is empty, or when they would rather keep to something unfinished or say something else first (then say it in `freeText`).
 - `finish`: true when this person would press 「结束并出报告」 now. Only when `finish.offered`; then decide as the person would, from the 「作答习惯」 section and how much they still want to say. A person who would keep talking leaves it false.
 
+**The scale page** (`version: "crossline.eval-persona.scale"`, before the interview): `{persona, items[]}`, each item `{id, text, labels[]}` — a statement and the labels of its points, first to last (five or six). Answer every item the way this person would, with the biases the 「作答习惯」 section names; `score` is the point's place (1 = the first label), 0 only for an item the person would truly skip. Return `{taps: [{itemId, score}]}`, item ids copied exactly.
+
 Return raw JSON only: `{answers: [{questionId, picked, other}], freeText, upload}` for v1; for v2 add `cardTaps: [{itemId, score}]` (score 1–5, or 0 for left alone), `cardWords: [{cardId, words}]`, `insights: [{index, verdict, correction}]` (`verdict` `fits`, `off`, `partial` or empty), `goOn` and `finish`. `picked` are option labels copied exactly, `freeText` one or two sentences or empty, `upload` file names copied exactly from `files`, item and card ids copied exactly from `cards`.
 
 ## Language

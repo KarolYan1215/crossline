@@ -22,7 +22,7 @@ test("the device's zone replaces the server's default, including one a schedule 
   // The other preferences stay, and the same zone again changes nothing.
   expect(effectiveSchedulePreferences(TEST_CTX).preferences.params?.gapMinutes).toBe(10);
   expect(syncDeviceTimeZone(TEST_CTX, "America/Chicago")).toEqual({ ok: true, changed: false });
-  expect(globalThis.crosslineStore.listEvents(TEST_CTX.workspaceId, { type: "schedule.time_zone_detected" })).toHaveLength(1);
+  expect(globalThis.crosslineStore.listEvents(TEST_CTX.workspaceId, { type: "job.ran", job: "schedule.time_zone_detect" })).toHaveLength(1);
 });
 
 test("an account with no preferences yet gets them, with the device's zone; nonsense is refused", () => {

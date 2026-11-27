@@ -4,7 +4,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import {
-  RECORDING_CONSENT, RECORDING_DIGESTED_EVENT, RECORDING_FAILED_EVENT, RECORDING_SILENT_EVENT, RECORDING_TRANSCRIBED_EVENT, SOURCE_FOLDERS_SETTING,
+  RECORDING_CONSENT, SOURCE_FOLDERS_SETTING,
   sourceFolderIndexSetting, transcribeWindowOpens
 } from "@crossline/core";
 import { CrosslineStore } from "@crossline/db";
@@ -26,8 +26,8 @@ beforeEach(() => {
   writeFileSync(file, "[00:20] 今天下午三点组会");
   store.saveSourceDocument({ id: "doc-1", ownerId, workspaceId, kind: "text", fileName: "phone/a.m4a 转写.txt", mediaType: "text/plain", sha256: "abc",
     uri: pathToFileURL(file).href, extractedText: "[00:20] 今天下午三点组会", extractionStatus: "done", createdAt: "2026-10-20T15:00:00Z" });
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: "recording.transcribed:sha", type: RECORDING_TRANSCRIBED_EVENT, entityId: "sha",
-    payload: { fileName: "a.m4a", seconds: 3600, speechSeconds: 1200, workMs: 6 * 60_000, wallMs: 7 * 60_000, documentId: "doc-1" } });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: "recording.transcribed:sha", type: "recording.changed", entityId: "sha",
+    payload: { fileName: "a.m4a", seconds: 3600, speechSeconds: 1200, workMs: 6 * 60_000, wallMs: 7 * 60_000, documentId: "doc-1", change: "transcribed" } });
   store.setSetting(workspaceId, SOURCE_FOLDERS_SETTING, JSON.stringify([{ id: "f1", path: "C:\\phone", label: "phone", addedAt: "", lines: [], linesBy: "" }]));
   store.setSetting(workspaceId, sourceFolderIndexSetting("f1"), JSON.stringify({ "a.m4a": { size: 1, mtimeMs: 1, documentId: "doc-1", audio: "done", created: true },
     "b.m4a": { size: 1, mtimeMs: 2, documentId: "", audio: "queued" }, "c.m4a": { size: 1, mtimeMs: 3, documentId: "", audio: "failed", note: "格式读不了" } }));
@@ -43,11 +43,11 @@ test("the overview counts what is done, waiting and failed, and the cost per hou
 test("the server path counts what it transcribed, what waits and when the night window opens, and what failed", () => {
   const ws = workspaceId;
   // The 2026-10-21 case: one upload transcribed in the night, so nothing waits — the card used to say only 「等待转写 0 个」.
-  store.appendEvent({ ownerId, workspaceId: ws, idempotencyKey: "recording.transcribed:server-sha", type: RECORDING_TRANSCRIBED_EVENT, entityId: "server-sha",
-    payload: { fileName: "Engineering Hall 8.m4a", seconds: 1059, speechSeconds: 1044, workMs: 103_911, wallMs: 103_911, documentId: "doc-2", where: "server", engine: "sensevoice-small" } });
-  store.appendEvent({ ownerId, workspaceId: ws, idempotencyKey: "recording.silent:s", type: RECORDING_SILENT_EVENT, entityId: "s",
-    payload: { fileName: "空白.m4a", seconds: 60, speechSeconds: 0, workMs: 1, wallMs: 1, where: "server" } });
-  store.appendEvent({ ownerId, workspaceId: ws, idempotencyKey: "recording.failed:f", type: RECORDING_FAILED_EVENT, entityId: "f", payload: { fileName: "坏.m4a", message: "ffmpeg 读不了" } });
+  store.appendEvent({ ownerId, workspaceId: ws, idempotencyKey: "recording.transcribed:server-sha", type: "recording.changed", entityId: "server-sha",
+    payload: { fileName: "Engineering Hall 8.m4a", seconds: 1059, speechSeconds: 1044, workMs: 103_911, wallMs: 103_911, documentId: "doc-2", where: "server", engine: "sensevoice-small", change: "transcribed" } });
+  store.appendEvent({ ownerId, workspaceId: ws, idempotencyKey: "recording.silent:s", type: "recording.changed", entityId: "s",
+    payload: { fileName: "空白.m4a", seconds: 60, speechSeconds: 0, workMs: 1, wallMs: 1, where: "server", change: "silent" } });
+  store.appendEvent({ ownerId, workspaceId: ws, idempotencyKey: "recording.failed:f", type: "recording.changed", entityId: "f", payload: { fileName: "坏.m4a", message: "ffmpeg 读不了", change: "failed" } });
   const inbox = path.join(data, "recordings", "inbox", ws);
   mkdirSync(inbox, { recursive: true });
   writeFileSync(path.join(inbox, "1761025440000-abc.m4a"), "x");
@@ -58,7 +58,7 @@ test("the server path counts what it transcribed, what waits and when the night 
     failed: [{ file: "坏.m4a", note: "ffmpeg 读不了" }],
     recent: [{ file: "Engineering Hall 8.m4a", documentId: "doc-2", minutes: 18, digested: false }] });
   expect(serverRecordings(store, ws, data, "America/Chicago", new Date("2026-10-21T06:06:00Z")).opens.inMinutes).toBe(0);
-  store.appendEvent({ ownerId, workspaceId: ws, idempotencyKey: "recording.digested:doc-2", type: RECORDING_DIGESTED_EVENT, entityId: "doc-2", payload: {} });
+  store.appendEvent({ ownerId, workspaceId: ws, idempotencyKey: "recording.digested:doc-2", type: "recording.changed", entityId: "doc-2", payload: { change: "digested" } });
   expect(serverRecordings(store, ws, data, "America/Chicago").recent[0]?.digested).toBe(true);
 });
 

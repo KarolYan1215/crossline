@@ -2,8 +2,7 @@ import { readFileSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  RECORDING_CONSENT, RECORDING_DIGESTED_EVENT, RECORDING_FAILED_EVENT, RECORDING_FILE, RECORDING_INBOX_SEGMENTS, RECORDING_VOICEPRINT_CONSENT, RECORDING_VOICEPRINT_SEGMENTS, RECORDING_MODEL_NOTICE, RECORDING_SERVER_CONSENT, RECORDING_PURGED_EVENT,
-  RECORDING_SILENT_EVENT, RECORDING_TRANSCRIBED_EVENT, SOURCE_FOLDERS_SETTING, TRANSCRIBE_WINDOW,
+  RECORDING_CONSENT, RECORDING_FILE, RECORDING_INBOX_SEGMENTS, RECORDING_VOICEPRINT_CONSENT, RECORDING_VOICEPRINT_SEGMENTS, RECORDING_MODEL_NOTICE, RECORDING_SERVER_CONSENT, SOURCE_FOLDERS_SETTING, TRANSCRIBE_WINDOW,
   readSourceFolders, sourceFolderIndexSetting, transcribeWindowOpens, transcriptionCost, type FolderIndexEntry, type RecordingTranscribed
 } from "@crossline/core";
 import { readLocale, type CrosslineStore } from "@crossline/db";
@@ -46,14 +45,14 @@ const entries = (store: CrosslineStore, workspaceId: string) => readSourceFolder
 
 export function recordingOverview(store: CrosslineStore, workspaceId: string, dataDir?: string, timeZone = "America/Chicago", now = new Date()): RecordingOverview {
   const all = entries(store, workspaceId);
-  const transcribed = store.listEvents(workspaceId, { type: RECORDING_TRANSCRIBED_EVENT });
+  const transcribed = store.listEvents(workspaceId, { type: "recording.changed", change: "transcribed" });
   const recent = transcribed.slice(-20).map((event) => event.payload as RecordingTranscribed);
   const cost = transcriptionCost(recent);
   return { on: store.getSetting(workspaceId, RECORDING_CONSENT) === "granted",
     folders: readSourceFolders(store.getSetting(workspaceId, SOURCE_FOLDERS_SETTING)).length,
     queued: all.filter((item) => item.entry.audio === "queued").length,
     done: transcribed.length,
-    silent: store.listEvents(workspaceId, { type: RECORDING_SILENT_EVENT }).length,
+    silent: store.listEvents(workspaceId, { type: "recording.changed", change: "silent" }).length,
     failed: all.filter((item) => item.entry.audio === "failed").slice(0, 5).map((item) => ({ file: `${item.folder.label}/${item.relative.replace(/\\/g, "/")}`, note: item.entry.note ?? "" })),
     ...(cost ? { cost } : {}),
     ...(serverTranscribeAvailable() && dataDir ? { server: serverRecordings(store, workspaceId, dataDir, timeZone, now) } : {}) };
@@ -65,12 +64,12 @@ type DigestPayload = { notRecorded?: { commitments: number; unclear: number; unv
 
 /** What the server path did for this workspace: transcribed, silent, waiting in the inbox (and when the night window opens), failed. */
 export function serverRecordings(store: CrosslineStore, workspaceId: string, dataDir: string, timeZone: string, now = new Date()): ServerRecordings {
-  const transcribed = store.listEvents(workspaceId, { type: RECORDING_TRANSCRIBED_EVENT }).filter(fromServer);
-  const failed = store.listEvents(workspaceId, { type: RECORDING_FAILED_EVENT });
-  const digests = new Map(store.listEvents(workspaceId, { type: RECORDING_DIGESTED_EVENT }).map((event) => [event.entityId, event.payload as DigestPayload]));
+  const transcribed = store.listEvents(workspaceId, { type: "recording.changed", change: "transcribed" }).filter(fromServer);
+  const failed = store.listEvents(workspaceId, { type: "recording.changed", change: "failed" });
+  const digests = new Map(store.listEvents(workspaceId, { type: "recording.changed", change: "digested" }).map((event) => [event.entityId, event.payload as DigestPayload]));
   return { on: store.getSetting(workspaceId, RECORDING_SERVER_CONSENT) === "granted",
     transcribed: transcribed.length,
-    silent: store.listEvents(workspaceId, { type: RECORDING_SILENT_EVENT }).filter(fromServer).length,
+    silent: store.listEvents(workspaceId, { type: "recording.changed", change: "silent" }).filter(fromServer).length,
     waiting: serverInboxCount(dataDir, workspaceId),
     failedCount: failed.length,
     opens: { ...transcribeWindowOpens(now, timeZone, process.env.CROSSLINE_TRANSCRIBE_WINDOW?.trim() || TRANSCRIBE_WINDOW), timeZone },
@@ -125,7 +124,7 @@ export function setServerRecordingConsent(store: CrosslineStore, workspaceId: st
 function purgeRecordingTranscripts(store: CrosslineStore, workspaceId: string, dataDir: string, ownerId: string): number {
   const sources = path.resolve(dataDir, "sources");
   let deleted = 0;
-  for (const event of store.listEvents(workspaceId, { type: RECORDING_TRANSCRIBED_EVENT })) {
+  for (const event of store.listEvents(workspaceId, { type: "recording.changed", change: "transcribed" })) {
     const gone = store.deleteSourceDocument(workspaceId, String((event.payload as { documentId?: unknown }).documentId ?? ""));
     if (!gone) continue;
     deleted += 1;
@@ -140,7 +139,7 @@ function purgeRecordingTranscripts(store: CrosslineStore, workspaceId: string, d
     for (const entry of Object.values(index)) if (entry.audio === "done" && entry.documentId) { entry.documentId = ""; entry.note = tFor(readLocale(store, workspaceId))("转写已按本人选择删除"); changed = true; }
     if (changed) store.setSetting(workspaceId, key, JSON.stringify(index));
   }
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `${RECORDING_PURGED_EVENT}:${Date.now()}`, type: RECORDING_PURGED_EVENT, entityId: workspaceId, payload: { deleted } });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `recording.transcripts_deleted:${Date.now()}`, type: "recording.changed", entityId: workspaceId, payload: { deleted, change: "transcripts_deleted" } });
   return deleted;
 }
 

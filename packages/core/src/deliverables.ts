@@ -8,8 +8,6 @@
 
 /** `{ [folderId]: projectId }`: where a project's results are put (one project per folder; a project may have several). */
 export const RESULT_FOLDERS_SETTING = "projects.resultFolders";
-/** One judgement per document, the event the web reads to close a task or ask about a gap. */
-export const DELIVERABLE_JUDGED = "deliverable.judged";
 
 export type DeliverableVerdict = "deliverable" | "evidence" | "unrelated";
 export type CriterionVerdict = "pass" | "gap" | "cannot_read";

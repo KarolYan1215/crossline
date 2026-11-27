@@ -37,7 +37,7 @@ export const SAY_DO_DIMENSIONS = [
  */
 export const PORTRAIT_SCHEMA_VERSION = 6;
 /**
- * The portrait report written when the interview ends (decided 2026-10-08), by Skill `crossline-portrait-writer`, as structured data so the
+ * The portrait report written when the interview ends (decided 2026-10-08), by Skill `crossline-portrait:report`, as structured data so the
  * page can draw it: the first half is the person's portrait and insight, meant to be shared (cover, the real problem, compass and energy,
  * the lines as a flywheel with their long-term goals, the say–do gap and the anchor); the second half is specific guidance, kept private
  * (insights with advice, and what the app does next). `sensitive` lists spans to hide in the shared version (names, institutions, course
@@ -47,17 +47,20 @@ export type PortraitReport = {
   /** `tagline`: who they are now in one line (≤ 40 characters) — under the type name on the share card. `archetype` only on older reports. */
   cover: { portrait: string; coreConflict: string; keywords: string[]; archetype?: string; tagline?: string; coreWord?: string };
   problem: { statement: string; gravity: string[]; designable: string[]; reframes: Array<{ fallacy: string; reframe: string }> };
-  /** `values`: Schwartz's ten values (`SCHWARTZ_VALUES`), each scored 0–100 from the evidence (drawn as a radar); older reports carry free names. */
-  compass: { workView: string; lifeView: string; consistency: string; trueNorth: string; values?: Array<{ name: string; score: number; evidence: string }> };
-  /** `skillScore`/`loveScore` 0–100 place an activity on the energy plane; `skill`/`love` are the same reading as high or low. */
-  energy: { summary: string; map: Array<{ activity: string; skill: "high" | "low"; love: "high" | "low"; charge: "charge" | "drain"; skillScore?: number; loveScore?: number; category?: string }>; flow: string[] };
-  /** `share` — of their attention now; `targetShare` — what the portrait suggests; both percentages, each set summing to about 100. */
-  lines: { allocation: string; items: Array<{ lineId: string; description: string; goals: string[]; feeds: Array<{ toLineId: string; how: string }>; share?: number; targetShare?: number }> };
   /**
-   * `pairs`: the five `SAY_DO_DIMENSIONS`, each with how much the person says it matters (0–100); what they do is computed from the
-   * ledger. `does` is only on older reports and is no longer drawn.
+   * `values`: Schwartz's ten values (`SCHWARTZ_VALUES`), drawn as a radar; older reports carry free names. Since 2026-11-27 `score` is the
+   * person's TwIVI score, filled in by the app (`withScaleValues`), null when the scale did not measure it; the writer gives `evidence` only.
    */
-  gap: { says: string; does: string; reading: string; anchor: string; realWant: string; reframe: string; pairs?: Array<{ dimension: string; says: number; evidence?: string; does?: number }> };
+  compass: { workView: string; lifeView: string; consistency: string; trueNorth: string; values?: Array<{ name: string; score: number | null; evidence: string }> };
+  /** `skillScore`/`loveScore` 0–100 place an activity on the energy plane, null when nothing said places it; `skill`/`love` are the same reading as high or low. */
+  energy: { summary: string; map: Array<{ activity: string; skill: "high" | "low"; love: "high" | "low"; charge: "charge" | "drain"; skillScore?: number | null; loveScore?: number | null; category?: string }>; flow: string[] };
+  /** `share` — of their attention now; `targetShare` — what the portrait suggests; percentages, null when the person gave nothing to set them by. */
+  lines: { allocation: string; items: Array<{ lineId: string; description: string; goals: string[]; feeds: Array<{ toLineId: string; how: string }>; share?: number | null; targetShare?: number | null }> };
+  /**
+   * `pairs`: the five `SAY_DO_DIMENSIONS`, each with how much the person says it matters (0–100, null when the interview did not cover it);
+   * what they do is computed from the ledger. `does` is only on older reports and is no longer drawn.
+   */
+  gap: { says: string; does: string; reading: string; anchor: string; realWant: string; reframe: string; pairs?: Array<{ dimension: string; says: number | null; evidence?: string; does?: number }> };
   /** `impact`/`effort` 1–5 place each piece of advice on the matrix. */
   insights: Array<{ insight: string; advice: string; solves: string; priority: "high" | "medium" | "low"; impact?: number; effort?: number }>;
   /**
@@ -101,19 +104,21 @@ const list = (max: number, length: number) => ({ type: "array", maxItems: max, i
 const object = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
 
 const score = (min: number, max: number) => ({ type: "integer", minimum: min, maximum: max }) as const;
+/** A number only evidence can give (2026-11-27): null when the person, the files or the scale did not give it. */
+const evidenced = (min: number, max: number) => ({ anyOf: [score(min, max), { type: "null" }] }) as const;
 const GAP = object({ says: text(300), does: text(300), reading: text(400), anchor: text(300), realWant: text(300), reframe: text(300),
-  pairs: { type: "array", maxItems: 5, items: object({ dimension: { type: "string", enum: SAY_DO_DIMENSIONS.map((dimension) => dimension.label) }, says: score(0, 100), evidence: text(80) }) } });
+  pairs: { type: "array", maxItems: 5, items: object({ dimension: { type: "string", enum: SAY_DO_DIMENSIONS.map((dimension) => dimension.label) }, says: evidenced(0, 100), evidence: text(80) }) } });
 export const PORTRAIT_SCHEMA = object({
   cover: object({ portrait: text(200), coreConflict: text(300), keywords: list(6, 12), tagline: text(40), coreWord: text(6) }),
   problem: object({ statement: text(500), gravity: list(6, 200), designable: list(6, 200),
     reframes: { type: "array", maxItems: 4, items: object({ fallacy: text(200), reframe: text(300) }) } }),
   compass: object({ workView: text(500), lifeView: text(500), consistency: text(500), trueNorth: text(200),
-    values: { type: "array", maxItems: 10, items: object({ name: { type: "string", enum: SCHWARTZ_VALUES.map((value) => value.name) }, score: score(0, 100), evidence: text(80) }) } }),
+    values: { type: "array", maxItems: 10, items: object({ name: { type: "string", enum: SCHWARTZ_VALUES.map((value) => value.name) }, score: evidenced(0, 100), evidence: text(80) }) } }),
   energy: object({ summary: text(400), flow: list(6, 200), map: { type: "array", maxItems: 12, items: object({ activity: text(60),
     skill: { type: "string", enum: ["high", "low"] }, love: { type: "string", enum: ["high", "low"] }, charge: { type: "string", enum: ["charge", "drain"] },
-    skillScore: score(0, 100), loveScore: score(0, 100), category: { type: "string", enum: [...ENERGY_CATEGORIES] } }) } }),
+    skillScore: evidenced(0, 100), loveScore: evidenced(0, 100), category: { type: "string", enum: [...ENERGY_CATEGORIES] } }) } }),
   lines: object({ allocation: text(500), items: { type: "array", maxItems: 8, items: object({ lineId: text(60), description: text(500), goals: list(6, 120),
-    feeds: { type: "array", maxItems: 6, items: object({ toLineId: text(60), how: text(200) }) }, share: score(0, 100), targetShare: score(0, 100) }) } }),
+    feeds: { type: "array", maxItems: 6, items: object({ toLineId: text(60), how: text(200) }) }, share: evidenced(0, 100), targetShare: evidenced(0, 100) }) } }),
   gap: GAP,
   insights: { type: "array", maxItems: 6, items: object({ insight: text(300), advice: text(400), solves: text(200), priority: { type: "string", enum: ["high", "medium", "low"] },
     impact: score(1, 5), effort: score(1, 5) }) },
@@ -171,11 +176,7 @@ export function validatePortrait(value: unknown, lineIds: string[],
   const values = inFixedOrder(report.compass.values, SCHWARTZ_VALUES.map((item) => item.name), (item) => item.name, "PORTRAIT_VALUES_INCOMPLETE", lenient);
   const pairs = inFixedOrder(report.gap.pairs, SAY_DO_DIMENSIONS.map((item) => item.label), (item) => item.dimension, "PORTRAIT_SAY_DO_INCOMPLETE", lenient);
   const items = onRecord.map((item) => ({ ...item, feeds: item.feeds.filter((feed) => known.has(feed.toLineId) && feed.toLineId !== item.lineId) }));
-  // Shares are read as parts of a whole: two sets that do not add up to about 100 are scaled to it, rather than refused over arithmetic.
-  for (const key of ["share", "targetShare"] as const) {
-    const total = items.reduce((sum, item) => sum + (item[key] ?? 0), 0);
-    if (total > 0 && Math.abs(total - 100) > 5) for (const item of items) item[key] = Math.round(((item[key] ?? 0) / total) * 100);
-  }
+  // Shares are kept as written (2026-11-27): scaling a set to 100 put numbers in the report nobody gave; a null share stays null.
   const replies = options.replies;
   const hypotheses = Array.isArray(report.hypotheses) ? cleanHypotheses(report.hypotheses, replies ? (ref) => replies[ref] : undefined, options.ratedOf) : undefined;
   const hypothesisIds = new Set((hypotheses ?? []).map((item) => item.id));

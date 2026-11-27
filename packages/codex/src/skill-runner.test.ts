@@ -3,7 +3,7 @@ import { RESEARCH_SOURCE_INSTRUCTION, SOURCE_ORDER_INSTRUCTION, gatedWebTools, s
 import type { CodexRpcBoundary } from "./index";
 
 describe("source defaults (2026-11-18: web as needed, the person's files first)", () => {
-  const base: Parameters<typeof withSourceDefaults>[0] = { skillName: "crossline:crossline-task-titler", developerInstructions: "do it" };
+  const base: Parameters<typeof withSourceDefaults>[0] = { skillName: "crossline:crossline-goal-backplanner:title", developerInstructions: "do it" };
   const files = { specs: [{ name: "search_my_files", description: "", inputSchema: {} }], call: () => "x" };
   afterEach(() => { setWebAvailableProvider(() => false); setLocalLookupProvider(undefined); });
 

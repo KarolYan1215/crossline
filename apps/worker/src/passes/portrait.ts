@@ -15,10 +15,10 @@ import { accountClient, analysisStore, codexSupervisor, dataDir, repoRoot, spend
 export async function writePortraitFor(workspaceId: string) {
   enterUsageWorkspace(workspaceId);
   const store = analysisStore;
-  store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `portrait.requested:${Date.now()}`, type: "portrait.requested", entityId: workspaceId, payload: {} });
+  store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `portrait.requested:${Date.now()}`, type: "portrait.changed", entityId: workspaceId, payload: { change: "requested" } });
   const outcome = await createPortraitWriter(store, workspaceId, repoRoot, () => accountClient(workspaceId))();
   if (outcome.state === "blocked") store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `portrait.blocked:${Date.now()}`,
-    type: "portrait.blocked", entityId: workspaceId, payload: { code: outcome.code, message: outcome.message } });
+    type: "portrait.changed", entityId: workspaceId, payload: { code: outcome.code, message: outcome.message, change: "blocked" } });
   // The pictures follow the words, in the background: the report is readable at once and gains its illustrations as they land.
   else void createPortraitIllustrator(store, workspaceId, repoRoot, dataDir, () => accountClient(workspaceId))()
     .then((drawn) => console.info(JSON.stringify({ type: "portrait.illustrated", workspaceId, ...drawn })))

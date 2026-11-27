@@ -172,13 +172,13 @@ test("work whose result comes later is accepted at once and followed up; a state
   expect(completeWorkOrderExecution(TEST_CTX, "exam", [], [], "2026-10-27T20:00:00.000Z")).toEqual({ ok: true,
     completion: { mode: "needs_assessment", followUp: "「ECE 548 期中考试 1」的成绩或结果出来了吗？" } });
   expect(store.listWorkOrders(TEST_CTX.workspaceId).find((item) => item.id === "exam")?.state).toBe("accepted");
-  expect(store.listEvents(TEST_CTX.workspaceId, { type: "assessment.pending", entityId: "exam" })[0]?.payload)
+  expect(store.listEvents(TEST_CTX.workspaceId, { type: "work_order.changed", change: "assessment_pending", entityId: "exam" })[0]?.payload)
     .toMatchObject({ reason: "result_pending", askAfter: "2026-10-28T20:00:00.000Z", milestoneId: "m" });
   // Said how it went at completion: a quality follow-up has nothing left to ask.
   expect(completeWorkOrderExecution(TEST_CTX, "draft", [], [], undefined, undefined, { level: "barely", note: "图表还差一张" }))
     .toEqual({ ok: true, completion: { mode: "needs_assessment" } });
-  expect(store.listEvents(TEST_CTX.workspaceId, { type: "assessment.pending", entityId: "draft" })).toEqual([]);
-  expect(store.listEvents(TEST_CTX.workspaceId, { type: "work_order.outcome_reported", entityId: "draft" })[0]?.payload).toMatchObject({ level: "barely", note: "图表还差一张" });
+  expect(store.listEvents(TEST_CTX.workspaceId, { type: "work_order.changed", change: "assessment_pending", entityId: "draft" })).toEqual([]);
+  expect(store.listEvents(TEST_CTX.workspaceId, { type: "work_order.changed", change: "outcome_reported", entityId: "draft" })[0]?.payload).toMatchObject({ level: "barely", note: "图表还差一张" });
 });
 
 test("a standard edited on the card before approving replaces the contract's wording and is what the task is judged by", () => {

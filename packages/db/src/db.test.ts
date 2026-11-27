@@ -26,7 +26,7 @@ describe("event ledger", () => {
       ownerId: "owner-1",
       workspaceId: "workspace-1",
       idempotencyKey: "command-1",
-      type: "task.created",
+      type: "op.applied",
       entityId: "task-1",
       payload: { title: "Write paper" }
     });
@@ -34,7 +34,7 @@ describe("event ledger", () => {
       ownerId: "owner-1",
       workspaceId: "workspace-1",
       idempotencyKey: "command-1",
-      type: "task.created",
+      type: "op.applied",
       entityId: "task-1",
       payload: { title: "Write paper" }
     });
@@ -69,7 +69,7 @@ describe("event ledger", () => {
       ownerId: "owner-1",
       workspaceId: "workspace-1",
       idempotencyKey: "export-1",
-      type: "work_order.created",
+      type: "op.applied",
       entityId: "work-order-4",
       payload: { title: "Export me" }
     });

@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { continueSkillTurn, runCodexSkill } from "@crossline/codex";
 import { fakeRuntime } from "./testing/fake-runtime";
 
-const SKILL = "crossline:crossline-plan-explainer";
+const SKILL = "crossline:crossline-schedule-advisor:explain";
 const options = { skillName: SKILL, cwd: "C:\\repo", developerInstructions: "x", outputSchema: {}, prepareInput: (input: unknown) => input,
   validateOutput: (output: unknown) => output, onAudit: () => {}, timeoutMs: 5_000 };
 const settle = () => new Promise((resolve) => setTimeout(resolve, 10));

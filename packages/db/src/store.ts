@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { createHash, randomUUID } from "node:crypto";
 import { copyFileSync, existsSync } from "node:fs";
-import { type CaptureProvenance, readProvenance, mergeLineTags, tFor, chunkText, ftsMatchExpression, searchTerms, SEGMENTER_VERSION, segmentText, type LedgerQuestion, byproductArtifactId, advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria, currentMineVersion, mineSkillSettingKey, readMineSkill, acceptanceStandardLines, type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState, type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource, type ChecklistAnswer, type DomainRecordInput, type StoredDomainRecord, type WealthAccount, type WealthSnapshot, type WealthHolding, type MarketPrice, type EligibilityTerm, type EligibilityVerdict, type Feasibility, type Opportunity, type OpportunityDecision, automationDefinition, type Automation, type StoredWorkflowVersion, type WorkflowKind, type WorkflowThread, type WorkflowTurn, type WorkflowTurnItem } from "@crossline/core";
+import { type EventChange, type EventPayload, type EventType, type JobName, type PersonSubject, type CaptureProvenance, readProvenance, mergeLineTags, tFor, chunkText, ftsMatchExpression, searchTerms, SEGMENTER_VERSION, segmentText, type LedgerQuestion, byproductArtifactId, advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria, currentMineVersion, mineSkillSettingKey, readMineSkill, acceptanceStandardLines, type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState, type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource, type ChecklistAnswer, type DomainRecordInput, type StoredDomainRecord, type WealthAccount, type WealthSnapshot, type WealthHolding, type MarketPrice, type EligibilityTerm, type EligibilityVerdict, type Feasibility, type Opportunity, type OpportunityDecision, automationDefinition, type Automation, type StoredWorkflowVersion, type WorkflowKind, type WorkflowThread, type WorkflowTurn, type WorkflowTurnItem } from "@crossline/core";
 import { handOffArtifacts } from "./artifacts";
 import { readLocale } from "./locale";
 import type { RelationExtras, StoredMilestone, StoredMilestoneAnchor, StoredMilestoneRelation, StoredMilestoneTemplate } from "./milestone-types";
@@ -13,18 +13,19 @@ import { type DocChunk, type DocChunkHit, type StoredBackgroundFact, type Stored
 import type { ConversationRole, StoredAssistantAttachment, StoredAssistantThread, StoredConversation, StoredConversationMessage } from "./conversation-types";
 import { questionRow, sentenceIds, sentenceRow } from "./sentence-rows";
 import { PERSON_ACTIVITY_SQL } from "./person-activity";
+import { condenseEventTypes } from "./event-condense";
 import type { StoredAuditEvent, StoredDeviceLease, StoredInvite, StoredPrincipal, StoredTailscaleBinding, StoredWorkspace, StoredWorkspaceMember } from "./account-types";
 
-type LedgerEventInput = {
-  ownerId: string;
-  workspaceId: string;
-  idempotencyKey: string;
-  type: string;
-  entityId: string;
-  payload: unknown;
-};
+/** A type and the payload it must carry (packages/core/src/event-types.ts): `<entity>.changed` needs its `change`, `job.ran` its job and state. */
+export type LedgerEventBody = { [T in EventType]: { type: T; payload: EventPayload<T> } }[EventType];
+export type LedgerEventInput = { ownerId: string; workspaceId: string; idempotencyKey: string; entityId: string } & LedgerEventBody;
 
-type LedgerEvent = LedgerEventInput & { eventId: string; createdAt: string };
+export type LedgerEvent = { ownerId: string; workspaceId: string; idempotencyKey: string; entityId: string; type: EventType; payload: unknown;
+  eventId: string; createdAt: string };
+
+/** Which events `listEvents` returns: by type, and within a family by what changed (`change`), by job (`job`, `state`) or by decision. */
+export type EventFilter = { type?: EventType | readonly EventType[]; change?: EventChange | readonly EventChange[]; job?: JobName | readonly JobName[];
+  state?: string | readonly string[]; subject?: PersonSubject; decision?: string; entityId?: string };
 
 export type CrosslineSnapshot = {
   schemaVersion: 2;
@@ -54,6 +55,26 @@ export function workflowSettingRoute(key: string): WorkflowSettingRoute | undefi
 }
 
 /** A replayed time can never precede what it follows: a resume before its pause, an end before its start. */
+/** The WHERE clause of an `EventFilter`; a family's discriminator is matched on the payload (`json_extract`). */
+function eventWhere(workspaceId: string, filter: EventFilter): { where: string; values: string[] } {
+  const where = ["workspace_id = ?"];
+  const values: string[] = [workspaceId];
+  const among = (column: string, value: string | readonly string[] | undefined) => {
+    if (value === undefined) return;
+    const list = typeof value === "string" ? [value] : value;
+    where.push(`${column} IN (${list.map(() => "?").join(", ")})`);
+    values.push(...list);
+  };
+  among("type", filter.type);
+  among("json_extract(payload_json, '$.change')", filter.change);
+  among("json_extract(payload_json, '$.job')", filter.job);
+  among("json_extract(payload_json, '$.state')", filter.state);
+  among("json_extract(payload_json, '$.subject')", filter.subject);
+  among("json_extract(payload_json, '$.decision')", filter.decision);
+  if (filter.entityId !== undefined) { where.push("entity_id = ?"); values.push(filter.entityId); }
+  return { where: where.join(" AND "), values };
+}
+
 function notBefore(at: string, floor: string | undefined): string {
   return floor && Date.parse(at) < Date.parse(floor) ? floor : at;
 }
@@ -123,18 +144,18 @@ export class CrosslineStore {
     this.#markPromotedCaptures();
   }
 
-  /** Each row the query returns (shaped like the retired `plan_changes`) becomes a `plan.change_archived` event; the migration and the restore share it. */
+  /** Each row the query returns (shaped like the retired `plan_changes`) becomes a `plan.changed` `change_archived` event; the migration and the restore share it. */
   #archivePlanChangeRows(query: string, params: unknown[] = []): void {
     this.#prepare(`
       INSERT OR IGNORE INTO events (event_id, owner_id, workspace_id, idempotency_key, type, entity_id, payload_json, created_at)
-      SELECT lower(hex(randomblob(16))), owner_id, workspace_id, 'plan-change-archived:' || id, 'plan.change_archived', plan_version_id,
-        json_object('id', id, 'planVersionId', plan_version_id, 'kind', kind, 'triggerEventId', trigger_event_id,
+      SELECT lower(hex(randomblob(16))), owner_id, workspace_id, 'plan-change-archived:' || id, 'plan.changed', plan_version_id,
+        json_object('change', 'change_archived', 'id', id, 'planVersionId', plan_version_id, 'kind', kind, 'triggerEventId', trigger_event_id,
           'explanation', explanation, 'before', json(before_json), 'after', json(after_json), 'status', status),
         strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       FROM (${query})`).run(...params);
   }
 
-  /** Keeps each workspace's newest plan row as the one current plan; older rows become `plan.version_archived` events. */
+  /** Keeps each workspace's newest plan row as the one current plan; older rows become `plan.changed` `version_archived` events. */
   #collapsePlanVersions(workspaceId?: string): void {
     const scope = workspaceId ? "WHERE workspace_id = ?" : "";
     const params = workspaceId ? [workspaceId] : [];
@@ -142,8 +163,8 @@ export class CrosslineStore {
       WHERE q.workspace_id = p.workspace_id ORDER BY version DESC, created_at DESC LIMIT 1)`;
     this.#prepare(`
       INSERT OR IGNORE INTO events (event_id, owner_id, workspace_id, idempotency_key, type, entity_id, payload_json, created_at)
-      SELECT lower(hex(randomblob(16))), owner_id, workspace_id, 'plan-version-archived:' || id, 'plan.version_archived', id,
-        json_object('id', id, 'version', version, 'status', status, 'payload', json(payload_json), 'createdAt', created_at),
+      SELECT lower(hex(randomblob(16))), owner_id, workspace_id, 'plan-version-archived:' || id, 'plan.changed', id,
+        json_object('change', 'version_archived', 'id', id, 'version', version, 'status', status, 'payload', json(payload_json), 'createdAt', created_at),
         strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       FROM (${older})`).run(...params);
     this.#prepare(`DELETE FROM plan_versions WHERE id IN (SELECT id FROM (${older}))`).run(...params);
@@ -270,10 +291,10 @@ export class CrosslineStore {
       if (capture.state === "analyzing") throw new Error("CAPTURE_IS_ANALYZING");
       // The reason is optional: a duplicate or a slip needs no explanation, and asking for one made discarding cost more than keeping.
       // Keyed per attempt, because a restored capture can be discarded again and a fixed key would silently no-op the second time.
-      const attempt = this.listEvents(workspaceId, { type: "capture.discarded", entityId: id }).length;
+      const attempt = this.listEvents(workspaceId, { type: "capture.changed", change: "discarded", entityId: id }).length;
       this.appendEvent({
         ownerId: capture.ownerId, workspaceId, idempotencyKey: attempt ? `capture-discarded:${id}:${attempt}` : `capture-discarded:${id}`,
-        type: "capture.discarded", entityId: id, payload: { reason: reason.trim().slice(0, 200), from: capture.state }
+        type: "capture.changed", entityId: id, payload: { reason: reason.trim().slice(0, 200), from: capture.state, change: "discarded" }
       });
       this.#prepare("UPDATE captures SET state = 'discarded' WHERE workspace_id = ? AND id = ?").run(workspaceId, id);
       return { changed: true };
@@ -286,11 +307,11 @@ export class CrosslineStore {
       const capture = this.listCaptures(workspaceId).find((item) => item.id === id);
       if (!capture) throw new Error("CAPTURE_NOT_FOUND");
       if (capture.state !== "discarded") return { changed: false };
-      const discards = this.listEvents(workspaceId, { type: "capture.discarded", entityId: id });
+      const discards = this.listEvents(workspaceId, { type: "capture.changed", change: "discarded", entityId: id });
       const from = (discards.at(-1)?.payload as { from?: string } | undefined)?.from;
       const to = from === "captured" ? "captured" : "blocked";
       this.appendEvent({ ownerId: capture.ownerId, workspaceId, idempotencyKey: `capture-restored:${id}:${discards.length}`,
-        type: "capture.restored", entityId: id, payload: { to } });
+        type: "person.decided", entityId: id, payload: { to, subject: "capture", decision: "restored" } });
       this.#prepare("UPDATE captures SET state = ? WHERE workspace_id = ? AND id = ?").run(to, workspaceId, id);
       return { changed: true };
     })();
@@ -309,7 +330,7 @@ export class CrosslineStore {
       if (!text) throw new Error("CAPTURE_NOTE_REQUIRED");
       const context = capture.context ? `${capture.context}\n${tFor(readLocale(this, workspaceId))("补充（{{day}}）：{{text}}", { day: new Date().toISOString().slice(0, 10), text })}` : text;
       this.appendEvent({ ownerId: capture.ownerId, workspaceId, idempotencyKey: `capture-context:${id}:${capture.attempt}`,
-        type: "capture.context_added", entityId: id, payload: { note: text } });
+        type: "person.decided", entityId: id, payload: { note: text, subject: "capture", decision: "context_added" } });
       this.#prepare("UPDATE captures SET context = ? WHERE workspace_id = ? AND id = ?").run(context, workspaceId, id);
       return { changed: true };
     })();
@@ -534,7 +555,7 @@ export class CrosslineStore {
       if (!order) throw new Error("WORK_ORDER_NOT_FOUND");
       const previousFamily = (order.payload as { family?: string } | undefined)?.family ?? null;
       const { inserted } = this.appendEvent({ ownerId, workspaceId, idempotencyKey,
-        type: "work_order.family_backfilled", entityId: workOrderId, payload: { previousFamily, family } });
+        type: "job.ran", entityId: workOrderId, payload: { previousFamily, family, job: "work_order.family_backfill", state: "done" } });
       if (!inserted) return { changed: false };
       this.#mergeWorkOrderPayload(workspaceId, workOrderId, { family });
       return { changed: true };
@@ -562,7 +583,7 @@ export class CrosslineStore {
       this.saveWorkOrder(workOrder);
       this.#prepare("UPDATE captures SET state = 'promoted' WHERE workspace_id = ? AND id = ?").run(workspaceId, captureId);
       this.appendEvent({ ownerId: workOrder.ownerId, workspaceId, idempotencyKey,
-        type: "capture.promoted_manually", entityId: captureId, payload: { workOrderId: workOrder.id } });
+        type: "person.decided", entityId: captureId, payload: { workOrderId: workOrder.id, subject: "capture", decision: "promoted_manually" } });
       return { ok: true };
     }).immediate();
   }
@@ -598,10 +619,10 @@ export class CrosslineStore {
           humanCore: [{ id: `${id}-core`, intent: byproduct.landing.description, energy: "medium", interruptible: true }],
           automationParts: [], materialContract: [],
           evidenceContract: [{ kind: "record", description: byproduct.artifact.slice(0, 280), why: byproduct.why.slice(0, 280), required: true }] } });
-      this.appendEvent({ ownerId: primary.ownerId, workspaceId, idempotencyKey: `work_order.auto_approved:${id}`, type: "work_order.auto_approved",
-        entityId: id, payload: { reason: tFor(readLocale(this, workspaceId))("「{{task}}」的顺带产出，排在它之后", { task: primary.intent.slice(0, 40) }) } });
-      this.appendEvent({ ownerId: primary.ownerId, workspaceId, idempotencyKey: `byproduct.planned:${id}`, type: "byproduct.planned",
-        entityId: id, payload: { primaryId: primary.id, lineId: byproduct.lineId, milestoneId: milestone?.id ?? "", artifact: byproduct.artifact } });
+      this.appendEvent({ ownerId: primary.ownerId, workspaceId, idempotencyKey: `work_order.auto_approved:${id}`, type: "work_order.changed",
+        entityId: id, payload: { reason: tFor(readLocale(this, workspaceId))("「{{task}}」的顺带产出，排在它之后", { task: primary.intent.slice(0, 40) }), change: "auto_approved" } });
+      this.appendEvent({ ownerId: primary.ownerId, workspaceId, idempotencyKey: `byproduct.planned:${id}`, type: "work_order.changed",
+        entityId: id, payload: { primaryId: primary.id, lineId: byproduct.lineId, milestoneId: milestone?.id ?? "", artifact: byproduct.artifact, change: "byproduct_planned" } });
     }
   }
 
@@ -686,8 +707,8 @@ export class CrosslineStore {
     session: { startedAt: string; endedAt: string; minutes: number; source: "one_tap" | "activity"; key: string }): { executionId: string; changed: boolean } {
     return this.#db.transaction(() => {
       const minutes = Math.round(Math.min(24 * 60, Math.max(1, session.minutes)));
-      const appended = this.appendEvent({ ownerId, workspaceId, idempotencyKey: session.key, type: "execution.confirmed", entityId: workOrderId,
-        payload: { startedAt: session.startedAt, endedAt: session.endedAt, minutes, source: session.source } });
+      const appended = this.appendEvent({ ownerId, workspaceId, idempotencyKey: session.key, type: "execution.changed", entityId: workOrderId,
+        payload: { startedAt: session.startedAt, endedAt: session.endedAt, minutes, source: session.source, change: "confirmed" } });
       const open = this.#openExecution(workspaceId, workOrderId);
       if (!appended.inserted) return { executionId: open?.id ?? "", changed: false };
       if (open) {
@@ -719,8 +740,8 @@ export class CrosslineStore {
     session: { startedAt: string; endedAt: string; minutes: number; key: string; stepId?: string }): { executionId: string; changed: boolean } {
     return this.#db.transaction(() => {
       const minutes = Math.round(Math.min(24 * 60, Math.max(1, session.minutes)));
-      const appended = this.appendEvent({ ownerId, workspaceId, idempotencyKey: session.key, type: "execution.confirmed", entityId: workOrderId,
-        payload: { startedAt: session.startedAt, endedAt: session.endedAt, minutes, source: "inferred_confirmed", ...(session.stepId ? { stepId: session.stepId } : {}) } });
+      const appended = this.appendEvent({ ownerId, workspaceId, idempotencyKey: session.key, type: "execution.changed", entityId: workOrderId,
+        payload: { startedAt: session.startedAt, endedAt: session.endedAt, minutes, source: "inferred_confirmed", ...(session.stepId ? { stepId: session.stepId } : {}), change: "confirmed" } });
       if (!appended.inserted) return { executionId: "", changed: false };
       const id = randomUUID();
       this.#prepare(`
@@ -757,7 +778,7 @@ export class CrosslineStore {
       const pausedAt = notBefore(at ?? new Date().toISOString(), open.interruptions.at(-1)?.resumedAt ?? open.startedAt);
       this.#writeInterruptions(open.id, [...open.interruptions, { pausedAt, reason }], open.durationObserved);
       this.appendEvent({ ownerId: open.ownerId, workspaceId, idempotencyKey: `execution:${open.id}:pause:${open.interruptions.length}`,
-        type: "execution.paused", entityId: workOrderId, payload: { executionId: open.id, reason } });
+        type: "execution.changed", entityId: workOrderId, payload: { executionId: open.id, reason, change: "paused" } });
       return { changed: true };
     }).immediate();
   }
@@ -771,7 +792,7 @@ export class CrosslineStore {
       const resumedAt = notBefore(at ?? new Date().toISOString(), last.pausedAt);
       this.#writeInterruptions(open.id, [...open.interruptions.slice(0, -1), { ...last, resumedAt }], open.durationObserved);
       this.appendEvent({ ownerId: open.ownerId, workspaceId, idempotencyKey: `execution:${open.id}:resume:${open.interruptions.length - 1}`,
-        type: "execution.resumed", entityId: workOrderId, payload: { executionId: open.id, reason: last.reason } });
+        type: "execution.changed", entityId: workOrderId, payload: { executionId: open.id, reason: last.reason, change: "resumed" } });
       return { changed: true };
     }).immediate();
   }
@@ -798,7 +819,7 @@ export class CrosslineStore {
       if (JSON.stringify(interruptions) === JSON.stringify(open.interruptions)) return { changed: false, stoppedAt: interruptions.at(-1)!.pausedAt };
       this.#writeInterruptions(open.id, interruptions, open.durationObserved);
       this.appendEvent({ ownerId: open.ownerId, workspaceId, idempotencyKey: `execution:${open.id}:stopped:${stoppedAt}`,
-        type: "execution.stopped_at", entityId: workOrderId, payload: { executionId: open.id, at: stoppedAt, reason } });
+        type: "execution.changed", entityId: workOrderId, payload: { executionId: open.id, at: stoppedAt, reason, change: "stopped_at" } });
       return { changed: true, stoppedAt: interruptions.at(-1)!.pausedAt };
     }).immediate();
   }
@@ -1839,7 +1860,7 @@ export class CrosslineStore {
     `).run(item.id, item.ownerId, item.workspaceId, item.title, item.who, item.expectedAt, item.approximate ? 1 : 0,
       item.followUpAt, item.state, JSON.stringify(item.blocks), item.source, item.createdAt ?? now, now);
     if (result.changes) this.appendEvent({ ownerId: item.ownerId, workspaceId: item.workspaceId, idempotencyKey: `waiting.created:${item.id}`,
-      type: "waiting.created", entityId: item.id, payload: { title: item.title, who: item.who, expectedAt: item.expectedAt, blocks: item.blocks } });
+      type: "waiting.changed", entityId: item.id, payload: { title: item.title, who: item.who, expectedAt: item.expectedAt, blocks: item.blocks, change: "created" } });
     return { inserted: result.changes > 0 };
   }
 
@@ -1862,8 +1883,8 @@ export class CrosslineStore {
       const next = [...item.blocks, ...added];
       this.#prepare("UPDATE waiting_items SET blocks_json = ?, updated_at = ? WHERE workspace_id = ? AND id = ?")
         .run(JSON.stringify(next), new Date().toISOString(), workspaceId, id);
-      this.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.blocks_added:${id}:${next.join(",")}`, type: "waiting.blocks_added",
-        entityId: id, payload: { added } });
+      this.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.blocks_added:${id}:${next.join(",")}`, type: "waiting.changed",
+        entityId: id, payload: { added, change: "blocks_added" } });
       return { changed: true };
     }).immediate();
   }
@@ -1885,9 +1906,9 @@ export class CrosslineStore {
       } else {
         this.#prepare("UPDATE waiting_items SET state = ?, updated_at = ? WHERE workspace_id = ? AND id = ?").run(answer.kind, now, workspaceId, id);
       }
-      const attempt = this.listEvents(workspaceId, { type: ["waiting.arrived", "waiting.cancelled", "waiting.deferred"], entityId: id }).length;
-      this.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.${answer.kind}:${id}:${attempt}`, type: `waiting.${answer.kind}`, entityId: id,
-        payload: answer.kind === "deferred" ? { followUpAt: answer.followUpAt } : {} });
+      const attempt = this.listEvents(workspaceId, { type: "waiting.changed", change: ["arrived", "cancelled", "deferred"], entityId: id }).length;
+      this.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.${answer.kind}:${id}:${attempt}`, type: "waiting.changed", entityId: id,
+        payload: answer.kind === "deferred" ? { followUpAt: answer.followUpAt, change: answer.kind } : { change: answer.kind } });
       return { changed: true };
     }).immediate();
   }
@@ -1903,9 +1924,9 @@ export class CrosslineStore {
       if (item.state === "open" && item.followUpAt === followUpAt) return { changed: false };
       this.#prepare("UPDATE waiting_items SET state = 'open', follow_up_at = ?, updated_at = ? WHERE workspace_id = ? AND id = ?")
         .run(followUpAt, new Date().toISOString(), workspaceId, id);
-      const attempt = this.listEvents(workspaceId, { type: "waiting.reopened", entityId: id }).length;
-      this.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.reopened:${id}:${attempt}`, type: "waiting.reopened", entityId: id,
-        payload: { followUpAt } });
+      const attempt = this.listEvents(workspaceId, { type: "waiting.changed", change: "reopened", entityId: id }).length;
+      this.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.reopened:${id}:${attempt}`, type: "waiting.changed", entityId: id,
+        payload: { followUpAt, change: "reopened" } });
       return { changed: true };
     }).immediate();
   }
@@ -1947,8 +1968,8 @@ export class CrosslineStore {
             ...(step.attends ? { attends: true } : {}), ...(step.workout ? { workout: true } : {}),
             ...(typeof step.external === "boolean" ? { external: step.external } : {}) }));
       });
-      this.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.steps_planned:${workOrderId}:${version}`, type: "task.steps_planned",
-        entityId: workOrderId, payload: { version, archetypeId: plan.archetypeId, steps: plan.steps.length, kept: kept.length, reason } });
+      this.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.steps_planned:${workOrderId}:${version}`, type: "task.changed",
+        entityId: workOrderId, payload: { version, archetypeId: plan.archetypeId, steps: plan.steps.length, kept: kept.length, reason, change: "steps_planned" } });
       return this.getStepPlan(workspaceId, workOrderId)!;
     }).immediate();
   }
@@ -1994,9 +2015,9 @@ export class CrosslineStore {
       if (step.estimate.p50Minutes === estimate.p50Minutes) return { changed: false };
       this.#prepare("UPDATE task_steps SET p25_minutes = ?, p50_minutes = ?, p85_minutes = ?, updated_at = ? WHERE workspace_id = ? AND work_order_id = ? AND id = ?")
         .run(estimate.p25Minutes, estimate.p50Minutes, estimate.p85Minutes, new Date().toISOString(), workspaceId, workOrderId, stepId);
-      const attempt = this.listEvents(workspaceId, { type: "task.step_estimated", entityId: workOrderId }).length;
-      this.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.step_estimated:${workOrderId}:${stepId}:${attempt}`, type: "task.step_estimated",
-        entityId: workOrderId, payload: { stepId, before: step.estimate, after: estimate } });
+      const attempt = this.listEvents(workspaceId, { type: "task.changed", change: "step_estimated", entityId: workOrderId }).length;
+      this.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.step_estimated:${workOrderId}:${stepId}:${attempt}`, type: "task.changed",
+        entityId: workOrderId, payload: { stepId, before: step.estimate, after: estimate, change: "step_estimated" } });
       return { changed: true };
     }).immediate();
   }
@@ -2025,9 +2046,9 @@ export class CrosslineStore {
       if (detail.firstAction === note) return { changed: false };
       this.#prepare("UPDATE task_steps SET detail_json = ?, updated_at = ? WHERE workspace_id = ? AND work_order_id = ? AND id = ?")
         .run(JSON.stringify({ ...detail, firstAction: note }), new Date().toISOString(), workspaceId, workOrderId, stepId);
-      const attempt = this.listEvents(workspaceId, { type: "task.step_resume_noted", entityId: workOrderId }).length;
-      this.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.step_resume_noted:${workOrderId}:${stepId}:${attempt}`, type: "task.step_resume_noted",
-        entityId: workOrderId, payload: { stepId, note, before: detail.firstAction ?? "" } });
+      const attempt = this.listEvents(workspaceId, { type: "task.changed", change: "step_resume_noted", entityId: workOrderId }).length;
+      this.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.step_resume_noted:${workOrderId}:${stepId}:${attempt}`, type: "task.changed",
+        entityId: workOrderId, payload: { stepId, note, before: detail.firstAction ?? "", change: "step_resume_noted" } });
       return { changed: true };
     }).immediate();
   }
@@ -2043,9 +2064,9 @@ export class CrosslineStore {
       if (quarter === step.progressQuarter && status === step.status) return { changed: false };
       this.#prepare("UPDATE task_steps SET progress_quarter = ?, status = ?, updated_at = ? WHERE workspace_id = ? AND work_order_id = ? AND id = ?")
         .run(quarter, status, new Date().toISOString(), workspaceId, workOrderId, stepId);
-      const attempt = this.listEvents(workspaceId, { type: "task.step_progress", entityId: workOrderId }).length;
-      this.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.step_progress:${workOrderId}:${stepId}:${attempt}`, type: "task.step_progress",
-        entityId: workOrderId, payload: { stepId, progressQuarter: quarter, status, source } });
+      const attempt = this.listEvents(workspaceId, { type: "task.changed", change: "step_progress", entityId: workOrderId }).length;
+      this.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.step_progress:${workOrderId}:${stepId}:${attempt}`, type: "task.changed",
+        entityId: workOrderId, payload: { stepId, progressQuarter: quarter, status, source, change: "step_progress" } });
       return { changed: true };
     }).immediate();
   }
@@ -2337,34 +2358,23 @@ export class CrosslineStore {
    * walking the entire ledger every tick to build a two-entry map.
    */
   /** When the latest event of these types was written, or undefined: a cheap "did anything change since" without reading the events. */
-  latestEventAt(workspaceId: string, types: string[]): string | undefined {
-    if (!types.length) return undefined;
-    const row = this.#prepare(`SELECT MAX(created_at) AS at FROM events WHERE workspace_id = ? AND type IN (${types.map(() => "?").join(", ")})`)
-      .get(workspaceId, ...types) as { at?: string | null } | undefined;
+  latestEventAt(workspaceId: string, filter: EventFilter): string | undefined {
+    const { where, values } = eventWhere(workspaceId, filter);
+    const row = this.#prepare(`SELECT MAX(created_at) AS at FROM events WHERE ${where}`).get(...values) as { at?: string | null } | undefined;
     return row?.at ?? undefined;
   }
 
-  listEvents(workspaceId: string, options: { type?: string | string[]; entityId?: string } = {}): LedgerEvent[] {
-    const types = options.type === undefined ? [] : Array.isArray(options.type) ? options.type : [options.type];
-    const where = ["workspace_id = ?"];
-    const values: string[] = [workspaceId];
-    if (types.length) {
-      where.push(`type IN (${types.map(() => "?").join(", ")})`);
-      values.push(...types);
-    }
-    if (options.entityId !== undefined) {
-      where.push("entity_id = ?");
-      values.push(options.entityId);
-    }
+  listEvents(workspaceId: string, filter: EventFilter = {}): LedgerEvent[] {
+    const { where, values } = eventWhere(workspaceId, filter);
     // rowid is the order things actually happened. Ordering by (created_at, event_id) let a random
     // UUID decide the sequence of same-millisecond events, which defeats an append-only ledger.
-    const rows = this.#cachedAll<Record<string, string>>(`SELECT * FROM events WHERE ${where.join(" AND ")} ORDER BY rowid`, values);
+    const rows = this.#cachedAll<Record<string, string>>(`SELECT * FROM events WHERE ${where} ORDER BY rowid`, values);
     return rows.map((row) => ({
       eventId: row.event_id!,
       ownerId: row.owner_id!,
       workspaceId: row.workspace_id!,
       idempotencyKey: row.idempotency_key!,
-      type: row.type!,
+      type: row.type! as EventType,
       entityId: row.entity_id!,
       payload: JSON.parse(row.payload_json!),
       createdAt: row.created_at!
@@ -2624,8 +2634,8 @@ export class CrosslineStore {
       if (decided.length) {
         this.appendEvent({
           ownerId, workspaceId, idempotencyKey,
-          type: "milestone_relations.decided", entityId: decided[0]!,
-          payload: { decision, relationIds: decided, skipped }
+          type: "milestone_relation.changed", entityId: decided[0]!,
+          payload: { decision, relationIds: decided, skipped, change: "decided" }
         });
       }
     })();
@@ -2690,7 +2700,7 @@ export class CrosslineStore {
       autoAcceptance: { acceptedAt: new Date().toISOString(), relationIds }
     });
     this.appendEvent({ ownerId: order.ownerId, workspaceId, idempotencyKey: `${idempotencyKey}:audit`,
-      type: "milestone_gate.auto_accepted", entityId: workOrderId, payload: { milestoneId: milestone.id, relationIds } });
+      type: "milestone_gate.changed", entityId: workOrderId, payload: { milestoneId: milestone.id, relationIds, change: "auto_accepted" } });
     return transitioned;
     })["immediate"]();
   }
@@ -2716,7 +2726,7 @@ export class CrosslineStore {
       autoAcceptance: { ...payload.autoAcceptance, revokedAt: new Date().toISOString(), revocationReason: reason.trim() }
     });
     this.appendEvent({ ownerId: order.ownerId, workspaceId, idempotencyKey: `${idempotencyKey}:audit`,
-      type: "milestone_gate.auto_acceptance_revoked", entityId: workOrderId, payload: { reason: reason.trim() } });
+      type: "milestone_gate.changed", entityId: workOrderId, payload: { reason: reason.trim(), change: "auto_acceptance_revoked" } });
     return transitioned;
     })["immediate"]();
   }
@@ -2738,7 +2748,7 @@ export class CrosslineStore {
       });
     }
     this.appendEvent({ ownerId: relation.ownerId, workspaceId, idempotencyKey,
-      type: "milestone_relation.refuted", entityId: relationId, payload: { note } });
+      type: "milestone_relation.changed", entityId: relationId, payload: { note, change: "refuted" } });
     })["immediate"]();
   }
 
@@ -3295,6 +3305,8 @@ export class CrosslineStore {
       this.#indexDocuments(snapshot.workspaceId);
       // A backup taken before migration 27 carries the workflows as settings: moved into their tables as the migration moved them.
       this.adoptLegacyWorkflowSettings(snapshot.workspaceId);
+      // A backup or mirror written before migration 28 carries the old event names: condensed as the migration condensed them.
+      condenseEventTypes(this.#db, snapshot.workspaceId);
     })();
     return counts;
   }

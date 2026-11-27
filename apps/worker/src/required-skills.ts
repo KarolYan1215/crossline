@@ -3,13 +3,23 @@
  * so this list must name only Skills that exist: `required-skills.test.ts` checks it against the plugin's skill directories. The retired
  * `crossline-assistant` stayed here for two days after its directory was deleted, and the runtime went on starting only while its
  * plugin cache still held the old copy.
+ *
+ * Since 2026-11-27 (docs/plans/condense-1127.md §B) one Skill per scenario, each run naming a mode; these are the Skills themselves.
+ * Every Skill with a production caller is here (the opportunity agent's, the deliverable check, the energy review, the method research
+ * and the quote reader were missing before). The weekly drill is the owner's own plugin's (`crossline-personal`), not required.
  */
 export const REQUIRED_SKILLS = [
-  "crossline:crossline-automation-stripper", "crossline:crossline-milestone-gate",
-  "crossline:crossline-flywheel-scout", "crossline:crossline-manualbook-designer", "crossline:crossline-material-researcher", "crossline:crossline-material-writer", "crossline:crossline-milestone-architect", "crossline:crossline-milestone-risk-reviewer", "crossline:crossline-artifact-planner",
-  "crossline:crossline-goal-backplanner", "crossline:crossline-background-facts",
-  "crossline:crossline-onboarding", "crossline:crossline-onboarding-extract", "crossline:crossline-onboarding-research", "crossline:crossline-due-diligence", "crossline:crossline-plan-explainer", "crossline:crossline-weekly-insight",
-  "crossline:crossline-agent", "crossline:crossline-agent-tools", "crossline:crossline-mail-triage", "crossline:crossline-import-triage", "crossline:crossline-dictation-corrector", "crossline:crossline-mail-reply-drafter", "crossline:crossline-recording-digest", "crossline:crossline-source-digest", "crossline:crossline-media-describer", "crossline:crossline-favourite-topics", "crossline:crossline-automation-designer", "crossline:crossline-step-planner", "crossline:crossline-validation-reviewer", "crossline:crossline-progress-judge", "crossline:crossline-concierge", "crossline:crossline-archetype-curator", "crossline:crossline-task-titler", "crossline:crossline-portrait-writer", "crossline:crossline-portrait-narrative", "crossline:crossline-portrait-illustrator", "crossline:crossline-calendar-classifier", "crossline:crossline-folder-classifier", "crossline:crossline-time-attributor", "crossline:crossline-visa-finder", "crossline:crossline-web-scout", "crossline:crossline-query-review", "crossline:crossline-goal-splitter", "crossline:crossline-insight-compiler", "crossline:crossline-skill-scout", "crossline:crossline-form-filler", "crossline:crossline-form-checker", "crossline:crossline-form-observer", "crossline:crossline-form-browser-agent",
-  "crossline:crossline-gate-completion", "crossline:crossline-gate-priority", "crossline:crossline-gate-front", "crossline:crossline-gate-admission",
-  "crossline:crossline-gate-setback", "crossline:crossline-gate-attention", "crossline:crossline-gate-night", "crossline:crossline-gate-drill"
+  "crossline:crossline-onboarding", "crossline:crossline-onboarding-extract", "crossline:crossline-portrait",
+  "crossline:crossline-line-method", "crossline:crossline-milestone-architect", "crossline:crossline-goal-backplanner",
+  "crossline:crossline-cross-line-planner", "crossline:crossline-milestone-review", "crossline:crossline-task-planner",
+  "crossline:crossline-schedule-advisor", "crossline:crossline-evidence-judge", "crossline:crossline-focus", "crossline:crossline-weekly-review",
+  "crossline:crossline-form-page", "crossline:crossline-outward-check", "crossline:crossline-research", "crossline:crossline-page-reader",
+  "crossline:crossline-line-filer", "crossline:crossline-capture-digest", "crossline:crossline-inbox-triage", "crossline:crossline-agent",
+  "crossline:crossline-automation-stripper", "crossline:crossline-material-writer", "crossline:crossline-validation-reviewer",
+  "crossline:crossline-web-scout", "crossline:crossline-query-review", "crossline:crossline-quote-reader", "crossline:crossline-concierge",
+  "crossline:crossline-mail-reply-drafter", "crossline:crossline-media-describer", "crossline:crossline-favourite-topics",
+  "crossline:crossline-dictation-corrector", "crossline:crossline-automation-designer"
 ];
+
+/** The owner's own plugin in the same local marketplace (the weekly drill, J7), installed beside `crossline` and never required. */
+export const PERSONAL_PLUGIN = "crossline-personal";

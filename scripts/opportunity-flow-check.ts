@@ -132,7 +132,7 @@ try {
   heading("申请：准备做完后才问代填");
   const apply = opportunityOfferAsks(ctx, NOW).find((ask) => ask.entityId === "flow-apply")!;
   expect(answerOpportunityOffer(ctx, apply, "apply", {}, NOW).ok, "申请写了已批准的里程碑");
-  const milestoneId = (store.listEvents(ws, { type: "opportunity.milestone_written", entityId: "flow-apply" })[0]?.payload as { milestoneId: string }).milestoneId;
+  const milestoneId = (store.listEvents(ws, { type: "opportunity.changed", change: "milestone_written", entityId: "flow-apply" })[0]?.payload as { milestoneId: string }).milestoneId;
   // What the backplan would write (the worker's backplanner is not run on the copy): one preparation task and the person's submission.
   const task = (id: string, intent: string) => store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: apply.line ?? "research", projectId: "", milestoneId, intent,
     state: "active", riskTier: "milestone", estimate: { p25Minutes: 30, p50Minutes: 60, p85Minutes: 90, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: {} });

@@ -2,7 +2,7 @@
  * Bringing the lists someone kept in another tool into Crossline on their first day (docs/personal-agent.md §9, 2026-10-28, the owner's
  * decision): Todoist and TickTick by a personal API token, a Notion database by an internal integration token, and anything else as pasted
  * text, a CSV export or a screenshot. What is read is parsed here by code into `ImportItem`s; one cheap model run sorts a few dozen at a
- * time (`crossline-import-triage`: which line, done already, gone stale, a duplicate of a task on the board, keep / merge / done / drop /
+ * time (`crossline-inbox-triage:import`: which line, done already, gone stale, a duplicate of a task on the board, keep / merge / done / drop /
  * someday); the person then sees every item on one screen, grouped by line, with the suggestion ticked, and confirms once. Only what they
  * keep becomes a capture (`import-<source>-<id>`), which the capture analysis then turns into a task proposal like anything typed.
  *

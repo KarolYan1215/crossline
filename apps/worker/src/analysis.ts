@@ -222,8 +222,8 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
         else if (!foldNewTask(store, workspaceId, id, result.proposal.extendsTaskId ?? "")) { absorbParts(store, workspaceId, id); autoApproveEligible(store, workspaceId, [id]); }
         // A quality problem the repairs did not fix was corrected in the smallest way and kept; the reviewer looks at it next.
         if (result.audit.warnings?.length) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
-          idempotencyKey: `validation.warned:analysis:${id}:${attempt}`, type: "validation.warned", entityId: `analysis:${id}`,
-          payload: { subject: "analysis", version: attempt, warnings: result.audit.warnings, revised: false } });
+          idempotencyKey: `validation.warned:analysis:${id}:${attempt}`, type: "validation.changed", entityId: `analysis:${id}`,
+          payload: { subject: "analysis", version: attempt, warnings: result.audit.warnings, revised: false, change: "warned" } });
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "";

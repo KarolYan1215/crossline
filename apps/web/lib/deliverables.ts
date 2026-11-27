@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { DELIVERABLE_JUDGED, gapWorthAsking, onPersonsBoard, readSourceFolders, SOURCE_FOLDERS_SETTING, sourceFolderIndexSetting, taskTitleOf, tidySentenceEnds, type AccessContext, type Ask, type AskOption, type DeliverableJudgement } from "@crossline/core";
+import { gapWorthAsking, onPersonsBoard, readSourceFolders, SOURCE_FOLDERS_SETTING, sourceFolderIndexSetting, taskTitleOf, tidySentenceEnds, type AccessContext, type Ask, type AskOption, type DeliverableJudgement } from "@crossline/core";
 import { acceptWorkOrderEvidence, appNow, completeWorkOrderExecution, getStore, planToday, startWorkOrderExecution } from "./crossline";
 import { recordOp, reopenWorkOrders } from "./undo";
 import { tOf } from "./locale";
@@ -17,22 +17,19 @@ import { tOf } from "./locale";
  * reverted); a file the person left out of the folder, or a folder no longer authorized, takes back nothing.
  */
 export type JudgedFile = DeliverableJudgement & { fileName: string; uri: string; at: string; folderId?: string };
-export const DELIVERABLE_SETTLED = "deliverable.settled";
-export const GAP_ANSWERED = "deliverable.gap_answered";
-export const DELIVERABLE_WITHDRAWN = "deliverable.withdrawn";
 /** How long after it closed a task a deleted or emptied file still takes the completion back. */
 const WITHDRAW_DAYS = 14;
 const OPEN = new Set(["approved", "ready_for_human", "active"]);
 
 export function judgedFiles(ctx: AccessContext): JudgedFile[] {
-  return getStore().listEvents(ctx.workspaceId, { type: DELIVERABLE_JUDGED })
+  return getStore().listEvents(ctx.workspaceId, { type: "deliverable.changed", change: "judged" })
     .map((event) => ({ ...(event.payload as Omit<JudgedFile, "at">), at: event.createdAt }));
 }
 
 export function settleDeliverables(ctx: AccessContext, now = appNow()): string[] {
   const store = getStore();
   const t = tOf(ctx);
-  const settled = new Set(store.listEvents(ctx.workspaceId, { type: DELIVERABLE_SETTLED }).map((event) => event.entityId));
+  const settled = new Set(store.listEvents(ctx.workspaceId, { type: "deliverable.changed", change: "settled" }).map((event) => event.entityId));
   const closed: Array<{ id: string; title: string; file: string }> = [];
   for (const file of judgedFiles(ctx)) {
     if (settled.has(file.doc)) continue;
@@ -46,8 +43,8 @@ export function settleDeliverables(ctx: AccessContext, now = appNow()): string[]
         outcome = "completed";
       }
     }
-    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `${DELIVERABLE_SETTLED}:${file.doc}`, type: DELIVERABLE_SETTLED,
-      entityId: file.doc, payload: { task: file.task, outcome } });
+    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `deliverable.settled:${file.doc}`, type: "deliverable.changed",
+      entityId: file.doc, payload: { task: file.task, outcome, change: "settled" } });
   }
   for (const order of store.listWorkOrders(ctx.workspaceId).filter((item) => item.state === "evidence_review" && !item.milestoneId && onPersonsBoard(item))) {
     if (!acceptWorkOrderEvidence(ctx, order.id).ok) continue;
@@ -76,7 +73,7 @@ const short = (text: string, length = 30) => text.length > length ? `${text.slic
 export function gapAsks(ctx: AccessContext): Ask[] {
   const store = getStore();
   const t = tOf(ctx);
-  const answered = new Set(store.listEvents(ctx.workspaceId, { type: GAP_ANSWERED }).map((event) => event.entityId));
+  const answered = new Set(store.listEvents(ctx.workspaceId, { type: "deliverable.changed", change: "gap_answered" }).map((event) => event.entityId));
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
   return judgedFiles(ctx).flatMap((file): Ask[] => {
     const order = file.task ? orders.get(file.task) : undefined;
@@ -106,8 +103,8 @@ export function answerGap(ctx: AccessContext, ask: Ask, optionId: string): { ok:
     store.addPreference({ workspaceId: ctx.workspaceId, source: "correction", scope: "all", weight: 1, refId: `gap:${file.doc}`,
       text: tOf(ctx)("本人说「{{title}}」验收时「{{gap}}」这一条不适用：同类任务以后不按它判。", { title: order ? taskTitleOf(order) : file.fileName, gap: file.gap }).slice(0, 300) });
   } else if (optionId !== "done") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
-  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `${GAP_ANSWERED}:${file.doc}`, type: GAP_ANSWERED, entityId: file.doc,
-    payload: { task: ask.entityId, answer: optionId } });
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `deliverable.gap_answered:${file.doc}`, type: "deliverable.changed", entityId: file.doc,
+    payload: { task: ask.entityId, answer: optionId, change: "gap_answered" } });
   return { ok: true };
 }
 
@@ -130,8 +127,8 @@ export function withdrawDeliverables(ctx: AccessContext, now = appNow()): string
   const store = getStore();
   const t = tOf(ctx);
   const since = now.getTime() - WITHDRAW_DAYS * 86_400_000;
-  const withdrawn = new Set(store.listEvents(ctx.workspaceId, { type: DELIVERABLE_WITHDRAWN }).map((event) => event.entityId));
-  const closedBy = store.listEvents(ctx.workspaceId, { type: DELIVERABLE_SETTLED })
+  const withdrawn = new Set(store.listEvents(ctx.workspaceId, { type: "deliverable.changed", change: "withdrawn" }).map((event) => event.entityId));
+  const closedBy = store.listEvents(ctx.workspaceId, { type: "deliverable.changed", change: "settled" })
     .filter((event) => (event.payload as { outcome?: string }).outcome === "completed" && Date.parse(event.createdAt) >= since && !withdrawn.has(event.entityId));
   if (!closedBy.length) return [];
   const files = new Map(judgedFiles(ctx).map((file) => [file.doc, file]));
@@ -142,8 +139,8 @@ export function withdrawDeliverables(ctx: AccessContext, now = appNow()): string
     const file = files.get(event.entityId);
     if (!file || deliverableGone(ctx, file, docs, folders) !== true) continue;
     const order = store.getWorkOrder(ctx.workspaceId, file.task);
-    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `${DELIVERABLE_WITHDRAWN}:${file.doc}`, type: DELIVERABLE_WITHDRAWN,
-      entityId: file.doc, payload: { task: file.task, fileName: file.fileName } });
+    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `deliverable.withdrawn:${file.doc}`, type: "deliverable.changed",
+      entityId: file.doc, payload: { task: file.task, fileName: file.fileName, change: "withdrawn" } });
     // Only a completion still standing: one the person already reopened, or finished again some other way since, is left alone.
     if (order?.state !== "accepted") continue;
     if (!reopenWorkOrders(ctx, [order.id], t("交付文件「{{file}}」被删除或清空", { file: file.fileName })).ok) continue;

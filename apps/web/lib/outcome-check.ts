@@ -1,3 +1,5 @@
+import type { EventType } from "@crossline/core";
+import type { LedgerEventInput } from "@crossline/db";
 import "server-only";
 import { OUTCOME_LEVELS, outcomeCriteriaVerdict, taskTitleOf, type AccessContext, type Ask, type AskOption, type NudgeInput } from "@crossline/core";
 import { getStore } from "./crossline";
@@ -23,14 +25,14 @@ const short = (text: string, length = 30) => text.length > length ? `${text.slic
 export function openAssessments(ctx: AccessContext): Pending[] {
   const store = getStore();
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
-  const closed = new Set(store.listEvents(ctx.workspaceId, { type: "assessment.answered" })
+  const closed = new Set(store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "assessment_answered" })
     .map((event) => String((event.payload as { pendingEventId?: string }).pendingEventId ?? "")));
   const deferred = new Map<string, string>();
-  for (const event of store.listEvents(ctx.workspaceId, { type: "assessment.deferred" })) {
+  for (const event of store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "assessment_deferred" })) {
     const payload = event.payload as { pendingEventId?: string; until?: string };
     if (payload.pendingEventId && payload.until) deferred.set(payload.pendingEventId, payload.until);
   }
-  return store.listEvents(ctx.workspaceId, { type: "assessment.pending" }).flatMap((event) => {
+  return store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "assessment_pending" }).flatMap((event) => {
     // An order taken back out of `accepted` (revoked, archived) has nothing to follow up.
     if (closed.has(event.eventId) || orders.get(event.entityId)?.state !== "accepted") return [];
     const pending = event.payload as PendingAssessment;
@@ -86,17 +88,17 @@ export function answerOutcome(ctx: AccessContext, ask: Ask, optionId: string, va
   const pendingEventId = ask.id.split(":").slice(2).join(":");
   const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === ask.entityId);
   if (!order) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
-  const write = (type: string, payload: Record<string, unknown>) => store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
-    idempotencyKey: `${type}:${pendingEventId}:${Date.now()}`, type, entityId: order.id, payload: { pendingEventId, ...payload } });
+  const write = (type: EventType, payload: Record<string, unknown>) => store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
+    idempotencyKey: `${type}:${pendingEventId}:${Date.now()}`, type, entityId: order.id, payload: { pendingEventId, ...payload } } as LedgerEventInput);
   if (optionId === "later") {
     if (!DAY.test(values.date ?? "")) return { ok: false, code: "ASK_FIELD_REQUIRED" };
-    write("assessment.deferred", { until: values.date, ...(note ? { note } : {}) });
+    write("work_order.changed", { until: values.date, ...(note ? { note } : {}), change: "assessment_deferred" });
     return { ok: true };
   }
-  if (optionId === "stop") { write("assessment.answered", { level: "", stopped: true }); return { ok: true }; }
+  if (optionId === "stop") { write("work_order.changed", { level: "", stopped: true, change: "assessment_answered" }); return { ok: true }; }
   const level = OUTCOME_LEVELS.find((item) => item.id === optionId)?.id ?? "";
   const score = optionId === "result" ? (values.score ?? "").trim() : !level && /\d/.test(note) ? note : "";
-  write("assessment.answered", { level, score, note: (values.note ?? note ?? "").trim().slice(0, 300) });
+  write("work_order.changed", { level, score, note: (values.note ?? note ?? "").trim().slice(0, 300), change: "assessment_answered" });
   // A score against the milestone's one threshold is progress on the milestone, recorded the way the gate records it.
   const milestone = order.milestoneId ? store.listMilestones(ctx.workspaceId).filter((item) => item.id === order.milestoneId && item.status === "approved").at(-1) : undefined;
   const readings = milestone && score ? outcomeCriteriaVerdict(milestone.successCriteria, score, localeFor(ctx)) : [];

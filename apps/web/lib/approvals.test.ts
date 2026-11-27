@@ -31,7 +31,7 @@ test("an automatic approval is listed for a day, can be taken back once, and onl
   add("auto");
   store.transitionWorkOrder(TEST_CTX.workspaceId, "auto", { type: "plan.approved", approvalId: "system:auto-approval" }, "auto-approved:auto");
   store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId, idempotencyKey: "work_order.auto_approved:auto",
-    type: "work_order.auto_approved", entityId: "auto", payload: { reason: "内部准备" } });
+    type: "work_order.changed", entityId: "auto", payload: { reason: "内部准备", change: "auto_approved" } });
   expect(recentAutoApprovals(TEST_CTX)).toMatchObject([{ id: "auto", undoable: true }]);
   expect(recentAutoApprovals(TEST_CTX, Date.now() + 25 * 3_600_000)).toEqual([]);
   // W-279: archived since, it is no longer listed (it had been shown as 「已开始做」).

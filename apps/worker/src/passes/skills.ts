@@ -167,8 +167,8 @@ export async function workflowPass(workspaceId: string, checkedAt: string): Prom
   // A busy assistant or another account's workspace is tried again on a later tick; nothing is recorded for it.
   if (started.state === "blocked") return;
   // Tried once per errand or request: a kind the person has not allowed is said once, not every tick.
-  analysisStore.appendEvent({ ownerId: ownerOf(analysisStore, workspaceId), workspaceId, idempotencyKey: "skill.grown.attempted:" + input.taskId, type: "skill.grown.attempted",
-    entityId: candidate.lineId, payload: { taskId: input.taskId, state: started.state, ...(candidate.origin.kind === "asked" ? { requestId: candidate.origin.requestId } : { taskIds: candidate.origin.taskIds }) } });
+  analysisStore.appendEvent({ ownerId: ownerOf(analysisStore, workspaceId), workspaceId, idempotencyKey: "skill.grown.attempted:" + input.taskId, type: "skill.changed",
+    entityId: candidate.lineId, payload: { taskId: input.taskId, state: started.state, ...(candidate.origin.kind === "asked" ? { requestId: candidate.origin.requestId } : { taskIds: candidate.origin.taskIds }), change: "grown_attempted" } });
   if (started.state === "needs_category_approval") {
     const t = tOfWorkspace(analysisStore, workspaceId);
     sayToPerson(analysisStore, workspaceId, t("要把「{{text}}」固化成工作流，需要先允许助手做「{{label}}」这类工作。", { text: growLabel(candidate.text), label: t(started.label) }),

@@ -1,5 +1,5 @@
 /**
- * Visa checks for the time–space engine (docs/opportunity-agent.md §17.6, track ②). A small Skill (`crossline-visa-finder`) finds the
+ * Visa checks for the time–space engine (docs/opportunity-agent.md §17.6, track ②). A small Skill (`crossline-page-reader:visa`) finds the
  * official page for the person's confirmed citizenship and the destination and copies its sentences; code opens the page, finds each quote
  * in it, and works out the lead time from the processing-time sentence itself. The model never states a number of days. An answer that
  * cannot be checked falls back to `VISA_LEAD_FALLBACK_DAYS`, unverified.

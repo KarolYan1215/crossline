@@ -41,7 +41,7 @@ export function unfiledFilesIn(store: CrosslineStore, workspaceId: string, input
   const docs = store.listSourceDocuments(workspaceId).filter((doc) => doc.extractionStatus === "done");
   const byRef = documentsByRef(store.listSourceDocuments(workspaceId));
   const retracted = retractedEventIdsIn(store, workspaceId);
-  const cleared = new Set(store.listEvents(workspaceId, { type: "source.project_cleared" }).filter((event) => !retracted.has(event.eventId)).map((event) => event.entityId));
+  const cleared = new Set(store.listEvents(workspaceId, { type: "source.changed", change: "project_cleared" }).filter((event) => !retracted.has(event.eventId)).map((event) => event.entityId));
   const open = new Map<string, UnfiledFile>();
   const entry = (doc: { id: string; fileName: string; createdAt: string }) => open.get(doc.id)
     ?? open.set(doc.id, { id: doc.id, fileName: doc.fileName, titles: [], days: [], lean: undefined, raisedAt: doc.createdAt }).get(doc.id)!;

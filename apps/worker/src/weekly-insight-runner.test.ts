@@ -53,7 +53,7 @@ test("three real observations produce a written insight_proposal event", async (
   const run = createWeeklyInsight(store, WORKSPACE, "C:\\repo", () => rpc);
   const outcome = await run(now);
   expect(outcome).toMatchObject({ state: "ready" });
-  expect(store.listEvents(WORKSPACE, { type: "weekly_review.insight_proposal" })).toHaveLength(1);
+  expect(store.listEvents(WORKSPACE, { type: "insight.changed", change: "weekly_proposal" })).toHaveLength(1);
 });
 
 test("fewer than three executions is a blocker before any Skill call happens", async () => {

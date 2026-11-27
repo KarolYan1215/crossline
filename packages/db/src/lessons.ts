@@ -1,5 +1,5 @@
 // i18n-exempt: lessons are written for the model runs that read them (step planner, assistant) and deduplicated by their text
-import { SKILL_NEEDS, taskTitleOf } from "@crossline/core";
+import { currentSkillKeys, skillKey, skillNeedsOf, taskTitleOf } from "@crossline/core";
 import { listAgentTasks } from "./agent";
 import type { CrosslineStore, StoredLesson, StoredPreference, StoredProfileFact, UsedRef } from "./index";
 
@@ -30,7 +30,7 @@ const RULE = { review: "rule:review_note", gate: "rule:gate_partial", overrun: "
 export const LESSONS_DAY_SETTING = "lessons.pass.day";
 
 const short = (text: string, length = 30) => (text.length > length ? `${text.slice(0, length)}…` : text);
-const skillShort = (skill: string) => skill.replace(/^crossline:/, "");
+const skillShort = (skill: string) => skillKey(skill);
 const bigrams = (text: string) => { const clean = text.replace(/[\s\p{P}]+/gu, ""); const out = new Set<string>(); for (let i = 0; i < clean.length - 1; i += 1) out.add(clean.slice(i, i + 2)); return out; };
 /** Bigram Dice: two lessons this close say the same thing. */
 export function similarText(a: string, b: string): number {
@@ -69,7 +69,7 @@ export function extractLessons(store: CrosslineStore, workspaceId: string, now =
 
   // A result of the assistant's the person sent back with words: what they said is how such work is to be done.
   const tasks = new Map(listAgentTasks(store, workspaceId, now).map((task) => [task.taskId, task]));
-  for (const event of store.listEvents(workspaceId, { type: "agent.task.reviewed" })) {
+  for (const event of store.listEvents(workspaceId, { type: "agent.changed", change: "task_reviewed" })) {
     const payload = event.payload as { decision?: string; note?: string; by?: string };
     const note = String(payload.note ?? "").trim();
     if (payload.decision === "accepted" || payload.by === "system" || note.length < 4) continue;
@@ -94,7 +94,7 @@ export function extractLessons(store: CrosslineStore, workspaceId: string, now =
   // A step confirmed at far more than its cautious estimate (the confirmed blocks' minutes summed per step), and a finished task whose
   // timed minutes did the same: the next plan of that kind is estimated looser.
   const stepMinutes = new Map<string, { orderId: string; stepId: string; minutes: number; at: string }>();
-  for (const event of store.listEvents(workspaceId, { type: "block.confirmed" })) {
+  for (const event of store.listEvents(workspaceId, { type: "work_order.changed", change: "block_confirmed" })) {
     const payload = event.payload as { workOrderId?: string; stepId?: string; outcome?: string; minutes?: number; blockMinutes?: number };
     if (!payload.workOrderId || !payload.stepId || payload.outcome === "not_done") continue;
     const key = `${payload.workOrderId}#${payload.stepId}`;
@@ -124,7 +124,7 @@ export function extractLessons(store: CrosslineStore, workspaceId: string, now =
   for (const failed of store.failedModelRuns(workspaceId, week)) {
     if (failed.runs < REPEATED_ERROR_RUNS || INFRASTRUCTURE_CODE.test(failed.errorCode)) continue;
     const name = skillShort(failed.skill);
-    const label = SKILL_NEEDS[name]?.label ?? name;
+    const label = skillNeedsOf(name)?.label ?? name;
     const advice = ERROR_ADVICE[failed.errorCode] ?? (/_BLOCKED$/.test(failed.errorCode) ? "多次停下说缺东西：先用已有材料推进，缺的写明" : "");
     if (addLesson(store, { workspaceId, lineId: null, archetypeId: null, kind: "failure", source: RULE.error, sourceRef: `error:${name}:${failed.errorCode}:${monday}`,
       text: `「${label}」近 7 天 ${failed.runs} 次以 ${failed.errorCode} 结束${advice ? `：${advice}` : ""}`, keywords: `skill:${name} ${failed.errorCode}`,
@@ -154,7 +154,9 @@ export function lessonsFor(store: CrosslineStore, workspaceId: string, scope: { 
   const skills = (Array.isArray(scope.skill) ? scope.skill : [scope.skill]).map((name) => `skill:${skillShort(name)}`);
   const fit = store.listLessons(workspaceId).filter((lesson) => (!lesson.lineId || lesson.lineId === scope.lineId)
     && (!lesson.archetypeId || !scope.archetypeId || lesson.archetypeId === scope.archetypeId)
-    && (lesson.source !== RULE.error || lesson.keywords.split(/\s+/).some((word) => skills.includes(word))));
+    // A lesson written under a Skill's name from before the merge of 2026-11-27 reaches the mode that Skill became.
+    && (lesson.source !== RULE.error || lesson.keywords.split(/\s+/).some((word) => word.startsWith("skill:")
+      && currentSkillKeys(word.slice("skill:".length)).some((key) => skills.includes(`skill:${key}`)))));
   const score = (lesson: StoredLesson) => (lesson.lineId === scope.lineId ? 2 : 0) + (scope.archetypeId && lesson.archetypeId === scope.archetypeId ? 1 : 0);
   const ranked = fit.sort((a, b) => score(b) - score(a) || b.useCount - a.useCount || (b.lastUsedAt ?? "").localeCompare(a.lastUsedAt ?? "")
     || b.createdAt.localeCompare(a.createdAt));

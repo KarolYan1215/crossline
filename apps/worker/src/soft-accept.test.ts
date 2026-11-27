@@ -3,7 +3,7 @@ import { runCodexSkill } from "@crossline/codex";
 import { keepAnalysisProposal, keepMilestoneProposal, MILESTONE_SOFT_CODES } from "@crossline/core";
 import { fakeRuntime } from "./testing/fake-runtime";
 
-const SKILL = "crossline:crossline-step-planner";
+const SKILL = "crossline:crossline-task-planner:steps";
 const refuse = (code: string) => { throw Object.assign(new Error(code), { detail: "说明" }); };
 
 test("a quality refusal still standing after the repairs keeps the answer when the caller says so, and reports it as a warning", async () => {

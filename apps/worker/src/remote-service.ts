@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { NODE_STATUS_SETTING, REMOTE_COMMAND, REMOTE_KINDS, type RemoteKind } from "@crossline/core";
+import { NODE_STATUS_SETTING, REMOTE_COMMAND, REMOTE_KINDS, type EventChange, type RemoteKind } from "@crossline/core";
 import { readFormRuns, type CrosslineStore } from "@crossline/db";
 import { tOfWorkspace } from "./locale";
 import type { NodeEntry, NodeHub, NodeRemoteLink } from "./node/hub";
@@ -29,14 +29,16 @@ export const REMOTE_NOTIFY_SETTING = "remote.notify_online";
 /** The record shown on the phone covers ninety days (§7.3); deleting the account deletes it with the workspace. */
 const SHOWN_DAYS = 90;
 
-/** What a computer's report becomes in the ledger; reports not listed (a streamed piece of text, a command starting) are live only. */
-const LEDGER_TYPES: Record<string, string> = {
-  "session.started": "remote.session.started", "session.ended": "remote.session.ended", "message.person": "remote.message", "message.assistant": "remote.message",
-  "command.completed": "remote.command", "approval.asked": "remote.approval", "approval.resolved": "remote.approval", "approval.refused": "remote.approval",
-  "approval.expired": "remote.approval", "files.changed": "remote.files", "folder.read": "remote.folder.read", "form.submitted": "remote.form.submitted",
-  "refused": "remote.refused", "interrupted": "remote.session.interrupted"
+/**
+ * What a computer's report becomes in the ledger: a `remote.changed` event with this `change`; reports not listed (a streamed piece of
+ * text, a command starting) are live only.
+ */
+const LEDGER_CHANGES: Record<string, EventChange<"remote.changed">> = {
+  "session.started": "session_started", "session.ended": "session_ended", "message.person": "message", "message.assistant": "message",
+  "command.completed": "command", "approval.asked": "approval", "approval.resolved": "approval", "approval.refused": "approval",
+  "approval.expired": "approval", "files.changed": "files", "folder.read": "folder_read", "form.submitted": "form_submitted",
+  "refused": "refused", "interrupted": "session_interrupted"
 };
-export const REMOTE_EVENT_TYPES = [...new Set(Object.values(LEDGER_TYPES))];
 
 type Live = { session?: { id: string; folder: string; approval: string; endsAt: string } | undefined; busy: boolean; draft: string; running?: string | undefined;
   pending: Map<string, Record<string, unknown>>; updatedAt: string };
@@ -56,8 +58,8 @@ export function createRemoteService(deps: RemoteServiceDeps) {
     return value;
   };
   const owner = (workspaceId: string) => store.getWorkspaceOwnerId(workspaceId) ?? "system";
-  const record = (workspaceId: string, type: string, entityId: string, payload: Record<string, unknown>) =>
-    store.appendEvent({ ownerId: owner(workspaceId), workspaceId, type, entityId, idempotencyKey: `${type}:${randomUUID()}`, payload });
+  const record = (workspaceId: string, change: EventChange<"remote.changed">, entityId: string, payload: Record<string, unknown>) =>
+    store.appendEvent({ ownerId: owner(workspaceId), workspaceId, type: "remote.changed", entityId, idempotencyKey: `remote.${change}:${randomUUID()}`, payload: { ...payload, change } });
 
   const links = (workspaceId: string): NodeRemoteLink[] => { try { return deps.hub()?.remoteFor(workspaceId) ?? []; } catch { return []; } };
   const linkFor = (workspaceId: string, host: unknown) => {
@@ -83,9 +85,9 @@ export function createRemoteService(deps: RemoteServiceDeps) {
       case "approval.asked": state.pending.set(String(event.approval ?? ""), event); break;
       case "approval.resolved": case "approval.expired": state.pending.delete(String(event.approval ?? "")); break;
     }
-    const ledgerType = LEDGER_TYPES[type];
-    if (ledgerType) {
-      try { record(workspaceId, ledgerType, String(event.session ?? host), { ...event, ...(type.startsWith("message.") ? { role: type === "message.person" ? "person" : "assistant" } : {}), ...(type.startsWith("approval.") ? { state: type.slice(9) } : {}) }); }
+    const change = LEDGER_CHANGES[type];
+    if (change) {
+      try { record(workspaceId, change, String(event.session ?? host), { ...event, ...(type.startsWith("message.") ? { role: type === "message.person" ? "person" : "assistant" } : {}), ...(type.startsWith("approval.") ? { state: type.slice(9) } : {}) }); }
       catch (error) { log({ type: "remote.record_failed", message: String(error).slice(0, 200) }); }
     }
     // The one interruption remote control makes (push-policy: it needs the person now, and nothing runs until they answer).
@@ -111,7 +113,7 @@ export function createRemoteService(deps: RemoteServiceDeps) {
   /** 「核对」 on the computer: this computer's instructions in the record of the last seven days (read only). */
   const ledgerFor = (workspaceId: string, host: string) => {
     const since = now().getTime() - 7 * 86_400_000;
-    return store.listEvents(workspaceId, { type: REMOTE_EVENT_TYPES }).filter((event) => Date.parse(event.createdAt) >= since)
+    return store.listEvents(workspaceId, { type: "remote.changed" }).filter((event) => Date.parse(event.createdAt) >= since)
       .map((event) => ({ event, payload: (event.payload ?? {}) as Record<string, unknown> }))
       .filter(({ payload }) => payload.host === host && typeof payload.nonce === "string")
       .map(({ event, payload }) => ({ type: event.type, at: event.createdAt, nonce: String(payload.nonce), ...(typeof payload.session === "string" ? { session: payload.session } : {}) }));
@@ -128,7 +130,7 @@ export function createRemoteService(deps: RemoteServiceDeps) {
 
   const history = (workspaceId: string, session?: string) => {
     const since = now().getTime() - SHOWN_DAYS * 86_400_000;
-    return store.listEvents(workspaceId, { type: REMOTE_EVENT_TYPES }).filter((event) => Date.parse(event.createdAt) >= since && (!session || event.entityId === session))
+    return store.listEvents(workspaceId, { type: "remote.changed" }).filter((event) => Date.parse(event.createdAt) >= since && (!session || event.entityId === session))
       .slice(-300).map((event): Record<string, unknown> & { type: string; at: string } => ({ type: event.type, ...(event.payload as Record<string, unknown>), event: event.type, at: event.createdAt }));
   };
 

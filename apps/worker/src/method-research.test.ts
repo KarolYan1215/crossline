@@ -27,7 +27,7 @@ test("a method resting only on a page that does not open is dropped; the person'
 test("research is due once per finished interview, and planners read it after the profile", () => {
   const store = new CrosslineStore(":memory:");
   expect(methodResearchDue(store, "w")).toBe(false);
-  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "fin:1", type: "onboarding.finish_requested", entityId: "w", payload: {} });
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "fin:1", type: "onboarding.changed", entityId: "w", payload: { change: "finish_requested" } });
   expect(methodResearchDue(store, "w")).toBe(true);
   store.setSetting("w", METHOD_RESEARCH_SETTING, JSON.stringify({ at: "2999-01-01T00:00:00Z", droppedSources: 0, sources: [],
     habits: [{ text: "写东西先列提纲", factIds: ["f1"] }],

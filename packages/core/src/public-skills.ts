@@ -2,7 +2,7 @@ import { decideCommand, isSecretPath } from "./agent-guard";
 import { tFor, type Locale } from "./i18n";
 
 /**
- * Public skills (`crossline-public:<id>`, docs/skills-library.md §2): skills other people published, found by `crossline-skill-scout`,
+ * Public skills (`crossline-public:<id>`, docs/skills-library.md §2): skills other people published, found by `crossline-research:skills`,
  * fetched as one directory from a public GitHub repository, scanned by code, reviewed by a model, and installed in the runtime's third
  * plugin. Everything decided about each one is recorded in `skills.library`; its files (the text fetched, never anything run) in
  * `skills.public.files.<id>`, so a backup can rebuild the plugin without fetching again.
@@ -116,7 +116,7 @@ export function scanSkillFiles(files: Array<{ path: string; text: string }>): Sk
   return { risk: findings.some((finding) => finding.rule !== "injection" && finding.rule !== "hidden.text") ? "high" : "low", injection, findings: findings.slice(0, 60) };
 }
 
-// ── Scout (crossline-skill-scout) ────────────────────────────────────────────────────────────────────────────────────────
+// ── Scout (crossline-research:skills) ────────────────────────────────────────────────────────────────────────────────────────
 
 export type SkillScoutContext = {
   version: "crossline.skill-scout.v1";

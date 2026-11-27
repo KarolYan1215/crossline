@@ -16,7 +16,7 @@ export const OBSERVE_METHODS = ["click", "fill", "type", "press", "scrollTo", "n
 export const OBSERVE_SUPPORTED = ["fill", "selectOptionFromDropdown", "click"] as const;
 export type ObservedElement = { elementId: string; description: string; method: string; arguments: string[] };
 
-/** `crossline-form-observer`: Stagehand's `Observation` shape, as strict structured output. */
+/** `crossline-form-page:observe`: Stagehand's `Observation` shape, as strict structured output. */
 export const FORM_OBSERVE_SCHEMA = {
   type: "object", additionalProperties: false, required: ["elements"],
   properties: {

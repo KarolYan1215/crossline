@@ -1,17 +1,20 @@
+import { currentSkillOf } from "@crossline/core";
 import type { ModelUsageSummary } from "@crossline/db";
 import { BarChart, Sparkline } from "../ui/charts";
 import { tFor, type Locale } from "../../lib/i18n";
 
-/** Each Skill by what it does for the person. */
+/**
+ * Each Skill by what it does for the person, one bar per Skill since the merge of 2026-11-27: runs stored under a Skill's old name
+ * (`crossline-step-planner`) count under the Skill it became (`currentSkillOf`).
+ */
 const FUNCTION_LABEL: Record<string, string> = {
-  "crossline-onboarding": "访谈", "crossline-onboarding-extract": "整理层", "crossline-onboarding-research": "调研层", "crossline-milestone-architect": "里程碑设计", "crossline-goal-backplanner": "任务倒推",
-  "crossline-flywheel-scout": "跨主线扩展", "crossline-automation-stripper": "收集分析", "crossline-manualbook-designer": "教程设计",
-  "crossline-material-researcher": "资料检索", "crossline-material-writer": "教程写作", "crossline-milestone-gate": "验收判定",
-  "crossline-weekly-insight": "每周洞察", "crossline-due-diligence": "网上查证", "crossline-background-facts": "背景整理",
-  "crossline-plan-explainer": "排程说明", "crossline-assistant": "小帮手", "crossline-agent": "助手任务", "crossline-step-planner": "步骤拆分",
-  "crossline-validation-reviewer": "复核", "crossline-progress-judge": "进度判断", "crossline-input-router": "输入识别", "crossline-concierge": "输入框"
+  "crossline-onboarding": "访谈", "crossline-onboarding-extract": "整理层", "crossline-research": "网上查证", "crossline-milestone-architect": "里程碑设计",
+  "crossline-goal-backplanner": "任务倒推", "crossline-cross-line-planner": "跨主线扩展", "crossline-automation-stripper": "收集分析",
+  "crossline-task-planner": "步骤拆分", "crossline-material-writer": "教程写作", "crossline-evidence-judge": "验收判定",
+  "crossline-weekly-review": "每周洞察", "crossline-capture-digest": "背景整理", "crossline-schedule-advisor": "排程说明", "crossline-assistant": "小帮手",
+  "crossline-agent": "助手任务", "crossline-validation-reviewer": "复核", "crossline-input-router": "输入识别", "crossline-concierge": "输入框"
 };
-const label = (skill: string) => FUNCTION_LABEL[skill.replace(/^crossline:/, "")] ?? "其他";
+const label = (skill: string) => FUNCTION_LABEL[currentSkillOf(skill)] ?? "其他";
 const k = (n: number) => Math.round(n / 100) / 10;
 
 /**

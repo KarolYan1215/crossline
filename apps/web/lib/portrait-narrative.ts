@@ -39,7 +39,7 @@ export function rateNarrative(ctx: AccessContext, input: { key: string; verdict:
   store.setSetting(ctx.workspaceId, PROFILE_CLAIM_STATUS_SETTING, JSON.stringify(result.status));
   const at = new Date().toISOString();
   store.appendEvent({ ownerId: store.getWorkspaceOwnerId(ctx.workspaceId) ?? ctx.principalId, workspaceId: ctx.workspaceId,
-    idempotencyKey: `portrait.narrative_rated:${input.key}:${at}`, type: "portrait.narrative_rated", entityId: ctx.workspaceId,
-    payload: { key: input.key, verdict: input.verdict } });
+    idempotencyKey: `portrait.narrative_rated:${input.key}:${at}`, type: "person.decided", entityId: ctx.workspaceId,
+    payload: { key: input.key, verdict: input.verdict, subject: "portrait", decision: "narrative_rated" } });
   return { ok: true };
 }

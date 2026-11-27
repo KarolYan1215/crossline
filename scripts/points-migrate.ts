@@ -85,7 +85,7 @@ try {
       store.saveOnboardingSession({ ...main, coverage: { ...main.coverage, rules: POINTS_RULES }, updatedAt: new Date().toISOString() });
       if (sections.length) store.setSetting(ws, POINTS_SPLIT_SETTING, JSON.stringify(sections));
       store.appendEvent({ ownerId: found.principalId, workspaceId: ws, idempotencyKey: `profile.points.migrated:${ws}:${Date.now()}`,
-        type: "profile.points_migrated", entityId: main.id, payload: { split: sections } });
+        type: "job.ran", entityId: main.id, payload: { split: sections, job: "profile.points.migrate", state: "done" } });
     });
   } else {
     console.log(JSON.stringify({ ...found, sessions: sessions.length, runtimeOwner: store.getSetting(ws, "deployment.runtimeOwner") === "1", apply }));

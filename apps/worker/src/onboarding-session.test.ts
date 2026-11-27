@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore, interviewChecklistFor, rateInsight, writeExtractState } from "@crossline/db";
 import { cardWordsHead, documentsByRef, DISCLOSURE_PLACEHOLDER, LESSON_QUESTION, PROFILE_SECTIONS_SETTING, ONBOARDING_STAGES, PROFILE_FRAMEWORK, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
-  type OnboardingProgress, type ProfileCard, setRuleSink, type RuleFiredLine } from "@crossline/core";
+  type OnboardingProgress, type ProfileCard } from "@crossline/core";
 import { createOnboardingSessionRunner as createRunner, enqueueInterview, finishInterview, INSTRUCTIONS, interviewQueueKey, ONBOARDING_SKILL, readQueued, stageGuide,
   steerInterview } from "./onboarding-session";
 import { correctedSince, correctionUnread, INSTRUCTIONS as EXTRACT_INSTRUCTIONS } from "./onboarding-extract";
@@ -53,15 +53,7 @@ beforeEach(() => {
   store = new CrosslineStore(":memory:");
   workspaceId = store.createPrincipalWithWorkspace("user-1", "个人 workspace").workspace.id;
 });
-afterEach(() => { store.close(); setRuleSink(undefined); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
-/**
- * The record-only rules that fired in this test (`ruleFired` under `interview.record`, 2026-11-25), caught by a sink of the test's own.
- */
-function watchFired(): () => Array<{ rule: string; detail?: string }> {
-  const lines: RuleFiredLine[] = [];
-  setRuleSink((line) => lines.push(line));
-  return () => lines.filter((line) => line.id === "interview.record").map((line) => ({ rule: String(line.rule), detail: String(line.detail) }));
-}
+afterEach(() => { store.close(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 // A test round's `insight` is the dialogue's one card (`insights`, 2026-11-14): an empty one is none. Its question is the same every
 // round, so it is marked a follow-up: the repeat check comes back to the model (onboarding-cards.test.ts), which these tests are not about.
@@ -181,7 +173,7 @@ test("a fact citing a sentence number the extraction was not shown is dropped wi
   expect(extraction(prompts)).toHaveLength(1);
   expect(prompts()).toHaveLength(2);
   expect(store.listProfileFacts(workspaceId)).toEqual([]);
-  expect(store.listEvents(workspaceId, { type: "onboarding.extracted" })[0]?.payload).toMatchObject({ replies: 1, facts: 0 });
+  expect(store.listEvents(workspaceId, { type: "job.ran", job: "onboarding.extract", state: "done" })[0]?.payload).toMatchObject({ replies: 1, facts: 0 });
   expect(store.listOnboardingMessages(workspaceId, "s").map((message) => message.role)).toEqual(["user", "assistant"]);
 });
 
@@ -209,7 +201,7 @@ test("the main interview never ends itself: a model that is done says so in its 
   const { outcome } = finishInterview(store, workspaceId, "C:\\repo", () => rpc, "s", { extract: false });
   expect(outcome).toEqual({ state: "finished", sessionId: "s" });
   expect(store.getOnboardingSession(workspaceId, "s")?.state).toBe("complete");
-  expect(store.listEvents(workspaceId, { type: "onboarding.finish_requested" })).toHaveLength(1);
+  expect(store.listEvents(workspaceId, { type: "onboarding.changed", change: "finish_requested" })).toHaveLength(1);
 });
 
 test("before the start standard stands, the model is told what is still owed, and the app adds no question of its own", async () => {
@@ -252,14 +244,12 @@ test("every round's input opens with the progress header, counted from the round
   expect(store.getOnboardingSession(workspaceId, "s")?.coverage).not.toHaveProperty("startMetRound");
 });
 
-test("a reply saying the app can be used before the start standard stands is recorded, not sent back or cut (2026-11-22, IR-035 retired)", async () => {
-  const fired = watchFired();
+test("a reply saying the app can be used before the start standard stands is not sent back or cut (2026-11-22, IR-035 retired)", async () => {
   const reply = "要用的几样都在了，你可以开始使用应用了。周末一般怎么过？";
   const { rpc, prompts } = fakeRuntime([turn({ reply })]);
   await createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" })({ sessionId: "s", text: "差不多了吧" });
   expect(dialogue(prompts)).toHaveLength(1);
   expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string }).reply).toBe(reply);
-  expect(fired()).toEqual([expect.objectContaining({ rule: "IR-165", detail: "reply said the app can be used before the start standard stands" })]);
 });
 
 test("with no Codex runtime the turn is a blocker and saves nothing", async () => {
@@ -422,15 +412,6 @@ test("an app question answered in words the code did not read is not offered aga
   expect(dialogue(prompts).at(-1)).not.toContain('"id":"gap-line-startup"');
 });
 
-// IR-200, replay 2026-11-26: 「七张画完」 for a set of four the person had only called 「还剩两张没画」.
-test("a count stated about the person that nobody said is sent back once; the second answer stands", async () => {
-  const { rpc, prompts } = fakeRuntime([turn({ reply: "七张画完，两张没动，整批没交。" }), turn({ reply: "还剩两张没画。这套一共几张？" })]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
-  await run({ sessionId: "s", text: "咖啡品牌那套节日插画，还剩两张没画。" });
-  expect(dialogue(prompts).some((prompt) => prompt.includes("「七张」本人、文件和之前的回复都没说过"))).toBe(true);
-  expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string }).reply).toBe("还剩两张没画。这套一共几张？");
-});
-
 test("with the completion list on, a 「ready」 goes back to asking, and the checklist's labels never reach the person", async () => {
   const { rpc } = fakeRuntime([turn({ questions: [], nextAction: "ready_for_milestones" })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
@@ -579,7 +560,7 @@ test("the question ledger: a round's questions are numbered, an answer is record
   expect(dialogue(prompts).some((prompt) => prompt.includes(`#${asked.id}「西湖合作的图表清单由谁提供？」是同一个问题，本人答过：「选择：师兄」`))).toBe(true);
   const last = store.listOnboardingMessages(workspaceId, "s1").at(-1)!.content as { questions: Array<{ id: string }> };
   expect(last.questions.map((question) => question.id)).not.toContain("q9");
-  expect(store.listEvents(workspaceId, { type: "onboarding.round_edited" }).at(-1)?.payload).toMatchObject({ removed: [{ why: expect.stringContaining("followUp") }] });
+  expect(store.listEvents(workspaceId, { type: "onboarding.changed", change: "round_edited" }).at(-1)?.payload).toMatchObject({ removed: [{ why: expect.stringContaining("followUp") }] });
 });
 
 test("an app question the model asks in its own words, naming its number, comes back: it goes out by id so its tap settles the fact", async () => {
@@ -595,7 +576,7 @@ test("an app question the model asks in its own words, naming its number, comes 
   await createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc2)({ sessionId: "s2", text: "继续" });
   const round = store.listOnboardingMessages(workspaceId, "s2").at(-1)!.content as { questions: Array<{ id: string }> };
   expect(round.questions).toEqual([]);
-  expect(store.listEvents(workspaceId, { type: "onboarding.round_edited" }).at(-1)?.payload)
+  expect(store.listEvents(workspaceId, { type: "onboarding.changed", change: "round_edited" }).at(-1)?.payload)
     .toMatchObject({ removed: [{ why: expect.stringContaining("把「gap-line-startup」放进 openItems") }] });
 });
 
@@ -698,7 +679,7 @@ test("the progress record goes back to the model next round, and an observation 
   expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { insight?: unknown }).insight).toBeUndefined();
 });
 
-test("observations come as often as there is evidence, never the same one twice", async () => {
+test("observations come as often as there is evidence; a repeat is the Skill's to avoid, not refused (2026-11-27)", async () => {
   const insight = { text: "你说投入的两次都是和人一起赶东西；底座主线是一个人做的研究。",
     refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-5", quote: "一个人做研究" }], falsifier: "如果独自做研究时也常投入到忘了时间" };
   const { rpc } = fakeRuntime([turn({ stage: "energy", insight: { text: "", refs: [] } }), turn({ stage: "energy" }), turn({ stage: "energy", insight }),
@@ -711,9 +692,8 @@ test("observations come as often as there is evidence, never the same one twice"
   expect(await kept("最投入的是和同学一起赶比赛的时候。")).toBe(false);
   expect(await kept("周末一般在家。")).toBe(false);
   expect(await kept("底座是我一个人做研究。")).toBe(true);
-  // The same words again are left out, in any part.
-  expect(await kept("还有别的吗")).toBe(false);
-  expect(await kept("看重的是把事做完。")).toBe(false);
+  // The same words again are no longer refused by the app (docs/plans/condense-1127.md A5): the Skill says each card says one new thing.
+  expect(await kept("还有别的吗")).toBe(true);
 });
 
 test("a card's hypothesis is marked asked when it is shown, rated or not; one picked from the log keeps its id, a new one never takes an id on record", async () => {
@@ -743,7 +723,7 @@ test("cards ready together come in one round: each is kept, keyed and rated on i
   const card = (id: string, text: string) => ({ text, refs, falsifier: "如果独自时也常投入", hypothesisId: id, dimension: "D2" });
   const { rpc } = fakeRuntime([turn({ stage: "energy", insight: { text: "", refs: [] } }), turn({ stage: "energy" }),
     turn({ stage: "energy", insights: [card("h1", "你说投入的两次都是和人一起赶东西。"), card("h2", "你说底座主线是一个人做的研究。"),
-      card("h3", "你说投入的两次都是和人一起赶东西。")] })]);
+      card("h3", "你说周末一般在家。")] })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });
   await run({ sessionId: "s", text: "最投入的是和同学一起赶比赛的时候。" });
   await run({ sessionId: "s", text: "周末一般在家。" });
@@ -752,17 +732,16 @@ test("cards ready together come in one round: each is kept, keyed and rated on i
   await run({ sessionId: "s", text: "底座是我一个人做研究。" });
   const shown = store.listOnboardingMessages(workspaceId, "s").at(-1)!;
   const content = shown.content as { insight?: { text: string }; moreInsights?: Array<{ text: string }> };
-  // The third says what the first said and is left out.
   expect([content.insight?.text, ...(content.moreInsights ?? []).map((item) => item.text)])
-    .toEqual(["你说投入的两次都是和人一起赶东西。", "你说底座主线是一个人做的研究。"]);
+    .toEqual(["你说投入的两次都是和人一起赶东西。", "你说底座主线是一个人做的研究。", "你说周末一般在家。"]);
   const log = () => (JSON.parse(store.getSetting(workspaceId, "profile.model")!) as { hypotheses: Array<{ id: string; cardKey?: string; rated?: string }> }).hypotheses;
-  expect(log().map((item) => item.cardKey)).toEqual([`s#${shown.seq}`, `s#${shown.seq}.1`, undefined]);
+  expect(log().map((item) => item.cardKey)).toEqual([`s#${shown.seq}`, `s#${shown.seq}.1`, `s#${shown.seq}.2`]);
   // The second card is rated under its own key; a 部分对 newer than the inferences' last read goes beside the next cards (`cardsCheck`).
   expect(correctionUnread(store, workspaceId, "s")).toBe(false);
   expect(rateInsight(store, workspaceId, { sessionId: "s", seq: shown.seq, index: 1, verdict: "partial", correction: "是一个人做，但常和导师讨论" }))
     .toMatchObject({ ok: true, hypothesisId: "h2" });
   expect(log().find((item) => item.id === "h2")?.rated).toBe("partial");
-  expect(rateInsight(store, workspaceId, { sessionId: "s", seq: shown.seq, index: 2, verdict: "fits" })).toEqual({ ok: false, code: "INSIGHT_NOT_FOUND" });
+  expect(rateInsight(store, workspaceId, { sessionId: "s", seq: shown.seq, index: 3, verdict: "fits" })).toEqual({ ok: false, code: "INSIGHT_NOT_FOUND" });
   expect(correctionUnread(store, workspaceId, "s")).toBe(true);
   expect(correctedSince(store, workspaceId, "s", "2999-01-01T00:00:00Z")).toBe(false);
   // Never held back any more (replay 14: a nine-minute lane held the cards for ten rounds; 2026-11-14 audit): the correction stays
@@ -771,7 +750,7 @@ test("cards ready together come in one round: each is kept, keyed and rated on i
   expect(correctionUnread(store, workspaceId, "s")).toBe(true);
 });
 
-test("an uncertain hypothesis the log offers on one reply may be carded citing that one; any other card still needs two", async () => {
+test("a card may cite one reply: how many replies it joins is the Skill's (2026-11-27)", async () => {
   // Replay 13 (2026-11-14): with only open hypotheses on two replies offered, nine rounds had no card. The extraction's uncertain ones fill in.
   const one = [{ replyId: "reply-3", quote: "一个人做研究" }];
   // The one reply is older than the latest two: a card does not rest on what was just said alone (2026-11-15).
@@ -789,7 +768,7 @@ test("an uncertain hypothesis the log offers on one reply may be carded citing t
   await run({ sessionId: "s", text: "还有别的吗" });
   const content = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { insight?: { text: string; hypothesisId?: string }; moreInsights?: unknown[] };
   expect(content.insight).toMatchObject({ hypothesisId: "h7" });
-  expect(content.moreInsights ?? []).toEqual([]);
+  expect(content.moreInsights).toEqual([expect.objectContaining({ hypothesisId: "h8" })]);
 });
 
 test("no observation card beside the safety check, and none built on the disclosure or the answer to the check", async () => {
@@ -831,8 +810,7 @@ test("a reply naming self-harm is sent back once when the round is not the safet
   expect(safe.insight).toBeUndefined();
 });
 
-test("a disclosure's words leave the dialogue's thread once answered, a card retelling it is recorded, and the lesson is asked once by the app (2026-11-15)", async () => {
-  const fired = watchFired();
+test("a disclosure's words leave the dialogue's thread once answered, a card retelling it is not sent back, and the lesson is asked once by the app (2026-11-15)", async () => {
   const good = { text: "你最投入的时候身边都有人，一个人做研究推得最慢。", falsifier: "如果独自时也常投入",
     refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-7", quote: "一个人做研究" }] };
   // Replay 15: the card retold the disclosure in its own words; here it uses the disclosure's 「没人可说」.
@@ -858,10 +836,9 @@ test("a disclosure's words leave the dialogue's thread once answered, a card ret
   expect(rebuilt).toContain(DISCLOSURE_PLACEHOLDER);
   expect(rebuilt).not.toContain("自残过");
   expect(rebuilt).toContain("本人在 reply-3 谈到过一段艰难时期");
-  // A card using the disclosure's words is the model's to avoid (the snapshot says where the disclosure is); it is recorded, not sent back
+  // A card using the disclosure's words is the model's to avoid (the snapshot says where the disclosure is); it is not sent back
   // (2026-11-25). The snapshot carries the disclosure's note.
   expect((await last("一个人做研究时最慢。")).insight).toMatchObject({ text: echo.text });
-  expect(fired()).toEqual([expect.objectContaining({ rule: "IR-123", detail: "a card used words only the disclosure said" })]);
   expect(dialogue(prompts).filter((prompt) => prompt.includes("那段经历不作观察卡的材料"))).toHaveLength(0);
   expect(dialogue(prompts).at(-1)).toContain("四、本人在 reply-3");
   expect(dialogue(prompts).some((prompt) => prompt.includes("自残过") || prompt.includes("现在没有了"))).toBe(true);
@@ -882,15 +859,13 @@ test("the extraction never reads a disclosure's words: the reply goes to it as t
   expect(extraction(prompts).some((prompt) => prompt.includes(DISCLOSURE_PLACEHOLDER))).toBe(true);
 });
 
-test("the dialogue reads the scale as readings, never taps; a reply quoting scores is recorded, not sent back (2026-11-22, IR-136 retired)", async () => {
-  const fired = watchFired();
+test("the dialogue reads the scale as readings, never taps; a reply quoting scores is not sent back (2026-11-22, IR-136 retired)", async () => {
   const { rpc, prompts } = fakeRuntime([turn({ stage: "energy", reply: "你尽责性 5/5，很有条理。" })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
   await run({ sessionId: "s", text: "【我做事有条理】点选：5/5（非常符合）\n周末一般在家。" });
   expect(dialogue(prompts)).toHaveLength(1);
   expect(dialogue(prompts)[0]).toContain("【我做事有条理】已点选（读数见 scaleReadings）");
   expect(dialogue(prompts)[0]).not.toContain("点选：5/5");
-  expect(fired()).toEqual([expect.objectContaining({ rule: "IR-165", detail: "reply quoted the scale's scores" })]);
 });
 
 test("a reply saying what the card beside it says is no longer sent back (2026-11-22, IR-133 retired)", async () => {
@@ -958,16 +933,16 @@ test("a round's verdicts and the reply's own questions are in the ledger before 
   expect(third).toContain("- portrait:method｜做事方法｜answered ← reply-3「先做往年题」");
 });
 
-test("a free-text round that never marked its part is sent back once for `mark_round`, so the part moves on (replay 2026-11-23)", async () => {
+test("a free-text round that never marked its part keeps the part it started in, on its first answer (2026-11-27)", async () => {
   const reply = "那接下来谈精力：最近哪一件事最消耗你？";
-  const { rpc, prompts } = fakeRuntime([turn(), reply, reply]);
+  const { rpc, prompts } = fakeRuntime([turn(), reply]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
   await run({ sessionId: "s", text: "先说经历" });
-  // Unmarked, it is sent back once naming the tool; its second answer stands, marked or not.
+  const before = (store.getOnboardingSession(workspaceId, "s")!.coverage as { stage?: string }).stage;
+  // Unmarked, it is not sent back (the Skill asks for the mark); the round stays in the part it started in.
   expect(await run({ sessionId: "s", text: "工作给我的是自由。" })).toEqual({ state: "asked", sessionId: "s" });
-  expect(prompts()).toHaveLength(3);
-  expect(prompts().at(-1)).toContain("mark_round");
-  expect(store.listOnboardingMessages(workspaceId, "s").at(-1)!.content).toMatchObject({ reply });
+  expect(prompts()).toHaveLength(2);
+  expect(store.listOnboardingMessages(workspaceId, "s").at(-1)!.content).toMatchObject({ reply, ...(before ? { stage: before } : {}) });
 
   // A round that marked its part goes through on its first answer, in the part it marked.
   const marks: AgentScript = async ({ ask }) => {
@@ -979,25 +954,6 @@ test("a free-text round that never marked its part is sent back once for `mark_r
   await again({ sessionId: "t", text: "健身回血。" });
   expect(marked.prompts()).toHaveLength(2);
   expect(store.listOnboardingMessages(workspaceId, "t").at(-1)!.content).toMatchObject({ reply, stage: "energy" });
-});
-
-test("a round's note says what the person asked the interviewer, and how long the part has run from its sixth round (replay 2026-11-23)", async () => {
-  const replies = Array.from({ length: 7 }, () => "接着说。");
-  const marks: AgentScript = async ({ ask }) => {
-    await ask("item/tool/call", { callId: "m", tool: "mark_round", arguments: { stage: "situation" } });
-  };
-  const { rpc, prompts } = fakeRuntime([turn(), ...replies], { script: marks });
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
-  await run({ sessionId: "s", text: "先说经历" });
-  // The card's own question 【…？】 is not the person's; their own is said back in the note.
-  await run({ sessionId: "s", text: "【最想先试哪个？】选择：咨询。你每轮都换一个方向，到底哪个最适合我？" });
-  const note = () => prompts().at(-1)!.split("\n\n〔").at(-1) ?? "";
-  expect(note()).toContain("本人在这条里问了你：「你每轮都换一个方向，到底哪个最适合我？」");
-  expect(note()).not.toContain("最想先试哪个");
-  expect(note()).not.toContain("已到第");
-  for (let round = 3; round <= 6; round += 1) await run({ sessionId: "s", text: "好。" });
-  expect(note()).not.toContain("问了你");
-  expect(note()).toContain("当前部分 situation 连这一轮已到第 6 轮");
 });
 
 test("the person's messages are at most a thousand a session, counted as a turn starts (2026-11-22)", async () => {
@@ -1107,8 +1063,7 @@ test("as the person reads a round: the safety reply ends at its help lines; the 
 // 2026-11-25 (「访谈账本驱动」): the days the person gave are in the snapshot and the Skill says a reply writes no other; a reply that does is
 // recorded (IR-006), not sent back. What keeps a made-up day off the ledger and the calendar is the write step (IR-005): the extraction
 // cites only the person's words or a file.
-test("a reply that sets a date nobody gave is recorded, not sent back; the snapshot lists the days the person did give", async () => {
-  const fired = watchFired();
+test("a reply that sets a date nobody gave is not sent back; the snapshot lists the days the person did give", async () => {
   // A day ten days ahead: a fixed 11 月 17 日 stopped being invented on that day (it was today, 2026-11-17).
   const ahead = new Date(Date.now() + 10 * 86_400_000);
   const reply = `试做定在 ${ahead.getMonth() + 1} 月 ${ahead.getDate()} 日：约两位从业者聊一次。`;
@@ -1117,21 +1072,18 @@ test("a reply that sets a date nobody gave is recorded, not sent back; the snaps
   await run({ sessionId: "s", text: "【未来两周先做哪一件？】选择：约两位从业者聊一次" });
   expect(dialogue(prompts)).toHaveLength(1);
   expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string }).reply).toBe(reply);
-  expect(fired()).toEqual([expect.objectContaining({ rule: "IR-006" })]);
   await run({ sessionId: "s", text: "12 月 5 日要交初稿。" });
   expect(dialogue(prompts).at(-1)).toContain("- reply-3：12 月 5 日");
 });
 
 // 2026-11-25: whether a question was asked and answered is in the snapshot (the ledger), so 「还没答」 and the cards' notation are the
-// model's to avoid; recorded (IR-190, IR-191), not sent back.
-test("a reply copying a card's notation, or saying a question still waits, is recorded, not sent back (2026-11-23, W-314, W-315)", async () => {
-  const fired = watchFired();
+// model's to avoid (the Skill); not sent back.
+test("a reply copying a card's notation, or saying a question still waits, is not sent back (2026-11-23, W-314, W-315)", async () => {
   const { rpc, prompts } = fakeRuntime([turn({ reply: "清洗先定一条规则。[【问卷清洗】已点选]" }), turn({ reply: "上面那问还没答：接下来三四年你在做什么？" })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });
   await run({ sessionId: "s", text: "卡在清洗缺失值。" });
   await run({ sessionId: "s", text: "先这样。" });
   expect(dialogue(prompts)).toHaveLength(2);
-  expect(fired().map((item) => item.rule)).toEqual(["IR-190", "IR-191"]);
   expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string }).reply).toBe("上面那问还没答：接下来三四年你在做什么？");
 });
 
@@ -1181,13 +1133,13 @@ test("a line's goal is chosen inside the conversation: its candidates go out as 
   await run({ sessionId: "s", text: `【${asked!.text}】选择：有趣；值得信赖` });
   const lines = JSON.parse(store.getSetting(workspaceId, "lines.v1")!) as Array<{ id: string; goalParts?: string[] }>;
   expect(lines.find((line) => line.id === "media")?.goalParts).toEqual(["有趣", "值得信赖"]);
-  expect(store.listEvents(workspaceId, { type: "line.updated" }).at(-1)?.payload).toMatchObject({ via: "interview" });
+  expect(store.listEvents(workspaceId, { type: "line.changed", change: "updated" }).at(-1)?.payload).toMatchObject({ via: "interview" });
 });
 
 test("the portrait framework has one copy: no Skill keeps its own table or points at another Skill's", async () => {
   const { readFileSync } = await import("node:fs");
-  const skill = (name: string) => readFileSync(new URL(`../../../skills/marketplace/plugins/crossline/skills/${name}/SKILL.md`, import.meta.url), "utf8");
-  for (const name of ["crossline-onboarding", "crossline-onboarding-extract", "crossline-onboarding-research", "crossline-portrait-writer"]) {
+  const skill = (name: string) => readFileSync(new URL(`../../../skills/marketplace/plugins/crossline/skills/${name.split(":")[0]}/SKILL.md`, import.meta.url), "utf8");
+  for (const name of ["crossline-onboarding", "crossline-onboarding-extract", "crossline-research:onboarding", "crossline-portrait:report"]) {
     expect(skill(name)).not.toContain("| D0 背景与约束 |");
     expect(skill(name)).not.toMatch(/见访谈 Skill[^。]*画像框架/u);
   }
@@ -1210,7 +1162,7 @@ test("a question still failing its check after the repairs is left out, named to
   const { rpc, prompts } = fakeRuntime([kept, kept, kept, turn()]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   await run({ sessionId: "s1", text: "西湖那篇 10/31 前要投出，数据下周到。" });
-  const [edited] = store.listEvents(workspaceId, { type: "onboarding.round_edited" });
+  const [edited] = store.listEvents(workspaceId, { type: "onboarding.changed", change: "round_edited" });
   expect(edited?.payload).toMatchObject({ removed: [{ why: expect.stringContaining("「师兄给的文档。」重复") }] });
   // The room question is the model's to judge (the screen that took it out is gone): it reached the person.
   expect((store.listOnboardingMessages(workspaceId, "s1").at(-1)!.content as { questions: Array<{ id: string }> }).questions.map((question) => question.id)).toEqual(["q-room"]);
@@ -1236,8 +1188,8 @@ test("what the extraction could not record is named to the next round with why, 
   const { rpc, prompts } = fakeRuntime([firstAnswer, turn()]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   await run({ sessionId: "s1", text: "每周四 16:00 组会。" });
-  store.appendEvent({ ownerId: "user-1", workspaceId, idempotencyKey: "u1", type: "dates.unrecorded", entityId: "s1",
-    payload: { dropped: [{ title: "周四组会", code: "DATE_TIME_INVALID" }, { title: "午饭", code: "OFF_HOURS" }] } });
+  store.appendEvent({ ownerId: "user-1", workspaceId, idempotencyKey: "u1", type: "onboarding.changed", entityId: "s1",
+    payload: { dropped: [{ title: "周四组会", code: "DATE_TIME_INVALID" }, { title: "午饭", code: "OFF_HOURS" }], change: "dates_unrecorded" } });
   await run({ sessionId: "s1", text: "好的" });
   const second = dialogue(prompts)[1]!;
   expect(second).toContain("notRecorded");

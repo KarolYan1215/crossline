@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { DRILL_ANSWERED, DRILL_GRADED, DRILL_ISSUE_FAILED, DRILL_ISSUED, GATE_JUDGED, type DrillIssuedPayload } from "@crossline/core";
+import { GATE_JUDGED, type DrillIssuedPayload } from "@crossline/core";
 import { fakeRuntime } from "../testing/fake-runtime";
 import { DESIGN_FILE, DRILL_SKILL, drillGradePass, drillIssuePass, iverilogSimulator, type Simulator } from "./drill";
 
@@ -10,7 +10,7 @@ let store: CrosslineStore;
 let ws: string;
 const NOW = new Date("2026-11-24T15:00:00.000Z");
 const WEEK = "2026-11-23";
-const SKILL = `crossline:${DRILL_SKILL}`;
+const SKILL = DRILL_SKILL;
 
 beforeEach(() => {
   store = new CrosslineStore(":memory:");
@@ -42,7 +42,7 @@ const DESIGN = ["module m(input a, output y1, output y2, output y3, output y4);"
 const bug = (n: number, replacement = `BAD${n}`) => ({ id: `B${n}`, line: n + 1, original: "= a", replacement: `= ${replacement}`, description: `第 ${n} 处错误` });
 const exercise = (overrides: Record<string, unknown> = {}) => JSON.stringify({ title: "四路直通找错", topic: "pass through", design: DESIGN,
   testbench: "module tb; initial begin $display(\"TB_RESULT PASS\"); $finish; end endmodule", readme: "# 说明", bugs: [bug(1), bug(2), bug(3)], ...overrides });
-const issued = () => store.listEvents(ws, { type: DRILL_ISSUED }).map((event) => event.payload as DrillIssuedPayload);
+const issued = () => store.listEvents(ws, { type: "gate.changed", change: "drill_issued" }).map((event) => event.payload as DrillIssuedPayload);
 
 test("a clean design that fails its own testbench goes back with the simulator output, and the repaired one is issued with its key", async () => {
   const runtime = fakeRuntime([exercise({ design: DESIGN.replace("endmodule", "// BROKEN\nendmodule") }), exercise()], SKILL);
@@ -99,16 +99,17 @@ test("fewer than three working bugs: nothing issued, tried once more on a later 
   const turns = runtime.turns();
   expect(await pass()).toBe(false);
   expect(runtime.turns()).toBe(turns);
-  expect(store.listEvents(ws, { type: DRILL_ISSUE_FAILED }).map((event) => event.payload)).toEqual([
-    { week: WEEK, reason: "too_few_bugs", bugs: 1, attempt: 1 }, { week: WEEK, reason: "too_few_bugs", bugs: 1, attempt: 2 }]);
+  expect(store.listEvents(ws, { type: "gate.changed", change: "drill_issue_failed" }).map((event) => event.payload)).toEqual([
+    { week: WEEK, reason: "too_few_bugs", bugs: 1, attempt: 1, change: "drill_issue_failed" },
+    { week: WEEK, reason: "too_few_bugs", bugs: 1, attempt: 2, change: "drill_issue_failed" }]);
   expect(issued()).toEqual([]);
 });
 
 test("an answer is graded once as a gate judgement against the key, a fixed file simulated first, and summarized", async () => {
   await drillIssuePass(store, ws, fakeRuntime([exercise()], SKILL).rpc, "C:\\repo", NOW, { simulator: fakeSim(), log: () => {} });
-  const answered = store.appendEvent({ ownerId: "user-1", workspaceId: ws, type: DRILL_ANSWERED, entityId: WEEK, idempotencyKey: `${DRILL_ANSWERED}:${WEEK}`,
+  const answered = store.appendEvent({ ownerId: "user-1", workspaceId: ws, type: "gate.changed", entityId: WEEK, idempotencyKey: `drill.answered:${WEEK}`,
     payload: { week: WEEK, issuedId: "x", answers: [{ line: 2, description: "y1 接错了" }, { line: 6, description: "多余的 endmodule" }],
-      fixedFile: { name: DESIGN_FILE, text: DESIGN } } });
+      fixedFile: { name: DESIGN_FILE, text: DESIGN }, change: "drill_answered" } });
   const detail = { found: 1, total: 3, falsePositives: 1, fixedFile: "passes", matches: [
     { bug: "B1", verdict: "found", answer: "A1", why: "行号与原因一致" }, { bug: "B2", verdict: "missed", answer: "", why: "未提及" }, { bug: "B3", verdict: "missed", answer: "", why: "未提及" }] };
   const runtime = fakeRuntime([JSON.stringify({ items: [{ subject: answered.eventId, verdict: "graded", confidence: "high", reason: "找到 1/3",
@@ -124,8 +125,8 @@ test("an answer is graded once as a gate judgement against the key, a fixed file
   const judged = store.listEvents(ws, { type: GATE_JUDGED });
   expect(judged).toHaveLength(1);
   expect(judged[0]!.payload).toMatchObject({ gate: "drill", subject: { kind: "drill", id: answered.eventId }, run: 1, asked: false, output: { verdict: "graded", detail } });
-  expect(store.listEvents(ws, { type: DRILL_GRADED }).map((event) => event.payload)).toEqual([
-    { week: WEEK, found: 1, total: 3, falsePositives: 1, judgedId: judged[0]!.eventId }]);
+  expect(store.listEvents(ws, { type: "gate.changed", change: "drill_graded" }).map((event) => event.payload)).toEqual([
+    { week: WEEK, found: 1, total: 3, falsePositives: 1, judgedId: judged[0]!.eventId, change: "drill_graded" }]);
   expect(await drillGradePass(store, ws, runtime.rpc, "C:\\repo", NOW, { simulator: sim })).toBe(0);
   expect(runtime.turns()).toBe(1);
 });

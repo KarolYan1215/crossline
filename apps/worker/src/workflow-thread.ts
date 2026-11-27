@@ -223,7 +223,7 @@ function apply(deps: WorkflowThreadDeps, workspaceId: string, thread: WorkflowTh
   const firstWords = store.listWorkflowTurns(workspaceId, thread.id).find((turn) => turn.role === "person")?.text ?? "";
   const { automation } = installAutomation(store, workspaceId, plan, id, { kind: "asked", text: firstWords, requestId: thread.id }, previous, now);
   store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `automation.${previous ? "changed" : "created"}:${turnId}`,
-    type: previous ? "automation.changed" : "automation.created", entityId: id, payload: { requestId: thread.id, turnId, name: plan.name, trigger: plan.trigger.type, action: plan.action.kind } });
+    type: "automation.changed", entityId: id, payload: { change: previous ? "edited" : "created", requestId: thread.id, turnId, name: plan.name, trigger: plan.trigger.type, action: plan.action.kind } });
   if (store.listWorkflowVersions(workspaceId, "automation", id).length > before) {
     const version = store.annotateWorkflowVersion(workspaceId, "automation", id, { source: "thread", note: plan.summary, turnId });
     if (version) items.push({ type: "version", version, note: plan.summary });

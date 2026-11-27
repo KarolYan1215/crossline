@@ -30,7 +30,7 @@ test("a milestone carries its score line as a threshold, and a reached one gets 
   expect(await recordRetrospective(TEST_CTX, "m1", "提前两天模拟")).toEqual({ ok: true });
   board = await loadMilestoneBoard(TEST_CTX);
   expect(board.milestones.find((item) => item.id === "m1")!.retrospective?.note).toBe("提前两天模拟");
-  expect(store.listEvents(workspaceId, { type: "milestone.retrospective" })[0]?.payload).toMatchObject({ identityId: "research", note: "提前两天模拟" });
+  expect(store.listEvents(workspaceId, { type: "milestone.changed", change: "retrospective" })[0]?.payload).toMatchObject({ identityId: "research", note: "提前两天模拟" });
 });
 
 test("a draft carries its risks (the review for this version, else the rule estimate), the system's importance, and a date editable before approval", async () => {
@@ -57,7 +57,7 @@ test("a draft carries its risks (the review for this version, else the rule esti
   draft = (await loadMilestoneBoard(TEST_CTX)).milestones.find((item) => item.id === "d1")!;
   // The date moved: the old review no longer describes this milestone, and the estimate is back.
   expect(draft).toMatchObject({ deadline: "2026-12-01", riskSource: "rules" });
-  expect(store.listEvents(workspaceId, { type: "milestone.revised" })).toHaveLength(1);
+  expect(store.listEvents(workspaceId, { type: "milestone.changed", change: "revised" })).toHaveLength(1);
 });
 
 test("importance set on a draft is shown as the person's, and takes effect as the milestone's goal setting when it is approved", async () => {

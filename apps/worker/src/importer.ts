@@ -23,7 +23,7 @@ import type { MediaDescription } from "@crossline/core";
 
 /**
  * Bringing another tool's list in (docs/personal-agent.md §9; the shared shapes and parsers are in `packages/core/src/task-import.ts`).
- * A source is read, its items not seen before are put in a batch, `crossline-import-triage` sorts them a chunk at a time (intake work,
+ * A source is read, its items not seen before are put in a batch, `crossline-inbox-triage:import` sorts them a chunk at a time (intake work,
  * low tier), and the person confirms the batch once on the 「导入核对」 screen. Confirming writes the kept items as captures — analysed at
  * once like anything typed — folds the merged ones into the task they repeat, and remembers every item so it is never offered again.
  *
@@ -31,7 +31,7 @@ import type { MediaDescription } from "@crossline/core";
  * `IMPORT_DAILY_CAPTURES` a day, the person told once), because they already agreed to the source. Todoist alone is written back to,
  * and only when its account's 「完成后在 Todoist 里关闭」 is on: an imported task finished here closes there.
  */
-export const IMPORT_TRIAGE_SKILL = "crossline:crossline-import-triage";
+export const IMPORT_TRIAGE_SKILL = "crossline:crossline-inbox-triage:import";
 /** Files the web writes for a paste, a CSV or a screenshot (`<dataDir>/imports/<workspace>/<name>`), read once and deleted. */
 export const IMPORT_FILE = /^[a-z0-9-]{8,40}\.(png|jpg|webp|gif|csv|txt)$/;
 const FILE_MAX = 8_000_000;
@@ -122,8 +122,8 @@ export async function connectSource(deps: ImportDeps, workspaceId: string, input
       ...(kind === "notion" ? { databaseId, ...(databaseTitle ? { databaseTitle } : {}) } : {}), daily: true, writeBack: false,
       lastReadAt: nowOf(deps).toISOString(), lastItems: items.length };
     saveSources(deps.store, workspaceId, [...importSources(deps.store, workspaceId), source]);
-    deps.store.appendEvent({ ownerId: ownerOf(deps.store, workspaceId), workspaceId, idempotencyKey: `import.connected:${id}`, type: "import.connected", entityId: id,
-      payload: { kind, label: source.label } });
+    deps.store.appendEvent({ ownerId: ownerOf(deps.store, workspaceId), workspaceId, idempotencyKey: `import.connected:${id}`, type: "person.decided", entityId: id,
+      payload: { kind, label: source.label, subject: "import", decision: "connected" } });
     const batch = startBatch(deps, workspaceId, { kind, sourceId: id, label: source.label, items });
     return { ok: true, source, ...(batch ? { batchId: batch.id } : {}) };
   } catch (error) { return { ok: false, ...errorText(deps, workspaceId, error) }; }
@@ -136,7 +136,7 @@ export function removeSource(deps: ImportDeps, workspaceId: string, id: string):
   saveSources(deps.store, workspaceId, list.filter((item) => item.id !== id));
   void deps.secrets.remove(workspaceId, importSecretName(id));
   saveBatches(deps.store, workspaceId, importBatches(deps.store, workspaceId).filter((batch) => batch.sourceId !== id));
-  deps.store.appendEvent({ ownerId: ownerOf(deps.store, workspaceId), workspaceId, idempotencyKey: `import.removed:${id}`, type: "import.removed", entityId: id, payload: {} });
+  deps.store.appendEvent({ ownerId: ownerOf(deps.store, workspaceId), workspaceId, idempotencyKey: `import.removed:${id}`, type: "person.decided", entityId: id, payload: { subject: "import", decision: "removed" } });
   return true;
 }
 
@@ -236,8 +236,8 @@ export function confirmBatch(deps: ImportDeps, workspaceId: string, batchId: str
     return { keep: choice ? choice.keep : ticked(item.suggestion.decision), lineId: choice?.lineId ?? item.suggestion.lineId };
   });
   saveBatches(deps.store, workspaceId, importBatches(deps.store, workspaceId).filter((item) => item.id !== batchId));
-  deps.store.appendEvent({ ownerId: ownerOf(deps.store, workspaceId), workspaceId, idempotencyKey: `import.confirmed:${batchId}`, type: "import.confirmed", entityId: batchId,
-    payload: { kind: batch.kind, sourceId: batch.sourceId, items: batch.items.length, ...outcome } });
+  deps.store.appendEvent({ ownerId: ownerOf(deps.store, workspaceId), workspaceId, idempotencyKey: `import.confirmed:${batchId}`, type: "person.decided", entityId: batchId,
+    payload: { kind: batch.kind, sourceId: batch.sourceId, items: batch.items.length, ...outcome, subject: "import", decision: "confirmed" } });
   if (outcome.captured) { try { deps.onCaptured?.(workspaceId); } catch { /* the analysis runs at the next intake anyway */ } }
   return { ok: true, ...outcome };
 }
@@ -268,8 +268,8 @@ function applyItems(deps: ImportDeps, workspaceId: string, batch: ImportBatch, d
       recordFold(deps.store, workspaceId, { kind: "duplicate", keep: target.id, keepTitle: target.title,
         why: t("从 {{source}} 导入的「{{title}}」与「{{target}}」重复", { source: t(source), title: item.title, target: target.title }) },
       { id: importCaptureId(item), title: item.title, intent: item.notes || item.title, source: "import" });
-      deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `import.item_merged:${seenKey(item)}`, type: "import.item_merged", entityId: target.id,
-        payload: { kind: item.kind, externalId: item.externalId, sourceId: batch.sourceId, title: item.title } });
+      deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `import.item_merged:${seenKey(item)}`, type: "import.changed", entityId: target.id,
+        payload: { kind: item.kind, externalId: item.externalId, sourceId: batch.sourceId, title: item.title, change: "item_merged" } });
       merged += 1; handled.push(item); continue;
     }
     if (captured >= cap) continue;
@@ -282,8 +282,8 @@ function applyItems(deps: ImportDeps, workspaceId: string, batch: ImportBatch, d
       ...(item.labels.length ? [t("标签：{{labels}}", { labels: item.labels.join(", ") })] : []),
       ...(item.notes ? [t("备注：{{notes}}", { notes: item.notes })] : [])];
     deps.store.capture({ id, ownerId, workspaceId, title: item.title.slice(0, 240), context: parts.join("\n").slice(0, 1200) }, `import:${seenKey(item)}`);
-    deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `import.item_captured:${seenKey(item)}`, type: "import.item_captured", entityId: id,
-      payload: { kind: item.kind, externalId: item.externalId, sourceId: batch.sourceId, dueDate: due, lineId: choice.lineId } });
+    deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `import.item_captured:${seenKey(item)}`, type: "import.changed", entityId: id,
+      payload: { kind: item.kind, externalId: item.externalId, sourceId: batch.sourceId, dueDate: due, lineId: choice.lineId, change: "item_captured" } });
     captured += 1; handled.push(item);
   }
   remember(deps.store, workspaceId, handled);
@@ -293,7 +293,7 @@ function applyItems(deps: ImportDeps, workspaceId: string, batch: ImportBatch, d
 /** The day an imported item carried, for a work order the analysis promoted without reading one (`recordWaitingAndDates`). */
 export function importedDueDate(store: CrosslineStore, workspaceId: string, id: string): string | undefined {
   if (!importOrigin(id)) return undefined;
-  const event = store.listEvents(workspaceId, { type: "import.item_captured", entityId: id }).at(-1);
+  const event = store.listEvents(workspaceId, { type: "import.changed", change: "item_captured", entityId: id }).at(-1);
   const due = (event?.payload as { dueDate?: string } | undefined)?.dueDate;
   return due && /^\d{4}-\d{2}-\d{2}$/.test(due) ? due : undefined;
 }
@@ -397,8 +397,8 @@ export async function writeBackPass(deps: ImportDeps, workspaceId: string): Prom
   const sources = importSources(deps.store, workspaceId).filter((source) => source.kind === "todoist" && source.writeBack);
   if (!sources.length) return 0;
   const accepted = new Set(deps.store.listWorkOrders(workspaceId).filter((order) => order.state === "accepted").map((order) => order.id));
-  const closedAlready = new Set(deps.store.listEvents(workspaceId, { type: "import.closed_upstream" }).map((event) => event.entityId));
-  const mapped = [...deps.store.listEvents(workspaceId, { type: "import.item_captured" }), ...deps.store.listEvents(workspaceId, { type: "import.item_merged" })]
+  const closedAlready = new Set(deps.store.listEvents(workspaceId, { type: "import.changed", change: "closed_upstream" }).map((event) => event.entityId));
+  const mapped = [...deps.store.listEvents(workspaceId, { type: "import.changed", change: "item_captured" }), ...deps.store.listEvents(workspaceId, { type: "import.changed", change: "item_merged" })]
     .map((event) => ({ taskId: event.entityId, ...(event.payload as { kind?: string; externalId?: string; sourceId?: string }) }))
     .filter((item) => item.kind === "todoist" && item.externalId && accepted.has(item.taskId) && !closedAlready.has(`todoist:${item.externalId}`));
   let closed = 0;
@@ -411,7 +411,7 @@ export async function writeBackPass(deps: ImportDeps, workspaceId: string): Prom
       try {
         await closeTodoistTask(token, item.externalId!, deps.fetch);
         deps.store.appendEvent({ ownerId: ownerOf(deps.store, workspaceId), workspaceId, idempotencyKey: `import.closed_upstream:todoist:${item.externalId}`,
-          type: "import.closed_upstream", entityId: `todoist:${item.externalId}`, payload: { sourceId: source.id, taskId: item.taskId } });
+          type: "import.changed", entityId: `todoist:${item.externalId}`, payload: { sourceId: source.id, taskId: item.taskId, change: "closed_upstream" } });
         closed += 1;
       } catch (error) {
         patchSource(deps.store, workspaceId, source.id, { lastError: errorText(deps, workspaceId, error).message });

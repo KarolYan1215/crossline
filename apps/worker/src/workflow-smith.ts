@@ -68,7 +68,7 @@ const growTitle = (text: string, locale?: Locale) => tFor(locale)("把这类事�
 
 /** Errands already tried as a workflow in the last month — except an attempt whose run was interrupted and is due to run again. */
 const attemptedTaskIds = (store: CrosslineStore, workspaceId: string, now: Date, again: (taskId: string) => AgentChain | undefined) =>
-  new Set(store.listEvents(workspaceId, { type: "skill.grown.attempted" })
+  new Set(store.listEvents(workspaceId, { type: "skill.changed", change: "grown_attempted" })
     .filter((event) => now.getTime() - Date.parse(event.createdAt) < ATTEMPT_COOLDOWN_DAYS * 86_400_000)
     .filter((event) => !again(String((event.payload as { taskId?: string }).taskId ?? "")))
     .flatMap((event) => ((event.payload as { taskIds?: string[] }).taskIds ?? [])));
@@ -82,7 +82,7 @@ const shared = (a: string, b: string) => { const left = textTerms(a); let count 
  */
 export function notRepeatedGrowResults(store: CrosslineStore, workspaceId: string, rows = listAgentTasks(store, workspaceId)): string[] {
   const byId = new Map(rows.map((row) => [row.taskId, row]));
-  return store.listEvents(workspaceId, { type: "skill.grown.attempted" }).flatMap((event) => {
+  return store.listEvents(workspaceId, { type: "skill.changed", change: "grown_attempted" }).flatMap((event) => {
     const { taskId, taskIds } = event.payload as { taskId?: string; taskIds?: unknown };
     const run = taskId ? byId.get(taskId) : undefined;
     if (!run || run.status !== "needs_review" || run.settled || !Array.isArray(taskIds)) return [];
@@ -106,7 +106,7 @@ export function growCandidates(store: CrosslineStore, workspaceId: string, now =
   const again = (taskId: string) => { const chain = chainOf.get(taskId); return chain && chain.latest.taskId === taskId && retryDue(chain, now) ? chain : undefined; };
   const lastAttempt = new Map<string, { taskId: string; state: string }>();
   const settled = new Set<string>();
-  for (const event of store.listEvents(workspaceId, { type: "skill.grown.attempted" })) {
+  for (const event of store.listEvents(workspaceId, { type: "skill.changed", change: "grown_attempted" })) {
     const payload = event.payload as { requestId?: string; taskId?: string; state?: string };
     if (!payload.requestId) continue;
     // A kind the person had not allowed was said once: that request is settled.
@@ -119,7 +119,7 @@ export function growCandidates(store: CrosslineStore, workspaceId: string, now =
     const chain = again(attempt.taskId);
     if (chain && !settled.has(requestId)) retryOf.set(requestId, chain); else tried.add(requestId);
   }
-  const asked = store.listEvents(workspaceId, { type: "workflow.requested" }).filter((event) => !tried.has(event.entityId)).map((event): GrowCandidate | undefined => {
+  const asked = store.listEvents(workspaceId, { type: "skill.changed", change: "workflow_requested" }).filter((event) => !tried.has(event.entityId)).map((event): GrowCandidate | undefined => {
     const payload = event.payload as { text?: string; lineId?: string; category?: string };
     const text = String(payload.text ?? "").trim();
     // A request on no known line is not guessed onto the first one; it waits (the input box now always names one).
@@ -276,7 +276,7 @@ export async function installGrown(store: CrosslineStore, workspaceId: string, c
   const t = tFor(locale);
   const reject = (reason: string, extra: Record<string, unknown> = {}) => {
     store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.rejected:${now.getTime()}:${randomUUID().slice(0, 6)}`,
-      type: "skill.grown.rejected", entityId: candidate.lineId, payload: { reason, text: candidate.text.slice(0, 200), ...extra } });
+      type: "skill.changed", entityId: candidate.lineId, payload: { reason, text: candidate.text.slice(0, 200), ...extra, change: "grown_rejected" } });
     return { state: "rejected" as const, reason };
   };
   if (outcome.state !== "done") return reject(outcome.state === "failed" ? outcome.message || t("运行失败") : outcome.state === "blocked" ? outcome.message : t("助手未获准做这类工作"));
@@ -315,8 +315,8 @@ export async function installGrown(store: CrosslineStore, workspaceId: string, c
     scan, review: { ...reviewed.output, final }, status: reads ? "needs_consent" : "active", pinned: false, createdAt: at, updatedAt: at, lastUsedAt: at };
   store.setSetting(workspaceId, grownSkillFilesKey(id), JSON.stringify({ files: read.files }));
   writeGrownSkills(store, workspaceId, [...records, record]);
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.created:${id}`, type: "skill.grown.created", entityId: id,
-    payload: { id, name: front.name, lines: manifest.lines, category: manifest.category, trigger: manifest.trigger, schedule: manifest.schedule, final, origin: candidate.origin.kind, taskId: outcome.taskId } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.created:${id}`, type: "skill.changed", entityId: id,
+    payload: { id, name: front.name, lines: manifest.lines, category: manifest.category, trigger: manifest.trigger, schedule: manifest.schedule, final, origin: candidate.origin.kind, taskId: outcome.taskId, change: "grown_created" } });
   // Which line and why, first: a workflow the system noticed on one line, said right after a request about another, read as its answer.
   // A default pack's label (「研究者」) has English; a name the person gave their line is shown as written.
   const lineLabel = t(identityLines(store, workspaceId).find((line) => line.id === candidate.lineId)?.label ?? candidate.lineId);
@@ -486,7 +486,7 @@ export function resumeByPerson(store: CrosslineStore, workspaceId: string, recor
   const hosts = [...new Set(workflowAccess(record).access.filter((item) => item.login).map((item) => hostOfSite(item.site)).filter(Boolean))];
   const released = hosts.filter((host) => { const hold = siteHold(store, workspaceId, host, now); return releaseSite(store, workspaceId, host) && Boolean(hold); });
   if (released.length) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `site.resumed:${record.id}:${now.getTime()}`,
-    type: "site.resumed", entityId: record.id, payload: { hosts: released } });
+    type: "job.ran", entityId: record.id, payload: { hosts: released, job: "site.read", state: "resumed" } });
   return released;
 }
 const hostOfSite = (url: string) => { try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ""); } catch { return ""; } };
@@ -647,8 +647,8 @@ export function startFavouritesRun(store: CrosslineStore, workspaceId: string, r
   const day = now.toISOString().slice(0, 10);
   const log = collector.log ?? (() => {});
   // The page shows the workflow as running from here until `collect.ran` (a collection takes minutes to hours).
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `collect.started:${taskId}`, type: "collect.started", entityId: record.id,
-    payload: { taskId, listOnly: Boolean(plan.listOnly), notes: plan.targets?.length ?? 0 } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `collect.started:${taskId}`, type: "job.ran", entityId: record.id,
+    payload: { taskId, listOnly: Boolean(plan.listOnly), notes: plan.targets?.length ?? 0, job: "collect", state: "started" } });
   // A computer of the person's that runs a browser (a ready node offering one): the favourites are read there, in their own Chrome or
   // Edge, and nothing of the page sits in the server's memory (2026-10-24: read on the server, the list filled it at ~1360 notes).
   const job = (async () => {
@@ -715,8 +715,8 @@ export function startFavouritesRun(store: CrosslineStore, workspaceId: string, r
     for (let switches = 1; result.state === "handover"; switches += 1) {
       const next = collector.nodeBrowser?.(workspaceId);
       log({ type: "collect.handover", workspaceId, id: record.id, to: next?.host ?? "server", read: result.read.length });
-      store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `collect.handover:${taskId}:${switches}`, type: "collect.handover",
-        entityId: record.id, payload: { taskId, to: next?.host ?? "server", read: result.read.length } });
+      store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `collect.handover:${taskId}:${switches}`, type: "job.ran",
+        entityId: record.id, payload: { taskId, to: next?.host ?? "server", read: result.read.length, job: "collect", state: "handover" } });
       const rest = await stretch(next, switches < HANDOVERS_PER_RUN);
       // The notes this stretch counted as waiting include those the earlier one already read.
       result = { ...rest, listed: result.listed, listEnded: result.listEnded, read: [...result.read, ...rest.read], gone: [...result.gone, ...rest.gone],
@@ -724,10 +724,10 @@ export function startFavouritesRun(store: CrosslineStore, workspaceId: string, r
     }
     collector.memory?.release();
     releaseProfile(profileDir, "collect");
-    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `collect.ran:${taskId}`, type: "collect.ran", entityId: record.id,
-      payload: { taskId, state: result.state, mode: result.mode, listed: result.listed, listEnded: result.listEnded, ...(result.listCapped ? { listCapped: true } : {}),
+    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `collect.ran:${taskId}`, type: "job.ran", entityId: record.id,
+      payload: { taskId, result: result.state, mode: result.mode, listed: result.listed, listEnded: result.listEnded, ...(result.listCapped ? { listCapped: true } : {}),
         read: result.read.length, gone: result.gone.length, pending: result.pending,
-        ...(result.message ? { message: result.message } : {}), ...(result.trigger ? { trigger: result.trigger } : {}) } });
+        ...(result.message ? { message: result.message } : {}), ...(result.trigger ? { trigger: result.trigger } : {}), job: "collect", state: "done" } });
     // A run that broke is not started again by itself: the person is told and presses 「立即运行」 when they want it (2026-10-23).
     if (result.state === "failed") holdAfterFailure(store, workspaceId, result.message ?? t("浏览器出错"), new Date());
     log({ type: "collect.ran", workspaceId, id: record.id, state: result.state, mode: result.mode, read: result.read.length, pending: result.pending });
@@ -1014,15 +1014,15 @@ export function rememberRead(store: CrosslineStore, workspaceId: string, id: str
 
 /** How a run that reads sites ended: `partial` when its pages listed nothing. */
 function recordWorkflowResult(store: CrosslineStore, workspaceId: string, id: string, taskId: string, outcome: "done" | "partial", items: number, previous: number): void {
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.result:${id}:${taskId}`, type: "skill.grown.result",
-    entityId: id, payload: { id, taskId, outcome, items, previous } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.result:${id}:${taskId}`, type: "job.ran",
+    entityId: id, payload: { id, taskId, outcome, items, previous, job: "skill.grown.run", state: "result" } });
 }
 
 /** A run or reminder happened (at its time or by hand): recorded, and the idle clock starts again. */
 export function markWorkflowRun(store: CrosslineStore, workspaceId: string, id: string, outcome: string, now = new Date()): void {
   writeGrownSkills(store, workspaceId, readGrownSkills(store, workspaceId).map((item) => item.id === id ? { ...unheld(item), lastRunAt: now.toISOString(), lastUsedAt: now.toISOString() } : item));
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.ran:${id}:${now.getTime()}`, type: "skill.grown.ran",
-    entityId: id, payload: { id, outcome } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.ran:${id}:${now.getTime()}`, type: "job.ran",
+    entityId: id, payload: { id, outcome, job: "skill.grown.run", state: "done" } });
 }
 
 /** Once a day: grown workflows not used, run or kept by the person for thirty days are removed, and the person is told. */

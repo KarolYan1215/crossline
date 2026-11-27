@@ -59,7 +59,7 @@ export function decideDiligenceProposal(ctx: AccessContext, reportId: string, pr
   store.saveDiligenceReport({ ...report, proposals: proposals.map((item) => item.id === proposalId ? { ...item, status: decision } : item) });
   store.appendEvent({
     ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `diligence:decided:${reportId}:${proposalId}:${decision}:${Date.now()}`,
-    type: "diligence.decided", entityId: reportId, payload: { proposalId, decision }
+    type: "person.decided", entityId: reportId, payload: { proposalId, decision, subject: "diligence" }
   });
   // The proposal id is the researcher's own wording (「建议一」): hashed, so the capture id stays plain for every route that takes one.
   const captureId = `diligence-${reportId}-${/^[a-zA-Z0-9_-]+$/.test(proposalId) ? proposalId : createHash("sha256").update(proposalId).digest("hex").slice(0, 12)}`;

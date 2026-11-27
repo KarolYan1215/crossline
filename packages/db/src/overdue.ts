@@ -12,11 +12,9 @@ import type { CrosslineStore, StoredWorkOrder } from "./index";
  * - **self-set** — a due day the person typed, or one the system moved (the weekly commitment's 推, an earlier move of this pass): moved
  *   by the daily pass to the cautious finish at the measured pace plus two days, at most twice, then asked like an external one.
  *
- * Work whose due day is only its milestone's is the milestone's to settle (`date-advance.ts` step 2) and is not listed here.
+ * Work whose due day is only its milestone's is the milestone's to settle (`date-advance.ts` step 2) and is not listed here. A move is a
+ * `work_order.changed` `due_advanced`; the person's answer to the overdue question, a `task.changed` `overdue_resolved`.
  */
-export const DUE_ADVANCED_EVENT = "work_order.due_advanced";
-/** The person answered the overdue question for one due day (`overdue_task`). */
-export const OVERDUE_TASK_RESOLVED = "task.overdue_resolved";
 /** How many times a self-set due day is moved by itself before it is asked about instead. */
 export const SILENT_TASK_SHIFTS_MAX = 2;
 const OPEN = new Set(["approved", "preparing", "ready_for_human", "active", "blocked"]);
@@ -70,10 +68,10 @@ export function dueProvenance(store: CrosslineStore, workspaceId: string): (orde
     days.set(day, by);
     setBy.set(id, days);
   };
-  for (const event of store.listEvents(workspaceId, { type: "work_order.due_changed" })) note(event.entityId, (event.payload as { after?: unknown }).after, "person");
-  for (const event of store.listEvents(workspaceId, { type: "work_order.deferred" })) note(event.entityId, (event.payload as { dueAfter?: unknown }).dueAfter, "system");
+  for (const event of store.listEvents(workspaceId, { type: "work_order.changed", change: "due_changed" })) note(event.entityId, (event.payload as { after?: unknown }).after, "person");
+  for (const event of store.listEvents(workspaceId, { type: "work_order.changed", change: "deferred" })) note(event.entityId, (event.payload as { dueAfter?: unknown }).dueAfter, "system");
   const shifts = new Map<string, number>();
-  for (const event of store.listEvents(workspaceId, { type: DUE_ADVANCED_EVENT })) {
+  for (const event of store.listEvents(workspaceId, { type: "work_order.changed", change: "due_advanced" })) {
     note(event.entityId, (event.payload as { to?: unknown }).to, "system");
     shifts.set(event.entityId, (shifts.get(event.entityId) ?? 0) + 1);
   }

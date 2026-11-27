@@ -32,7 +32,7 @@ test("approved goal expands into sourced, bound drafts once; a step the person s
   // Steps of an approved milestone take effect by themselves. Sending something out used to hold it; since 2026-11-11 the person's own
   // send does not (only the assistant's would), so this one takes effect too, still marked high risk.
   const runtime = fakeRuntime([JSON.stringify({ steps: [step({ family: "deep_work", intent: "把实验方案发送给导师" })], dateCandidates: [], blockers: [] })],
-    "crossline:crossline-goal-backplanner");
+    "crossline:crossline-goal-backplanner:backplan");
   const backplan = createGoalBackplanner(store, workspaceId, "C:\\repo", () => runtime.rpc);
   const first = await backplan("m");
   expect(first.state).toBe("proposed");
@@ -43,7 +43,7 @@ test("approved goal expands into sourced, bound drafts once; a step the person s
   expect(await backplan("m")).toEqual(first);
   expect(runtime.turns()).toBe(1);
   expect(store.listWorkOrders(workspaceId)).toHaveLength(1);
-  expect(store.listEvents(workspaceId, { type: "goal.backplan_proposed" })).toHaveLength(1);
+  expect(store.listEvents(workspaceId, { type: "goal.changed", change: "backplan_proposed" })).toHaveLength(1);
   store.close();
 });
 
@@ -56,7 +56,7 @@ test("a real account's approved milestone (UUID owner) is backplanned, drafts ow
   store.saveMilestone({ id: "m", ownerId: ctx.principalId, workspaceId: ctx.workspaceId, identityId: "research", projectId: "p",
     title: "稳定推进实验", status: "approved", version: 1 });
   const runtime = fakeRuntime([JSON.stringify({ steps: [step()], dateCandidates: [], blockers: [] })],
-    "crossline:crossline-goal-backplanner");
+    "crossline:crossline-goal-backplanner:backplan");
   const result = await createGoalBackplanner(store, ctx.workspaceId, "C:\repo", () => runtime.rpc)("m");
   expect(result.state).toBe("proposed");
   const draft = store.listWorkOrders(ctx.workspaceId)[0]!;
@@ -80,20 +80,20 @@ test("only approved, unrevoked insight enters the next backplanning context", as
     identityId: "research", projectId: "p", title: "稳定推进实验", status: "approved", version });
   milestone(1);
   const finding = store.appendEvent({ ownerId, workspaceId, idempotencyKey: "finding-1",
-    type: "flywheel.finding", entityId: "m", payload: { milestoneId: "m",
-      summary: "可复用的实验记录模板", sourceUrl: "https://example.org/source", staleWhen: "方法变更" } });
+    type: "insight.changed", entityId: "m", payload: { milestoneId: "m",
+      summary: "可复用的实验记录模板", sourceUrl: "https://example.org/source", staleWhen: "方法变更", change: "found" } });
   const runtime = fakeRuntime([JSON.stringify({ steps: [step()], dateCandidates: [], blockers: [] })],
-    "crossline:crossline-goal-backplanner");
+    "crossline:crossline-goal-backplanner:backplan");
   const backplan = createGoalBackplanner(store, workspaceId, "C:\\repo", () => runtime.rpc);
   await backplan("m");
   expect(runtime.prompts()[0]).not.toContain("可复用的实验记录模板");
   store.appendEvent({ ownerId, workspaceId, idempotencyKey: "insight-1",
-    type: "insight.approved", entityId: finding.eventId, payload: {} });
+    type: "insight.changed", entityId: finding.eventId, payload: { change: "approved" } });
   milestone(2);
   await backplan("m");
   expect(runtime.prompts()[1]).toContain("可复用的实验记录模板");
   store.appendEvent({ ownerId, workspaceId, idempotencyKey: "revoke-1",
-    type: "insight.revoked", entityId: finding.eventId, payload: {} });
+    type: "insight.changed", entityId: finding.eventId, payload: { change: "revoked" } });
   milestone(3);
   await backplan("m");
   expect(runtime.prompts()[2]).not.toContain("可复用的实验记录模板");
@@ -136,12 +136,12 @@ test("a missing input is recorded with who has it, and the milestone is split an
     JSON.stringify({ steps: [step({ id: "get", intent: "向师兄确认实测数据的位置和字段", sourceQuote: "实测数据还没有到", acquires: "m1", family: "deep_work",
         request: { kind: "ask_person", who: "师兄", fact: "实测数据的位置和字段" } }),
       step({ id: "map", dependsOn: ["get"], family: "deep_work" })], dateCandidates: [], blockers: [] })
-  ], "crossline:crossline-goal-backplanner");
+  ], "crossline:crossline-goal-backplanner:backplan");
   const result = await createGoalBackplanner(store, workspaceId, "C:\\repo", () => runtime.rpc, { rolling: true })("m");
   expect(result.state).toBe("proposed");
   expect(runtime.prompts()[1]).toContain("missingInputs");
   expect(runtime.prompts()[1]).toContain("MoS₂ 实测数据");
-  const blocked = store.listEvents(workspaceId, { type: "goal.backplan_blocked" });
+  const blocked = store.listEvents(workspaceId, { type: "goal.changed", change: "backplan_blocked" });
   expect(blocked).toHaveLength(1);
   expect((blocked[0]!.payload as { missing: unknown[] }).missing).toEqual([{ id: "m1", what: "MoS₂ 实测数据", whoHas: "师兄", message: "实测数据还没有到" }]);
   // Asking 师兄 is one email, not a task (2026-10-15): it is folded into the task that needs the data, as that task's first step.
@@ -173,16 +173,16 @@ test("a refusal with nothing to split is recorded and not retried on a timer; a 
   expect(await createGoalBackplanner(store, workspaceId, "C:\\repo", () => undefined)("m")).toMatchObject({ state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE" });
   expect(milestonesAwaitingBackplan(store, workspaceId, now)).toEqual(["m"]);
   const runtime = fakeRuntime([JSON.stringify({ steps: [], dateCandidates: [], blockers: [missingData] }),
-    JSON.stringify({ steps: [], dateCandidates: [], blockers: [missingData] })], "crossline:crossline-goal-backplanner");
+    JSON.stringify({ steps: [], dateCandidates: [], blockers: [missingData] })], "crossline:crossline-goal-backplanner:backplan");
   const result = await createGoalBackplanner(store, workspaceId, "C:\\repo", () => runtime.rpc)("m");
   expect(result.state).toBe("blocked");
-  expect(store.listEvents(workspaceId, { type: "goal.backplan_blocked" })).toHaveLength(1);
+  expect(store.listEvents(workspaceId, { type: "goal.changed", change: "backplan_blocked" })).toHaveLength(1);
   expect(milestonesAwaitingBackplan(store, workspaceId, now)).toEqual([]);
   // The person's answer asks for it again, past the closed timer.
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: "rerun-1", type: "goal.backplan_rerun_requested", entityId: "m", payload: {} });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: "rerun-1", type: "goal.changed", entityId: "m", payload: { change: "backplan_rerun_requested" } });
   expect(milestonesAwaitingBackplan(store, workspaceId, now)).toEqual(["m"]);
   // Saying 「先不拆」 closes it for this version.
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: "declined-1", type: "goal.backplan_declined", entityId: "m", payload: { milestoneVersion: 1 } });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: "declined-1", type: "goal.changed", entityId: "m", payload: { milestoneVersion: 1, change: "backplan_declined" } });
   expect(milestonesAwaitingBackplan(store, workspaceId, now)).toEqual([]);
   store.close();
 });
@@ -206,7 +206,7 @@ test("rolling mode keeps the person's next core task and its preparation, propos
     step({ id: "c1", dependsOn: ["a1"], family: "deep_work", owner: "person" }),
     step({ id: "a2", intent: "按已定参数跑基线仿真", dependsOn: ["c1"], owner: "assistant", prepares: "c2" }),
     step({ id: "c2", intent: "判断要补哪些实验", dependsOn: ["a2"], family: "deep_work", owner: "person" })];
-  const runtime = fakeRuntime([JSON.stringify({ steps: chain, dateCandidates: [], blockers: [] })], "crossline:crossline-goal-backplanner");
+  const runtime = fakeRuntime([JSON.stringify({ steps: chain, dateCandidates: [], blockers: [] })], "crossline:crossline-goal-backplanner:backplan");
   const backplan = createGoalBackplanner(store, workspaceId, "C:\repo", () => runtime.rpc, { rolling: true });
   const first = await backplan("m");
   expect(first.state).toBe("proposed");
@@ -235,11 +235,11 @@ test("a refusal recorded before missing inputs were itemised gets one more autom
   store.saveMilestone({ id: "m", ownerId, workspaceId, identityId: "research", projectId: "p", title: "稳定推进实验", status: "approved", version: 1 });
   store.saveMilestoneAnchor({ workspaceId, milestoneId: "m", stage: 1, deadline: "2026-10-12", baseline: "", target: "", stakeholders: [],
     sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: "legacy", type: "goal.backplan_blocked", entityId: "m",
-    payload: { milestoneVersion: 1, code: "BACKPLAN_INPUT_BLOCKED", message: "未提供实测数据。" } });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: "legacy", type: "goal.changed", entityId: "m",
+    payload: { milestoneVersion: 1, code: "BACKPLAN_INPUT_BLOCKED", message: "未提供实测数据。", change: "backplan_blocked" } });
   expect(milestonesAwaitingBackplan(store, workspaceId, new Date("2026-10-06T12:00:00Z"))).toEqual(["m"]);
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: "itemised", type: "goal.backplan_blocked", entityId: "m",
-    payload: { milestoneVersion: 1, code: "BACKPLAN_INPUT_BLOCKED", message: "未提供实测数据。", missing: [] } });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: "itemised", type: "goal.changed", entityId: "m",
+    payload: { milestoneVersion: 1, code: "BACKPLAN_INPUT_BLOCKED", message: "未提供实测数据。", missing: [], change: "backplan_blocked" } });
   expect(milestonesAwaitingBackplan(store, workspaceId, new Date("2026-10-06T12:00:00Z"))).toEqual([]);
   store.close();
 });
@@ -252,7 +252,7 @@ test("a step is high-risk for what it does, not for a publishing word in its rat
   const runtime = fakeRuntime([JSON.stringify({ steps: [
     step({ id: "pick", intent: "从素材库选出四个首轮选题", rationale: "为首轮发布做准备", evidence: "首轮发布清单草稿" }),
     step({ id: "post", intent: "发布第一条视频", dependsOn: ["pick"], evidence: "视频链接" })], dateCandidates: [], blockers: [] })],
-  "crossline:crossline-goal-backplanner");
+  "crossline:crossline-goal-backplanner:backplan");
   expect((await createGoalBackplanner(store, workspaceId, "C:\repo", () => runtime.rpc)("m")).state).toBe("proposed");
   const tiers = Object.fromEntries(store.listWorkOrders(workspaceId).map((order) => [order.intent, order.riskTier]));
   expect(tiers).toEqual({ "从素材库选出四个首轮选题": "routine", "发布第一条视频": "high_risk" });
@@ -266,7 +266,7 @@ test("a step is high-risk when the model marks it external, and the model's not-
   const runtime = fakeRuntime([JSON.stringify({ steps: [
     step({ id: "call", intent: "和三家门店店长逐一过一遍试用安排", external: true }),
     step({ id: "post", intent: "发布第一条视频的剪辑稿到本地预览", dependsOn: ["call"], external: false })], dateCandidates: [], blockers: [] })],
-  "crossline:crossline-goal-backplanner");
+  "crossline:crossline-goal-backplanner:backplan");
   expect((await createGoalBackplanner(store, workspaceId, "C:\repo", () => runtime.rpc)("m")).state).toBe("proposed");
   const orders = Object.fromEntries(store.listWorkOrders(workspaceId).map((order) => [order.intent, [order.riskTier, (order.payload as { external?: boolean }).external]]));
   expect(orders).toEqual({ "和三家门店店长逐一过一遍试用安排": ["high_risk", true], "发布第一条视频的剪辑稿到本地预览": ["routine", false] });
@@ -280,9 +280,9 @@ test("an existing waiting item linked to a milestone's missing input is passed o
   store.saveMilestone({ id: "m", ownerId, workspaceId, identityId: "research", projectId: "p", title: "稳定推进实验", status: "approved", version: 1 });
   store.saveWaitingItem({ id: "wait-sim-0", ownerId, workspaceId, title: "西湖 MoS2 真实测量数据", who: "师兄", expectedAt: "2026-10-08",
     approximate: true, followUpAt: "2026-10-08", state: "open", blocks: [], source: "manual" });
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: "link", type: "goal.backplan_input_waiting", entityId: "m",
-    payload: { waitingId: "wait-sim-0", askId: "bp:e:m1", what: "实测 MoS₂ 参数数据" } });
-  const runtime = fakeRuntime([JSON.stringify({ steps: [step()], dateCandidates: [], blockers: [] })], "crossline:crossline-goal-backplanner");
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: "link", type: "goal.changed", entityId: "m",
+    payload: { waitingId: "wait-sim-0", askId: "bp:e:m1", what: "实测 MoS₂ 参数数据", change: "backplan_input_waiting" } });
+  const runtime = fakeRuntime([JSON.stringify({ steps: [step()], dateCandidates: [], blockers: [] })], "crossline:crossline-goal-backplanner:backplan");
   await createGoalBackplanner(store, workspaceId, "C:\repo", () => runtime.rpc)("m");
   expect(runtime.prompts()[0]).toContain('"waitingInputs":[{"what":"实测 MoS₂ 参数数据","who":"师兄","expectedAt":"2026-10-08"}]');
   store.close();
@@ -301,7 +301,7 @@ test("cross-line artifacts at task level: the upstream milestone's task produces
 
   // A first answer that forgets to say which task produces the figures is sent back.
   const upRuntime = fakeRuntime([JSON.stringify({ steps: [step()], dateCandidates: [], blockers: [] }),
-    JSON.stringify({ steps: [step({ produces: "research-figs", uses: [] })], dateCandidates: [], blockers: [] })], "crossline:crossline-goal-backplanner");
+    JSON.stringify({ steps: [step({ produces: "research-figs", uses: [] })], dateCandidates: [], blockers: [] })], "crossline:crossline-goal-backplanner:backplan");
   expect((await createGoalBackplanner(store, workspaceId, "C:\\repo", () => upRuntime.rpc)("up")).state).toBe("proposed");
   expect(upRuntime.prompts()[0]).toContain('"produce":[{"id":"research-figs"');
   expect(upRuntime.prompts()[1]).toContain("BACKPLAN_ARTIFACT_UNPRODUCED");
@@ -309,7 +309,7 @@ test("cross-line artifacts at task level: the upstream milestone's task produces
   expect(producer.payload).toMatchObject({ produces: "research-figs" });
 
   const downRuntime = fakeRuntime([JSON.stringify({ steps: [step({ sourceQuote: "发布科普视频", uses: ["research-figs"] })], dateCandidates: [], blockers: [] })],
-    "crossline:crossline-goal-backplanner");
+    "crossline:crossline-goal-backplanner:backplan");
   expect((await createGoalBackplanner(store, workspaceId, "C:\\repo", () => downRuntime.rpc)("down")).state).toBe("proposed");
   expect(downRuntime.prompts()[0]).toContain('"use":[{"id":"research-figs","title":"仿真图表","fromLine":"research"}]');
   const user = store.listWorkOrders(workspaceId).find((order) => order.milestoneId === "down")!;

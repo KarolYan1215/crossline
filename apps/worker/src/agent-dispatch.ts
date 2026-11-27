@@ -15,7 +15,7 @@ function assistantLessons(store: CrosslineStore, workspaceId: string, orderId: s
   const order = store.listWorkOrders(workspaceId).find((item) => item.id === orderId);
   if (!order) return [];
   return lessonsFor(store, workspaceId, { lineId: order.identityId, archetypeId: store.getStepPlan(workspaceId, orderId)?.archetypeId,
-    skill: ["crossline-agent", "crossline-agent-tools"] }).map((lesson) => lesson.text);
+    skill: ["crossline-agent:shell", "crossline-agent:functions"] }).map((lesson) => lesson.text);
 }
 import type { AgentTaskInput } from "./agent-task";
 import { tOfWorkspace } from "./locale";
@@ -341,7 +341,7 @@ export function ledgerQuestion(store: CrosslineStore, workspaceId: string, taskI
     function done() { clearTimeout(timer); options.signal?.removeEventListener("abort", done); resolve(); }
     options.signal?.addEventListener("abort", done, { once: true });
   }));
-  const ended = () => Boolean(options.signal?.aborted) || store.listEvents(workspaceId, { type: ["agent.task.completed", "agent.task.blocked"], entityId: taskId }).length > 0;
+  const ended = () => Boolean(options.signal?.aborted) || store.listEvents(workspaceId, { type: "agent.changed", change: ["task_completed", "task_blocked"], entityId: taskId }).length > 0;
   return async (questions: AgentQuestion[]): Promise<Record<string, string[]>> => {
     const unanswered = Object.fromEntries(questions.map((question) => [question.id, [QUESTION_UNANSWERED]]));
     const withAnswers = (answers: Record<string, string[]>) => ({ ...unanswered, ...Object.fromEntries(Object.entries(answers).filter(([, value]) => value.length)) });

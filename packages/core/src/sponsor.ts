@@ -20,7 +20,7 @@ export const SPONSOR_MONTHLY_CAP_CNY = 30;
 export const SPONSOR_PASS_MARGIN = 0.05;
 /** The interview needs the long context of a full history plus every file. */
 export const SPONSOR_MIN_CONTEXT_K = 128;
-const REQUIRED_SKILLS = ["crossline-onboarding", "crossline-onboarding-extract", "crossline-automation-stripper", "crossline-milestone-gate"];
+const REQUIRED_SKILLS = ["crossline-onboarding", "crossline-onboarding-extract", "crossline-automation-stripper", "crossline-evidence-judge:milestone"];
 
 /**
  * `model=in:out[:ctxK[:cached]],…` (`CROSSLINE_SPONSOR_MODELS`), yuan per million tokens as SiliconFlow lists them. A model priced by time
@@ -128,8 +128,8 @@ export function hoursToOffPeakEnd(now: Date): number {
  * mail sorting. The conformance cases measure form, not judgement, so the interview, the input box, analysis, the gate, planning and
  * the reviewer stay on the chosen model.
  */
-export const SPONSOR_SIMPLE_SKILLS: readonly string[] = ["crossline-task-titler", "crossline-calendar-classifier", "crossline-folder-classifier", "crossline-time-attributor",
-  "crossline-goal-splitter", "crossline-background-facts", "crossline-mail-triage"];
+export const SPONSOR_SIMPLE_SKILLS: readonly string[] = ["crossline-goal-backplanner:title", "crossline-line-filer:calendar", "crossline-line-filer:folder", "crossline-line-filer:time",
+  "crossline-milestone-architect:split", "crossline-capture-digest:background", "crossline-inbox-triage:mail"];
 
 /**
  * What one run of this Skill is expected to cost on a candidate, in yuan (2026-10-21, docs/token-economy.md §2.6): the measured cost per
@@ -160,7 +160,7 @@ function admittedFor(skill: string, models: SponsorModel[], evaluations: Sponsor
  * scripts/sponsor-compare.ts): conformance measures form, so a planning Skill moves only by that decision (`CROSSLINE_SPONSOR_PLANNING_MODEL`),
  * never because a cheaper candidate passed its checks. A run of one that needed a repair is redone on the chosen model (`redoOnRepair`).
  */
-export const SPONSOR_PLANNING_SKILLS: readonly string[] = ["crossline-step-planner", "crossline-goal-backplanner"];
+export const SPONSOR_PLANNING_SKILLS: readonly string[] = ["crossline-task-planner:steps", "crossline-goal-backplanner:backplan"];
 
 /**
  * The model one Skill runs on: the cheapest candidate that passed it for a simple background Skill, the planning model for a planning

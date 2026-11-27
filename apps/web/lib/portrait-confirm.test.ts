@@ -40,7 +40,7 @@ test("「大体符合」 needs a sentence and goes to the interview in its own q
   expect(body.sessionId).toBe("s1");
   expect(body.text).toContain("【「当前画像」写的是否符合本人？】");
   expect(body.text).toContain("第二句写得太绝对");
-  expect(store.listEvents(ws, { type: "profile.portrait_feedback" })).toHaveLength(1);
+  expect(store.listEvents(ws, { type: "person.decided", subject: "profile", decision: "portrait_feedback" })).toHaveLength(1);
 });
 
 test("nothing to confirm before the interview wrote a portrait", async () => {

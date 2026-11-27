@@ -125,12 +125,12 @@ test("a connected node is prepared through its own runtime, gets the server's pl
   expect(baseUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/a{32}$/);
   expect(baseUrl.startsWith(gateway)).toBe(false);
   // The relay carries a request over the connection to the server's gateway and streams the answer back.
-  const relayed = await fetch(`${baseUrl}/responses`, { method: "POST", headers: { "x-crossline-skill": "crossline-step-planner" },
+  const relayed = await fetch(`${baseUrl}/responses`, { method: "POST", headers: { "x-crossline-skill": "crossline-task-planner:steps" },
     body: JSON.stringify({ model: "m1", prompt_cache_key: "thread-9" }) });
   expect(relayed.status).toBe(200);
   expect(await relayed.text()).toContain(`gateway POST /${OWN_ROUTE}/responses`);
   // Billed from the gateway's answer, with the thread, Skill and model the request named.
-  expect(metered).toEqual([{ workspaceId: "ws-owner", request: { threadId: "thread-9", model: "m1", skill: "crossline-step-planner" },
+  expect(metered).toEqual([{ workspaceId: "ws-owner", request: { threadId: "thread-9", model: "m1", skill: "crossline-task-planner:steps" },
     usage: { input_tokens: 120, output_tokens: 30, total_tokens: 150 } }]);
   // Another account's route, an endpoint Codex does not call, or a GET to responses never reach the gateway.
   const relayRoot = baseUrl.slice(0, -OWN_ROUTE.length);

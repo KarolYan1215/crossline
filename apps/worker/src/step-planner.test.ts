@@ -28,7 +28,7 @@ test("a committed task gets a step plan; warnings are recorded, not refused, and
     steps: [step("c", "compare"), step("s", "solve", { dependsOn: ["c"] })] };
   const second = { ...first, quantity: { basis: "题目数", amount: 2, unit: "题" }, steps: [step("s", "solve"), step("c", "check", { dependsOn: ["s"] }), step("u", "submit", { dependsOn: ["c"] })] };
   const answers = [JSON.stringify(first), JSON.stringify({ verdict: "redo", notes: "把检查放在解题之后，并加提交" }), JSON.stringify(second)];
-  const runtime = scriptedRuntime(["crossline:crossline-step-planner", "crossline:crossline-validation-reviewer"], (prompt) => prompt.includes("validation-review") ? answers[1]! : prompt.includes("把检查放在") ? answers[2]! : answers[0]!);
+  const runtime = scriptedRuntime(["crossline:crossline-task-planner:steps", "crossline:crossline-validation-reviewer"], (prompt) => prompt.includes("validation-review") ? answers[1]! : prompt.includes("把检查放在") ? answers[2]! : answers[0]!);
   const planner = createStepPlanner(store, workspaceId, "C:\\repo", () => runtime.rpc);
   const outcome = await planner("wo");
   expect(outcome.state).toBe("planned");
@@ -90,8 +90,8 @@ test("a flagged cross-line relation is reviewed: dismissed it stays, redone it i
   const relationId = "proposed:r1->m1:reuses";
   store.saveMilestoneRelation({ id: relationId, ownerId, workspaceId, fromMilestoneId: "r1", toMilestoneId: "m1", kind: "reuses", status: "candidate",
     explanation: "互相促进", refutedWhen: "" });
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: "w1", type: "validation.warned", entityId: relationId,
-    payload: { subject: "milestone_relation", version: 1, warnings: [{ code: "RELATION_EXPLANATION_THIN", detail: "说明过短" }], revised: false } });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: "w1", type: "validation.changed", entityId: relationId,
+    payload: { subject: "milestone_relation", version: 1, warnings: [{ code: "RELATION_EXPLANATION_THIN", detail: "说明过短" }], revised: false, change: "warned" } });
   const runtime = scriptedRuntime(["crossline:crossline-validation-reviewer"], () => JSON.stringify({ verdict: "redo", notes: "写明迁移的产出物，否则删除" }));
   const revised: Array<[string, string]> = [];
   const review = createWarningReviewer(store, workspaceId, "C:\repo", () => runtime.rpc, async () => undefined,
@@ -117,7 +117,7 @@ test("a plan rests on the person's own material and facts: units quote the file,
     steps: [step("a", "solve", { covers: ["u1"], why: "目标 A−，余量小" }), step("b", "check", { dependsOn: ["a"], covers: ["u2"] })] });
   const prompts: string[] = [];
   let calls = 0;
-  const runtime = scriptedRuntime(["crossline:crossline-step-planner"], (prompt) => { prompts.push(prompt); calls += 1; return calls === 1 ? plan("L5 PN junction made up") : plan("L5 PN junction electrostatics"); });
+  const runtime = scriptedRuntime(["crossline:crossline-task-planner:steps"], (prompt) => { prompts.push(prompt); calls += 1; return calls === 1 ? plan("L5 PN junction made up") : plan("L5 PN junction electrostatics"); });
   const outcome = await createStepPlanner(store, workspaceId, "C:\repo", () => runtime.rpc)("wo");
   expect(outcome.state).toBe("planned");
   // The planner was given the whole file and the person's target, not a 300-character opening.
@@ -140,10 +140,10 @@ test("the planner is told what the assistant already made for the same course, i
   for (const [id, project] of [["hw1", "ece548"], ["hw2", "ece548"], ["other", "ece555"]] as const)
     store.saveWorkOrder({ id, ownerId: "o", workspaceId: "w", identityId: "research", projectId: project, milestoneId: "", intent: id, state: "approved", riskTier: "routine", estimate, payload: {} });
   const run = (task: string, order: string, reviewRequired: boolean) => {
-    store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: `r-${task}`, type: "agent.task.requested", entityId: task,
-      payload: { taskId: task, workOrderId: order, title: `${order} · 材料目录`, category: "read_research_organize" } });
-    store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: `c-${task}`, type: "agent.task.completed", entityId: task,
-      payload: { taskId: task, reviewRequired, artifacts: [{ path: "out/目录.md", sha256: "x", bytes: 1 }] } });
+    store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: `r-${task}`, type: "agent.changed", entityId: task,
+      payload: { taskId: task, workOrderId: order, title: `${order} · 材料目录`, category: "read_research_organize", change: "task_requested" } });
+    store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: `c-${task}`, type: "agent.changed", entityId: task,
+      payload: { taskId: task, reviewRequired, artifacts: [{ path: "out/目录.md", sha256: "x", bytes: 1 }], change: "task_completed" } });
   };
   run("t1", "hw1", true); run("t2", "other", false);
   const order = store.listWorkOrders("w").find((item) => item.id === "hw2")!;
@@ -165,7 +165,7 @@ test("the model decides which questions reach the person (ask); the rest are ass
   // ask false: settled as its assumption (`assume`, not merely the first option) the next plan reads; ask true: left for the person.
   let answer = plan([question("海报用哪种尺寸？", false, ["A3", "A2"], "A2"), question("评分看重哪一项？", true, ["创意", "规范"])]);
   const prompts: string[] = [];
-  const runtime = scriptedRuntime(["crossline:crossline-step-planner"], (prompt) => { prompts.push(prompt); return answer; });
+  const runtime = scriptedRuntime(["crossline:crossline-task-planner:steps"], (prompt) => { prompts.push(prompt); return answer; });
   expect((await createStepPlanner(store, workspaceId, "C:\repo", () => runtime.rpc)("wo")).state).toBe("planned");
   expect(fact(store, "海报用哪种尺寸？")).toMatchObject({ status: "inferred", value: "假设：【海报用哪种尺寸？】A2" });
   expect(fact(store, "评分看重哪一项？")).toBeUndefined();
@@ -186,7 +186,7 @@ test("the model decides which questions reach the person (ask); the rest are ass
   seed(fresh);
   const free = { ...question("字体用哪种？", true), ifWrong: { waste: 0, harm: "none", fixable: "before_step" } };
   const answers = [plan([free]), plan([{ ...free, ask: false }])];
-  const repair = scriptedRuntime(["crossline:crossline-step-planner"], (prompt) => { prompts.push(prompt); return answers.shift() ?? answers[0]!; });
+  const repair = scriptedRuntime(["crossline:crossline-task-planner:steps"], (prompt) => { prompts.push(prompt); return answers.shift() ?? answers[0]!; });
   expect((await createStepPlanner(fresh, workspaceId, "C:\repo", () => repair.rpc)("wo")).state).toBe("planned");
   expect(prompts.some((prompt) => prompt.includes("没有代价的就按 assume 做"))).toBe(true);
   expect(fact(fresh, "字体用哪种？")).toMatchObject({ status: "inferred" });
@@ -293,7 +293,7 @@ test("a drill form taken from an identity template is cut on the way to the ledg
     seed(store);
     for (const fact of facts) store.upsertProfileFact({ workspaceId, identityId: "person", projectId: "", slot: fact.slot, value: fact.value, status: "confirmed",
       sourceRef: "reply-1", sourceQuote: fact.value, updatedAt: "2026-11-10T00:00:00Z" });
-    const runtime = scriptedRuntime(["crossline:crossline-step-planner", "crossline:crossline-validation-reviewer"],
+    const runtime = scriptedRuntime(["crossline:crossline-task-planner:steps", "crossline:crossline-validation-reviewer"],
       (prompt) => prompt.includes("validation-review") ? JSON.stringify({ verdict: "dismiss", notes: "" }) : answer);
     expect((await createStepPlanner(store, workspaceId, "C:\repo", () => runtime.rpc)("wo")).state).toBe("planned");
     const saved = store.getStepPlan(workspaceId, "wo")!;
@@ -330,7 +330,7 @@ test("the one granularity replan asks once for every open plan with several pers
   expect(requestGranularityReplans(store, workspaceId)).toEqual([]);
   expect(tasksAwaitingStepPlan(store, workspaceId)).toEqual(["wo"]);
   const whole = { ...base, steps: [step("s", "solve", { title: "完成作业 2（解第 1–4 题并提交）", doneCriterion: "4 题写完并已提交" })] };
-  const runtime = scriptedRuntime(["crossline:crossline-step-planner"], () => JSON.stringify(whole));
+  const runtime = scriptedRuntime(["crossline:crossline-task-planner:steps"], () => JSON.stringify(whole));
   expect((await createStepPlanner(store, workspaceId, "C:\repo", () => runtime.rpc)("wo", GRANULARITY_FEEDBACK)).state).toBe("planned");
   const plan = store.getStepPlan(workspaceId, "wo")!;
   expect(plan.steps.map((item) => [item.id, item.progressQuarter])).toEqual([["v2s1", 2]]);

@@ -19,8 +19,6 @@ import { defaultProbeDeps, probeProvider, type ProbeDeps } from "./provider-prob
  * A workspace's own model provider, as the worker keeps it (R7, decided 2026-10-13): the `model.provider` setting (no key), the key
  * in a DPAPI file, the gateway route Codex is pointed at, and the conformance runs that decide which Skills it may serve.
  */
-export const CONFORMANCE_EVENT = "model.provider.conformance";
-export const PROVIDER_CHANGED_EVENT = "model.provider.changed";
 const SECRET_NAME = "provider-key";
 /** The runtime that conformance was measured on: the pinned binary, named by its hash, so a runtime upgrade asks for a new test. */
 export const RUNTIME_VERSION = CODEX_FORK_BINARY_SHA256.slice(0, 12);
@@ -90,7 +88,7 @@ export function createModelProviderService(options: {
     try { return JSON.parse(raw) as ProviderConfig; } catch { return undefined; }
   };
   const latest = (workspaceId: string, provider: ProviderConfig): ConformanceRecord | undefined => {
-    const events = options.store.listEvents(workspaceId, { type: CONFORMANCE_EVENT, entityId: provider.id });
+    const events = options.store.listEvents(workspaceId, { type: "model.changed", change: "provider_conformance", entityId: provider.id });
     return events.at(-1)?.payload as ConformanceRecord | undefined;
   };
   /** The record that counts: same model and runtime, under thirty days old, and run after the configuration was last saved. */
@@ -249,8 +247,8 @@ export function createModelProviderService(options: {
       }
     } finally { testing.delete(workspaceId); }
     const record = summarizeConformance({ providerId: provider.id, model: provider.model, runtimeVersion: RUNTIME_VERSION, ranAt: now().toISOString() }, runs);
-    options.store.appendEvent({ ownerId: ownerOf(options.store, workspaceId), workspaceId, idempotencyKey: `${CONFORMANCE_EVENT}:${provider.id}:${record.ranAt}`,
-      type: CONFORMANCE_EVENT, entityId: provider.id, payload: record });
+    options.store.appendEvent({ ownerId: ownerOf(options.store, workspaceId), workspaceId, idempotencyKey: `model.provider.conformance:${provider.id}:${record.ranAt}`,
+      type: "model.changed", entityId: provider.id, payload: { ...record, change: "provider_conformance" } });
     try { options.onConformance?.(workspaceId); } catch { /* the listener's own concern */ }
     return record;
   }
@@ -308,8 +306,8 @@ export function createModelProviderService(options: {
       ...(body.responseFormat === "json_object" && kind === "chat" ? { responseFormat: "json_object" as const } : {}) };
     if (!saved.keyLast4 && !isLocalProvider(saved.baseUrl)) return { status: 400, body: { blocker: { code: "PROVIDER_KEY_MISSING", message: t("这个接口需要 API key。") } } };
     options.store.setSetting(workspaceId, MODEL_PROVIDER_SETTING, JSON.stringify(saved));
-    options.store.appendEvent({ ownerId: ownerOf(options.store, workspaceId), workspaceId, idempotencyKey: `${PROVIDER_CHANGED_EVENT}:${saved.updatedAt}`,
-      type: PROVIDER_CHANGED_EVENT, entityId: saved.id, payload: { id: saved.id, kind: saved.kind, label: saved.label, baseUrl: saved.baseUrl, model: saved.model } });
+    options.store.appendEvent({ ownerId: ownerOf(options.store, workspaceId), workspaceId, idempotencyKey: `model.provider.changed:${saved.updatedAt}`,
+      type: "model.changed", entityId: saved.id, payload: { id: saved.id, kind: saved.kind, label: saved.label, baseUrl: saved.baseUrl, model: saved.model, change: "provider_changed" } });
     if (options.testOnSave !== false) startConformance(workspaceId);
     return { status: 200, body: view(workspaceId) };
   }
@@ -329,8 +327,8 @@ export function createModelProviderService(options: {
       options.store.deleteSetting(workspaceId, MODEL_PROVIDER_SETTING);
       options.secrets.remove(workspaceId, SECRET_NAME);
       keys.delete(workspaceId);
-      if (provider) options.store.appendEvent({ ownerId: ownerOf(options.store, workspaceId), workspaceId, idempotencyKey: `${PROVIDER_CHANGED_EVENT}:${now().toISOString()}:removed`,
-        type: PROVIDER_CHANGED_EVENT, entityId: provider.id, payload: { id: provider.id, removed: true } });
+      if (provider) options.store.appendEvent({ ownerId: ownerOf(options.store, workspaceId), workspaceId, idempotencyKey: `model.provider.changed:${now().toISOString()}:removed`,
+        type: "model.changed", entityId: provider.id, payload: { id: provider.id, removed: true, change: "provider_changed" } });
       return { status: 200, body: view(workspaceId) };
     }
     if (pathname === "/v1/model/provider/test" && method === "POST") {

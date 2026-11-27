@@ -14,11 +14,11 @@ const usage = (over: Partial<StoredModelUsage> = {}): StoredModelUsage => ({
 test("runs are summed per skill and model, biggest spender first, inside one workspace and one window", () => {
   store.saveModelUsage(usage());
   store.saveModelUsage(usage({ totalTokens: 800, inputTokens: 700, outputTokens: 100, durationMs: 30_000, repairs: 2 }));
-  store.saveModelUsage(usage({ skill: "crossline:crossline-plan-explainer", model: "gpt-5.6-luna", totalTokens: 90, ok: false, durationMs: 4_000 }));
+  store.saveModelUsage(usage({ skill: "crossline:crossline-schedule-advisor:explain", model: "gpt-5.6-luna", totalTokens: 90, ok: false, durationMs: 4_000 }));
   store.saveModelUsage(usage({ workspaceId: "w2", totalTokens: 99_999 }));
   store.saveModelUsage(usage({ at: "2026-09-01T00:00:00.000Z", totalTokens: 99_999 }));
   const summary = store.summarizeModelUsage("w1", "2026-09-25T00:00:00.000Z");
-  expect(summary.map((row) => row.skill)).toEqual(["crossline:crossline-onboarding", "crossline:crossline-plan-explainer"]);
+  expect(summary.map((row) => row.skill)).toEqual(["crossline:crossline-onboarding", "crossline:crossline-schedule-advisor:explain"]);
   expect(summary[0]).toMatchObject({ runs: 2, failed: 0, repairs: 2, totalTokens: 2000, inputTokens: 1700, outputTokens: 300, averageSeconds: 45 });
   expect(summary[1]).toMatchObject({ runs: 1, failed: 1, totalTokens: 90 });
 });

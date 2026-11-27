@@ -109,7 +109,7 @@ test("少来: each reason changes its own thing, the find leaves the inbox, and 
   expect(readWatchList(store, ws)[0]).toMatchObject({ everyDays: 3, strictness: 0, weight: 1 });
   expect(store.listPreferences(ws).some((pref) => pref.source === "opportunity_less")).toBe(false);
   expect(undoLessEntry(store, ws, owner, kind.id, NOW)).toBe(false);
-  expect(store.listEvents(ws, { type: "opportunity.outcome" }).filter((event) => (event.payload as { outcome: string }).outcome === "less")).toHaveLength(3);
+  expect(store.listEvents(ws, { type: "opportunity.changed", change: "outcome" }).filter((event) => (event.payload as { outcome: string }).outcome === "less")).toHaveLength(3);
 });
 
 test("a scout find waits for 视野外 unless it must be prepared within two weeks", () => {

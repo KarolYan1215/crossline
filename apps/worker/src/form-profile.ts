@@ -148,8 +148,8 @@ export async function moveSensitiveToComputer(store: CrosslineStore, secrets: Se
     if (!await putOnComputer(link, slot, value)) { kept.push(slot); log({ event: "apply.sensitive.move_failed", workspaceId, slot, node: link.host }); continue; }
     secrets.remove(workspaceId, secretNameOf(slot));
     moved.push(slot);
-    store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "system", workspaceId, type: "apply.profile.saved", entityId: slot,
-      idempotencyKey: `apply.profile.moved:${slot}:${Date.now()}:${randomUUID().slice(0, 8)}`, payload: { slot, sensitive: true, movedToComputer: link.host } });
+    store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "system", workspaceId, type: "person.decided", entityId: slot,
+      idempotencyKey: `apply.profile.moved:${slot}:${Date.now()}:${randomUUID().slice(0, 8)}`, payload: { slot, sensitive: true, movedToComputer: link.host, subject: "apply.profile", decision: "saved" } });
     log({ event: "apply.sensitive.moved", workspaceId, slot, node: link.host });
   }
   return { moved, kept };
@@ -162,8 +162,9 @@ export const loginVault = (store: CrosslineStore, workspaceId: string): LoginVau
 const writeVault = (store: CrosslineStore, workspaceId: string, entries: LoginVaultEntry[], host: string, saved: boolean) => {
   store.setSetting(workspaceId, LOGIN_VAULT_SETTING, JSON.stringify(entries));
   // The profile's own events, with the host as the only detail.
-  store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "system", workspaceId, type: saved ? "apply.profile.saved" : "apply.profile.removed",
-    entityId: `login:${host}`, idempotencyKey: `apply.login:${host}:${Date.now()}:${randomUUID().slice(0, 8)}`, payload: { login: host, sensitive: true } });
+  store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "system", workspaceId, type: "person.decided",
+    entityId: `login:${host}`, idempotencyKey: `apply.login:${host}:${Date.now()}:${randomUUID().slice(0, 8)}`,
+    payload: { login: host, sensitive: true, subject: "apply.profile", decision: saved ? "saved" : "removed" } });
 };
 
 /** The person saved a login: username and password together in the secret store (`login-<host>`), the host alone in the ledger. */

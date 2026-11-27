@@ -12,7 +12,7 @@ import { ownerOf } from "./owner";
 import { defaultSafeGetDeps, htmlToText, safeGet, type SafeGetDeps } from "./safe-fetch";
 import { citable, citableUrls } from "./cited-urls";
 
-const INSTRUCTIONS = "Do the crossline-method-research Skill and return only the requested JSON: the person's habits from their own facts, "
+const INSTRUCTIONS = "Do the crossline-line-method:research Skill and return only the requested JSON: the person's habits from their own facts, "
   + "then for each recurring kind of work in their lines the current best way to do it with AI tools, from their own files first and the web second, "
   + "fitted to their habits. Cite only what you read.";
 
@@ -55,7 +55,7 @@ export function readStoredMethodResearch(store: CrosslineStore, workspaceId: str
  * is none yet. A re-finished interview (new answers) is researched again.
  */
 export function methodResearchDue(store: CrosslineStore, workspaceId: string): boolean {
-  const finished = store.listEvents(workspaceId, { type: "onboarding.finish_requested" }).at(-1)?.createdAt;
+  const finished = store.listEvents(workspaceId, { type: "onboarding.changed", change: "finish_requested" }).at(-1)?.createdAt;
   if (!finished) return false;
   const last = readStoredMethodResearch(store, workspaceId)?.at;
   return !last || last < finished;
@@ -75,14 +75,14 @@ export async function runMethodResearch(store: CrosslineStore, workspaceId: stri
     validateOutput: (output) => validateMethodResearch(output, { factIds: input.facts.map((fact) => fact.id), lineIds: input.lines.map((line) => line.id) }) });
   if (!result.ok) {
     store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `method.research_blocked:${now.toISOString()}`,
-      type: "method.research_blocked", entityId: workspaceId, payload: { code: result.blocker.code } });
+      type: "job.ran", entityId: workspaceId, payload: { code: result.blocker.code, job: "method.research", state: "blocked" } });
     return { blocked: result.blocker.code };
   }
   const verified = await verifyMethodSources(result.output, deps.safeGet ?? defaultSafeGetDeps(), citableUrls(result.audit, input));
   const screened = screenMethodResearch(verified.research, drillBackingFor(store, workspaceId).backing);
   const stored: StoredMethodResearch = { ...screened, at: now.toISOString(), droppedSources: verified.dropped };
   store.setSetting(workspaceId, METHOD_RESEARCH_SETTING, JSON.stringify(stored));
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `method.researched:${stored.at}`, type: "method.researched",
-    entityId: workspaceId, payload: { habits: stored.habits.length, methods: stored.methods.length, sources: stored.sources.length, droppedSources: stored.droppedSources } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `method.researched:${stored.at}`, type: "job.ran",
+    entityId: workspaceId, payload: { habits: stored.habits.length, methods: stored.methods.length, sources: stored.sources.length, droppedSources: stored.droppedSources, job: "method.research", state: "done" } });
   return stored;
 }

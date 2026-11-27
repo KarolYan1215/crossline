@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { RECORDING_TRANSCRIBED_EVENT, SOURCE_FOLDERS_SETTING, sourceFolderIndexSetting } from "@crossline/core";
+import { SOURCE_FOLDERS_SETTING, sourceFolderIndexSetting } from "@crossline/core";
 import { CrosslineStore, mirrorSnapshot } from "@crossline/db";
 import { installVersion, mirrorPass } from "./mirror";
 import { readDeviceState } from "./payloads";
@@ -42,7 +42,7 @@ const ledger = () => path.join(dir, "crossline.db");
 test("the device takes the site's ledger, keeps its folder files and its own transcripts, and asks with the ETag next time", async () => {
   server.setSetting(sw, "schedule.lineShares", "{\"research\":50}");
   server.appendEvent({ ownerId: server.getWorkspaceOwnerId(sw)!, workspaceId: sw, idempotencyKey: "recording.transcribed:" + "f".repeat(64),
-    type: RECORDING_TRANSCRIBED_EVENT, entityId: "f".repeat(64), payload: { where: "server" } });
+    type: "recording.changed", entityId: "f".repeat(64), payload: { where: "server", change: "transcribed" } });
   const owner = local.getWorkspaceOwnerId(lw)!;
   local.saveSourceDocument({ id: "folder-doc", ownerId: owner, workspaceId: lw, kind: "text", fileName: "a.txt", mediaType: "text/plain", sha256: "a".repeat(64),
     uri: "file:///a.txt", extractedText: "a", extractionStatus: "done", createdAt: "2026-11-01T00:00:00.000Z" });

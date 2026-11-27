@@ -65,7 +65,7 @@ test("with ChatGPT and the developer's model, ChatGPT serves; a spent reading mo
   expect(decideRoute("crossline:crossline-onboarding", routing)).toMatchObject({ via: "provider", provider: { model: MODEL } });
   expect(decideRoute("crossline:crossline-automation-stripper", routing)).toMatchObject({ via: "provider" });
   // What the developer's model cannot do (web research here) stops with the reason, never back to the spent ChatGPT.
-  expect(decideRoute("crossline:crossline-due-diligence", routing)).toEqual({ via: "blocked", code: "MODEL_CAPABILITY_MISSING",
+  expect(decideRoute("crossline:crossline-research:diligence", routing)).toEqual({ via: "blocked", code: "MODEL_CAPABILITY_MISSING",
     message: expect.stringContaining("ChatGPT 额度已用尽") });
 });
 
@@ -141,7 +141,7 @@ test("a run ChatGPT refuses for the quota is run once more on the developer's mo
   const { store, providers, workspaceId } = setup();
   setProviderResolver((id) => providers.routing(id));
   setUsageLimitHandler((id) => providers.noteUsageLimit(id));
-  const { rpc, prompts } = scriptedRuntime(["crossline:crossline-task-titler"], () => JSON.stringify({ titles: [] }),
+  const { rpc, prompts } = scriptedRuntime(["crossline:crossline-goal-backplanner:title"], () => JSON.stringify({ titles: [] }),
     { failWith: (_prompt, turn) => turn === 1 ? "usageLimitExceeded" : undefined });
   const starts: Array<Record<string, unknown>> = [];
   const request = rpc.request.bind(rpc);
@@ -150,7 +150,7 @@ test("a run ChatGPT refuses for the quota is run once more on the developer's mo
     return request(method, params as never);
   }) as typeof rpc.request;
   enterUsageWorkspace(workspaceId);
-  const result = await runCodexSkill(rpc, {}, { skillName: "crossline:crossline-task-titler", cwd: "C:\\repo", developerInstructions: "x",
+  const result = await runCodexSkill(rpc, {}, { skillName: "crossline:crossline-goal-backplanner:title", cwd: "C:\\repo", developerInstructions: "x",
     outputSchema: { type: "object", additionalProperties: false, properties: { titles: { type: "array", items: { type: "string" } } }, required: ["titles"] },
     prepareInput: () => ({}), validateOutput: (output) => output, onAudit: () => {} });
   expect(result.ok).toBe(true);

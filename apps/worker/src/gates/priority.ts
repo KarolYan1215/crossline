@@ -11,7 +11,7 @@ import { boardTasks, gateLookups, gateTask, isOpen } from "./tasks";
  * person's zone) every open task is marked P1 and/or outward against the person's goal and milestones; tasks that appear during the
  * week are marked as they come.
  */
-export const PRIORITY_SKILL = "crossline-gate-priority";
+export const PRIORITY_SKILL = "crossline-focus:priority";
 export const PRIORITY_VERSION = "crossline.gate.priority.v1";
 const DETAIL = { type: "object", additionalProperties: false, required: [], properties: {} };
 
@@ -38,6 +38,6 @@ export async function priorityGatePass(deps: Deps): Promise<GateResult[]> {
   const subjects = new Map<string, GateSubject>(pending.map((id) => [id, { kind: "task", id }]));
   return runGate({ store, workspaceId, client: deps.client, cwd: deps.cwd, gate: "priority", skill: PRIORITY_SKILL, promptVersion: PRIORITY_VERSION, input,
     detail: DETAIL, subjects, stableKeys: ["goal", "ledger"], round: week, summary: `open ${open.length}, to mark ${pending.length}`,
-    developerInstructions: "Mark every task whose id is in `judge` as the crossline-gate-priority Skill describes, weighing it against all of `tasks`; return only the requested JSON, one item per id in `judge`.",
+    developerInstructions: "Mark every task whose id is in `judge` as the crossline-focus:priority Skill describes, weighing it against all of `tasks`; return only the requested JSON, one item per id in `judge`.",
     now });
 }

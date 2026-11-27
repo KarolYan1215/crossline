@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { ACTIVITY_HOURLY, ACTIVITY_LONG_GAPS, INPUT_RHYTHM_BUCKETS, NODE_STATUS_SETTING, RECORDING_TRANSCRIBED_EVENT, RUNTIME_OWNER_SETTING, SLEEP_TRACKING_CONSENT, type AccessContext } from "@crossline/core";
+import { ACTIVITY_HOURLY, ACTIVITY_LONG_GAPS, INPUT_RHYTHM_BUCKETS, NODE_STATUS_SETTING, RUNTIME_OWNER_SETTING, SLEEP_TRACKING_CONSENT, type AccessContext } from "@crossline/core";
 vi.mock("server-only", () => ({}));
 const session: { ctx?: AccessContext | undefined } = {};
 vi.mock("../../../lib/access-guard", () => ({
@@ -142,7 +142,7 @@ test("a transcript becomes the same recording.transcribed event the machine writ
     seconds: 600, speechSeconds: 300, workMs: 40_000, wallMs: 50_000 };
   expect(await (await send(recordings, "/api/device/recordings", device, "recordings:aaaa1111", { transcripts: [transcript] })).json()).toMatchObject({ transcripts: 1 });
   expect(await (await send(recordings, "/api/device/recordings", device, "recordings:bbbb2222", { transcripts: [transcript] })).json()).toMatchObject({ transcripts: 0 });
-  const events = store.listEvents(ctx.workspaceId, { type: RECORDING_TRANSCRIBED_EVENT });
+  const events = store.listEvents(ctx.workspaceId, { type: "recording.changed", change: "transcribed" });
   expect(events).toHaveLength(1);
   expect(events[0]!.entityId).toBe(sha("c"));
   expect(store.listSourceDocuments(ctx.workspaceId).map((item) => item.fileName)).toEqual(["录音/2026-10-21 09.30.m4a 转写.txt"]);

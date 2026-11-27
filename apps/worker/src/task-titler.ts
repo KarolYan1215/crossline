@@ -3,7 +3,7 @@ import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
 import { ownerOf } from "./owner";
 
-export const TASK_TITLER = "crossline:crossline-task-titler";
+export const TASK_TITLER = "crossline:crossline-goal-backplanner:title";
 
 /**
  * Tasks the titler has not read yet (still on the board or in its history), oldest first: those written before short names existed, and
@@ -36,7 +36,7 @@ export function createTaskTitler(store: CrosslineStore, workspaceId: string, cwd
     const context = { version: "crossline.task-titles.v2", tasks };
     const result = await runCodexSkill<TaskTitles>(client, context, { skillName: TASK_TITLER, cwd,
       developerInstructions: "Give each task the short name shown on its card and calendar block and say whether it is going to something at its own time, "
-        + "as the crossline-task-titler Skill describes, and return only the requested JSON: a verb-first action of at most 24 characters that keeps the "
+        + "as the crossline-goal-backplanner:title Skill describes, and return only the requested JSON: a verb-first action of at most 24 characters that keeps the "
         + "course code and what tells the task apart (a task that already has a title keeps it; return it unchanged), and attends.", outputSchema: TASK_TITLES_SCHEMA, prepareInput: () => context,
       validateOutput: (output) => validateTaskTitles(output, tasks.map((task) => task.id)), onAudit: () => {}, timeoutMs: 20 * 60_000 });
     if (!result.ok) return { blocked: result.blocker.code };
@@ -51,8 +51,8 @@ export function createTaskTitler(store: CrosslineStore, workspaceId: string, cwd
       if (!Object.keys(named).length && !Object.keys(read).length) continue;
       store.saveWorkOrder({ ...order, payload: { ...payload, ...named, ...read } });
     }
-    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `tasks.titled:${Date.now()}`, type: "tasks.titled", entityId: workspaceId,
-      payload: { named: result.output.titles.length } });
+    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `tasks.titled:${Date.now()}`, type: "job.ran", entityId: workspaceId,
+      payload: { named: result.output.titles.length, job: "tasks.title", state: "done" } });
     return { named: result.output.titles.length };
   };
 }

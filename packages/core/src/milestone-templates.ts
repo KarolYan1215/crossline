@@ -265,7 +265,7 @@ export function domainMilestoneTemplates(lineId: string, domain: "wellness" | "w
 export type MilestoneConfidence = "low" | "medium" | "high";
 
 /**
- * Deterministic, not model-self-rated — `crossline-milestone-architect` is already told never to emit a
+ * Deterministic, not model-self-rated — `crossline-milestone-architect:design` is already told never to emit a
  * numeric score, and letting the model grade its own confidence has the same problem: it is marking its
  * own homework. `high` means the submitted criteria actually came from a known template unmodified,
  * `medium` means the template was used as a starting point but customized, and `low` is the same "free-

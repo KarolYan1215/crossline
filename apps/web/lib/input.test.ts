@@ -27,7 +27,7 @@ test("the box's actions write a goal, a milestone draft, a new line and a task n
   expect(await executeAction(TEST_CTX, { action: "line.add", summary: "跑者", args: { label: "跑者", domain: "" } })).toMatchObject({ ok: true });
   expect(identityLines(TEST_CTX).some((line) => line.label === "跑者")).toBe(true);
   expect(await executeAction(TEST_CTX, { action: "task.op", summary: "第三题卡住了", args: { ...op, type: "note", text: "第三题卡住了" } })).toMatchObject({ ok: true });
-  expect(store.listEvents(ws, { type: "task.note", entityId: "w1" })).toHaveLength(1);
+  expect(store.listEvents(ws, { type: "task.changed", change: "note", entityId: "w1" })).toHaveLength(1);
   expect(store.listCaptures(ws)).toEqual([]);
 
   // Each write is its own operation in the undo log; taking back the milestone archives the draft, the line disappears again.

@@ -18,7 +18,6 @@ export type NarrativeRating = { verdict: "fits" | "partial" | "off"; note?: stri
 export type SavedNarrative = PortraitNarrative & { version: number; at: string; ratings?: Record<string, NarrativeRating> };
 
 const BASIS_LINE = /<!--\s*basis:\s*([^>]*?)\s+level:\s*([123])\s*-->/;
-const MAX_QUOTE = 15;
 
 /** The narrative's sections: each `## ` heading, its paragraphs, and the hidden basis line under it. */
 export function parseNarrative(text: string): PortraitNarrative {
@@ -37,8 +36,8 @@ export function parseNarrative(text: string): PortraitNarrative {
 
 /**
  * What a narrative must not carry, each a reason handed back to the model: no section, a section with no basis or one naming ids the
- * ledger lacks, a long verbatim quote, a URL or reply id, the evidence/confidence words, labels (a 16-type, a level-3 section when the
- * interview had a safety turn) and more than three level-3 sections.
+ * ledger lacks, and a level-3 section when the interview had a safety turn. How it is written — quotes, sources, wording, labels, how
+ * many level-3 sections — is the Skill's (2026-11-27, docs/plans/condense-1127.md A6).
  */
 /* i18n-ignore-start: reasons handed back to the model */
 export function narrativeProblems(narrative: PortraitNarrative, known: { ids: ReadonlySet<string>; safety: boolean }): string[] {
@@ -49,16 +48,8 @@ export function narrativeProblems(narrative: PortraitNarrative, known: { ids: Re
     if (!section.basis.length) problems.push(`${name}末尾缺少 <!-- basis: … level: n --> 一行。`);
     const unknown = section.basis.filter((id) => !known.ids.has(id));
     if (unknown.length) problems.push(`${name}的 basis 写了材料里没有的 id：${unknown.join("、")}。`);
-    const long = [...section.body.matchAll(/[「“"]([^」”"]+)[」”"]/g)].map((match) => match[1]!).filter((quote) => [...quote].length > MAX_QUOTE);
-    if (long.length) problems.push(`${name}引了超过 ${MAX_QUOTE} 个字的原话（「${long[0]!.slice(0, 20)}…」）：用自己的话说，不印引文。`);
-    if (/https?:\/\/|reply-\d+|src-\d+/i.test(section.body)) problems.push(`${name}出现了网址或回复编号：叙事不印出处。`);
-    const words = ["置信度", "把握", "证据", "依据"].filter((word) => section.body.includes(word));
-    if (words.length) problems.push(`${name}用了「${words.join("」「")}」：不确定就用「可能」「大概」。`);
-    if (/\b[EI][NS][TF][JP]\b|16\s*型/.test(section.body) && !/自己|本人说|自报/.test(section.body)) problems.push(`${name}出现了人格类型：不贴标签。`);
   }
-  const third = narrative.sections.filter((section) => section.level === 3);
-  if (third.length > 3) problems.push(`第三级的节有 ${third.length} 节，最多三节。`);
-  if (known.safety && third.length) problems.push("访谈里有过艰难时期的处理，这份叙事不写第三级的节。");
+  if (known.safety && narrative.sections.some((section) => section.level === 3)) problems.push("访谈里有过艰难时期的处理，这份叙事不写第三级的节。");
   return problems;
 }
 /* i18n-ignore-end */

@@ -62,7 +62,7 @@ import { addFolder, configureFolderReading, personNames, previewFolder, removeFo
 import { createFolderScreener } from "./folder-classifier";
 import { homedir, tmpdir } from "node:os";
 import { defaultSafeGetDeps } from "./safe-fetch";
-import { REQUIRED_SKILLS } from "./required-skills";
+import { PERSONAL_PLUGIN, REQUIRED_SKILLS } from "./required-skills";
 import { privateGuardFor } from "./private-guard";
 import { createMailService } from "./mailbox";
 import { createImportService } from "./importer";
@@ -875,7 +875,7 @@ const nodeHub: NodeHub | undefined = nodePort > 0 ? await createNodeHub({
     // A node with no sign-in of its own serves only an account whose model is a provider (the gateway's key); else every run would fail.
     const account = await client.request("account/read", { refreshToken: false }).catch(() => undefined) as { account?: unknown } | undefined;
     if (!account?.account && !modelProviders.hasProvider(workspaceId)) throw new Error("NODE_NOT_SIGNED_IN");
-    const skills = await installLocalPlugin(client, { name: "crossline", marketplacePath: crosslineMarketplace, cwd: repoRoot, requiredSkills: REQUIRED_SKILLS });
+    const skills = await installLocalPlugin(client, { name: "crossline", marketplacePath: crosslineMarketplace, cwd: repoRoot, requiredSkills: REQUIRED_SKILLS, extraPlugins: [PERSONAL_PLUGIN] });
     const missing = REQUIRED_SKILLS.filter((name) => !skills.includes(name));
     if (missing.length) throw new Error(`CODEX_PLUGIN_SKILLS_MISSING ${missing.slice(0, 3).join(",")}`);
   },
@@ -909,7 +909,8 @@ if (!capabilitySecret) {
       name: "crossline",
       marketplacePath: path.join(repoRoot, "skills", "marketplace", ".agents", "plugins", "marketplace.json"),
       cwd: repoRoot,
-      requiredSkills: REQUIRED_SKILLS
+      requiredSkills: REQUIRED_SKILLS,
+      extraPlugins: [PERSONAL_PLUGIN]
     },
     // Every account but the machine owner's runs on its own Codex (runtime-registry.ts), in its own home beside the owner's.
     // On the hosted beta as many other accounts at a time keep a runtime as model runs may go at once (`guestRuntimeLimit`: 2 on the
@@ -969,7 +970,7 @@ if (!capabilitySecret) {
       if (outcome.state !== "finished") return outcome;
       // Marked as being written at once, so the page says so and the background pass does not write a report before the extraction finished.
       analysisStore.appendEvent({ ownerId: analysisStore.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `portrait.requested:${Date.now()}`,
-        type: "portrait.requested", entityId: workspaceId, payload: { via: "finish" } });
+        type: "portrait.changed", entityId: workspaceId, payload: { via: "finish", change: "requested" } });
       void complete.then(() => writePortraitFor(workspaceId)).catch(() => undefined).finally(() => {
         void firstDraftsPass(workspaceId).catch(() => undefined); void publicSkillPass(workspaceId, new Date().toISOString()).catch(() => undefined);
         void methodResearchPass(workspaceId, new Date().toISOString()).catch(() => undefined); });

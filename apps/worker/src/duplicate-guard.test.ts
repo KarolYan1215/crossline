@@ -27,13 +27,13 @@ test("a captured task the board already has is folded into it, an addition goes 
 
   expect(foldNewTask(store, ws, "new1")).toMatchObject({ kind: "duplicate", keep: "mat" });
   expect(store.getWorkOrder(ws, "new1")!.state).toBe("archived");
-  expect(store.listEvents(ws, { type: "task.duplicate_prevented", entityId: "mat" })[0]?.payload).toMatchObject({ kind: "duplicate", source: "analysis",
+  expect(store.listEvents(ws, { type: "task.changed", change: "duplicate_prevented", entityId: "mat" })[0]?.payload).toMatchObject({ kind: "duplicate", source: "analysis",
     candidate: { id: "new1" } });
 
   // The model said it adds to 作业 2: folded, and the kept task is asked to take it into its steps.
   expect(foldNewTask(store, ws, "new2", "hw2")).toMatchObject({ kind: "extends", keep: "hw2" });
   expect(store.getWorkOrder(ws, "new2")!.state).toBe("archived");
-  expect(store.listEvents(ws, { type: "task.steps_replan_requested", entityId: "hw2" })[0]?.payload)
+  expect(store.listEvents(ws, { type: "task.changed", change: "steps_replan_requested", entityId: "hw2" })[0]?.payload)
     .toMatchObject({ feedback: expect.stringContaining("补做作业 2 第 5 题") });
 
   // Near but not settled by the rules: created as usual, left to the daily merge.
@@ -57,14 +57,14 @@ test("the backplanner is shown the open tasks; what one already covers or adds t
     backplanStep({ id: "s3", title: "ECE 548 期中考试", intent: "参加期中考试", dependsOn: ["s1"],
       completion: { mode: "needs_assessment", reason: "result_pending", why: "成绩由老师评定", question: "", askAfterHours: 48 } })
   ], dateCandidates: [], blockers: [] };
-  const runtime = fakeRuntime([JSON.stringify(answer)], "crossline:crossline-goal-backplanner");
+  const runtime = fakeRuntime([JSON.stringify(answer)], "crossline:crossline-goal-backplanner:backplan");
   const result = await createGoalBackplanner(store, ws, "C:\\repo", () => runtime.rpc)("m2");
   expect(result.state).toBe("proposed");
   const created = store.listWorkOrders(ws).filter((item) => item.milestoneId === "m2");
   expect(created.map((item) => (item.payload as { title: string }).title)).toEqual(["ECE 548 期中考试"]);
   // The exam waits on the material task already there, and carries the backplanner's judgement.
   expect(created[0]!.payload).toMatchObject({ dependsOn: ["mat"], completion: { mode: "needs_assessment", reason: "result_pending", askAfterHours: 48 } });
-  expect(store.listEvents(ws, { type: "task.duplicate_prevented" }).map((event) => [event.entityId, (event.payload as { kind: string }).kind]))
+  expect(store.listEvents(ws, { type: "task.changed", change: "duplicate_prevented" }).map((event) => [event.entityId, (event.payload as { kind: string }).kind]))
     .toEqual([["mat", "duplicate"], ["outline", "extends"]]);
   // The kept tasks serve this milestone too, so it is not split again for want of open work.
   expect((store.getWorkOrder(ws, "mat")!.payload as { alsoServes?: string[] }).alsoServes).toEqual(["m2"]);
@@ -84,7 +84,7 @@ test("a homework from the course's dates the person already has is not written t
   expect(store.listWorkOrders(ws).map((item) => item.id)).toEqual(["typed"]);
   expect(store.getWorkOrder(ws, "typed")!.payload).toMatchObject({ dueDate: "2026-10-20", datePair: { number: "2" } });
   expect(materializeDatePairs(store, ws, now)).toEqual([]);
-  expect(store.listEvents(ws, { type: "task.duplicate_prevented" })).toHaveLength(1);
+  expect(store.listEvents(ws, { type: "task.changed", change: "duplicate_prevented" })).toHaveLength(1);
 });
 
 test("the backplanner does not write again what the person just finished (W-30)", async () => {
@@ -98,12 +98,12 @@ test("the backplanner does not write again what the person just finished (W-30)"
     backplanStep({ title: "核对5家试用门店的名单与联系人", intent: "整理5家试用门店的名单与联系人", sourceQuote: "试用门店上线" }),
     backplanStep({ id: "s2", title: "给试用门店发上线通知", intent: "给每家试用门店写上线通知", sourceQuote: "试用门店上线", dependsOn: ["s1"] })
   ], dateCandidates: [], blockers: [] };
-  const runtime = fakeRuntime([JSON.stringify(answer)], "crossline:crossline-goal-backplanner");
+  const runtime = fakeRuntime([JSON.stringify(answer)], "crossline:crossline-goal-backplanner:backplan");
   expect((await createGoalBackplanner(store, ws, "C:\\repo", () => runtime.rpc)("m3")).state).toBe("proposed");
   const created = store.listWorkOrders(ws).filter((item) => item.milestoneId === "m3");
   expect(created.map((item) => (item.payload as { title: string }).title)).toEqual(["给试用门店发上线通知"]);
   expect(created[0]!.payload).toMatchObject({ dependsOn: ["done"] });
-  expect(store.listEvents(ws, { type: "task.duplicate_prevented" })[0]?.payload).toMatchObject({ kind: "done", keep: "done" });
+  expect(store.listEvents(ws, { type: "task.changed", change: "duplicate_prevented" })[0]?.payload).toMatchObject({ kind: "done", keep: "done" });
 });
 
 test("a part of a task goes into the whole, in either order (W-194)", () => {
@@ -113,7 +113,7 @@ test("a part of a task goes into the whole, in either order (W-194)", () => {
   order("whole", "完成 ECE 548 作业 3", { state: "awaiting_plan_approval" });
   expect(absorbParts(store, ws, "whole")).toEqual(["part"]);
   expect(store.getWorkOrder(ws, "part")!.state).toBe("archived");
-  expect(store.listEvents(ws, { type: "task.steps_replan_requested", entityId: "whole" })[0]?.payload)
+  expect(store.listEvents(ws, { type: "task.changed", change: "steps_replan_requested", entityId: "whole" })[0]?.payload)
     .toMatchObject({ feedback: expect.stringContaining("2026-11-05") });
   // The whole first, then the piece: the piece is folded in as an addition.
   order("part2", "作业 3 的前两题", { state: "awaiting_plan_approval" });
@@ -131,7 +131,7 @@ test("a captured part keeps its earlier day as a sub-deadline of the whole, whic
   expect(foldNewTask(store, ws, "part")).toMatchObject({ kind: "extends", part: true, keep: "whole" });
   expect(store.getWorkOrder(ws, "part")!.state).toBe("archived");
   expect(store.getWorkOrder(ws, "whole")!.payload).toMatchObject({ dueDate: "2026-11-09", partDeadlines: [{ title: "作业 3 的前两题", dueDate: "2026-11-05" }] });
-  expect(store.listEvents(ws, { type: "task.steps_replan_requested", entityId: "whole" }).map((event) => (event.payload as { feedback: string }).feedback))
+  expect(store.listEvents(ws, { type: "task.changed", change: "steps_replan_requested", entityId: "whole" }).map((event) => (event.payload as { feedback: string }).feedback))
     .toEqual([expect.stringContaining("须在 2026-11-05 前完成")]);
   expect(taskWindow(store, ws, store.getWorkOrder(ws, "whole")!, new Date("2026-11-03T15:00:00Z")))
     .toMatchObject({ dueBy: "2026-11-09", partDeadlines: [{ title: "作业 3 的前两题", dueDate: "2026-11-05" }] });

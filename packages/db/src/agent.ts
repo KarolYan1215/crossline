@@ -133,16 +133,14 @@ export function projectAgentOutputs(store: CrosslineStore, workspaceId: string, 
 }
 /** A run with no outcome after this long was lost with the process that held it, not still going. */
 const STALE_AFTER_MS = 8 * 3_600_000;
-export const AGENT_FILES_CHECKED = "agent.task.files_checked";
 
 export function listAgentTasks(store: CrosslineStore, workspaceId: string, now = new Date()): AgentTaskRow[] {
   const rows = new Map<string, AgentTaskRow>();
-  const events = store.listEvents(workspaceId, { type: ["agent.task.requested", "agent.task.completed", "agent.task.blocked", "agent.task.reviewed",
-    "agent.task.settled", "agent.task.reopened", AGENT_FILES_CHECKED] });
+  const events = store.listEvents(workspaceId, { type: "agent.changed", change: ["task_requested", "task_completed", "task_blocked", "task_reviewed", "task_settled", "task_reopened", "task_files_checked"] });
   for (const event of events) {
     const p = event.payload as Record<string, unknown>;
     const taskId = event.entityId;
-    if (event.type === "agent.task.requested") {
+    if ((event.type === "agent.changed" && (event.payload as { change?: string }).change === "task_requested")) {
       rows.set(taskId, { taskId, title: String(p.title ?? ""), category: isAgentCategory(p.category) ? p.category : "read_research_organize", workOrderId: String(p.workOrderId ?? ""),
         requestedAt: event.createdAt, status: "running", directory: "", durationMs: 0, commands: 0, denied: 0, artifacts: [], needsHuman: 0, checksPassed: false, inputsModified: [], blockerCode: "", blockerMessage: "", reviewNote: "", autoApproved: p.autoApproved === true,
         delegated: p.delegated === true, stepId: typeof p.stepId === "string" ? p.stepId : "", by: p.by === "person" ? "person" : "system", deniedRules: [],
@@ -152,31 +150,31 @@ export function listAgentTasks(store: CrosslineStore, workspaceId: string, now =
     const row = rows.get(taskId);
     if (!row) continue;
     // Half-written workflow drafts from stopped growing runs were once offered for review (2026-10-14); they are not results.
-    if (event.type === "agent.task.completed" && p.partial === true && taskId.startsWith("grow-")) continue;
-    if (event.type === "agent.task.completed") {
+    if ((event.type === "agent.changed" && (event.payload as { change?: string }).change === "task_completed") && p.partial === true && taskId.startsWith("grow-")) continue;
+    if ((event.type === "agent.changed" && (event.payload as { change?: string }).change === "task_completed")) {
       Object.assign(row, { status: p.reviewRequired === false ? "accepted" : "needs_review", directory: String(p.directory ?? ""), durationMs: Number(p.durationMs ?? 0),
         commands: Number(p.commands ?? 0), denied: Number(p.denied ?? 0), artifacts: Array.isArray(p.artifacts) ? p.artifacts as AgentTaskRow["artifacts"] : [],
         needsHuman: Number(p.needsHuman ?? 0), checksPassed: p.checksPassed === true, inputsModified: Array.isArray(p.inputsModified) ? p.inputsModified.map(String) : [],
         partial: p.partial === true, completedAt: event.createdAt,
         external: Array.isArray(p.reviewReasons) && p.reviewReasons.some((reason) => /涉及对外/.test(String(reason))) });
       delete row.settled;
-    } else if (event.type === AGENT_FILES_CHECKED) {
+    } else if ((event.type === "agent.changed" && (event.payload as { change?: string }).change === "task_files_checked")) {
       // The self-check's finding (apps/worker/src/self-check.ts): the run's folder found under the current root, or the files that are gone.
       if (typeof p.directory === "string" && p.directory) row.directory = p.directory;
       const missing = new Set(Array.isArray(p.missing) ? p.missing.map(String) : []);
       if (missing.size) row.artifacts = row.artifacts.filter((artifact) => !missing.has(artifact.path));
       if (p.gone === true) row.filesGone = true; else delete row.filesGone;
-    } else if (event.type === "agent.task.blocked") {
+    } else if ((event.type === "agent.changed" && (event.payload as { change?: string }).change === "task_blocked")) {
       Object.assign(row, { status: "blocked", blockerCode: String(p.code ?? ""), blockerMessage: String(p.message ?? ""), durationMs: Number(p.durationMs ?? 0), commands: Number(p.commands ?? 0), denied: Number(p.decisions ?? 0),
         endedAt: event.createdAt, deniedRules: Array.isArray(p.deniedRules) ? p.deniedRules.map(String) : [], siteRefusals: Number(p.siteRefusals ?? 0),
         ...(typeof p.directory === "string" && p.directory ? { directory: p.directory } : {}) });
-    } else if (event.type === "agent.task.reviewed") {
+    } else if ((event.type === "agent.changed" && (event.payload as { change?: string }).change === "task_reviewed")) {
       row.status = p.decision === "accepted" ? "accepted" : "rejected";
       row.reviewNote = String(p.note ?? "");
       row.reviewedBy = p.by === "system" ? "system" : "person";
-    } else if (event.type === "agent.task.settled") {
+    } else if ((event.type === "agent.changed" && (event.payload as { change?: string }).change === "task_settled")) {
       if (row.status === "needs_review" && (p.how === "superseded" || p.how === "expired" || p.how === "not_repeated")) row.settled = p.how;
-    } else if (event.type === "agent.task.reopened") {
+    } else if ((event.type === "agent.changed" && (event.payload as { change?: string }).change === "task_reopened")) {
       // An undo of the daily pass: the result is the person's to look at again, whatever the pass did with it. Also a result accepted by
       // itself that turned out to need the person (a workflow revision that read untrusted content, workflow-improver.ts); never one the
       // person decided.
@@ -217,14 +215,14 @@ export function resultsAwaitingReview(store: CrosslineStore, workspaceId: string
 export function settleAgentResult(store: CrosslineStore, workspaceId: string, taskId: string, how: "superseded" | "expired" | "not_repeated", detail: { by?: string; day: string }): boolean {
   const ownerId = store.getWorkspaceOwnerId(workspaceId);
   if (!ownerId) return false;
-  return store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:settled:${taskId}:${how}:${detail.day}`, type: "agent.task.settled", entityId: taskId,
-    payload: { taskId, how, ...(detail.by ? { supersededBy: detail.by } : {}) } }).inserted;
+  return store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:settled:${taskId}:${how}:${detail.day}`, type: "agent.changed", entityId: taskId,
+    payload: { taskId, how, ...(detail.by ? { supersededBy: detail.by } : {}), change: "task_settled" } }).inserted;
 }
 
 /** The undo of the daily pass for one result: a settled one, or one the system accepted, is waiting for the person again. */
 export function reopenAgentResult(store: CrosslineStore, workspaceId: string, taskId: string, principalId: string): void {
   store.appendEvent({ ownerId: principalId, workspaceId, idempotencyKey: `agent:reopened:${taskId}:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`,
-    type: "agent.task.reopened", entityId: taskId, payload: { taskId } });
+    type: "agent.changed", entityId: taskId, payload: { taskId, change: "task_reopened" } });
 }
 
 /**
@@ -239,8 +237,8 @@ export function reviewAgentTask(store: CrosslineStore, workspaceId: string, task
   if (task.status !== "needs_review" && task.status !== "accepted") return { ok: false, code: "TASK_NOT_REVIEWABLE" };
   const ownerId = store.getWorkspaceOwnerId(workspaceId);
   if (!ownerId) return { ok: false, code: "TASK_NOT_FOUND" };
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:reviewed:${taskId}:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`, type: "agent.task.reviewed", entityId: taskId,
-    payload: { taskId, decision, note: note.slice(0, 500), category: task.category, ...(options.by ? { by: options.by } : {}) } });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:reviewed:${taskId}:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`, type: "agent.changed", entityId: taskId,
+    payload: { taskId, decision, note: note.slice(0, 500), category: task.category, ...(options.by ? { by: options.by } : {}), change: "task_reviewed" } });
   // A result that failed its own checks, or left originals changed, does not count towards trust even if the person is kind.
   const clean = decision === "accepted" && task.checksPassed && task.inputsModified.length === 0;
   const trust = options.by === "system" ? readCategories(store, workspaceId)[task.category] : recordReview(store, workspaceId, task.category, clean);
@@ -282,9 +280,9 @@ function finishPreparation(store: CrosslineStore, workspaceId: string, order: { 
   const core = store.listWorkOrders(workspaceId).find((item) => item.id === preparesOf(order));
   const ownerId = store.getWorkspaceOwnerId(workspaceId);
   if (!core || !ownerId || !DISPATCH_STATES.has(core.state) || !store.getStepPlan(workspaceId, core.id)) return;
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.steps_replan_requested:prepared:${taskId}`, type: "task.steps_replan_requested", entityId: core.id,
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.steps_replan_requested:prepared:${taskId}`, type: "task.changed", entityId: core.id,
     // i18n-ignore: the brief for the next plan (model-facing)
-    payload: { feedback: `助手已备好「${title.slice(0, 60)}」（在本任务的「已备好」里）。本人的步骤直接用它，不再安排收集或整理它的步骤。`, prepared: taskId } });
+    payload: { feedback: `助手已备好「${title.slice(0, 60)}」（在本任务的「已备好」里）。本人的步骤直接用它，不再安排收集或整理它的步骤。`, prepared: taskId, change: "steps_replan_requested" } });
 }
 
 /** A kind of work the assistant would like to start but has not been allowed to, waiting for the person. */
@@ -292,15 +290,15 @@ export function requestCategory(store: CrosslineStore, workspaceId: string, cate
   const ownerId = store.getWorkspaceOwnerId(workspaceId);
   if (!ownerId || readCategories(store, workspaceId)[category] || declinedCategories(store, workspaceId).includes(category)) return;
   if (pendingCategoryRequests(store, workspaceId).some((item) => item.category === category)) return;
-  const round = store.listEvents(workspaceId, { type: "agent.category.requested", entityId: category }).length;
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:category:requested:${category}:${round}`, type: "agent.category.requested", entityId: category,
-    payload: { category, workOrderId, why: why.slice(0, 300) } });
+  const round = store.listEvents(workspaceId, { type: "agent.changed", change: "category_requested", entityId: category }).length;
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:category:requested:${category}:${round}`, type: "agent.changed", entityId: category,
+    payload: { category, workOrderId, why: why.slice(0, 300), change: "category_requested" } });
 }
 export function pendingCategoryRequests(store: CrosslineStore, workspaceId: string): Array<{ category: AgentCategory; workOrderId: string; why: string }> {
   const approved = readCategories(store, workspaceId);
   const declined = new Set(declinedCategories(store, workspaceId));
   const seen = new Map<AgentCategory, { category: AgentCategory; workOrderId: string; why: string }>();
-  for (const event of store.listEvents(workspaceId, { type: "agent.category.requested" })) {
+  for (const event of store.listEvents(workspaceId, { type: "agent.changed", change: "category_requested" })) {
     const p = event.payload as { category?: unknown; workOrderId?: unknown; why?: unknown };
     if (isAgentCategory(p.category) && !approved[p.category] && !declined.has(p.category)) seen.set(p.category, { category: p.category, workOrderId: String(p.workOrderId ?? ""), why: String(p.why ?? "") });
   }
@@ -313,23 +311,23 @@ export function requestAgentApproval(store: CrosslineStore, workspaceId: string,
   const ownerId = store.getWorkspaceOwnerId(workspaceId);
   if (!ownerId) return undefined;
   const id = `ap-${Math.random().toString(36).slice(2, 10)}`;
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:approval:requested:${id}`, type: "agent.approval.requested", entityId: id,
-    payload: { id, taskId, kind: request.kind, subject: request.subject.slice(0, 600), rule: request.rule, reason: request.reason.slice(0, 300) } });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:approval:requested:${id}`, type: "agent.changed", entityId: id,
+    payload: { id, taskId, kind: request.kind, subject: request.subject.slice(0, 600), rule: request.rule, reason: request.reason.slice(0, 300), change: "approval_requested" } });
   return id;
 }
 export function decideAgentApproval(store: CrosslineStore, workspaceId: string, id: string, decision: "accepted" | "declined"): boolean {
   const ownerId = store.getWorkspaceOwnerId(workspaceId);
-  if (!ownerId || !store.listEvents(workspaceId, { type: "agent.approval.requested", entityId: id }).length) return false;
-  return store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:approval:decided:${id}`, type: "agent.approval.decided", entityId: id, payload: { id, decision } }).inserted;
+  if (!ownerId || !store.listEvents(workspaceId, { type: "agent.changed", change: "approval_requested", entityId: id }).length) return false;
+  return store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:approval:decided:${id}`, type: "agent.changed", entityId: id, payload: { id, decision, change: "approval_decided" } }).inserted;
 }
 export function agentApprovalDecision(store: CrosslineStore, workspaceId: string, id: string): "accepted" | "declined" | undefined {
-  const decided = store.listEvents(workspaceId, { type: "agent.approval.decided", entityId: id })[0];
+  const decided = store.listEvents(workspaceId, { type: "agent.changed", change: "approval_decided", entityId: id })[0];
   const value = (decided?.payload as { decision?: unknown } | undefined)?.decision;
   return value === "accepted" || value === "declined" ? value : undefined;
 }
 export function pendingAgentApprovals(store: CrosslineStore, workspaceId: string, now = new Date(), maxAgeMs = 15 * 60_000): AgentApprovalRow[] {
-  const decided = new Set(store.listEvents(workspaceId, { type: "agent.approval.decided" }).map((event) => event.entityId));
-  return store.listEvents(workspaceId, { type: "agent.approval.requested" })
+  const decided = new Set(store.listEvents(workspaceId, { type: "agent.changed", change: "approval_decided" }).map((event) => event.entityId));
+  return store.listEvents(workspaceId, { type: "agent.changed", change: "approval_requested" })
     .filter((event) => !decided.has(event.entityId) && now.getTime() - Date.parse(event.createdAt) <= maxAgeMs)
     .map((event) => ({ ...(event.payload as Omit<AgentApprovalRow, "requestedAt">), requestedAt: event.createdAt }));
 }
@@ -345,15 +343,15 @@ export function requestAgentQuestion(store: CrosslineStore, workspaceId: string,
   const ownerId = store.getWorkspaceOwnerId(workspaceId);
   if (!ownerId || !questions.length) return undefined;
   const id = `aq-${Math.random().toString(36).slice(2, 10)}`;
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:question:requested:${id}`, type: "agent.question.requested", entityId: id,
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:question:requested:${id}`, type: "agent.changed", entityId: id,
     payload: { id, taskId, title: title.slice(0, 200), questions: questions.slice(0, 3).map((question) => ({ id: question.id.slice(0, 80), header: question.header.slice(0, 60),
-      question: question.question.slice(0, 600), options: question.options.slice(0, 6).map((option) => ({ label: option.label.slice(0, 120), description: option.description.slice(0, 300) })) })) } });
+      question: question.question.slice(0, 600), options: question.options.slice(0, 6).map((option) => ({ label: option.label.slice(0, 120), description: option.description.slice(0, 300) })) })), change: "question_requested" } });
   return id;
 }
 /** The person's answers, one list per question id (an option's label, or their own words). Refused once answered or expired. */
 export function answerAgentQuestion(store: CrosslineStore, workspaceId: string, id: string, answers: Record<string, string[]>): boolean {
   const ownerId = store.getWorkspaceOwnerId(workspaceId);
-  const asked = store.listEvents(workspaceId, { type: "agent.question.requested", entityId: id })[0];
+  const asked = store.listEvents(workspaceId, { type: "agent.changed", change: "question_requested", entityId: id })[0];
   if (!ownerId || !asked) return false;
   const ids = new Set(((asked.payload as { questions?: AgentQuestion[] }).questions ?? []).map((question) => question.id));
   const kept = Object.fromEntries(Object.entries(answers).filter(([key, value]) => ids.has(key) && Array.isArray(value))
@@ -361,10 +359,10 @@ export function answerAgentQuestion(store: CrosslineStore, workspaceId: string, 
   if (!Object.values(kept).some((value) => value.length)) return false;
   // Checked and written in one immediate transaction: the web answers and the worker expires from two processes.
   return store.atomically(() => !agentQuestionClosed(store, workspaceId, id) &&
-    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:question:answered:${id}`, type: "agent.question.answered", entityId: id, payload: { id, answers: kept } }).inserted);
+    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:question:answered:${id}`, type: "agent.changed", entityId: id, payload: { id, answers: kept, change: "question_answered" } }).inserted);
 }
 export function agentQuestionAnswers(store: CrosslineStore, workspaceId: string, id: string): Record<string, string[]> | undefined {
-  const answered = store.listEvents(workspaceId, { type: "agent.question.answered", entityId: id })[0];
+  const answered = store.listEvents(workspaceId, { type: "agent.changed", change: "question_answered", entityId: id })[0];
   return answered ? (answered.payload as { answers: Record<string, string[]> }).answers : undefined;
 }
 /** Expires an open question; false when it was already answered or expired (never both written: one transaction with the answer's). */
@@ -372,13 +370,13 @@ export function expireAgentQuestion(store: CrosslineStore, workspaceId: string, 
   const ownerId = store.getWorkspaceOwnerId(workspaceId);
   if (!ownerId) return false;
   return store.atomically(() => !agentQuestionClosed(store, workspaceId, id) &&
-    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:question:expired:${id}`, type: "agent.question.expired", entityId: id, payload: { id } }).inserted);
+    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:question:expired:${id}`, type: "agent.changed", entityId: id, payload: { id, change: "question_expired" } }).inserted);
 }
 const agentQuestionClosed = (store: CrosslineStore, workspaceId: string, id: string) =>
-  store.listEvents(workspaceId, { type: "agent.question.answered", entityId: id }).length > 0 || store.listEvents(workspaceId, { type: "agent.question.expired", entityId: id }).length > 0;
+  store.listEvents(workspaceId, { type: "agent.changed", change: "question_answered", entityId: id }).length > 0 || store.listEvents(workspaceId, { type: "agent.changed", change: "question_expired", entityId: id }).length > 0;
 export function pendingAgentQuestions(store: CrosslineStore, workspaceId: string, now = new Date(), maxAgeMs = 15 * 60_000): AgentQuestionRow[] {
-  const closed = new Set([...store.listEvents(workspaceId, { type: "agent.question.answered" }), ...store.listEvents(workspaceId, { type: "agent.question.expired" })].map((event) => event.entityId));
-  return store.listEvents(workspaceId, { type: "agent.question.requested" })
+  const closed = new Set([...store.listEvents(workspaceId, { type: "agent.changed", change: "question_answered" }), ...store.listEvents(workspaceId, { type: "agent.changed", change: "question_expired" })].map((event) => event.entityId));
+  return store.listEvents(workspaceId, { type: "agent.changed", change: "question_requested" })
     .filter((event) => !closed.has(event.entityId) && now.getTime() - Date.parse(event.createdAt) <= maxAgeMs)
     .map((event) => ({ ...(event.payload as Omit<AgentQuestionRow, "requestedAt">), requestedAt: event.createdAt }));
 }
@@ -412,13 +410,13 @@ export function assistantPlanFor(store: CrosslineStore, workspaceId: string, ord
  */
 export function agentChainMarks(store: CrosslineStore, workspaceId: string): AgentChainMarks {
   return {
-    retries: store.listEvents(workspaceId, { type: "agent.retry_requested" }).map((event) => {
+    retries: store.listEvents(workspaceId, { type: "agent.changed", change: "retry_requested" }).map((event) => {
       const p = event.payload as { note?: unknown; approach?: unknown; only?: unknown };
       const only = Array.isArray(p.only) ? p.only.map(String).filter(Boolean) : [];
       const note = [typeof p.note === "string" ? p.note : "", only.length ? `只重做这些：${only.join("；")}` /* i18n-ignore: told to the next run */ : ""].filter(Boolean).join("\n");
       return { taskId: event.entityId, at: event.createdAt, note, ...(typeof p.approach === "string" && p.approach ? { approach: p.approach } : {}) };
     }),
-    closed: store.listEvents(workspaceId, { type: "agent.blocked_acknowledged" })
+    closed: store.listEvents(workspaceId, { type: "agent.changed", change: "blocked_acknowledged" })
       .map((event) => ({ taskId: event.entityId, at: event.createdAt, how: String((event.payload as { how?: unknown }).how ?? "self") }))
   };
 }
@@ -461,19 +459,19 @@ export function requestAgentRetry(store: CrosslineStore, workspaceId: string, ta
   const ownerId = store.getWorkspaceOwnerId(workspaceId) ?? "";
   const only = (input.only ?? []).map((item) => item.trim().slice(0, 300)).filter(Boolean).slice(0, 20);
   if (task.status === "needs_review" && !task.partial) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:reviewed:${taskId}:redo:${now.getTime()}`,
-    type: "agent.task.reviewed", entityId: taskId, payload: { taskId, decision: "redo", note: (input.note ?? "").slice(0, 500), category: task.category } });
+    type: "agent.changed", entityId: taskId, payload: { taskId, decision: "redo", note: (input.note ?? "").slice(0, 500), category: task.category, change: "task_reviewed" } });
   // Keyed on how many times this task was asked for already, not the clock: two requests in one millisecond shared a key and the
   // second (with its words) was silently dropped by `appendEvent`.
-  const attempt = store.listEvents(workspaceId, { type: "agent.retry_requested", entityId: taskId }).length;
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:retry:${taskId}:${attempt}`, type: "agent.retry_requested", entityId: taskId,
-    payload: { taskId, note: (input.note ?? "").trim().slice(0, 4000), ...(only.length ? { only } : {}), ...(input.approach ? { approach: input.approach.slice(0, 300) } : {}), by: "person" } });
+  const attempt = store.listEvents(workspaceId, { type: "agent.changed", change: "retry_requested", entityId: taskId }).length;
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:retry:${taskId}:${attempt}`, type: "agent.changed", entityId: taskId,
+    payload: { taskId, note: (input.note ?? "").trim().slice(0, 4000), ...(only.length ? { only } : {}), ...(input.approach ? { approach: input.approach.slice(0, 300) } : {}), by: "person", change: "retry_requested" } });
   return { ok: true };
 }
 
 /** The person closes a stopped task (they do it, or it is dropped): never run again by itself, and no longer asked about. */
 export function closeAgentTask(store: CrosslineStore, workspaceId: string, taskId: string, how: "self" | "drop", now = new Date()): void {
   store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `agent:blocked:ack:${taskId}:${now.getTime()}`,
-    type: "agent.blocked_acknowledged", entityId: taskId, payload: { how } });
+    type: "agent.changed", entityId: taskId, payload: { how, change: "blocked_acknowledged" } });
 }
 
 /**

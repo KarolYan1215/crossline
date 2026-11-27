@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { skillBase } from "@crossline/core";
 import { JsonLineRpcClient } from "@crossline/codex";
 
 /**
@@ -94,7 +95,8 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
   const pendingAsks = new Map<string, (value: Record<string, unknown>) => void>();
   let askId = 0;
   const configCalls: Array<{ method: string; params: Record<string, unknown> }> = [];
-  const skillNames = Array.isArray(skillName) ? skillName : [skillName];
+  // A merged Skill's mode (`crossline:crossline-task-planner:steps`) is not part of the name the runtime lists.
+  const skillNames = [...new Set((Array.isArray(skillName) ? skillName : [skillName]).map(skillBase))];
   const routeOf = new Map<string, number>();
   const routeTurns = new Map<number, number>();
   const libraryPath = (name: string) => `C:\\library\\${name.replace(":", "\\")}\\SKILL.md`;
@@ -255,7 +257,7 @@ export function scriptedRuntime(skillNames: string[], respond: (prompt: string, 
     }
     if (request.method === "thread/start") latestThread = `thread-${(threads += 1)}`;
     const result = request.method === "skills/list"
-      ? { data: [{ cwd: "C:\repo", errors: [], skills: skillNames.map((name) => ({ name, path: `C:\skill\${name}\SKILL.md`, enabled: true })) }] }
+      ? { data: [{ cwd: "C:\repo", errors: [], skills: [...new Set(skillNames.map(skillBase))].map((name) => ({ name, path: `C:\skill\${name}\SKILL.md`, enabled: true })) }] }
       : request.method === "account/read" ? { account: { type: "chatgpt" } }
       : request.method === "config/read" ? { config: {} }
       : request.method === "thread/start"

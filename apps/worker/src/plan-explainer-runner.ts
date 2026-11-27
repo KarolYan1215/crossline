@@ -9,12 +9,12 @@ import { defaultIdentityPacks } from "@crossline/identity-packs";
 
 import { ownerOf } from "./owner";
 import { tOfWorkspace } from "./locale";
-export const PLAN_EXPLAINER_SKILL = "crossline:crossline-plan-explainer";
+export const PLAN_EXPLAINER_SKILL = "crossline:crossline-schedule-advisor:explain";
 const ACTIONABLE = ["approved", "preparing", "ready_for_human", "active"];
 
 /** The scenario in short; the Skill holds the rules and the examples. */
 const INSTRUCTIONS = "Explain, for the person reading the plan page's 排程依据, why the scheduler put today's work in this order, as the " // i18n-ignore: model-facing
-  + "crossline-plan-explainer Skill describes, and return only the requested JSON. The order is already decided (urgency tier, then importance, then "
+  + "crossline-schedule-advisor:explain Skill describes, and return only the requested JSON. The order is already decided (urgency tier, then importance, then "
   + "deadline): narrate it, never re-rank or invent a score, and cite only factors in the input (tier, weight, deadline, first block, estimate, energy, "
   + "unplacedReason). Name tasks by their title, never by id or by the whole description. Return a blocker only when there is nothing to explain.";
 
@@ -100,7 +100,7 @@ export function createPlanExplainer(store: CrosslineStore, workspaceId: string, 
     if (!result.ok) return { state: "blocked", code: result.blocker.code, message: result.blocker.message };
     store.appendEvent({
       ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `plan-explainer:${today}:${Date.now()}`,
-      type: "plan.explained", entityId: today, payload: result.output
+      type: "plan.changed", entityId: today, payload: { ...result.output, change: "explained" }
     });
     return { state: "ready", explanation: result.output };
   };

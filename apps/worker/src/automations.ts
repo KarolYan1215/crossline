@@ -84,9 +84,9 @@ export function reconcileAutomationRuns(store: CrosslineStore, workspaceId: stri
 }
 
 export const pendingRequests =(store: CrosslineStore, workspaceId: string) => {
-  const settled = new Set([...store.listEvents(workspaceId, { type: "automation.created" }), ...store.listEvents(workspaceId, { type: "automation.design_failed" })]
+  const settled = new Set([...store.listEvents(workspaceId, { type: "automation.changed", change: "created" }), ...store.listEvents(workspaceId, { type: "automation.changed", change: "design_failed" })]
     .map((event) => String((event.payload as { requestId?: string }).requestId ?? "")));
-  return store.listEvents(workspaceId, { type: "automation.requested" }).filter((event) => !settled.has(event.entityId));
+  return store.listEvents(workspaceId, { type: "automation.changed", change: "requested" }).filter((event) => !settled.has(event.entityId));
 };
 
 /** What the person sees and controls on the settings card. */
@@ -112,7 +112,7 @@ async function designOne(deps: AutomationDeps, workspaceId: string, requestId: s
   const locale = localeOf(deps.store, workspaceId);
   const t = tFor(locale);
   const fail = (reason: string) => {
-    deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `automation.design_failed:${requestId}`, type: "automation.design_failed", entityId: requestId, payload: { requestId, reason } });
+    deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `automation.design_failed:${requestId}`, type: "automation.changed", entityId: requestId, payload: { requestId, reason, change: "design_failed" } });
     const said = t("没能把「{{text}}」建成自动化：{{reason}}", { text: text.slice(0, 60), reason });
     settleRequestTurn(deps.store, workspaceId, requestId, said, "failed", now);
     sayToPerson(deps.store, workspaceId, said, "automation_failed", `automation-failed:${requestId}`,
@@ -140,9 +140,9 @@ async function designOne(deps: AutomationDeps, workspaceId: string, requestId: s
   if (!result.ok) {
     // A passing trouble (quota, a timeout, a runtime that restarted, the developer's model still being checked) waits for the next tick,
     // three times at most; anything else — an answer that never kept to the schema, a missing Skill — is said to the person at once.
-    const attempts = deps.store.listEvents(workspaceId, { type: "automation.design_attempted", entityId: requestId }).length + 1;
-    deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `automation.design_attempted:${requestId}:${attempts}`, type: "automation.design_attempted", entityId: requestId,
-      payload: { code: result.blocker.code } });
+    const attempts = deps.store.listEvents(workspaceId, { type: "automation.changed", change: "design_attempted", entityId: requestId }).length + 1;
+    deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `automation.design_attempted:${requestId}:${attempts}`, type: "automation.changed", entityId: requestId,
+      payload: { code: result.blocker.code, change: "design_attempted" } });
     return PASSING.test(result.blocker.code) && attempts < 3 ? { state: "waiting" } : fail(result.blocker.message || t("设计没有成功"));
   }
   const plan = result.output;
@@ -150,8 +150,8 @@ async function designOne(deps: AutomationDeps, workspaceId: string, requestId: s
   if (!previous && existing.length >= AUTOMATIONS_MAX) return fail(t("已经有 {{count}} 个自动化，先删掉不用的。", { count: AUTOMATIONS_MAX }));
   const id = previous?.id ?? `auto-${createHash("sha256").update(requestId).digest("hex").slice(0, 8)}`;
   const { automation, allowed } = installAutomation(deps.store, workspaceId, plan, id, { kind: "asked", text, requestId }, previous, now);
-  deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `automation.created:${requestId}`, type: "automation.created", entityId: id,
-    payload: { requestId, name: plan.name, trigger: plan.trigger.type, action: plan.action.kind, ...(previous ? { replaced: previous.id } : {}) } });
+  deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `automation.created:${requestId}`, type: "automation.changed", entityId: id,
+    payload: { requestId, name: plan.name, trigger: plan.trigger.type, action: plan.action.kind, ...(previous ? { replaced: previous.id } : {}), change: "created" } });
   const person = plan.steps.filter((step) => step.by === "person").map((step) => step.title);
   const values = { name: plan.name, when: triggerLabel(plan.trigger, locale), summary: plan.summary };
   const said = [!plan.enabled ? t("已暂停自动化「{{name}}」，要恢复在设置里点「恢复」或再说一句。", values)
@@ -236,7 +236,7 @@ export function deleteAutomation(store: CrosslineStore, workspaceId: string, id:
   const list = read(store, workspaceId);
   if (!list.some((item) => item.id === id)) return false;
   write(store, workspaceId, list.filter((item) => item.id !== id));
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `automation.deleted:${id}:${Date.now()}`, type: "automation.deleted", entityId: id, payload: {} });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `automation.deleted:${id}:${Date.now()}`, type: "automation.changed", entityId: id, payload: { change: "deleted" } });
   return true;
 }
 
@@ -346,7 +346,7 @@ export function fire(deps: AutomationDeps, workspaceId: string, automation: Auto
     const run = { ...base, taskId: "", state: "skipped" as const, detail };
     noteRun(deps.store, workspaceId, run);
     const told = deps.store.appendEvent({ ownerId: ownerOf(deps.store, workspaceId), workspaceId, idempotencyKey: `automation.refused:${automation.id}:${code}`,
-      type: "automation.refused", entityId: automation.id, payload: { code } });
+      type: "automation.changed", entityId: automation.id, payload: { code, change: "refused" } });
     if (told.inserted) sayToPerson(deps.store, workspaceId, t("自动化「{{name}}」没有运行：{{detail}}。", { name: automation.name, detail }), "automation_failed",
       `automation-refused:${automation.id}:${code}`, [{ label: t("去设置"), href: "/automation" }], now);
     return run;
@@ -519,7 +519,7 @@ const servesMilestone = (store: CrosslineStore, workspaceId: string, orderIds: I
   [...orderIds].some((id) => Boolean(store.getWorkOrder(workspaceId, id)?.milestoneId));
 
 export function suggestFromRepeats(store: CrosslineStore, workspaceId: string, candidates: Array<{ lineId: string; text: string; origin: { kind: string; taskIds?: string[] } }>, now = new Date()): number {
-  const events = store.listEvents(workspaceId, { type: "automation.suggested" });
+  const events = store.listEvents(workspaceId, { type: "automation.changed", change: "suggested" });
   const suggested = new Set(events.map((event) => event.entityId));
   // Runs already offered once are not offered again under a bigger set: the key used to be the set itself, so every further accepted
   // run of the same errand asked again (2026-10-28: four suggestions for the NeuroSim and sample-pack errands, 2→3→5 runs).
@@ -536,8 +536,8 @@ export function suggestFromRepeats(store: CrosslineStore, workspaceId: string, c
     if (orders.size < SUGGEST_MIN_ORDERS || !servesMilestone(store, workspaceId, orders)) continue;
     const key = `sugg-${createHash("sha256").update([...candidate.origin.taskIds].sort().join(",")).digest("hex").slice(0, 12)}`;
     if (suggested.has(key)) continue;
-    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `automation.suggested:${key}`, type: "automation.suggested", entityId: key,
-      payload: { lineId: candidate.lineId, text: candidate.text.slice(0, 300), taskIds: candidate.origin.taskIds } });
+    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `automation.suggested:${key}`, type: "automation.changed", entityId: key,
+      payload: { lineId: candidate.lineId, text: candidate.text.slice(0, 300), taskIds: candidate.origin.taskIds, change: "suggested" } });
     const t = tFor(localeOf(store, workspaceId));
     const text = t("以后自动做这类事：{{text}}", { text: candidate.text.slice(0, 200) });
     sayToPerson(store, workspaceId, t("助手已经做过 {{count}} 次类似的事（{{text}}），都已采纳。要不要以后自动做？可以按时做，也可以在有新邮件、新文件或任务完成时做。", { count: orders.size, text: candidate.text.slice(0, 80) }),

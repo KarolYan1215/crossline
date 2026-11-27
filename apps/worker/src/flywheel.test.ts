@@ -33,10 +33,10 @@ test("the expansion Skill is the only one granted web search, and findings are s
     };
     const expand = createFlywheelExpander(store, "w", "C:\repo", () => ({}) as never);
     expect(await expand()).toBe(1);
-    expect(skillCalls.at(-1)).toMatchObject({ webResearch: true, skillName: "crossline:crossline-flywheel-scout" });
+    expect(skillCalls.at(-1)).toMatchObject({ webResearch: true, skillName: "crossline:crossline-cross-line-planner:flywheel" });
 
     const event = store.listEvents("w").at(-1)!;
-    expect(event.type).toBe("flywheel.finding");
+    expect(event).toMatchObject({ type: "insight.changed", payload: { change: "found" } });
     expect(event.entityId).toBe("m1");
     expect(event.payload).toMatchObject({ sourceUrl: "https://example.org/p", staleWhen: "被后续工作证伪" });
   } finally { store.close(); }
@@ -124,7 +124,7 @@ test("a nightly re-proposal never un-approves a decision or resurrects a refuted
     expect(await createFlywheelExpander(store, "w", "C:\repo", () => ({}) as never)()).toBe(0);
     // Silently downgrading it to `candidate` would quietly undo the user's approval every night.
     expect(store.listMilestoneRelations("w")[0]).toMatchObject({ status: "approved" });
-    expect(store.listEvents("w").some((event) => event.type === "flywheel.relation_proposed")).toBe(false);
+    expect(store.listEvents("w").some((event) => (event.type === "milestone_relation.changed" && (event.payload as { change?: string }).change === "proposed"))).toBe(false);
   } finally { store.close(); }
 });
 

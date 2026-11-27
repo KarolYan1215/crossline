@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
+import type { EventChange } from "@crossline/core";
 import { createMilestoneGate, pendingMilestoneGates, MILESTONE_GATE_SKILL } from "./milestone-gate-runner";
 import { fakeRuntime, recordedAnswer } from "./testing/fake-runtime";
 
@@ -19,25 +20,25 @@ beforeEach(() => {
 });
 afterEach(() => store.close());
 
-const append = (type: string) => store.appendEvent({
-  ownerId: "local-owner", workspaceId: WORKSPACE, idempotencyKey: `${type}:${Date.now()}:${Math.random()}`,
-  type, entityId: "w1", payload: {}
+const append = (change: EventChange<"milestone_gate.changed">) => store.appendEvent({
+  ownerId: "local-owner", workspaceId: WORKSPACE, idempotencyKey: `${change}:${Date.now()}:${Math.random()}`,
+  type: "milestone_gate.changed", entityId: "w1", payload: { change }
 });
 
 test("a gate run that failed is not retried on every tick, and asking reopens it", () => {
   expect(pendingMilestoneGates(store, WORKSPACE)).toEqual(["w1"]);
-  append("milestone_gate.blocked");
+  append("blocked");
   expect(pendingMilestoneGates(store, WORKSPACE)).toEqual([]);
-  append("milestone_gate.retry_requested");
+  append("retry_requested");
   expect(pendingMilestoneGates(store, WORKSPACE)).toEqual(["w1"]);
 });
 
 test("a revoked acceptance is not re-judged and re-accepted behind the person's back", () => {
   // The order returns to `evidence_review` with the same evidence, so the gate would reach the same
   // verdict and silently undo the revocation on the next tick.
-  append("milestone_gate.auto_acceptance_revoked");
+  append("auto_acceptance_revoked");
   expect(pendingMilestoneGates(store, WORKSPACE)).toEqual([]);
-  append("milestone_gate.retry_requested");
+  append("retry_requested");
   expect(pendingMilestoneGates(store, WORKSPACE)).toEqual(["w1"]);
 });
 
@@ -81,7 +82,7 @@ test("the gate accepts the work order while reporting the milestone criterion as
   const judged = store.listEvents(WORKSPACE).find((event) => event.type === "milestone_gate.judged");
   expect((judged?.payload as { criteriaVerdict: Array<{ met: string }> }).criteriaVerdict[0]?.met).toBe("unmet");
   // Delivered is not the same as achieved, and the ledger keeps them apart.
-  expect(store.listEvents(WORKSPACE).some((event) => event.type === "milestone_gate.auto_accepted")).toBe(true);
+  expect(store.listEvents(WORKSPACE).some((event) => (event.type === "milestone_gate.changed" && (event.payload as { change?: string }).change === "auto_accepted"))).toBe(true);
 });
 
 test("the gate cannot be passed by reporting nothing", async () => {
@@ -92,7 +93,7 @@ test("the gate cannot be passed by reporting nothing", async () => {
   // to buy a free pass on an order that declared one.
   expect(await judge("w1")).toMatchObject({ state: "blocked", code: "GATE_VERDICT_INCONSISTENT" });
   expect(store.listWorkOrders(WORKSPACE)[0]?.state).toBe("evidence_review");
-  expect(store.listEvents(WORKSPACE).some((event) => event.type === "milestone_gate.auto_accepted")).toBe(false);
+  expect(store.listEvents(WORKSPACE).some((event) => (event.type === "milestone_gate.changed" && (event.payload as { change?: string }).change === "auto_accepted"))).toBe(false);
   // Asked to fix it twice before giving up.
   expect(turns()).toBe(3);
 });
@@ -111,10 +112,10 @@ test("a refusal before the model runs is recorded too, and repeats after a retry
     projectId: "p", title: "里程碑", version: 2, status: "archived" });
   const { judge } = judgeWith([]);
   expect(await judge("w1")).toMatchObject({ state: "blocked", code: "MILESTONE_NOT_FOUND" });
-  const blocks = () => store.listEvents(WORKSPACE, { type: "milestone_gate.blocked", entityId: "w1" });
+  const blocks = () => store.listEvents(WORKSPACE, { type: "milestone_gate.changed", change: "blocked", entityId: "w1" });
   expect(blocks()).toHaveLength(1);
   expect(blocks()[0]?.payload).toMatchObject({ code: "MILESTONE_NOT_FOUND" });
-  append("milestone_gate.retry_requested");
+  append("retry_requested");
   await judge("w1");
   expect(blocks()).toHaveLength(2);
 });

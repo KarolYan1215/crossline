@@ -14,9 +14,9 @@ test("each kind's last run and week come from the model usage record; pausing on
   const usage = (skill: string, at: string, totalTokens: number, ok = true) => store.saveModelUsage({ workspaceId: ws, skill, tier: "mid", model: "m", effort: "high",
     spendMode: "normal", threadId: "t", ok, errorCode: ok ? "" : "SKILL_STALLED", repairs: 0, turns: 1, inputTokens: totalTokens, cachedInputTokens: Math.round(totalTokens / 4),
     outputTokens: 0, reasoningTokens: 0, totalTokens, durationMs: 1000, at });
-  usage("crossline:crossline-material-researcher", "2026-10-12T19:00:00.000Z", 400_000);
+  usage("crossline:crossline-research:material", "2026-10-12T19:00:00.000Z", 400_000);
   usage("crossline:crossline-material-writer", "2026-10-12T19:07:00.000Z", 200_000, false);
-  usage("crossline:crossline-step-planner", "2026-10-11T08:00:00.000Z", 80_000);
+  usage("crossline:crossline-task-planner:steps", "2026-10-11T08:00:00.000Z", 80_000);
   const view = backgroundOverview(TEST_CTX, now);
   expect(view.kinds.find((item) => item.kind === "tutorials")).toMatchObject({ lastRunAt: "2026-10-12T19:07:00.000Z", lastOk: false, weekRuns: 2, weekTokens: 600_000, weekCacheShare: 0.25, paused: false });
   expect(view.kinds.find((item) => item.kind === "planning")).toMatchObject({ weekRuns: 1, weekTokens: 80_000 });

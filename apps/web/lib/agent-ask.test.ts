@@ -20,11 +20,11 @@ function setup() {
   return globalThis.crosslineStore = new CrosslineStore(":memory:");
 }
 function run(store: CrosslineStore, taskId: string, payload: Record<string, unknown>, stop?: { code: string; message: string }, done?: boolean) {
-  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `req-${taskId}`, type: "agent.task.requested", entityId: taskId,
-    payload: { taskId, category: "read_research_organize", workOrderId: "", ...payload } });
-  if (stop) store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `blk-${taskId}`, type: "agent.task.blocked", entityId: taskId, payload: { taskId, ...stop } });
-  if (done) store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `done-${taskId}`, type: "agent.task.completed", entityId: taskId,
-    payload: { taskId, reviewRequired: false, artifacts: [] } });
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `req-${taskId}`, type: "agent.changed", entityId: taskId,
+    payload: { taskId, category: "read_research_organize", workOrderId: "", ...payload, change: "task_requested" } });
+  if (stop) store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `blk-${taskId}`, type: "agent.changed", entityId: taskId, payload: { taskId, ...stop, change: "task_blocked" } });
+  if (done) store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `done-${taskId}`, type: "agent.changed", entityId: taskId,
+    payload: { taskId, reviewRequired: false, artifacts: [], change: "task_completed" } });
 }
 const LOST = { code: "AGENT_RUN_LOST", message: "后台进程重启，这次运行中断" };
 const agentAsks = () => collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "agent_blocked");

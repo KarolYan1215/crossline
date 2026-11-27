@@ -39,7 +39,7 @@ test("a mistaken upload is taken back: its row, its stored copy and the question
   expect(removeUploadedSource(TEST_CTX, doc.id, at)).toEqual({ ok: true, fileName: "t.md" });
   expect(store.listSourceDocuments(ws)).toEqual([]);
   expect(unfiledFiles(TEST_CTX, "2026-10-17")).toEqual([]);
-  expect(store.listEvents(ws, { type: "source.removed" })).toHaveLength(1);
+  expect(store.listEvents(ws, { type: "person.decided", subject: "source", decision: "removed" })).toHaveLength(1);
   expect(removeUploadedSource(TEST_CTX, doc.id, at)).toEqual({ ok: false, code: "SOURCE_NOT_FOUND" });
   // The copy waits out the undo window, then goes with the next removal.
   expect(existsSync(file)).toBe(true);
@@ -57,7 +57,7 @@ test("deleting asks nothing; the notice's undo brings the file back under its id
   removeUploadedSource(TEST_CTX, doc.id, at);
   expect(await restoreUploadedSource(TEST_CTX, doc.id, at + 1000)).toEqual({ ok: true, fileName: "plan.md" });
   expect(store.listSourceDocuments(ws)).toMatchObject([{ id: doc.id, projectId: "ece548", extractionStatus: "pending" }]);
-  expect(store.listEvents(ws, { type: "source.restored" })).toHaveLength(1);
+  expect(store.listEvents(ws, { type: "person.decided", subject: "source", decision: "restored" })).toHaveLength(1);
   expect(await restoreUploadedSource(TEST_CTX, doc.id, at + 2000)).toEqual({ ok: false, code: "SOURCE_NOT_IN_TRASH" });
   removeUploadedSource(TEST_CTX, doc.id, at + 3000);
   expect(await restoreUploadedSource(TEST_CTX, doc.id, at + 3000 + UNDO_WINDOW_MS)).toEqual({ ok: false, code: "SOURCE_NOT_IN_TRASH" });

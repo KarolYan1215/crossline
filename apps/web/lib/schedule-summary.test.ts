@@ -24,8 +24,8 @@ test("a calendar event that lands on a work block is named with where the block 
   const plan = store.listPlanVersions(TEST_CTX.workspaceId)[0]!;
   const meeting = { id: "graph_calendar:sync", lane: "human", title: "Sync up", day: before.day, start: before.start, end: before.end, source: "日历", readOnly: true };
   store.savePlanVersion({ ...plan, payload: { blocks: [...((plan.payload as { blocks: unknown[] }).blocks ?? []), meeting] } });
-  store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId, idempotencyKey: "graph-sync:test", type: "plan.reality_changed",
-    entityId: plan.id, payload: { changes: [{ kind: "add", blockId: "graph_calendar:sync", title: "Sync up", explanation: "日历新增「Sync up」" }] } });
+  store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId, idempotencyKey: "graph-sync:test", type: "plan.changed",
+    entityId: plan.id, payload: { changes: [{ kind: "add", blockId: "graph_calendar:sync", title: "Sync up", explanation: "日历新增「Sync up」" }], change: "reality_changed" } });
   await loadCurrentPlan(TEST_CTX);
   const [change] = readChangeSummary(TEST_CTX);
   expect(change).toMatchObject({ blockId: before.id, day: before.day, from: { start: before.start, end: before.end }, cause: `${before.start} Sync up` });
@@ -51,8 +51,8 @@ test("a step split again is said in the summary once its smaller plan exists, fo
     vi.setSystemTime(new Date("2026-10-12T12:00:00Z"));
     store.saveStepPlan(ws, "hw3", plan("推导第 1–2 题"), TEST_CTX.principalId, "planned");
     vi.setSystemTime(new Date("2026-10-14T12:00:00Z"));
-    store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: ws, idempotencyKey: "split", type: "task.steps_replan_requested", entityId: "hw3",
-      payload: { feedback: "「推导第 1–2 题」2 天没做成：拆细，首步 ≤15 分钟", finerSplit: { stepId: "v1s1", version: 1, title: "推导第 1–2 题", days: ["2026-10-12", "2026-10-13"] } } });
+    store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: ws, idempotencyKey: "split", type: "task.changed", entityId: "hw3",
+      payload: { feedback: "「推导第 1–2 题」2 天没做成：拆细，首步 ≤15 分钟", finerSplit: { stepId: "v1s1", version: 1, title: "推导第 1–2 题", days: ["2026-10-12", "2026-10-13"] }, change: "steps_replan_requested" } });
     expect(readFinerSplits(TEST_CTX, new Date("2026-10-14T12:30:00Z"))).toEqual([]);
     vi.setSystemTime(new Date("2026-10-14T12:40:00Z"));
     store.saveStepPlan(ws, "hw3", plan("读第 1 题题干"), TEST_CTX.principalId, "revised");

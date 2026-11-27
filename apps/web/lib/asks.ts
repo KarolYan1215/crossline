@@ -1,3 +1,5 @@
+import type { EventType } from "@crossline/core";
+import type { LedgerEventInput } from "@crossline/db";
 import "server-only";
 import { recordOp, retractedEventIds, withUndo } from "./undo";
 import {
@@ -10,7 +12,7 @@ import {
   assumedAnswer, QUESTION_LEAD_DAYS, questionCannotWait, questionNeededDay, type StepQuestion
 } from "@crossline/core";
 import { applyWeeklyCommit, loadWeeklyCommit } from "./weekly-commit";
-import { acceptOwnCompletion, listAgentTasks, courseProjectIds, overdueStartedTasks, OVERDUE_TASK_RESOLVED, ownCompletion, SILENT_TASK_SHIFTS_MAX, resolvePossibleDuplicate, type StoredWorkOrder } from "@crossline/db";
+import { acceptOwnCompletion, listAgentTasks, courseProjectIds, overdueStartedTasks, ownCompletion, SILENT_TASK_SHIFTS_MAX, resolvePossibleDuplicate, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import {
   answerWaiting, appNow, approveWorkOrderProposal, archiveWorkOrder, discardCapture, effectiveSchedulePreferences, effectiveWeight, getStore, IMPORTANT_WEIGHT, loadGoalForecast,
@@ -96,12 +98,12 @@ const dueOf = (order: StoredWorkOrder, anchors: Map<string, string>) =>
 function backplanAsks({ store, ctx, today, t }: Source): Ask[] {
   const milestones = new Map(store.listMilestones(ctx.workspaceId).filter((item) => item.status === "approved").map((item) => [item.id, item]));
   const anchors = deadlines(store, ctx);
-  const declined = new Set(store.listEvents(ctx.workspaceId, { type: "goal.backplan_declined" })
+  const declined = new Set(store.listEvents(ctx.workspaceId, { type: "goal.changed", change: "backplan_declined" })
     .map((event) => `${event.entityId}:${(event.payload as { milestoneVersion?: number }).milestoneVersion}`));
-  const resolved = new Set(store.listEvents(ctx.workspaceId, { type: "goal.backplan_input_resolved" })
+  const resolved = new Set(store.listEvents(ctx.workspaceId, { type: "goal.changed", change: "backplan_input_resolved" })
     .map((event) => (event.payload as { askId?: string }).askId));
   const latest = new Map<string, ReturnType<typeof store.listEvents>[number]>();
-  for (const event of store.listEvents(ctx.workspaceId, { type: "goal.backplan_blocked" })) latest.set(event.entityId, event);
+  for (const event of store.listEvents(ctx.workspaceId, { type: "goal.changed", change: "backplan_blocked" })) latest.set(event.entityId, event);
   const orders = store.listWorkOrders(ctx.workspaceId);
   const asks: Ask[] = [];
   for (const [milestoneId, event] of latest) {
@@ -146,7 +148,7 @@ function waitingIndex(store: Source["store"], workspaceId: string) {
   const orders = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order]));
   // waiting item → milestone → the input's name as that milestone asked for it.
   const linked = new Map<string, Map<string, string>>();
-  for (const event of store.listEvents(workspaceId, { type: "goal.backplan_input_waiting" })) {
+  for (const event of store.listEvents(workspaceId, { type: "goal.changed", change: "backplan_input_waiting" })) {
     const { waitingId, what } = event.payload as { waitingId?: string; what?: string };
     if (waitingId) linked.set(waitingId, (linked.get(waitingId) ?? new Map()).set(event.entityId, what ?? ""));
   }
@@ -173,7 +175,7 @@ function waitingIndex(store: Source["store"], workspaceId: string) {
 function waitingAsks({ store, ctx, today, t, locale }: Source): Ask[] {
   const index = waitingIndex(store, ctx.workspaceId);
   // A reply from the one a wait is on, seen in the person's mailbox (mail triage), brings the question forward to today.
-  const replies = new Map(store.listEvents(ctx.workspaceId, { type: "waiting.mail_seen" })
+  const replies = new Map(store.listEvents(ctx.workspaceId, { type: "waiting.changed", change: "mail_seen" })
     .map((event) => [event.entityId, { ...(event.payload as { from?: string; subject?: string }), at: event.createdAt }]));
   const replied = (item: WaitingItem) => { const reply = replies.get(item.id); return reply && reply.at > item.updatedAt ? reply : undefined; };
   const due = index.open.filter((item) => item.followUpAt <= today || replied(item));
@@ -224,13 +226,13 @@ function captureAsks({ store, ctx, t }: Source): Ask[] {
 /** Last word wins over a materials trail: blocked unless a later retry asked again. */
 function lastMaterialsBlock(events: ReturnType<ReturnType<typeof getStore>["listEvents"]>) {
   let last: (typeof events)[number] | undefined;
-  for (const event of events) last = event.type === "materials.blocked" ? event : undefined;
+  for (const event of events) last = (event.type === "materials.changed" && (event.payload as { change?: string }).change === "blocked") ? event : undefined;
   return last;
 }
 
 function materialsAsks({ store, ctx, today, t }: Source): Ask[] {
   const anchors = deadlines(store, ctx);
-  const events = store.listEvents(ctx.workspaceId, { type: ["materials.blocked", "materials.retry_requested"] });
+  const events = store.listEvents(ctx.workspaceId, { type: "materials.changed", change: ["blocked", "retry_requested"] });
   return store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "preparing" && onPersonsBoard(order)).flatMap((order) => {
     const block = lastMaterialsBlock(events.filter((event) => event.entityId === order.id));
     if (!block) return [];
@@ -257,8 +259,8 @@ function gateAsks({ store, ctx, today, t }: Source): Ask[] {
   const anchors = deadlines(store, ctx);
   const asks: Ask[] = [];
   const runFailures = new Map<string, ReturnType<typeof store.listEvents>[number]>();
-  for (const event of store.listEvents(ctx.workspaceId, { type: ["milestone_gate.blocked", "milestone_gate.retry_requested"] })) {
-    if (event.type === "milestone_gate.blocked") runFailures.set(event.entityId, event); else runFailures.delete(event.entityId);
+  for (const event of store.listEvents(ctx.workspaceId, { type: "milestone_gate.changed", change: ["blocked", "retry_requested"] })) {
+    if ((event.type === "milestone_gate.changed" && (event.payload as { change?: string }).change === "blocked")) runFailures.set(event.entityId, event); else runFailures.delete(event.entityId);
   }
   // Only the person's own work: the assistant's preparation is accepted when delivered and never judged by the gate (docs/work-split.md).
   for (const order of store.listWorkOrders(ctx.workspaceId).filter(onPersonsBoard)) {
@@ -353,9 +355,9 @@ function riskAsks(source: Source): Ask[] {
   const forecast = loadGoalForecast(ctx, horizonDays);
   const lastDay = new Date(Date.parse(`${today}T00:00:00Z`) + (horizonDays - 1) * DAY).toISOString().slice(0, 10);
   const orders = store.listWorkOrders(ctx.workspaceId);
-  const accepted = live(ctx, store.listEvents(ctx.workspaceId, { type: "risk.accepted" }));
+  const accepted = live(ctx, store.listEvents(ctx.workspaceId, { type: "milestone.changed", change: "risk_accepted" }));
   const milestones = new Map(store.listMilestones(ctx.workspaceId).filter((item) => item.status === "approved").map((item) => [item.id, item]));
-  const rolling = new Set(store.listEvents(ctx.workspaceId, { type: "goal.backplan_proposed" })
+  const rolling = new Set(store.listEvents(ctx.workspaceId, { type: "goal.changed", change: "backplan_proposed" })
     .filter((event) => (event.payload as { rolling?: boolean }).rolling).map((event) => event.entityId));
   // A course's date is not the person's to move (docs/plans/closed-loop-1030.md §4): its card offers time and the standard, not 推迟截止.
   const courses = courseProjectIds(store, ctx.workspaceId);
@@ -445,12 +447,12 @@ function riskReviewMembers({ store, ctx, today, t, locale }: Source): Ask[] {
 function overdueAsks({ store, ctx, today, t, locale }: Source): Ask[] {
   const milestones = new Map(store.listMilestones(ctx.workspaceId).filter((item) => item.status === "approved").map((item) => [item.id, item]));
   const anchors = deadlines(store, ctx);
-  const resolved = new Set(live(ctx, store.listEvents(ctx.workspaceId, { type: "milestone.overdue_resolved" }))
+  const resolved = new Set(live(ctx, store.listEvents(ctx.workspaceId, { type: "milestone.changed", change: "overdue_resolved" }))
     .map((event) => `${event.entityId}|${(event.payload as { deadline?: string }).deadline ?? ""}`));
   const open = store.listWorkOrders(ctx.workspaceId).filter((order) => ["awaiting_plan_approval", "approved", "preparing", "ready_for_human", "active", "blocked"].includes(order.state)
     && onPersonsBoard(order));
   const latest = new Map<string, ReturnType<typeof store.listEvents>[number]>();
-  for (const event of store.listEvents(ctx.workspaceId, { type: "milestone.overdue" })) latest.set(event.entityId, event);
+  for (const event of store.listEvents(ctx.workspaceId, { type: "milestone.changed", change: "overdue" })) latest.set(event.entityId, event);
   return [...latest].flatMap(([milestoneId, event]): Ask[] => {
     const milestone = milestones.get(milestoneId);
     const { deadline, why, shifts } = event.payload as { deadline: string; why?: string; shifts?: number };
@@ -493,7 +495,7 @@ function overdueAsks({ store, ctx, today, t, locale }: Source): Ask[] {
  * Goes away when answered (for that due day), when the date changes, or when the task closes.
  */
 function overdueTaskAsks({ store, ctx, today, t, locale }: Source): Ask[] {
-  const resolved = new Set(live(ctx, store.listEvents(ctx.workspaceId, { type: OVERDUE_TASK_RESOLVED }))
+  const resolved = new Set(live(ctx, store.listEvents(ctx.workspaceId, { type: "task.changed", change: "overdue_resolved" }))
     .map((event) => `${event.entityId}|${(event.payload as { due?: string }).due ?? ""}`));
   return overdueStartedTasks(store, ctx.workspaceId, today, onPersonsBoard).flatMap((item): Ask[] => {
     if (!(item.external || item.shifts >= SILENT_TASK_SHIFTS_MAX) || resolved.has(`${item.order.id}|${item.due}`)) return [];
@@ -627,7 +629,7 @@ function answerRiskDigest(ctx: AccessContext, optionId: string): AskResult {
   for (const ask of members) {
     if (ask.kind === "milestone_risk_review") { decisions[ask.entityId] = { fingerprint: ask.fingerprint, how: optionId, at } satisfies RiskDecision; continue; }
     const goal = forecast.find((item) => item.milestoneId === ask.entityId);
-    record(ctx, "risk.accepted", ask.entityId, `risk:accepted:${ask.entityId}:weekly:${Date.now()}`, { slackDays: goal?.slackDays ?? -999, p85Day: goal?.p85Day ?? null, weekly: true });
+    record(ctx, "milestone.changed", ask.entityId, `risk:accepted:${ask.entityId}:weekly:${Date.now()}`, { slackDays: goal?.slackDays ?? -999, p85Day: goal?.p85Day ?? null, weekly: true, change: "risk_accepted" });
   }
   // Both `schedule.` settings, so the answer is undone with the rest of the operation.
   store.setSetting(ctx.workspaceId, RISK_DECISIONS_SETTING, JSON.stringify(decisions));
@@ -792,7 +794,7 @@ const dayBefore = (day: string) => new Date(Date.parse(`${day}T00:00:00Z`) - DAY
  */
 function missedHandledThrough(ctx: AccessContext, store: Source["store"]): Map<string, string> {
   const through = new Map<string, string>();
-  for (const event of live(ctx, store.listEvents(ctx.workspaceId, { type: "missed.handled" }))) {
+  for (const event of live(ctx, store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "missed_handled" }))) {
     const payload = event.payload as { askId?: string; through?: string };
     const day = [payload.askId?.split(":").at(-1) ?? "", payload.through ?? ""].sort().at(-1)!;
     if (day > (through.get(event.entityId) ?? "")) through.set(event.entityId, day);
@@ -812,10 +814,10 @@ function missedMembers({ store, ctx, today, t, locale }: Source): Ask[] {
   const handledThrough = missedHandledThrough(ctx, store);
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
   // A block the person already answered the completion check for (any answer, 未执行 included) is not asked about again.
-  const confirmed = new Set(store.listEvents(ctx.workspaceId, { type: "block.confirmed" })
+  const confirmed = new Set(store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "block_confirmed" })
     .map((event) => event.payload as { day?: string; workOrderId?: string }).map((payload) => `${payload.workOrderId}|${payload.day}`));
   // A task the person moved to a later day since (the input box's 「推到明天」, 推迟 on the task) has been answered already (W-141).
-  const deferrals = store.listEvents(ctx.workspaceId, { type: "work_order.deferred" });
+  const deferrals = store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "deferred" });
   const deferred = (orderId: string, day: string) => deferrals.some((event) => event.entityId === orderId && event.createdAt.slice(0, 10) >= day
     && String((event.payload as { after?: string }).after ?? "") > day);
   const asked = new Set<string>();
@@ -898,7 +900,7 @@ function answerPrepQuestion(ctx: AccessContext, ask: Ask, optionId: string, note
   if (!answer) return { ok: false, code: "ASK_FIELD_REQUIRED" };
   const question = prepQuestionOf(order);
   store.saveWorkOrder({ ...order, payload: { ...(order.payload as object), owner: "assistant", question, answer: answer.slice(0, 2000), answeredAt: new Date().toISOString() } });
-  record(ctx, "prep.question_answered", order.id, `prep:answered:${order.id}:${Date.now()}`, { question, answer: answer.slice(0, 2000) });
+  record(ctx, "person.decided", order.id, `prep:answered:${order.id}:${Date.now()}`, { question, answer: answer.slice(0, 2000), subject: "prep", decision: "question_answered" });
   // A proposal until now (it never took effect by itself): the person's answer is the go-ahead, and the assistant takes it on its next pass.
   if (order.state === "awaiting_plan_approval")
     store.transitionWorkOrder(ctx.workspaceId, order.id, { type: "plan.approved", approvalId: ctx.principalId }, `prep-answered-approved:${order.id}:${Date.now()}`);
@@ -1352,7 +1354,7 @@ function answerStepQuestionBatch(ctx: AccessContext, ask: Ask, optionId: string,
 }
 
 function snoozes(ctx: AccessContext): AskSnooze[] {
-  return live(ctx, getStore().listEvents(ctx.workspaceId, { type: "ask.snoozed" })).map((event) => event.payload as AskSnooze);
+  return live(ctx, getStore().listEvents(ctx.workspaceId, { type: "ask.changed", change: "snoozed" })).map((event) => event.payload as AskSnooze);
 }
 
 /**
@@ -1414,12 +1416,12 @@ export function statusNotices(ctx: AccessContext, now?: Date): StatusNotice[] {
 /** `op`: the operation the answer was recorded as (its 撤销), when there is one — the card's receipt offers it (2026-11-10). */
 export type AskResult = { ok: true; op?: { id: string; label: string } } | { ok: false; code: string };
 
-function record(ctx: AccessContext, type: string, entityId: string, key: string, payload: Record<string, unknown>) {
-  getStore().appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: key, type, entityId, payload });
+function record(ctx: AccessContext, type: EventType, entityId: string, key: string, payload: Record<string, unknown>) {
+  getStore().appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: key, type, entityId, payload } as LedgerEventInput);
 }
 
 function rerunBackplan(ctx: AccessContext, milestoneId: string) {
-  record(ctx, "goal.backplan_rerun_requested", milestoneId, `goal:backplan:rerun:${milestoneId}:${Date.now()}`, {});
+  record(ctx, "goal.changed", milestoneId, `goal:backplan:rerun:${milestoneId}:${Date.now()}`, { change: "backplan_rerun_requested" });
   requestAutoBackplan(ctx);
 }
 
@@ -1428,13 +1430,13 @@ function answerBackplan(ctx: AccessContext, ask: Ask, optionId: string): AskResu
   const milestoneId = ask.entityId;
   const milestone = store.listMilestones(ctx.workspaceId).find((item) => item.id === milestoneId && item.status === "approved");
   if (!milestone) return { ok: false, code: "MILESTONE_NOT_APPROVED" };
-  const resolve = (how: string, id = ask.id) => record(ctx, "goal.backplan_input_resolved", milestoneId, `goal:backplan:resolved:${id}`, { askId: id, how });
+  const resolve = (how: string, id = ask.id) => record(ctx, "goal.changed", milestoneId, `goal:backplan:resolved:${id}`, { askId: id, how, change: "backplan_input_resolved" });
   if (optionId === "skip") {
     const started = new Set(store.listExecutions(ctx.workspaceId).map((execution) => execution.workOrderId));
     for (const order of store.listWorkOrders(ctx.workspaceId).filter((item) => item.milestoneId === milestoneId
       && (item.payload as { backplan?: unknown }).backplan && UNTOUCHED.has(item.state) && !started.has(item.id)))
       archiveWorkOrder(ctx, order.id, "本人选择暂不拆分该里程碑"); // i18n-ignore: a system reason `archivedBySystem` matches
-    record(ctx, "goal.backplan_declined", milestoneId, `goal:backplan:declined:${milestoneId}:${milestone.version}`, { milestoneVersion: milestone.version });
+    record(ctx, "goal.changed", milestoneId, `goal:backplan:declined:${milestoneId}:${milestone.version}`, { milestoneVersion: milestone.version, change: "backplan_declined" });
     return { ok: true };
   }
   if (optionId === "retry") { resolve("retry"); rerunBackplan(ctx, milestoneId); return { ok: true }; }
@@ -1464,10 +1466,10 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
       const handOver = new Map(twins.flatMap((twin) => index.inputsOf(twin)));
       if (optionId === "arrived" && handOver.size) {
         for (const [milestoneId, what] of handOver) {
-          record(ctx, "goal.backplan_input_supplied", milestoneId, `goal:backplan:supplied:${ask.id}:${milestoneId}`,
+          record(ctx, "goal.changed", milestoneId, `goal:backplan:supplied:${ask.id}:${milestoneId}`,
             // Handed to the backplanner as the supplied input (model context).
-            { what, text: values.note || `已从${item.who || "对方"}那里收到`, askId: ask.id }); // i18n-ignore
-          record(ctx, "goal.backplan_rerun_requested", milestoneId, `goal:backplan:rerun:${milestoneId}:${Date.now()}`, {});
+            { what, text: values.note || `已从${item.who || "对方"}那里收到`, askId: ask.id, change: "backplan_input_supplied" }); // i18n-ignore
+          record(ctx, "goal.changed", milestoneId, `goal:backplan:rerun:${milestoneId}:${Date.now()}`, { change: "backplan_rerun_requested" });
         }
         requestAutoBackplan(ctx);
       }
@@ -1491,7 +1493,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
         ? { ok: true } : { ok: false, code: "NOT_COMPLETED_BY_PERSON" };
       return optionId === "drop" ? archiveWorkOrder(ctx, ask.entityId, values.reason!) : approveWorkOrderProposal(ctx, ask.entityId);
     case "gate_failed": {
-      record(ctx, "milestone_gate.retry_requested", ask.entityId, `milestone-gate:retry:${ask.entityId}:${Date.now()}`, { requestedBy: ctx.principalId });
+      record(ctx, "milestone_gate.changed", ask.entityId, `milestone-gate:retry:${ask.entityId}:${Date.now()}`, { requestedBy: ctx.principalId, change: "retry_requested" });
       await requestCodexSupervisor(ctx, `/v1/work-orders/${ask.entityId}/milestone-gate`, { method: "POST", headers: { "content-type": "application/json" },
         signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
       return { ok: true };
@@ -1503,12 +1505,12 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
         return saveGoalSettings(ctx, ask.entityId, { confirmedDeadline: values.date!, sourceQuote: tOf(ctx)("在「可能赶不上」的询问里推迟") });
       }
       const goal = loadGoalForecast(ctx, riskHorizonDays(ctx)).goals.find((item) => item.milestoneId === ask.entityId);
-      record(ctx, "risk.accepted", ask.entityId, `risk:accepted:${ask.entityId}:${Date.now()}`, { slackDays: goal?.slackDays ?? -999, p85Day: goal?.p85Day ?? null });
+      record(ctx, "milestone.changed", ask.entityId, `risk:accepted:${ask.entityId}:${Date.now()}`, { slackDays: goal?.slackDays ?? -999, p85Day: goal?.p85Day ?? null, change: "risk_accepted" });
       return { ok: true };
     }
     case "milestone_overdue": {
       const deadline = ask.fingerprint;
-      const resolve = (how: string) => record(ctx, "milestone.overdue_resolved", ask.entityId, `milestone-overdue:resolved:${ask.entityId}:${deadline}:${Date.now()}`, { deadline, how });
+      const resolve = (how: string) => record(ctx, "milestone.changed", ask.entityId, `milestone-overdue:resolved:${ask.entityId}:${deadline}:${Date.now()}`, { deadline, how, change: "overdue_resolved" });
       if (optionId === "extend") {
         const saved = saveGoalSettings(ctx, ask.entityId, { confirmedDeadline: values.date!, sourceQuote: tOf(ctx)("在「截止已过」的询问里改期") });
         if (!saved.ok) return saved;
@@ -1544,7 +1546,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
         for (const { ask: member, order } of pastEventsIn(overdueTaskAsks(sourceOf(ctx)).filter((item) => ids.has(item.id)), tasks)) {
           const archived = archiveWorkOrder(ctx, order.id, tOf(ctx)("活动 {{day}} 已过去，本人选择不参加了", { day: member.fingerprint }));
           if (!archived.ok) return archived;
-          record(ctx, OVERDUE_TASK_RESOLVED, order.id, `${OVERDUE_TASK_RESOLVED}:${order.id}:${member.fingerprint}:${Date.now()}`, { due: member.fingerprint, how: "drop" });
+          record(ctx, "task.changed", order.id, `task.overdue_resolved:${order.id}:${member.fingerprint}:${Date.now()}`, { due: member.fingerprint, how: "drop", change: "overdue_resolved" });
         }
         return { ok: true };
       }
@@ -1557,12 +1559,12 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
         const payload = (order.payload ?? {}) as Record<string, unknown>;
         store.saveWorkOrder({ ...order, payload: { ...payload, dueDate: date } });
         // Confirmed, not typed as the person's own: an external date stays external, and is asked about again if it passes too.
-        record(ctx, "work_order.due_confirmed", order.id, `work_order.due_confirmed:${order.id}:${due}:${date}`, { before: due, after: date });
+        record(ctx, "work_order.changed", order.id, `work_order.due_confirmed:${order.id}:${due}:${date}`, { before: due, after: date, change: "due_confirmed" });
       } else if (optionId === "drop") {
         const archived = archiveWorkOrder(ctx, order.id, tOf(ctx)("截止 {{day}} 已过，本人选择不再补交", { day: due }));
         if (!archived.ok) return archived;
       } else return { ok: false, code: "ASK_OPTION_UNKNOWN" };
-      record(ctx, OVERDUE_TASK_RESOLVED, order.id, `${OVERDUE_TASK_RESOLVED}:${order.id}:${due}:${Date.now()}`, { due, how: optionId });
+      record(ctx, "task.changed", order.id, `task.overdue_resolved:${order.id}:${due}:${Date.now()}`, { due, how: optionId, change: "overdue_resolved" });
       return { ok: true };
     }
     case "ledger_duplicate": {
@@ -1588,11 +1590,11 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
         if (optionId === "split") { store.setSetting(ctx.workspaceId, MISSED_SPLIT, ask.fingerprint); return { ok: true }; }
         if (optionId !== "roll") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
         for (const member of missedMembers({ store, ctx, today: planToday(ctx), now: appNow(), t: tOf(ctx), locale: localeFor(ctx) }))
-          record(ctx, "missed.handled", member.entityId, `missed:handled:${member.id}:${Date.now()}`, { askId: member.id, how: "roll", through: dayBefore(planToday(ctx)) });
+          record(ctx, "work_order.changed", member.entityId, `missed:handled:${member.id}:${Date.now()}`, { askId: member.id, how: "roll", through: dayBefore(planToday(ctx)), change: "missed_handled" });
         return { ok: true };
       }
-      const handled = () => record(ctx, "missed.handled", ask.entityId, `missed:handled:${ask.id}:${Date.now()}`,
-        { askId: ask.id, how: optionId, through: dayBefore(planToday(ctx)) });
+      const handled = () => record(ctx, "work_order.changed", ask.entityId, `missed:handled:${ask.id}:${Date.now()}`,
+        { askId: ask.id, how: optionId, through: dayBefore(planToday(ctx)), change: "missed_handled" });
       if (optionId === "drop") { const result = archiveWorkOrder(ctx, ask.entityId, values.reason!); if (result.ok) handled(); return result; }
       if (optionId === "later") {
         const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === ask.entityId);
@@ -1658,11 +1660,11 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
       return result.ok ? { ok: true } : result;
     }
     case "source_project": {
-      if (optionId === "none") { record(ctx, "source.project_cleared", ask.entityId, `source:cleared:${ask.entityId}:${Date.now()}`, { by: "person" }); return { ok: true }; }
+      if (optionId === "none") { record(ctx, "source.changed", ask.entityId, `source:cleared:${ask.entityId}:${Date.now()}`, { by: "person", change: "project_cleared" }); return { ok: true }; }
       const projectId = optionId.slice(2);
       if (!store.listProjects(ctx.workspaceId).some((project) => project.id === projectId)) return { ok: false, code: "PROJECT_NOT_FOUND" };
       store.assignSourceDocumentProject(ctx.workspaceId, ask.entityId, projectId);
-      record(ctx, "source.project_assigned", ask.entityId, `source:assigned:${ask.entityId}:${projectId}:${Date.now()}`, { projectId, by: "person" });
+      record(ctx, "source.changed", ask.entityId, `source:assigned:${ask.entityId}:${projectId}:${Date.now()}`, { projectId, by: "person", change: "project_assigned" });
       return { ok: true };
     }
     case "travel_minutes":
@@ -1779,10 +1781,10 @@ export async function answerAsk(ctx: AccessContext, askId: string, choice: strin
       at: now.toISOString() });
     /* i18n-ignore-end */
   }
-  if (result.ok) record(ctx, "ask.answered", ask.entityId, `ask:answered:${ask.id}:${ids.join("+") || "note"}:${now.getTime()}`,
+  if (result.ok) record(ctx, "ask.changed", ask.entityId, `ask:answered:${ask.id}:${ids.join("+") || "note"}:${now.getTime()}`,
     { askId: ask.id, kind: ask.kind, optionId: ids[0] ?? "", ...(ids.length > 1 ? { optionIds: ids } : {}), ...(checked.note ? { note: checked.note } : {}),
       // Seconds the card was on screen before the answer, when the page measured it: the decision's cost on 系统体检.
-      ...(typeof choice !== "string" && choice.seconds !== undefined ? { seconds: choice.seconds } : {}) });
+      ...(typeof choice !== "string" && choice.seconds !== undefined ? { seconds: choice.seconds } : {}), change: "answered" });
   // Words beside an answer that nothing downstream takes are read for facts in the background (a note that went into a field was taken).
   if (result.ok && checked.note && !NOTE_TAKEN_BY.has(ask.kind) && !Object.values(checked.values).includes(checked.note))
     keepNote(ctx, checked.note, { kind: "ask", id: `${ask.id}:${now.getTime()}` }, `待决：${ask.title}（选了「${label}」）`, now); // i18n-ignore: context for the extraction model
@@ -1799,10 +1801,10 @@ export function snoozeAsk(ctx: AccessContext, askId: string, choice: "tomorrow" 
   if (!ask) return { ok: false, code: "ASK_NOT_FOUND" };
   const until = snoozeUntil(choice, planToday(ctx, now));
   // Recorded as an operation, so 「明天再问」 pressed by mistake can be undone like any other answer.
-  const before = new Set(getStore().listEvents(ctx.workspaceId, { type: "ask.snoozed" }).map((event) => event.eventId));
-  record(ctx, "ask.snoozed", ask.entityId, `ask:snoozed:${ask.id}:${now.getTime()}`,
-    { askId: ask.id, until, fingerprint: ask.fingerprint, ...(seconds === undefined ? {} : { seconds }) } satisfies AskSnooze & { seconds?: number });
-  const added = getStore().listEvents(ctx.workspaceId, { type: "ask.snoozed" }).filter((event) => !before.has(event.eventId)).map((event) => event.eventId);
+  const before = new Set(getStore().listEvents(ctx.workspaceId, { type: "ask.changed", change: "snoozed" }).map((event) => event.eventId));
+  record(ctx, "ask.changed", ask.entityId, `ask:snoozed:${ask.id}:${now.getTime()}`,
+    { askId: ask.id, until, fingerprint: ask.fingerprint, ...(seconds === undefined ? {} : { seconds }), change: "snoozed" } satisfies AskSnooze & { seconds?: number; change: string });
+  const added = getStore().listEvents(ctx.workspaceId, { type: "ask.changed", change: "snoozed" }).filter((event) => !before.has(event.eventId)).map((event) => event.eventId);
   const op = added.length && options.undo !== false
     ? recordOp(ctx, tOf(ctx)(choice === "tomorrow" ? "明天再问：{{title}}" : "下周再问：{{title}}", { title: ask.title }), { kind: "event.retract", eventIds: added }) : undefined;
   return op ? { ok: true, op: { id: op.id, label: op.label } } : { ok: true };

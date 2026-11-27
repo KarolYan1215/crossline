@@ -30,7 +30,7 @@ test("the person's edit is a new version in force at once, made loadable; an ear
   const view = loadSkillLibrary(TEST_CTX).mine.find((line) => line.lineId === "media")!;
   expect(view.current).toMatchObject({ version: 3, by: "person", restoredFrom: 1, rules: [expect.objectContaining({ text: "先抛冲突" })] });
   expect(view.versions.map((version) => version.version)).toEqual([3, 2, 1]);
-  expect(store.listEvents(ws, { type: "skill.mine.rewritten" })).toHaveLength(3);
+  expect(store.listEvents(ws, { type: "skill.changed", change: "mine_rewritten" })).toHaveLength(3);
 });
 
 test("a public skill is shown with its source, licence, scan and review, and the person can remove it", () => {
@@ -63,8 +63,8 @@ test("a grown workflow shows when it runs, which steps are the person's and what
   expect(changeGrownSkill(TEST_CTX, "flow-weekly-vlog-cut", { pinned: true })).toEqual({ ok: true });
   expect(loadSkillLibrary(TEST_CTX).grown[0]).toMatchObject({ status: "off", pinned: true });
   // A revision's changes describe the version it made; after 回到上一版 (version 1 in force) they are not shown as that version's.
-  store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: ws, idempotencyKey: "rev2", type: "skill.grown.revised", entityId: "flow-weekly-vlog-cut",
-    payload: { id: "flow-weekly-vlog-cut", version: 2, changes: "- 首行写结论" } });
+  store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: ws, idempotencyKey: "rev2", type: "skill.changed", entityId: "flow-weekly-vlog-cut",
+    payload: { id: "flow-weekly-vlog-cut", version: 2, changes: "- 首行写结论", change: "grown_revised" } });
   expect(loadSkillLibrary(TEST_CTX).grown[0]!.improvement).not.toHaveProperty("lastChange");
   writeGrownSkills(store, ws, readGrownSkills(store, ws).map((item) => ({ ...item, version: 2 })));
   expect(loadSkillLibrary(TEST_CTX).grown[0]!.improvement).toMatchObject({ version: 2, lastChange: { changes: "- 首行写结论" } });
@@ -87,9 +87,9 @@ test("a workflow reads as running from the start of its collection to its end, a
   store.setSetting(ws, "collect.topics.flow-fav", JSON.stringify({ perDay: 50, window: { from: 2, to: 8 } }));
   expect(grownSkillStatus(TEST_CTX, id)).toMatchObject({ topics: { perDay: 50, from: 2, to: 8, listed: 0, progress: [] } });
   expect(grownSkillStatus(TEST_CTX, id).running).toBeUndefined();
-  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "s1", type: "collect.started", entityId: id, payload: { taskId: "c1", listOnly: true, notes: 0 } });
+  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "s1", type: "job.ran", entityId: id, payload: { taskId: "c1", listOnly: true, notes: 0, job: "collect", state: "started" } });
   expect(grownSkillStatus(TEST_CTX, id).running).toMatchObject({ what: "读取收藏列表" });
-  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "r1", type: "collect.ran", entityId: id, payload: { taskId: "c1" } });
+  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "r1", type: "job.ran", entityId: id, payload: { taskId: "c1", job: "collect", state: "done" } });
   expect(grownSkillStatus(TEST_CTX, id).running).toBeUndefined();
   expect(changeFavouriteTopics(TEST_CTX, id, { perDay: 30, from: 1, to: 1 })).toEqual({ ok: true });
   expect(grownSkillStatus(TEST_CTX, id).topics).toMatchObject({ perDay: 30, from: 1, to: 1 });

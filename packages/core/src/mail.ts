@@ -1,6 +1,6 @@
 /**
  * The person's mailbox as Crossline sees it (docs/personal-agent.md, 2026-10-19): accounts read over IMAP, read-only, the password in
- * the worker's secret store and never in the ledger. New mail is sorted once by a cheap model run (`crossline-mail-triage`): something
+ * the worker's secret store and never in the ledger. New mail is sorted once by a cheap model run (`crossline-inbox-triage:mail`): something
  * the person has to do or a date becomes a line in their inbox — planned like anything they type — a reply from someone they were
  * waiting on brings that wait forward, and the rest is left alone. What is kept is the sender, subject, date and opening lines of the
  * newest messages, and what was done with each; never the full text, which is read from the server when a run needs it.

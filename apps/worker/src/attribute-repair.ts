@@ -28,7 +28,7 @@ export function repairLineAttributes(store: CrosslineStore, workspaceId: string,
   const chosen = new Map(parse<Array<{ id: string; goalParts?: string[] }>>(store.getSetting(workspaceId, LINE_SETTING), [])
     .map((line) => [line.id, new Set((line.goalParts ?? []).map(attributeKey))]));
   const suggested = new Map<string, Set<string>>();
-  for (const event of store.listEvents(workspaceId, { type: "line.candidates_split" })) {
+  for (const event of store.listEvents(workspaceId, { type: "line.changed", change: "candidates_split" })) {
     const set = suggested.get(event.entityId) ?? new Set<string>();
     for (const text of (event.payload as { attributes?: string[] }).attributes ?? []) set.add(attributeKey(text));
     suggested.set(event.entityId, set);
@@ -47,8 +47,8 @@ export function repairLineAttributes(store: CrosslineStore, workspaceId: string,
   store.setSetting(workspaceId, LINE_ATTRIBUTE_REPAIR, now.toISOString());
   if (!Object.keys(removed).length) return removed;
   store.setSetting(workspaceId, LINE_PROFILES_SETTING, JSON.stringify(profiles));
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `repair.line_attributes:${workspaceId}`, type: "repair.line_attributes", entityId: workspaceId,
-    payload: { removed, at: now.toISOString() } });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `repair.line_attributes:${workspaceId}`, type: "job.ran", entityId: workspaceId,
+    payload: { removed, at: now.toISOString(), job: "repair.line_attributes", state: "done" } });
   // The same shape the web's undo writes (`recordOp`), so 撤销 can put the chips back for a day.
   const id = `op-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
   const count = Object.values(removed).reduce((sum, list) => sum + list.length, 0);

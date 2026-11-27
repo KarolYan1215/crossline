@@ -201,7 +201,7 @@ describe("skill folders (docs/plans/harness-1125.md 「Skill 供应链」)", () 
       `echo hi > ${library}`,
       `Add-Content "C:\\Users\\karol\\AppData\\Local\\Crossline\\skill-library\\ws1\\lock.json" x`,
       "Remove-Item -Recurse -Force C:\\Users\\karol\\AppData\\Local\\Crossline\\skill-quarantine\\ws1",
-      "Copy-Item .\\evil.md C:\\proj\\skills\\marketplace\\plugins\\crossline\\skills\\crossline-agent\\SKILL.md",
+      "Copy-Item .\\evil.md C:\\proj\\skills\\marketplace\\plugins\\crossline\\skills\\crossline-agent:shell\\SKILL.md",
       "cd C:\\Users\\karol\\AppData\\Local\\Crossline\\skill-library; New-Item x.md",
       "python -c \"open(r'C:/Users/karol/AppData/Local/Crossline/codex-home/plugins/cache/crossline-library/x/SKILL.md','w').write('x')\"",
       "git -C C:\\proj apply patch.diff --directory=skills/marketplace"

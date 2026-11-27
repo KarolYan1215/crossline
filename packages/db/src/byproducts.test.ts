@@ -15,7 +15,7 @@ test("approving an order with a byproduct creates one landing order on the other
   expect(landing).toMatchObject({ identityId: "media", milestoneId: "media-m", projectId: "xhs", state: "approved", intent: "落地：一篇研究日记笔记",
     payload: { byproductOf: "sim", dependsOn: ["sim"], evidenceContract: [{ description: "一篇研究日记笔记", required: true }] } });
   expect(landing.estimate.p50Minutes).toBe(40);
-  expect(store.listEvents("w", { type: "work_order.auto_approved", entityId: "landing-sim-media" })).toHaveLength(1);
+  expect(store.listEvents("w", { type: "work_order.changed", change: "auto_approved", entityId: "landing-sim-media" })).toHaveLength(1);
   // Approving again after a block does not duplicate it.
   store.transitionWorkOrder("w", "sim", { type: "blocked", reason: "x" }, "block:sim");
   store.transitionWorkOrder("w", "sim", { type: "plan.approved", approvalId: "o" }, "approve:sim:2");

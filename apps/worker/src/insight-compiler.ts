@@ -11,7 +11,7 @@ import { ownerOf } from "./owner";
 import { defaultSafeGetDeps, safeGet, type SafeGetDeps } from "./safe-fetch";
 import { citable as mayOpen, citableUrls } from "./cited-urls";
 
-export const INSIGHT_COMPILER = "crossline:crossline-insight-compiler";
+export const INSIGHT_COMPILER = "crossline:crossline-line-method:rules";
 
 /** Facts alone change often during an interview; a rewrite on facts only waits this long after the last one. */
 const FACT_ONLY_REWRITE_HOURS = 24;
@@ -48,7 +48,7 @@ export function mineMaterials(store: CrosslineStore, workspaceId: string, lineId
   const tasks = new Map(listAgentTasks(store, workspaceId).map((task) => [task.taskId, task]));
   const found: Array<Omit<MineMaterial, "id"> & { key: string }> = [];
 
-  for (const event of store.listEvents(workspaceId, { type: "agent.task.reviewed" })) {
+  for (const event of store.listEvents(workspaceId, { type: "agent.changed", change: "task_reviewed" })) {
     const note = String((event.payload as { note?: unknown }).note ?? "").trim();
     const task = tasks.get(event.entityId);
     if (!note || !task || !onLine.has(task.workOrderId)) continue;
@@ -107,7 +107,7 @@ export function linesAwaitingMineSkill(store: CrosslineStore, workspaceId: strin
     const materials = mineMaterials(store, workspaceId, line.id);
     const decided = materials.filter((material) => material.kind !== "fact");
     if (!decided.length && materials.length < 3) return false;
-    const blocked = store.listEvents(workspaceId, { type: "skill.mine.blocked", entityId: line.id }).at(-1)?.payload as
+    const blocked = store.listEvents(workspaceId, { type: "skill.changed", change: "mine_blocked", entityId: line.id }).at(-1)?.payload as
       { fingerprint?: string; code?: string; at?: string } | undefined;
     if (blocked?.fingerprint && blocked.fingerprint === mineMaterialsFingerprint(materials)
       && (blocked.code?.endsWith("_BLOCKED") || now.getTime() - Date.parse(blocked.at ?? "") < FAILED_RETRY_HOURS * 3_600_000)) return false;
@@ -145,7 +145,7 @@ export function createInsightCompiler(store: CrosslineStore, workspaceId: string
     const materialHashes = Object.fromEntries(all.map((material) => [material.id, mineTextHash(material.text)]));
     const blocked = (code: string, message = "") => {
       store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.mine:blocked:${target}:${now.getTime()}`,
-        type: "skill.mine.blocked", entityId: target, payload: { lineId: target, code, message: message.slice(0, 400), fingerprint, at: now.toISOString() } });
+        type: "skill.changed", entityId: target, payload: { lineId: target, code, message: message.slice(0, 400), fingerprint, at: now.toISOString(), change: "mine_blocked" } });
       return { blocked: code, lineId: target };
     };
     const previous = currentMineVersion(readMineSkill(store.getSetting(workspaceId, mineSkillSettingKey(target))));

@@ -12,7 +12,7 @@ import { expect, test } from "vitest";
  *
  * One such path, the owner's decision of 2026-11-11 (「窗口标题无所谓，都是通用的内容」, docs/plans/2026-11-11-walkthrough-decisions.md §1):
  * the worker's 拟计时 pass reads titles through `activityEntriesSince` and sends the titles of a stretch that no rule or block placed to
- * the attribution model (Skill `crossline-time-attributor`).
+ * the attribution model (Skill `crossline-line-filer:time`).
  *
  * Two more, the owner's decision of 2026-11-24 (docs/plans/execution-gates-1124.md, round 3 「传标题，模型根据标题判断」): the J3 attention
  * gate sends titles to its model (`apps/worker/src/gates/attention.ts`), and the device sync uploads them to the person's own hosted ledger

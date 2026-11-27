@@ -135,7 +135,7 @@ test("several options and the person's own words go to the interview", async () 
   const lines = sent.text.split("\n");
   expect(lines[0]).toBe("【ECE 548 本学期最重要的目标？】选择：总评达到 A；真正掌握器件物理。补充：顺便把课程项目做成论文素材");
   expect(lines).toHaveLength(1);
-  expect(store.listEvents(ws, { type: "ask.answered" }).at(-1)!.payload).toMatchObject({ askId: "iq:q-goal", optionIds: ["o0", "o1"], note: "顺便把课程项目做成论文素材" });
+  expect(store.listEvents(ws, { type: "ask.changed", change: "answered" }).at(-1)!.payload).toMatchObject({ askId: "iq:q-goal", optionIds: ["o0", "o1"], note: "顺便把课程项目做成论文素材" });
 });
 
 test("a single-choice question takes one option; answers left waiting by dead questions are sent once nothing is left to answer", async () => {

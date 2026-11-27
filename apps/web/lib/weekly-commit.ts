@@ -44,7 +44,7 @@ export function lastWeekRecap(ctx: AccessContext, week: string): LastWeekRecap |
   const store = getStore();
   const previous = plusDays(week, -7);
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
-  const committed = store.listEvents(ctx.workspaceId, { type: "week.committed" })
+  const committed = store.listEvents(ctx.workspaceId, { type: "plan.changed", change: "week_committed" })
     .filter((event) => (event.payload as { week?: string }).week === previous).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
   const payload = (committed?.payload ?? {}) as { keptMinutes?: number; deferred?: number; dropped?: number };
   const accepted = [...firstAcceptedAt(ctx.workspaceId).values()].filter((iso) => {
@@ -168,8 +168,8 @@ export function applyWeeklyCommit(ctx: AccessContext, chosen: Record<string, unk
     const payload = (order.payload ?? {}) as Record<string, unknown>;
     store.saveWorkOrder({ ...order, payload: { ...payload, notBefore: notBefore[row.id], ...(dueDates[row.id] ? { dueDate: dueDates[row.id] } : {}) } });
     store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `work_order.deferred:${order.id}:${notBefore[row.id]}:${now.getTime()}`,
-      type: "work_order.deferred", entityId: order.id, payload: { before: (payload.notBefore as string | undefined) ?? null, after: notBefore[row.id], by: "weekly_commit",
-        ...(dueDates[row.id] ? { dueBefore: (payload.dueDate as string | undefined) ?? null, dueAfter: dueDates[row.id] } : {}) } });
+      type: "work_order.changed", entityId: order.id, payload: { before: (payload.notBefore as string | undefined) ?? null, after: notBefore[row.id], by: "weekly_commit",
+        ...(dueDates[row.id] ? { dueBefore: (payload.dueDate as string | undefined) ?? null, dueAfter: dueDates[row.id] } : {}), change: "deferred" } });
     deferred += 1;
   }
   const kept = groupMinutes(view.rows, groups, "keep");
@@ -178,8 +178,8 @@ export function applyWeeklyCommit(ctx: AccessContext, chosen: Record<string, unk
     ...(view.due === "overload" || view.last?.overloadAskedFor === view.week ? { overloadAskedFor: view.week } : {}) };
   // A `schedule.` setting, so the undo puts the previous commitment back too.
   store.setSetting(ctx.workspaceId, WEEKLY_COMMIT_SETTING, JSON.stringify(record));
-  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `week.committed:${view.week}:${now.getTime()}`, type: "week.committed",
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `week.committed:${view.week}:${now.getTime()}`, type: "plan.changed",
     entityId: ctx.workspaceId, payload: { week: view.week, capacityMinutes: view.capacityMinutes, demandMinutes: view.demandMinutes, keptMinutes: kept, deferred, dropped,
-      reason: view.due ?? "manual" } });
+      reason: view.due ?? "manual", change: "week_committed" } });
   return { ok: true, deferred, dropped };
 }

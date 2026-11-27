@@ -185,16 +185,16 @@ test("a revision that finishes after the person turned the workflow off or rever
   expect(await installRevision(store, ws, record, done("improve-x", dir), { client: reviewer().rpc, cwd: "." })).toEqual({ state: "skipped", reason: "status_changed" });
   expect(readGrownSkills(store, ws)[0]).toMatchObject({ status: "off" });
   expect(readGrownSkills(store, ws)[0]!.version).toBeUndefined();
-  expect(store.listEvents(ws, { type: "skill.grown.revision_skipped" })).toHaveLength(1);
+  expect(store.listEvents(ws, { type: "job.ran", job: "skill.grown.revise" })).toHaveLength(1);
 });
 
 test("one run of its own that failed is enough for Crossline to repair the workflow; a restart is not", () => {
   const record = favouritesFlow();
   const later = (ms: number) => new Date(Date.now() + ms).toISOString();
   const blocked = (taskId: string, code: string, message: string, at: string) => {
-    store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: `r:${taskId}`, type: "agent.task.requested", entityId: taskId,
-      payload: { taskId, title: "整理收藏", category: "read_research_organize", workOrderId: "" }, createdAt: at } as never);
-    store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: `b:${taskId}`, type: "agent.task.blocked", entityId: taskId, payload: { taskId, code, message }, createdAt: at } as never);
+    store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: `r:${taskId}`, type: "agent.changed", entityId: taskId,
+      payload: { taskId, title: "整理收藏", category: "read_research_organize", workOrderId: "", change: "task_requested" }, createdAt: at } as never);
+    store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: `b:${taskId}`, type: "agent.changed", entityId: taskId, payload: { taskId, code, message, change: "task_blocked" }, createdAt: at } as never);
   };
   blocked(`flow-${record.id.replace(/^flow-/, "")}-1`, "SKILL_STALLED", "", later(1_000));
   expect(improvementDue(store, ws, record, new Date(Date.now() + 5_000))).toBeUndefined();
@@ -208,10 +208,10 @@ test("one run of its own that failed is enough for Crossline to repair the workf
 /** A run of the workspace with its folder: requested (with what it was handed) and completed, accepted by itself. */
 const ranRun = (taskId: string, directory: string, requested: Record<string, unknown> = {}, completed: Record<string, unknown> = {}) => {
   mkdirSync(directory, { recursive: true });
-  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: `r:${taskId}`, type: "agent.task.requested", entityId: taskId,
-    payload: { taskId, title: "整理收藏", category: "read_research_organize", workOrderId: "", ...requested } } as never);
-  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: `c:${taskId}`, type: "agent.task.completed", entityId: taskId,
-    payload: { taskId, directory, reviewRequired: false, checksPassed: true, artifacts: [], ...completed } } as never);
+  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: `r:${taskId}`, type: "agent.changed", entityId: taskId,
+    payload: { taskId, title: "整理收藏", category: "read_research_organize", workOrderId: "", ...requested, change: "task_requested" } } as never);
+  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: `c:${taskId}`, type: "agent.changed", entityId: taskId,
+    payload: { taskId, directory, reviewRequired: false, checksPassed: true, artifacts: [], ...completed, change: "task_completed" } } as never);
   return directory;
 };
 const revisedFolder = (name: string, record: { manifest: unknown }) => {
@@ -292,7 +292,7 @@ test("a held revision is dropped when the person returns it, the daily pass acce
   reviewAgentTask(store, ws, "improve-r3", "accepted");
   expect(applyPendingRevisions(store, ws)).toEqual([{ id: record.id, state: "dropped", reason: "files_changed" }]);
   expect(readGrownSkills(store, ws)[0]!.version).toBeUndefined();
-  expect(store.listEvents(ws, { type: "skill.grown.revision_rejected" }).map((item) => (item.payload as { reason: string }).reason))
+  expect(store.listEvents(ws, { type: "skill.changed", change: "grown_revision_rejected" }).map((item) => (item.payload as { reason: string }).reason))
     .toEqual(["person_declined", "not_reviewed", "files_changed"]);
 });
 
@@ -305,7 +305,7 @@ test("a revision from the person's feedback whose runs read nothing untrusted go
   const runs: Array<AgentTaskInput & { taskId: string }> = [];
   workflowImprovePass(store, ws, (input, then) => { runs.push(input); after = then; return { state: "started", taskId: input.taskId }; },
     { client: () => reviewer().rpc, cwd: ".", workRoot: path.join(root, "work"), spend: () => true, now: new Date(Date.now() + 2_000) });
-  expect(store.listEvents(ws, { type: "skill.grown.improve_started" })[0]!.payload).not.toHaveProperty("untrusted");
+  expect(store.listEvents(ws, { type: "job.ran", job: "skill.grown.improve", state: "started" })[0]!.payload).not.toHaveProperty("untrusted");
   after?.(done(runs[0]!.taskId, revisedFolder("auto", record)));
   await vi.waitFor(() => expect(readGrownSkills(store, ws)[0]).toMatchObject({ version: 2 }));
   expect(readGrownSkills(store, ws)[0]!.pendingRevision).toBeUndefined();
@@ -319,7 +319,7 @@ test("the same pass over a workflow whose run read a site's collection holds the
   const runs: Array<AgentTaskInput & { taskId: string }> = [];
   workflowImprovePass(store, ws, (input, then) => { runs.push(input); after = then; return { state: "started", taskId: input.taskId }; },
     { client: () => reviewer().rpc, cwd: ".", workRoot: path.join(root, "work"), spend: () => true, now: new Date(Date.now() + 2_000) });
-  expect(store.listEvents(ws, { type: "skill.grown.improve_started" })[0]!.payload).toMatchObject({ untrusted: ["site"] });
+  expect(store.listEvents(ws, { type: "job.ran", job: "skill.grown.improve", state: "started" })[0]!.payload).toMatchObject({ untrusted: ["site"] });
   const dir = revisedFolder("held", record);
   ranRun(runs[0]!.taskId, dir);
   after?.(done(runs[0]!.taskId, dir));

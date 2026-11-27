@@ -11,7 +11,7 @@ import type { CrosslineStore, StoredSourceDocument } from "@crossline/db";
 import { ownerOf } from "./owner";
 import { localeOf, tOfWorkspace } from "./locale";
 
-export const SOURCE_DIGEST = "crossline:crossline-source-digest";
+export const SOURCE_DIGEST = "crossline:crossline-capture-digest:source";
 /** Candidate pairs one run asks about, and the characters of each file it shows. */
 const PAIRS_PER_RUN = 6;
 const TEXT_PER_FILE = 6_000;
@@ -20,7 +20,7 @@ export const VERSION_NOTE_ID = "version-note-";
 
 /**
  * Older versions of one document (D11, docs/plans/2026-11-22-interview-and-import-redesign.md §四.3.4). Code fingerprints every read file
- * (`simhash`) and circles close pairs; the model (`crossline-source-digest`) decides whether each pair is one document in two versions and
+ * (`simhash`) and circles close pairs; the model (`crossline-capture-digest:source`) decides whether each pair is one document in two versions and
  * which is the latest, from modification times and the versions' own signals (dates, version numbers, 「终稿」, a section only one has).
  * For a confirmed pair the older file stays stored as it is and a note — summary plus what differs from the latest — is written beside
  * it; the interview reads the note in its place (`supersededDocumentIds`) and can still open the original by its id.

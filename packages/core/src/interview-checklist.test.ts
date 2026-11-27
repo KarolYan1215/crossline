@@ -26,9 +26,11 @@ const full: ChecklistInput = {
   projects: [{ id: "ece555", identityId: "research", name: "ECE 555" }, { id: "research-default", identityId: "research", name: "研究者" }],
   dates: [{ project: "ECE 555", kind: "class", recurring: true, pending: false, sourceRef: "src-2" }, { project: "ECE 555", kind: "exam", recurring: false, pending: false, sourceRef: "src-1" }],
   availability: true, unfiledFiles: 0, portraitConfirmed: true,
-  // Three parts written from the person's sentences (structure); how they work and the project's details only the model's verdict settles.
+  // Three parts written from the person's sentences (structure); how they work, the attention shares, the say–do weights and the
+  // project's details only the model's verdict settles.
   groundedSections: ["situation", "compass", "energy"],
-  verdicts: { "portrait:method": said("portrait:method"), "project:ece555": said("project:ece555") }
+  verdicts: { "portrait:method": said("portrait:method"), "portrait:allocation": said("portrait:allocation"), "portrait:saydo": said("portrait:saydo"),
+    "project:ece555": said("project:ece555") }
 };
 
 test("a complete record ticks every item, the portrait included", () => {
@@ -40,7 +42,7 @@ test("a complete record ticks every item, the portrait included", () => {
 
 test("a portrait written only from inferences is not finished, and what is missing is named", () => {
   const items = interviewChecklist({ ...full, groundedSections: [], verdicts: {}, profile: { ...full.profile, trueNorth: "", energyMap: [] } });
-  expect(items.find((item) => item.id === "portrait_grounded")).toMatchObject({ done: false, detail: "尚无本人依据：现状与真问题、工作观与人生观、能量与心流、做事方法" });
+  expect(items.find((item) => item.id === "portrait_grounded")).toMatchObject({ done: false, detail: "尚无本人依据：现状与真问题、工作观与人生观、精力：充电与耗电、擅长与喜欢、做事方法、各主线现在的注意力占比、说与做五项各有多重要" });
   expect(items.find((item) => item.id === "portrait_fields")?.detail).toContain("正北");
   expect(interviewOwnedOpen(items).map((item) => item.id)).toEqual(["portrait_fields", "portrait_grounded"]);
 });
@@ -67,12 +69,12 @@ test("a graded project needs its fixed times, a hard line its fixed schedule; a 
 // 2026-11-25 (「访谈账本驱动」): whether the person's words settle an item is the model's verdict against the ledger; the 「假设：」 prefix
 // and the slot-name patterns that read fact values are gone.
 test("a partial verdict keeps the item open and says what is missing; not_applicable settles it; a fact's wording settles nothing", () => {
-  const without = { ...full, verdicts: {} };
+  const without = { ...full, verdicts: { "portrait:allocation": said("portrait:allocation"), "portrait:saydo": said("portrait:saydo") } };
   const method = (input: ChecklistInput) => interviewChecklist(input).find((item) => item.id === "portrait_grounded")!;
   expect(method(without)).toMatchObject({ done: false, detail: "尚无本人依据：做事方法" });
   expect(method({ ...without, facts: [...without.facts, { identityId: "person", projectId: "", slot: "method_learning", status: "inferred", sourceRef: "", value: "假设：先做往年题" }] }).done).toBe(false);
-  expect(method({ ...without, verdicts: { "portrait:method": said("portrait:method", "partial", "只说了考试怎么准备，学新东西还没说") } }).done).toBe(false);
-  expect(method({ ...without, verdicts: { "portrait:method": said("portrait:method") } }).done).toBe(true);
+  expect(method({ ...without, verdicts: { ...without.verdicts, "portrait:method": said("portrait:method", "partial", "只说了考试怎么准备，学新东西还没说") } }).done).toBe(false);
+  expect(method({ ...without, verdicts: { ...without.verdicts, "portrait:method": said("portrait:method") } }).done).toBe(true);
   const undated = { ...full, dates: full.dates.filter((entry) => !entry.recurring) };
   const schedule = (verdict?: ChecklistVerdict) => interviewChecklist({ ...undated, verdicts: { ...full.verdicts, ...(verdict ? { [verdict.id]: verdict } : {}) } })
     .find((item) => item.id === "hard_schedule:research")!;
@@ -179,11 +181,26 @@ test("the portrait's parts rest on a section written from the person's sentences
     person("near_risk"), person("work_motive"), person("flow_scene"), person("method_learning")] };
   const grounded = (input: ChecklistInput) => interviewChecklist(input).find((item) => item.id === "portrait_grounded")!;
   expect(grounded(bare).done).toBe(false);
-  expect(grounded({ ...bare, groundedSections: ["situation", "compass", "energy"] }).detail).toBe("尚无本人依据：做事方法");
-  const verdicts = Object.fromEntries(["situation", "compass", "energy", "method"].map((part) => [`portrait:${part}`, said(`portrait:${part}`)]));
+  expect(grounded({ ...bare, groundedSections: ["situation", "compass", "energy"] }).detail).toBe("尚无本人依据：做事方法、各主线现在的注意力占比、说与做五项各有多重要");
+  const verdicts = Object.fromEntries(["situation", "compass", "energy", "method", "allocation", "saydo"].map((part) => [`portrait:${part}`, said(`portrait:${part}`)]));
   expect(grounded({ ...bare, verdicts })).toMatchObject({ done: true, detail: "" });
   // Each part is judged on its own: the snapshot lists the parts, not the summary item.
-  expect(judgedItems(interviewChecklist(bare)).map((item) => item.id).filter((id) => id.startsWith("portrait"))).toEqual(["portrait:situation", "portrait:compass", "portrait:energy", "portrait:method"]);
+  expect(judgedItems(interviewChecklist(bare)).map((item) => item.id).filter((id) => id.startsWith("portrait"))).toEqual(["portrait:situation", "portrait:compass", "portrait:energy",
+    "portrait:method", "portrait:allocation", "portrait:saydo"]);
+});
+
+// 2026-11-27 (docs/plans/condense-1127.md A3): the numbers no scale measures are covered by the interview; the interview is not complete
+// until the model settles them, and a part asked and still unknown settles as such (the report then leaves its number null).
+test("the attention shares and the say–do weights are parts of the portrait the model settles by verdict; the interview waits for them", () => {
+  const open = { ...full, verdicts: { "portrait:method": said("portrait:method"), "project:ece555": said("project:ece555") } };
+  const grounded = (input: ChecklistInput) => interviewChecklist(input).find((item) => item.id === "portrait_grounded")!;
+  expect(grounded(open)).toMatchObject({ done: false, sections: ["allocation", "saydo"], ask: expect.stringContaining("注意力") });
+  expect(interviewOwnedOpen(interviewChecklist(open)).map((item) => item.id)).toEqual(["portrait_grounded"]);
+  const partial = { ...open, verdicts: { ...open.verdicts, "portrait:allocation": said("portrait:allocation", "partial", "只说了研究占大头") } };
+  expect(grounded(partial).parts!.find((part) => part.id === "portrait:allocation")!.done).toBe(false);
+  const settled = { ...open, verdicts: { ...open.verdicts, "portrait:allocation": said("portrait:allocation"), "portrait:saydo": said("portrait:saydo", "not_applicable", "本人问过后说不知道") } };
+  expect(grounded(settled).done).toBe(true);
+  expect(interviewChecklist(settled).filter((item) => !item.done)).toEqual([]);
 });
 
 test("no deep part holds the start any more (D10): the person decides when to start", () => {

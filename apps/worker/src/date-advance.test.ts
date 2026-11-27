@@ -1,3 +1,5 @@
+import type { EventType } from "@crossline/core";
+import type { LedgerEventInput } from "@crossline/db";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -24,8 +26,8 @@ beforeEach(() => {
 afterEach(() => { store.close(); vi.useRealTimers(); rmSync(dir, { recursive: true, force: true }); });
 
 const at = (iso: string) => vi.setSystemTime(new Date(iso));
-const event = (type: string, entityId: string, payload: object, key = `${type}:${entityId}`) =>
-  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: key, type, entityId, payload });
+const event = (type: EventType, entityId: string, payload: object, key = `${type}:${entityId}:${JSON.stringify(payload)}`) =>
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: key, type, entityId, payload } as LedgerEventInput);
 const milestone = (id: string, projectId: string, deadline: string, status: "approved" | "draft" = "approved") => {
   store.saveMilestone({ id, ownerId: owner, workspaceId: ws, identityId: "media", projectId, title: id, status, version: 1 });
   store.saveMilestoneAnchor({ workspaceId: ws, milestoneId: id, stage: 1, deadline, baseline: "", target: "", stakeholders: [], sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
@@ -38,9 +40,9 @@ const result = (taskId: string, workOrderId: string, stepId: string, title: stri
   mkdirSync(directory, { recursive: true });
   writeFileSync(path.join(directory, "audit.json"), JSON.stringify({ needsHuman }));
   at(when);
-  event("agent.task.requested", taskId, { title, category: "read_research_organize", workOrderId, stepId });
-  event("agent.task.completed", taskId, { directory, artifacts: [{ path: "a.md", sha256: "h", bytes: 1 }], needsHuman: needsHuman.length, checksPassed: true,
-    inputsModified: [], reviewRequired: true, ...over });
+  event("agent.changed", taskId, { title, category: "read_research_organize", workOrderId, stepId, change: "task_requested" });
+  event("agent.changed", taskId, { directory, artifacts: [{ path: "a.md", sha256: "h", bytes: 1 }], needsHuman: needsHuman.length, checksPassed: true,
+    inputsModified: [], reviewRequired: true, ...over, change: "task_completed" });
 };
 
 test("one day's pass: old results replaced, decided or put away; overdue milestones moved or asked about; old proposals and drafts archived; all in one undo and one message", () => {
@@ -65,7 +67,7 @@ test("one day's pass: old results replaced, decided or put away; overdue milesto
   milestone("done-ms", "xhs2", "2026-10-10");
   store.upsertProfileFact({ workspaceId: ws, identityId: "media", projectId: "ece555", slot: "grading", value: "作业 30%", status: "confirmed", sourceRef: "doc", sourceQuote: "", updatedAt: "2026-10-01T00:00:00Z" });
   store.setSetting(ws, goalSettingKey("talk"), JSON.stringify({ confirmedDeadline: "2026-10-19" }));
-  event("goal.settings_confirmed", "talk", { previous: null, next: { confirmedDeadline: "2026-10-19" } });
+  event("goal.changed", "talk", { previous: null, next: { confirmedDeadline: "2026-10-19" }, change: "settings_confirmed" });
   order("t-feedback", "feedback", "approved");
   order("t-hw", "hw", "approved", "ece555");
   order("t-talk", "talk", "ready_for_human", "talks");
@@ -96,8 +98,8 @@ test("one day's pass: old results replaced, decided or put away; overdue milesto
   expect(resultsAwaitingReview(store, ws).map((row) => row.taskId).sort()).toEqual(["failed-young", "young"]);
   // Accepting it did the step, as the person's 采纳 would; what it left is on the task.
   expect(store.getStepPlan(ws, "t-steps")!.steps[0]!.status).toBe("done");
-  expect(store.listEvents(ws, { type: "task.note", entityId: "t-steps" }).map((note) => note.payload)).toEqual([
-    { text: "助手留下的待补：提供原始数据（只有本人有）", kind: "agent_left", agentTaskId: "new-run" }]);
+  expect(store.listEvents(ws, { type: "task.changed", change: "note", entityId: "t-steps" }).map((note) => note.payload)).toEqual([
+    { text: "助手留下的待补：提供原始数据（只有本人有）", kind: "agent_left", agentTaskId: "new-run", change: "note" }]);
 
   // The person's own milestone goes to the forecast's cautious finish plus two days, its chain after it; course and typed dates stay.
   expect(Object.fromEntries(outcome.shifted.map((item) => [item.id, `${item.from}→${item.to}`]))).toEqual({
@@ -105,7 +107,7 @@ test("one day's pass: old results replaced, decided or put away; overdue milesto
   expect(store.getSetting(ws, goalSettingKey("hw"))).toBeUndefined();
   expect(JSON.parse(store.getSetting(ws, goalSettingKey("talk"))!)).toEqual({ confirmedDeadline: "2026-10-19" });
   expect(outcome.asked.map((item) => item.id).sort()).toEqual(["hw", "talk"]);
-  expect(store.listEvents(ws, { type: "milestone.overdue" }).map((item) => [item.entityId, (item.payload as { why: string }).why]).sort())
+  expect(store.listEvents(ws, { type: "milestone.changed", change: "overdue" }).map((item) => [item.entityId, (item.payload as { why: string }).why]).sort())
     .toEqual([["hw", "course"], ["talk", "person"]]);
 
   expect(outcome.archived.map((item) => item.id)).toEqual(["t-proposal"]);
@@ -150,7 +152,7 @@ test("a milestone of the person's own is moved by itself twice at most; the thir
   const third = day(dayAfter(again));
   expect(third.shifted).toEqual([]);
   expect(third.asked.map((item) => item.id)).toEqual(["pack"]);
-  expect(store.listEvents(ws, { type: "milestone.overdue" }).map((item) => item.payload)).toEqual([{ deadline: again, why: "stalled", shifts: 2 }]);
+  expect(store.listEvents(ws, { type: "milestone.changed", change: "overdue" }).map((item) => item.payload)).toEqual([{ deadline: again, why: "stalled", shifts: 2, change: "overdue" }]);
   // The next day it is neither moved nor asked again.
   const fourth = day(dayAfter(dayAfter(again).slice(0, 10)));
   expect(fourth.shifted).toEqual([]);
@@ -165,9 +167,9 @@ test("a whole task the assistant did is handed in when it left nothing for the p
     mkdirSync(directory, { recursive: true });
     writeFileSync(path.join(directory, "audit.json"), JSON.stringify({ needsHuman: left }));
     at("2026-10-10T10:00:00Z");
-    event("agent.task.requested", taskId, { title: `整件事 ${taskId}`, category: "read_research_organize", workOrderId: orderId, delegated: true });
-    event("agent.task.completed", taskId, { directory, artifacts: [{ path: "a.md", sha256: "h", bytes: 1 }], needsHuman: left.length, checksPassed: true,
-      inputsModified: [], reviewRequired: true });
+    event("agent.changed", taskId, { title: `整件事 ${taskId}`, category: "read_research_organize", workOrderId: orderId, delegated: true, change: "task_requested" });
+    event("agent.changed", taskId, { directory, artifacts: [{ path: "a.md", sha256: "h", bytes: 1 }], needsHuman: left.length, checksPassed: true,
+      inputsModified: [], reviewRequired: true, change: "task_completed" });
   }
   at("2026-10-20T18:00:00Z");
   event("op.undone", "x", {});
@@ -202,13 +204,13 @@ test("a result made on another machine still leaves its items on the task: read 
   mkdirSync(path.join(dir, "ai-output", "moved"), { recursive: true });
   writeFileSync(path.join(dir, "ai-output", "moved", "audit.json"), JSON.stringify({ needsHuman: [{ what: "确认数据版本", why: "" }] }));
   at("2026-10-05T10:00:00Z");
-  event("agent.task.requested", "moved", { title: "任务 · 整理", category: "read_research_organize", workOrderId: "t", stepId: "" });
-  event("agent.task.completed", "moved", { directory: "C:\\Users\\karol\\Crossline\\ai-output\\moved", artifacts: [], needsHuman: 1, checksPassed: true, inputsModified: [], reviewRequired: true });
-  event("agent.task.requested", "gone", { title: "任务 · 汇总", category: "read_research_organize", workOrderId: "t", stepId: "s2" });
-  event("agent.task.completed", "gone", { directory: "C:\\Users\\karol\\Crossline\\ai-output\\gone", artifacts: [], needsHuman: 2, checksPassed: true, inputsModified: [], reviewRequired: true });
+  event("agent.changed", "moved", { title: "任务 · 整理", category: "read_research_organize", workOrderId: "t", stepId: "", change: "task_requested" });
+  event("agent.changed", "moved", { directory: "C:\\Users\\karol\\Crossline\\ai-output\\moved", artifacts: [], needsHuman: 1, checksPassed: true, inputsModified: [], reviewRequired: true, change: "task_completed" });
+  event("agent.changed", "gone", { title: "任务 · 汇总", category: "read_research_organize", workOrderId: "t", stepId: "s2", change: "task_requested" });
+  event("agent.changed", "gone", { directory: "C:\\Users\\karol\\Crossline\\ai-output\\gone", artifacts: [], needsHuman: 2, checksPassed: true, inputsModified: [], reviewRequired: true, change: "task_completed" });
   at(NOW.toISOString());
   dateAdvancePass(store, ws, { now: NOW });
-  const notes = store.listEvents(ws, { type: "task.note" }).map((item) => (item.payload as { text: string }).text);
+  const notes = store.listEvents(ws, { type: "task.changed", change: "note" }).map((item) => (item.payload as { text: string }).text);
   expect(notes).toContain("助手留下的待补：确认数据版本");
   expect(notes).toContain("助手留下 2 件待补，列在助手结果「任务 · 汇总」里（原记录不在这台机器上）");
   vi.unstubAllEnvs();
@@ -242,7 +244,7 @@ test("an exam whose day has passed puts its preparation away and asks how it wen
   expect(outcome.archived.map((item) => item.id).sort()).toEqual(["t-practice", "t-proposal-prep"]);
   expect(store.listWorkOrders(ws).find((item) => item.id === "t-timing")!.state).toBe("active");
   expect(outcome.asked.map((item) => item.id)).toEqual(["ECE 548 期中考试 1 达到 A− 支撑线"]);
-  expect(store.listEvents(ws, { type: "milestone.overdue" }).map((item) => (item.payload as { why: string }).why)).toEqual(["sitting"]);
+  expect(store.listEvents(ws, { type: "milestone.changed", change: "overdue" }).map((item) => (item.payload as { why: string }).why)).toEqual(["sitting"]);
   // Not moved like the person's own milestones: an exam's date is the course's.
   expect(outcome.shifted).toEqual([]);
 });
@@ -253,7 +255,7 @@ test("started work past its own self-set due day moves to the cautious finish at
   const save = (id: string, projectId: string, due: string) => store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "media", projectId, milestoneId: "",
     intent: id, state: "active", riskTier: "routine", estimate: { ...estimate, p85Minutes: 150 }, payload: { dueDate: due } });
   save("own", "xhs", "2026-10-19");
-  event("work_order.due_changed", "own", { before: null, after: "2026-10-19" });
+  event("work_order.changed", "own", { before: null, after: "2026-10-19", change: "due_changed" });
   save("course", "ece555", "2026-10-19");
   event("dates.extracted", "batch", { dates: [{ project: "ece555", kind: "homework_due" }] });
   const outcome = dateAdvancePass(store, ws, { now: NOW, force: true })!;
@@ -268,12 +270,12 @@ test("a workflow grown from two steps of one task is put away, one grown from tw
   // The owner's 待确认 held nine 「把这类事固化成工作流：…」 results counted by run, 「参加 11 月 6 日在 Levy Hall…」 among them (2026-11-11).
   for (const [taskId, workOrderId] of [["s1", "t-event"], ["s2", "t-event"], ["c1", "t-548"], ["c2", "t-555"]] as const) {
     result(taskId, workOrderId, taskId, "整理课程讲义", "2026-10-15T10:00:00Z");
-    event("agent.task.reviewed", taskId, { decision: "accepted", note: "" });
+    event("agent.changed", taskId, { decision: "accepted", note: "", change: "task_reviewed" });
   }
   result("grow-one", "", "", "把这类事固化成工作流：参加 11 月 6 日在 Levy Hall 举行的 CoE Alumni …", "2026-10-21T02:00:00Z");
   result("grow-two", "", "", "把这类事固化成工作流：整理课程讲义", "2026-10-21T02:00:00Z");
-  event("skill.grown.attempted", "media", { taskId: "grow-one", state: "started", taskIds: ["s1", "s2"] }, "att-1");
-  event("skill.grown.attempted", "media", { taskId: "grow-two", state: "started", taskIds: ["c1", "c2"] }, "att-2");
+  event("skill.changed", "media", { taskId: "grow-one", state: "started", taskIds: ["s1", "s2"], change: "grown_attempted" }, "att-1");
+  event("skill.changed", "media", { taskId: "grow-two", state: "started", taskIds: ["c1", "c2"], change: "grown_attempted" }, "att-2");
   at(NOW.toISOString());
   const outcome = dateAdvancePass(store, ws)!;
   expect(outcome.notRepeated).toEqual(["grow-one"]);

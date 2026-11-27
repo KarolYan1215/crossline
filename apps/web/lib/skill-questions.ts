@@ -79,7 +79,7 @@ export function answerSkillQuestion(ctx: AccessContext, ask: Ask, choice: { opti
     else if (ref.kind === "materials") retryMaterialPreparation(ctx, ref.id);
     else {
       store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `goal:backplan:rerun:${ref.id}:pq:${row.id}`,
-        type: "goal.backplan_rerun_requested", entityId: ref.id, payload: { questionId: row.id } });
+        type: "goal.changed", entityId: ref.id, payload: { questionId: row.id, change: "backplan_rerun_requested" } });
       requestAutoBackplan(ctx);
     }
   }

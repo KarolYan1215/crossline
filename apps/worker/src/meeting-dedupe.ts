@@ -86,10 +86,10 @@ export async function meetingDuplicatePass(store: CrosslineStore, workspaceId: s
     const order = store.listWorkOrders(workspaceId).find((item) => item.id === pair.taskId);
     if (!order || !OPEN.has(order.state)) continue;
     const title = taskTitleOf(order);
-    const attempt = store.listEvents(workspaceId, { type: "work_order.archived", entityId: order.id }).length;
+    const attempt = store.listEvents(workspaceId, { type: "work_order.changed", change: "archived", entityId: order.id }).length;
     const suffix = attempt ? `:${attempt}` : "";
-    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `archive-reason:${order.id}${suffix}`, type: "work_order.archived", entityId: order.id,
-      payload: { reason: t("与日历上的「{{title}}」是同一件", { title: pair.time.title }), from: order.state, bySystem: true } });
+    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `archive-reason:${order.id}${suffix}`, type: "work_order.changed", entityId: order.id,
+      payload: { reason: t("与日历上的「{{title}}」是同一件", { title: pair.time.title }), from: order.state, bySystem: true, change: "archived" } });
     store.transitionWorkOrder(workspaceId, order.id, { type: "archived" }, `archive:${order.id}${suffix}`);
     // One undoable operation per task, in the shape the web's undo log reads (apps/web/lib/undo.ts): the task comes back, nothing else changed.
     const opId = `op-${now.getTime().toString(36)}-${randomUUID().slice(0, 6)}`;

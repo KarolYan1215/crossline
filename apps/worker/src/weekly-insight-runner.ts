@@ -7,13 +7,13 @@ import type { CrosslineStore } from "@crossline/db";
 
 import { ownerOf } from "./owner";
 import { tOfWorkspace } from "./locale";
-export const WEEKLY_INSIGHT_SKILL = "crossline:crossline-weekly-insight";
+export const WEEKLY_INSIGHT_SKILL = "crossline:crossline-weekly-review:insight";
 
 /**
  * The scenario in short; the Skill holds the rules and the examples. It used to say "if you cannot find three, say so in a blocker", and a
  * blocker throws away the whole run, estimate updates included: a week without a strong pattern is empty lists.
  */
-const INSTRUCTIONS = "Read this week's execution record and propose only the patterns it supports, as the crossline-weekly-insight Skill describes, "
+const INSTRUCTIONS = "Read this week's execution record and propose only the patterns it supports, as the crossline-weekly-review:insight Skill describes, "
   + "and return only the requested JSON. The person reads each claim and its 建议 on the weekly review page and decides; nothing is changed by you. " // i18n-ignore: model-facing
   + "Every insight rests on at least three comparable observations, cites ids from executions or notificationEvents only, and names its counterexamples; "
   + "a pattern with fewer observations is left out, not reported as a blocker. Interruption, missing input and estimation error are separate findings "
@@ -49,12 +49,13 @@ export function buildWeeklyInsightContext(store: CrosslineStore, workspaceId: st
     .map((item) => ({ id: item.id, level: item.level, observedAt: item.observedAt }));
   // No dedicated "notification" concept exists in the ledger — the real signal a person would have
   // been notified about is a state transition, so that is what this reads rather than a fiction.
-  const notificationEvents = store.listEvents(workspaceId, { type: ["work_order.transitioned", "materials.blocked", "milestone_gate.judged"] })
-    .filter((event) => inPeriod(event.createdAt))
-    .map((event) => ({ id: event.eventId, type: event.type, entityId: event.entityId, createdAt: event.createdAt }));
+  const notificationEvents = [...store.listEvents(workspaceId, { type: ["work_order.transitioned", "milestone_gate.judged"] }),
+    ...store.listEvents(workspaceId, { type: "materials.changed", change: "blocked" })]
+    .filter((event) => inPeriod(event.createdAt)).sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    .map((event) => ({ id: event.eventId, type: event.type === "materials.changed" ? "materials.changed:blocked" : event.type, entityId: event.entityId, createdAt: event.createdAt }));
   const landedAt = (id: string) => store.listEvents(workspaceId, { type: "work_order.transitioned", entityId: id })
     .find((event) => (event.payload as { to?: string }).to === "accepted")?.createdAt;
-  const byproductItems = store.listEvents(workspaceId, { type: "byproduct.planned" }).filter((event) => inPeriod(event.createdAt)).map((event) => {
+  const byproductItems = store.listEvents(workspaceId, { type: "work_order.changed", change: "byproduct_planned" }).filter((event) => inPeriod(event.createdAt)).map((event) => {
     const payload = event.payload as { primaryId: string; lineId: string; artifact: string };
     const landing = orderById.get(event.entityId);
     const primaryDone = store.listExecutions(workspaceId, payload.primaryId).map((execution) => execution.endedAt).filter(Boolean).sort().at(-1);
@@ -98,14 +99,14 @@ export function createWeeklyInsight(store: CrosslineStore, workspaceId: string, 
     const runId = `${now.toISOString().slice(0, 10)}:${Date.now()}`;
     store.appendEvent({
       ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `weekly-insight:${runId}`,
-      type: "weekly_review.insight_run", entityId: runId, payload: result.output
+      type: "job.ran", entityId: runId, payload: { ...result.output, job: "weekly_review.insight", state: "done" }
     });
     // Each proposal also lands as its own event, so the Review page can list them the same way it
     // already lists flywheel findings and milestone-relation candidates — one row per reviewable claim.
     for (const proposal of result.output.insightProposals) {
       store.appendEvent({
         ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `weekly-insight:proposal:${proposal.id}`,
-        type: "weekly_review.insight_proposal", entityId: proposal.id, payload: proposal
+        type: "insight.changed", entityId: proposal.id, payload: { ...proposal, change: "weekly_proposal" }
       });
     }
     return { state: "ready", result: result.output };

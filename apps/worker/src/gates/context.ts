@@ -1,7 +1,7 @@
 import {
-  addDays, dayInZone, GATE_ATTEMPTED, GATE_GOAL_MAX_CHARS, GATE_GOAL_SETTING, GATE_JUDGED, GATE_OVERRIDDEN, instantInZone, pendingGateSubjects, weekStartOf, type GateId
+  addDays, dayInZone, GATE_GOAL_MAX_CHARS, GATE_GOAL_SETTING, GATE_JUDGED, instantInZone, pendingGateSubjects, weekStartOf, type GateId
 } from "@crossline/core";
-import type { CrosslineStore } from "@crossline/db";
+import { readTicks, type CrosslineStore } from "@crossline/db";
 import { buildLedgerBrief } from "../ledger-brief";
 
 /**
@@ -57,12 +57,16 @@ export const previousWeek = (now: Date, timeZone?: string) => localWeek(now, tim
 /** The local hour (0–23) of `at`. */
 export const localHour = (at: Date, timeZone?: string) => Number(new Intl.DateTimeFormat("en-GB", { timeZone: zoneOr(timeZone), hour: "2-digit", hourCycle: "h23" }).format(at)) % 24;
 
-/** The judgements, overrides and attempts of a workspace, for `latestGateJudgements` and `pendingGateSubjects`. */
-export const gateEventsOf = (store: CrosslineStore, workspaceId: string) => store.listEvents(workspaceId, { type: [GATE_JUDGED, GATE_OVERRIDDEN, GATE_ATTEMPTED] });
+/** The judgements and overrides of a workspace, for `latestGateJudgements` and `pendingGateSubjects`. */
+export const gateEventsOf = (store: CrosslineStore, workspaceId: string) => [
+  ...store.listEvents(workspaceId, { type: GATE_JUDGED }), ...store.listEvents(workspaceId, { type: "gate.changed", change: "overridden" })];
+/** The last day's model call attempts of a workspace (the `gate-attempts` log), for `gateExhausted`. */
+export const gateAttemptsOf = (workspaceId: string, now: Date) =>
+  readTicks("gate-attempts", workspaceId, new Date(now.getTime() - 86_400_000).toISOString());
 
 /** The candidates still to judge for `gate` (see `pendingGateSubjects`). */
 export const pendingFor = (store: CrosslineStore, workspaceId: string, gate: GateId, candidates: readonly string[], now: Date, sinceIso = "") =>
-  pendingGateSubjects(gateEventsOf(store, workspaceId), gate, candidates, now, sinceIso);
+  pendingGateSubjects(gateEventsOf(store, workspaceId), gate, candidates, now, sinceIso, gateAttemptsOf(workspaceId, now));
 
 /** The goal every gate judges against: the person's own text (Settings), then each line's goal. */
 export function gateGoal(store: CrosslineStore, workspaceId: string, now: Date): string {

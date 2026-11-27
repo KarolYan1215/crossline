@@ -61,8 +61,8 @@ export function repairFrozenRace(store: CrosslineStore, workspaceId: string, own
   if (!released.length && !republished.length) return { released: [], republished: [] };
 
   const at = now.toISOString();
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `repair.frozen_race:${workspaceId}`, type: "repair.frozen_race", entityId: workspaceId,
-    payload: { released: released.map((entry) => ({ blockId: entry.blockId, start: entry.start, end: entry.end })), republished, at } });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `repair.frozen_race:${workspaceId}`, type: "job.ran", entityId: workspaceId,
+    payload: { released: released.map((entry) => ({ blockId: entry.blockId, start: entry.start, end: entry.end })), republished, at, job: "repair.frozen_race", state: "done" } });
   if (released.length) {
     // The same shape the web's undo writes (`recordOp`), so 撤销 in the input box and on 待确认 can take it back for a day.
     const id = `op-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
@@ -96,8 +96,8 @@ export function repairDuplicateImports(store: CrosslineStore, workspaceId: strin
   if (plan && removed.length) {
     const gone = new Set(removed.map((block) => block.id));
     store.savePlanVersion({ ...plan, payload: { ...(plan.payload as object), blocks: blocks.filter((block) => !gone.has(block.id)) } });
-    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `repair.import_duplicates:${workspaceId}`, type: "repair.import_duplicates", entityId: plan.id,
-      payload: { removed, at: now.toISOString() } });
+    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `repair.import_duplicates:${workspaceId}`, type: "job.ran", entityId: plan.id,
+      payload: { removed, at: now.toISOString(), job: "repair.import_duplicates", state: "done" } });
   }
   store.setSetting(workspaceId, IMPORT_DUPLICATE_REPAIR, now.toISOString());
   return { removed: removed.map((block) => block.id) };

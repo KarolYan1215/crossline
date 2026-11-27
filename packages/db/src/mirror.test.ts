@@ -1,11 +1,13 @@
+import type { EventType } from "@crossline/core";
+import type { LedgerEventInput } from "./store";
 import { expect, test } from "vitest";
 import { CrosslineStore, isWorkspaceMirror, mirrorLocalSetting, mirrorSnapshot, replaceWorkspaceFrom, type StoredSourceDocument } from "./index";
 
 const doc = (store: CrosslineStore, workspaceId: string, id: string, sha: string, text: string): StoredSourceDocument =>
   store.saveSourceDocument({ id, ownerId: store.getWorkspaceOwnerId(workspaceId)!, workspaceId, kind: "text", fileName: `${id}.txt`, mediaType: "text/plain",
     sha256: sha.repeat(64), uri: `file:///x/${id}.txt`, extractedText: text, extractionStatus: "done", createdAt: "2026-11-01T00:00:00.000Z" });
-const event = (store: CrosslineStore, workspaceId: string, key: string, type: string, payload: Record<string, unknown> = {}) =>
-  store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId)!, workspaceId, idempotencyKey: key, type, entityId: key, payload });
+const event = (store: CrosslineStore, workspaceId: string, key: string, type: EventType, payload: Record<string, unknown> = {}) =>
+  store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId)!, workspaceId, idempotencyKey: key, type, entityId: key, payload } as LedgerEventInput);
 
 test("the hosted side leaves out machine settings, token hashes and identity tables", () => {
   const server = new CrosslineStore(":memory:");
@@ -27,26 +29,26 @@ test("a mirror replaces the local workspace's rows, keeps what the device holds 
   const serverOwner = server.getWorkspaceOwnerId(sw)!;
   server.setSetting(sw, "schedule.lineShares", JSON.stringify({ owner: serverOwner }));
   server.setSetting(sw, "activity.hourly", "server copy");
-  event(server, sw, "task-1", "work_order.created");
+  event(server, sw, "task-1", "op.applied");
   doc(server, sw, "upload-1", "a", "syllabus");
   doc(server, sw, "device-aaaa", "b", "notes from the folder");
-  event(server, sw, "fact-1", "profile.fact", { documentId: "device-aaaa" });
-  event(server, sw, "recording.transcribed:c", "recording.transcribed", { where: "device" });
+  event(server, sw, "fact-1", "op.undone", { documentId: "device-aaaa" });
+  event(server, sw, "recording.transcribed:c", "recording.changed", { where: "device", change: "transcribed" });
 
   const local = new CrosslineStore(":memory:");
   const lw = local.createPrincipalWithWorkspace("local", "个人").workspace.id;
   const ow = local.createPrincipalWithWorkspace("other", "别人").workspace.id;
   const localOwner = local.getWorkspaceOwnerId(lw)!;
   local.setSetting(ow, "schedule.lineShares", "other's");
-  event(local, ow, "other-1", "work_order.created");
+  event(local, ow, "other-1", "op.applied");
   local.setSetting(lw, "schedule.lineShares", "stale");
   local.setSetting(lw, "activity.hourly", "this machine");
   local.setSetting(lw, "sources.folders", "[folders]");
-  event(local, lw, "old-1", "work_order.created");
+  event(local, lw, "old-1", "op.applied");
   doc(local, lw, "folder-doc", "b", "notes from the folder");
   doc(local, lw, "folder-new", "d", "not sent yet");
   doc(local, lw, "stale-upload", "e", "gone on the site");
-  event(local, lw, "recording.transcribed:c", "recording.transcribed", { where: "本机转写" });
+  event(local, lw, "recording.transcribed:c", "recording.changed", { where: "本机转写", change: "transcribed" });
   local.replaceDeviceActivitySegments(lw, "2026-11-01T00:00:00.000Z", [{ start: "2026-11-01T10:00:00.000Z", end: "2026-11-01T10:30:00.000Z", app: "code.exe", category: "coding", idle: false }]);
 
   const keep = (table: string, row: Record<string, unknown>) => table === "source_documents" ? ["folder-doc", "folder-new"].includes(String(row.id))
@@ -59,12 +61,12 @@ test("a mirror replaces the local workspace's rows, keeps what the device holds 
   // The device's own: its settings, its transcript event (not the site's copy of it), its folder files and its screen segments.
   expect(local.getSetting(lw, "activity.hourly")).toBe("this machine");
   expect(local.getSetting(lw, "sources.folders")).toBe("[folders]");
-  expect(local.listEvents(lw, { type: "recording.transcribed" })[0]!.payload).toEqual({ where: "本机转写" });
+  expect(local.listEvents(lw, { type: "recording.changed", change: "transcribed" })[0]!.payload).toEqual({ where: "本机转写", change: "transcribed" });
   const docs = new Map(local.listSourceDocuments(lw).map((item) => [item.id, item]));
   expect([...docs.keys()].sort()).toEqual(["folder-doc", "folder-new", "upload-1"]);
   // The site's copy of a folder file gives way to the device's, which takes its number; the site's references follow it.
   expect(docs.get("folder-doc")!.refNo).toBe(server.listSourceDocuments(sw).find((item) => item.id === "device-aaaa")!.refNo);
-  expect(local.listEvents(lw, { type: "profile.fact" })[0]!.payload).toEqual({ documentId: "folder-doc" });
+  expect(local.listEvents(lw, { type: "op.undone" })[0]!.payload).toEqual({ documentId: "folder-doc" });
   const numbers = [...docs.values()].map((item) => item.refNo);
   expect(new Set(numbers).size).toBe(numbers.length);
   expect(local.listActivitySegments(lw, "2026-11-01T00:00:00.000Z")).toHaveLength(1);

@@ -98,7 +98,7 @@ describe("measurable, not just done", () => {
   }];
 
   test("whether a milestone is graded and needs a score line is the architect's call, not a title regex (2026-11-22)", () => {
-    // The course grammar (exam, quiz, homework → a threshold) is in the crossline-milestone-architect Skill now; code only asks for
+    // The course grammar (exam, quiz, homework → a threshold) is in the crossline-milestone-architect:design Skill now; code only asks for
     // one criterion that can be checked without judgement.
     expect(() => validatePlans(make("ECE 555 期末考试完成并被课程方记录", [{ evidenceOf: "outcome", measure: { kind: "artifact" } }]), profile, new Set())).not.toThrow();
     expect(() => validatePlans(make("ECE 555 期末考试取得 85 分以上", [{ evidenceOf: "outcome", measure: { kind: "threshold", unit: "分", comparator: "gte", value: 88, bareLine: 85 } }]), profile, new Set())).not.toThrow();

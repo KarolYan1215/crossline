@@ -7,7 +7,7 @@ import type { CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
 import { tOfWorkspace } from "./locale";
 
-export const BACKGROUND_FACTS_SKILL = "crossline:crossline-background-facts";
+export const BACKGROUND_FACTS_SKILL = "crossline:crossline-capture-digest:background";
 
 // The scenario in brief; the Skill has the rules and the examples (this used to be a second copy of it).
 // i18n-ignore-start: model-facing

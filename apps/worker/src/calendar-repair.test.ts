@@ -25,7 +25,7 @@ test("releases locks the calendar read-back took for the person's, clears 「del
   expect(JSON.parse(store.getSetting(ws, "schedule.frozen")!).map((item: { blockId: string }) => item.blockId))
     .toEqual(["scheduled:b", "scheduled:c", "scheduled:d", "scheduled:e"]);
   expect(Object.keys(JSON.parse(store.getSetting(ws, "calendar.published")!))).toEqual(["scheduled:y"]);
-  expect(store.listEvents(ws, { type: "repair.frozen_race" })[0]!.payload).toMatchObject({ released: [{ blockId: "scheduled:a:v1s1" }], republished: ["scheduled:x"] });
+  expect(store.listEvents(ws, { type: "job.ran", job: "repair.frozen_race" })[0]!.payload).toMatchObject({ released: [{ blockId: "scheduled:a:v1s1" }], republished: ["scheduled:x"] });
   const op = store.listEvents(ws, { type: "op.applied" })[0]!.payload as { inverse: { kind: string; entries: Array<{ key: string; value: string }> } };
   expect(op.inverse).toEqual({ kind: "settings.restore", entries: [{ key: "schedule.frozen", value: JSON.stringify(before) }] });
   expect(store.getSetting(ws, FROZEN_RACE_REPAIR)).toBe("2026-10-15T09:00:00.000Z");
@@ -57,7 +57,7 @@ test("an imported weekly class and that day's dated session in one slot keep the
   expect(repairDuplicateImports(store, ws, owner, new Date("2026-10-15T19:00:00Z"))).toEqual({ removed: ["import:b1:class:2026-12-07"] });
   const ids = (store.listPlanVersions(ws)[0]!.payload as { blocks: Array<{ id: string }> }).blocks.map((item) => item.id);
   expect(ids).toEqual(["graph_calendar:x", "import:b1:final-2026-12-07", "import:b1:class:2026-12-04"]);
-  expect(store.listEvents(ws, { type: "repair.import_duplicates" })[0]!.payload).toMatchObject({ removed: [blocks[1]] });
+  expect(store.listEvents(ws, { type: "job.ran", job: "repair.import_duplicates" })[0]!.payload).toMatchObject({ removed: [blocks[1]] });
   expect(store.getSetting(ws, IMPORT_DUPLICATE_REPAIR)).toBe("2026-10-15T19:00:00.000Z");
   expect(repairDuplicateImports(store, ws, owner)).toBeUndefined();
 });

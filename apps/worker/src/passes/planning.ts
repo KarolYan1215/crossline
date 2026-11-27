@@ -148,7 +148,7 @@ export async function goalSplitPass(workspaceId: string, checkedAt = new Date().
 }
 
 /**
- * Reads new milestone drafts critically for what could keep them from being reached (`crossline-milestone-risk-reviewer`), once per
+ * Reads new milestone drafts critically for what could keep them from being reached (`crossline-milestone-review:risk`), once per
  * draft as drafted: after every architect run and on the tick. Part of designing milestones, so it runs while the quota allows core work.
  */
 const reviewingRisks = new Set<string>();
@@ -320,7 +320,7 @@ export async function stepPlanPass(workspaceId: string, checkedAt = new Date().t
     await Promise.all(Array.from({ length: Math.max(1, workspaceConcurrency(workspaceId)) }, async () => {
       for (let id = await nextTask(); id !== undefined; id = await nextTask()) {
         // A replan the person (or the assistant) asked for carries what to change.
-        const request = analysisStore.listEvents(workspaceId, { type: "task.steps_replan_requested", entityId: id }).at(-1)?.payload as { feedback?: string } | undefined;
+        const request = analysisStore.listEvents(workspaceId, { type: "task.changed", change: "steps_replan_requested", entityId: id }).at(-1)?.payload as { feedback?: string } | undefined;
         const outcome = await planner(id, request?.feedback ?? "").catch(() => undefined);
         if (outcome) console.info(JSON.stringify({ type: `steps.${outcome.state}`, checkedAt, workspaceId, workOrderId: id,
           ...(outcome.state === "planned" ? { warnings: outcome.warnings.length } : { code: outcome.code }) }));

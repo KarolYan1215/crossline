@@ -95,11 +95,11 @@ export function absorbParts(store: CrosslineStore, workspaceId: string, wholeId:
 export function recordFold(store: CrosslineStore, workspaceId: string, fold: Fold,
   added: { id: string; title: string; intent: string; source: "analysis" | "backplan" | "datepair" | "import" }): void {
   const ownerId = ownerOf(store, workspaceId);
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.duplicate_prevented:${added.id}`, type: "task.duplicate_prevented", entityId: fold.keep,
-    payload: { kind: fold.kind, keep: fold.keep, candidate: { id: added.id, title: added.title, intent: added.intent }, source: added.source, why: fold.why } });
-  if (fold.kind === "extends") store.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.extended:${added.id}`, type: "task.steps_replan_requested",
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.duplicate_prevented:${added.id}`, type: "task.changed", entityId: fold.keep,
+    payload: { kind: fold.kind, keep: fold.keep, candidate: { id: added.id, title: added.title, intent: added.intent }, source: added.source, why: fold.why, change: "duplicate_prevented" } });
+  if (fold.kind === "extends") store.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.extended:${added.id}`, type: "task.changed",
     // i18n-ignore: the brief for the next plan (model-facing)
-    entityId: fold.keep, payload: { feedback: `并入补充内容「${added.title}」：${added.intent}`.slice(0, 600) } });
+    entityId: fold.keep, payload: { feedback: `并入补充内容「${added.title}」：${added.intent}`.slice(0, 600), change: "steps_replan_requested" } });
 }
 
 /**

@@ -90,7 +90,7 @@ test("the model proposes a folder's lines once; the person's own choice is never
   if (added.state !== "added") throw new Error("not added");
   await syncFolder(store, workspaceId, added.folder, deps());
   const answer = JSON.stringify({ folders: [{ id: added.folder.id, lineIds: ["research", "nonexistent"], why: "文件名多为 ECE 548 课件" }] });
-  const { rpc } = fakeRuntime([answer], "crossline:crossline-folder-classifier");
+  const { rpc } = fakeRuntime([answer], "crossline:crossline-line-filer:folder");
   expect(await createFolderClassifier(store, workspaceId, "C:\\repo", () => rpc)()).toEqual({ filed: 1 });
   expect(readSourceFolders(store.getSetting(workspaceId, SOURCE_FOLDERS_SETTING))[0]).toMatchObject({ lines: ["research"], linesBy: "model", linesWhy: "文件名多为 ECE 548 课件" });
   // Asked once: a folder already proposed for is not asked about again.
@@ -99,7 +99,7 @@ test("the model proposes a folder's lines once; the person's own choice is never
   expect(readSourceFolders(store.getSetting(workspaceId, SOURCE_FOLDERS_SETTING))[0]).toMatchObject({ lines: ["media", "research"], linesBy: "person" });
 });
 
-const events = (type: string) => store.listEvents(workspaceId, { type });
+const events = (decision: string) => store.listEvents(workspaceId, { type: "person.decided", subject: "sources", decision });
 const addCourse = async (rules?: { exclude?: string[]; include?: string[]; names?: string[] }) => {
   const added = await addFolder(store, workspaceId, path.join(root, "course"), deps(), rules);
   if (added.state !== "added") throw new Error("not added");
@@ -146,7 +146,7 @@ test("excluding what was read removes it from sources and its stored copy, keeps
   expect(names()).toEqual(["a.md", "course/syllabus.md"]);
   expect(store.listSourceDocuments(workspaceId).find((doc) => doc.id === upload.id)).toBeDefined();
   expect(existsSync(copy)).toBe(false);
-  expect(events("sources.folder_content_removed").map((event) => event.payload)).toEqual([{ folderId: folder.id, label: "course", removed: 1, reason: "excluded" }]);
+  expect(events("folder_content_removed").map((event) => event.payload)).toEqual([{ folderId: folder.id, label: "course", removed: 1, reason: "excluded", subject: "sources", decision: "folder_content_removed" }]);
   // Rescans obey the rules: nothing under `old` comes back.
   await syncFolder(store, workspaceId, folder, deps());
   expect(names()).toEqual(["a.md", "course/syllabus.md"]);
@@ -285,8 +285,8 @@ test("revoking keeps what was read by default; purging deletes what this folder 
   expect(names()).toHaveLength(4);
   expect(removeFolder(store, workspaceId, folder.id, { purge: true, dataDir: data })).toEqual({ removed: true, purged: 3 });
   expect(names()).toEqual(["shared.md"]);
-  expect(events("sources.folder_revoked").map((event) => event.payload)).toEqual([{ folderId: folder.id, label: "course", purged: 3 }]);
-  expect(events("sources.folder_content_removed").map((event) => event.payload)).toEqual([{ folderId: folder.id, label: "course", removed: 3, reason: "revoked" }]);
+  expect(events("folder_revoked").map((event) => event.payload)).toEqual([{ folderId: folder.id, label: "course", purged: 3, subject: "sources", decision: "folder_revoked" }]);
+  expect(events("folder_content_removed").map((event) => event.payload)).toEqual([{ folderId: folder.id, label: "course", removed: 3, reason: "revoked", subject: "sources", decision: "folder_content_removed" }]);
 });
 
 test("credentials are never read, whatever the page asks: by name, by extension, and by a key in the text", async () => {

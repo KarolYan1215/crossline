@@ -30,7 +30,7 @@ const OWNER = "owner-1";
 function populate(store: CrosslineStore): void {
   store.appendEvent({
     ownerId: OWNER, workspaceId: WORKSPACE, idempotencyKey: "restore-1",
-    type: "task.created", entityId: "work-order-1", payload: { title: "写论文", nested: { depth: 2 } }
+    type: "op.applied", entityId: "work-order-1", payload: { title: "写论文", nested: { depth: 2 } }
   });
   store.capture({ id: "capture-1", ownerId: OWNER, workspaceId: WORKSPACE, title: "一个想法", context: "" }, "capture:1");
   for (const id of ["milestone-1", "milestone-2"]) {
@@ -127,7 +127,7 @@ test("a backup taken before migration 14 still restores: its plan differences be
 
   const restored = freshStore();
   restored.importSnapshot(snapshot);
-  const archived = restored.listEvents(WORKSPACE, { type: "plan.change_archived" });
+  const archived = restored.listEvents(WORKSPACE, { type: "plan.changed", change: "change_archived" });
   expect(archived).toHaveLength(1);
   expect(archived[0]!.payload).toMatchObject({ explanation: "日历中已不存在", after: { id: "x" }, before: null });
   expect(restored.listPlanVersions(WORKSPACE).map((plan) => [plan.id, plan.status])).toEqual([["plan-2", "current"]]);

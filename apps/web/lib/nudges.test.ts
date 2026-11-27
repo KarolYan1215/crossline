@@ -92,7 +92,7 @@ test("「推迟 10 分钟」 says the block again ten minutes later in the same 
   const first = store.getConversationMessage(ws, starts()[0]!.id)!.payload.nudge as { fingerprint: string };
   const blockId = first.fingerprint.slice("start:".length, -":2026-10-12".length);
   await snooze(0);
-  expect(store.listEvents(ws, { type: "block.snoozed" })).toHaveLength(1);
+  expect(store.listEvents(ws, { type: "work_order.changed", change: "block_snoozed" })).toHaveLength(1);
   expect((await nudgesFor(TEST_CTX, at(5))).map((item) => item.kind)).not.toContain("block_start");
   expect((await nudgesFor(TEST_CTX, at(10))).map((item) => item.kind)).toContain("block_start");
   // The same message, asked again: not a second card beside the answered one.

@@ -78,8 +78,8 @@ export function writeDeadlineMoves(store: CrosslineStore, workspaceId: string, m
     if (from === to) continue;
     restore.push({ key, value: previous });
     store.setSetting(workspaceId, key, JSON.stringify({ ...(settingsOf(id) ?? {}), confirmedDeadline: to }));
-    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `goal:settings:${id}:${randomUUID()}`, type: "goal.settings_confirmed", entityId: id,
-      payload: { milestoneVersion: milestones.get(id)?.version ?? 1, previous: json(previous, null), next: { confirmedDeadline: to }, bySystem } });
+    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `goal:settings:${id}:${randomUUID()}`, type: "goal.changed", entityId: id,
+      payload: { milestoneVersion: milestones.get(id)?.version ?? 1, previous: json(previous, null), next: { confirmedDeadline: to }, bySystem, change: "settings_confirmed" } });
     shifted.push({ id, title: milestones.get(id)?.title ?? id, from, to });
   }
   return { restore, shifted };
@@ -121,10 +121,10 @@ export function archiveBySystem(store: CrosslineStore, workspaceId: string, item
   const t = tFor(localeOf(store, workspaceId));
   const reasonOf = (why: string) => by === "return" ? t("回来整理：{{why}}", { why }) : by === "mail" ? t("转为提醒：{{why}}", { why }) : by === "intake" ? why : t("到期整理：{{why}}", { why });
   return items.map(({ order, why }) => {
-    const attempt = store.listEvents(workspaceId, { type: "work_order.archived", entityId: order.id }).length;
+    const attempt = store.listEvents(workspaceId, { type: "work_order.changed", change: "archived", entityId: order.id }).length;
     const suffix = attempt ? `:${attempt}` : "";
-    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `archive-reason:${order.id}${suffix}`, type: "work_order.archived", entityId: order.id,
-      payload: { reason: reasonOf(why), from: order.state, bySystem: true } });
+    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `archive-reason:${order.id}${suffix}`, type: "work_order.changed", entityId: order.id,
+      payload: { reason: reasonOf(why), from: order.state, bySystem: true, change: "archived" } });
     store.transitionWorkOrder(workspaceId, order.id, { type: "archived" }, `archive:${order.id}${suffix}`);
     return { id: order.id, title: taskTitleOf(order), why };
   });
@@ -179,8 +179,8 @@ export async function returnTidy(store: CrosslineStore, workspaceId: string, opt
     archived.length ? t("归档了 {{count}} 个旧任务（{{reasons}}），可在任务页「已归档」恢复", { count: archived.length, reasons }) : "",
     merged ? t("合并了 {{count}} 个重复任务", { count: merged }) : ""
   ].filter(Boolean);
-  store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `return.tidied:${absence.since}`, type: "return.tidied", entityId: workspaceId,
-    payload: { since: absence.since, until: absence.until, days: absence.days, shifted, archived, merged, ...(opId ? { opId } : {}) } });
+  store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `return.tidied:${absence.since}`, type: "job.ran", entityId: workspaceId,
+    payload: { since: absence.since, until: absence.until, days: absence.days, shifted, archived, merged, ...(opId ? { opId } : {}), job: "return.tidy", state: "done" } });
   sayToPerson(store, workspaceId, parts.length
     ? t("离开 {{days}} 天回来，已整理任务库：{{parts}}。排程已按新日期重排；整理可在「最近操作」里撤销。离开期间排了时间的任务，请在回来页确认做到哪了。", { days: absence.days, parts: parts.join(sep) })
     : t("离开 {{days}} 天回来。离开期间排了时间的任务，请在回来页确认做到哪了。", { days: absence.days }),

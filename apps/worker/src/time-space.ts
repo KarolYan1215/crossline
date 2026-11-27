@@ -14,11 +14,11 @@ import { sayToPerson } from "./workflow-smith";
 /**
  * The time–space engine's worker half (docs/opportunity-agent.md §17.6–17.7, track ②). Each pass, for the opportunities still open:
  * the person's places and the events' cities are geocoded (cached, paced, a budget per pass), the visa for an event abroad is looked up on
- * the official page (`crossline-visa-finder` finds and quotes it; code opens the page, checks the quotes and reads the days), and a clash
+ * the official page (`crossline-page-reader:visa` finds and quotes it; code opens the page, checks the quotes and reads the days), and a clash
  * with a fixed arrangement on the calendar is told to the person at once. The web judges each card again on read, with the plan's own work
  * blocks and these caches; nothing here decides what is shown.
  */
-export const VISA_FINDER = "crossline:crossline-visa-finder";
+export const VISA_FINDER = "crossline:crossline-page-reader:visa";
 /** Fingerprints of clashes already told (`{ [fingerprint]: iso }`), so one clash is one message. */
 export const CLASH_SAID_SETTING = "opportunity.clashSaid";
 /** Single messages are capped like the other urgent ones (notify.ts): a day's clashes beyond this wait for the next day. */

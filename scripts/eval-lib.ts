@@ -21,11 +21,20 @@ export type GoldenCase = {
 export type LedgerEvent = { eventId: string; type: string; entityId: string; payload: unknown; createdAt: string };
 export type LedgerOrder = { id: string; intent: string; payload?: unknown };
 
-/** Proposals the person turned down: the event types, and what the proposal was. */
-export const REJECTION_TYPES = ["approval.declined", "goal.backplan_declined", "insight.rejected", "skill.rejected", "skill.public.rejected",
-  "skill.grown.rejected", "skill.grown.revision_rejected", "assess.declined", "permission.rejected"] as const;
+/**
+ * Proposals the person turned down, by `kindOf`. `approval.declined`, `skill.rejected` and `assess.declined` were listed here until
+ * 2026-11-27 and never written as ledger events (a node's report, a log line and a setting key).
+ */
+export const REJECTION_KINDS = ["goal.changed:backplan_declined", "insight.changed:rejected", "skill.changed:public_rejected",
+  "skill.changed:grown_rejected", "skill.changed:grown_revision_rejected", "person.decided:permission.rejected"] as const;
 
 const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+/** An event's kind: its type, with the `change` of a `.changed` family or the `subject.decision` of a `person.decided`. */
+const kindOf = (event: LedgerEvent) => {
+  const payload = record(event.payload);
+  if (event.type === "person.decided") return `${event.type}:${String(payload.subject)}.${String(payload.decision)}`;
+  return typeof payload.change === "string" ? `${event.type}:${payload.change}` : event.type;
+};
 const titleOf = (order: LedgerOrder | undefined) => order ? { title: String(record(order.payload).title ?? order.intent), intent: order.intent } : {};
 
 /**
@@ -37,23 +46,23 @@ export function extractGolden(events: readonly LedgerEvent[], orders: ReadonlyMa
   const byId = new Map(events.map((event) => [event.eventId, event]));
   const applied = new Map(events.filter((event) => event.type === "op.applied").map((event) => [event.entityId, event]));
   const add = (event: LedgerEvent, kind: GoldenKind, fields: Omit<GoldenCase, "id" | "kind" | "source" | "at" | "entityId">) =>
-    out.push({ id: `${kind}:${event.eventId}`, kind, source: event.type, at: event.createdAt, entityId: event.entityId, ...fields });
+    out.push({ id: `${kind}:${event.eventId}`, kind, source: kindOf(event), at: event.createdAt, entityId: event.entityId, ...fields });
   for (const event of events) {
-    const payload = record(event.payload);
+    const payload = record(event.payload), kind = kindOf(event);
     if (event.type === "op.undone") {
       const op = record(applied.get(event.entityId)?.payload);
       add(event, "undo", { context: { label: op.label ?? payload.label ?? "" }, modelSaid: op.inverse ?? null, personSaid: "undone", bySystem: op.bySystem === true });
-    } else if (event.type === "gate.overridden") {
+    } else if (kind === "gate.changed:overridden") {
       const judged = record(byId.get(String(payload.judgedId))?.payload);
       add(event, "gate", { context: { gate: payload.gate, subject: payload.subject }, modelSaid: { verdict: payload.from, reason: record(judged.output).reason ?? "" },
         personSaid: payload.to, ...(typeof payload.note === "string" && payload.note ? { note: payload.note } : {}) });
-    } else if (event.type === "estimate.adjusted") {
+    } else if (kind === "person.decided:estimate.adjusted") {
       add(event, "duration", { context: { ...titleOf(orders.get(event.entityId)), stepId: payload.stepId ?? null }, modelSaid: payload.before ?? null, personSaid: payload.after });
-    } else if (event.type === "work_order.due_changed") {
+    } else if (kind === "work_order.changed:due_changed") {
       add(event, "date", { context: titleOf(orders.get(event.entityId)), modelSaid: payload.before ?? null, personSaid: payload.after });
-    } else if ((REJECTION_TYPES as readonly string[]).includes(event.type)) {
+    } else if ((REJECTION_KINDS as readonly string[]).includes(kind)) {
       add(event, "reject", { context: { ...titleOf(orders.get(event.entityId)), ...payload }, modelSaid: "proposed", personSaid: "rejected" });
-    } else if (event.type === "task.renamed" && payload.by !== "system") {
+    } else if (kind === "task.changed:renamed" && payload.by !== "system") {
       add(event, "rename", { context: titleOf(orders.get(event.entityId)), modelSaid: payload.before ?? null, personSaid: payload.title });
     }
   }

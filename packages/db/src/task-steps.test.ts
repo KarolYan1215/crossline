@@ -20,8 +20,8 @@ test("a replan keeps the steps already done and replaces the rest; progress is r
   const second = store.saveStepPlan("w", "wo-1", plan([step("s1", "solve"), step("s2", "check", ["s1"])]), "o", "replan");
   expect(second.version).toBe(2);
   expect(second.steps.map((s) => [s.id, s.status])).toEqual([["v1s1", "done"], ["v2s1", "planned"], ["v2s2", "planned"]]);
-  expect(store.listEvents("w", { entityId: "wo-1" }).map((event) => event.type))
-    .toEqual(["task.steps_planned", "task.step_progress", "task.step_progress", "task.steps_planned"]);
+  expect(store.listEvents("w", { entityId: "wo-1" }).map((event) => [event.type, (event.payload as { change?: string }).change]))
+    .toEqual([["task.changed", "steps_planned"], ["task.changed", "step_progress"], ["task.changed", "step_progress"], ["task.changed", "steps_planned"]]);
   expect(() => store.updateStepProgress("w", "wo-1", "nope", { status: "done" }, "o", "user")).toThrow("STEP_NOT_FOUND");
   store.close();
 });
@@ -32,8 +32,8 @@ test("a resume note becomes the step's first action; the one it replaced is kept
   expect(store.setStepResumeNote("w", "wo-1", "v1s1", "从第 3 题的第二问接着推", "o").changed).toBe(true);
   expect(store.getStepPlan("w", "wo-1")!.steps[0]!.firstAction).toBe("从第 3 题的第二问接着推");
   expect(store.setStepResumeNote("w", "wo-1", "v1s1", "从第 3 题的第二问接着推", "o").changed).toBe(false);
-  expect(store.listEvents("w", { type: "task.step_resume_noted" }).map((event) => event.payload))
-    .toEqual([{ stepId: "v1s1", note: "从第 3 题的第二问接着推", before: "打开题目" }]);
+  expect(store.listEvents("w", { type: "task.changed", change: "step_resume_noted" }).map((event) => event.payload))
+    .toEqual([{ stepId: "v1s1", note: "从第 3 题的第二问接着推", before: "打开题目", change: "step_resume_noted" }]);
   expect(() => store.setStepResumeNote("w", "wo-1", "nope", "x", "o")).toThrow("STEP_NOT_FOUND");
   store.close();
 });

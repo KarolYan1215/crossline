@@ -7,10 +7,11 @@
  */
 import { readSourceFolders, SOURCE_FOLDERS_SETTING } from "./source-folders";
 
-/** Every judgement: one event. Its entity is what was judged (a task, a milestone, a week, a drill). */
+/**
+ * Every judgement: one event. Its entity is what was judged (a task, a milestone, a week, a drill). The person turning one over is a
+ * `gate.changed` `overridden` (entity: the overturned `gate.judged` event id); saying it was right, `gate.changed` `confirmed`.
+ */
 export const GATE_JUDGED = "gate.judged";
-/** The person turned a judgement over. Its entity is the overturned `gate.judged` event id. */
-export const GATE_OVERRIDDEN = "gate.overridden";
 
 export type GateId =
   /** J1: is the task done, submitted, waiting on someone, or still planned — from evidence alone. */
@@ -176,20 +177,20 @@ export function gateNeedsPerson(gate: GateId, output: Pick<GateOutput, "ifWrong"
 
 /**
  * One run of a gate's model call (`runGate`), kept so a failing call is not repeated on every tick: `ok` false when the model gave no
- * answer, and `missing` the subjects an answer left out.
+ * answer, and `missing` the subjects an answer left out. A progress tick, not a ledger event: the worker keeps it in the
+ * `gate-attempts` JSONL log (packages/db/src/rule-telemetry.ts) since 2026-11-27.
  */
-export const GATE_ATTEMPTED = "gate.attempted";
 export type GateAttemptedPayload = { gate: GateId; round: string; subjects: string[]; ok: boolean; missing: string[] };
 /** How many failed attempts a subject gets in a day before its gate leaves it until the next day: a spending bound, not a judgement. */
 export const GATE_FAILED_ATTEMPTS_PER_DAY = 3;
 
 /** Subjects of `gate` that failed `GATE_FAILED_ATTEMPTS_PER_DAY` times in the last day (no answer, or left out of one). */
-export function gateExhausted(events: readonly EventLike[], gate: GateId, now: Date): Set<string> {
+export function gateExhausted(attempts: readonly GateAttempt[], gate: GateId, now: Date): Set<string> {
   const since = new Date(now.getTime() - 86_400_000).toISOString();
   const failures = new Map<string, number>();
-  for (const event of events) {
-    if (event.type !== GATE_ATTEMPTED || event.createdAt < since) continue;
-    const payload = event.payload as GateAttemptedPayload;
+  for (const attempt of attempts) {
+    if (attempt.at < since) continue;
+    const payload = attempt.payload as GateAttemptedPayload;
     if (payload.gate !== gate) continue;
     for (const id of payload.ok ? payload.missing : payload.subjects) failures.set(id, (failures.get(id) ?? 0) + 1);
   }
@@ -200,16 +201,18 @@ export function gateExhausted(events: readonly EventLike[], gate: GateId, now: D
  * The one way every gate decides what is left to judge: the candidates with no judgement of this gate (since `sinceIso`, when a subject
  * is judged again each period) that have not failed too often today.
  */
-export function pendingGateSubjects(events: readonly EventLike[], gate: GateId, candidates: readonly string[], now: Date, sinceIso = ""): string[] {
+export function pendingGateSubjects(events: readonly EventLike[], gate: GateId, candidates: readonly string[], now: Date, sinceIso = "", attempts: readonly GateAttempt[] = []): string[] {
   const judged = new Set<string>();
   for (const event of events) {
     if (event.type === GATE_JUDGED && event.createdAt >= sinceIso && (event.payload as GateJudgedPayload).gate === gate) judged.add(event.entityId);
   }
-  const exhausted = gateExhausted(events, gate, now);
+  const exhausted = gateExhausted(attempts, gate, now);
   return candidates.filter((id) => !judged.has(id) && !exhausted.has(id));
 }
 
 type EventLike = { eventId: string; type: string; entityId: string; createdAt: string; payload: unknown };
+/** One line of the `gate-attempts` log. */
+export type GateAttempt = { at: string; payload: unknown };
 
 export type GateJudgement = { eventId: string; at: string; payload: GateJudgedPayload; overridden?: { to: string; at: string; note?: string } };
 
@@ -220,7 +223,7 @@ export type GateJudgement = { eventId: string; at: string; payload: GateJudgedPa
 export function latestGateJudgements(events: readonly EventLike[], gate: GateId): Map<string, GateJudgement> {
   const overrides = new Map<string, { to: string; at: string; note?: string }>();
   for (const event of events) {
-    if (event.type !== GATE_OVERRIDDEN) continue;
+    if (!(event.type === "gate.changed" && (event.payload as { change?: string }).change === "overridden")) continue;
     const payload = event.payload as GateOverriddenPayload;
     overrides.set(payload.judgedId, { to: payload.to, at: event.createdAt, ...(payload.note ? { note: payload.note } : {}) });
   }
@@ -267,7 +270,7 @@ export function gateWeekStats(events: readonly EventLike[], sinceIso: string, un
       if (disagreedPairs.has(event.eventId)) row.disagreed += 1;
       if (payload.asked) row.asked += 1;
     }
-    if (event.type === GATE_OVERRIDDEN && inWeek(event.createdAt)) {
+    if ((event.type === "gate.changed" && (event.payload as { change?: string }).change === "overridden") && inWeek(event.createdAt)) {
       const payload = event.payload as GateOverriddenPayload;
       const row = stats.get(payload.gate);
       if (!row) continue;
@@ -379,23 +382,19 @@ export function todaysFront(events: readonly EventLike[], day: string): { eventI
 
 /**
  * J2a's parking (docs/plans/execution-gates-1124.md §四 J2a): the milestones table allows no new status, so a parked milestone is a draft
- * with a `milestone.parked` event after its last approval and no `milestone.unparked` after that. A parked draft is never archived as
+ * with a `milestone.changed` `parked` event after its last approval and no `unparked` after that. A parked draft is never archived as
  * stale (date-advance), and the person is asked about it once a month.
  */
-export const MILESTONE_PARKED = "milestone.parked";
-export const MILESTONE_UNPARKED = "milestone.unparked";
 export type MilestoneParkedPayload = { milestoneId: string; judgedId: string; unparkWhen: string; reason: string; archivedTasks: string[] };
 export function parkedMilestones(events: readonly EventLike[]): Map<string, MilestoneParkedPayload & { at: string }> {
   const out = new Map<string, MilestoneParkedPayload & { at: string }>();
   for (const event of [...events].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
-    if (event.type === MILESTONE_PARKED) out.set(event.entityId, { ...(event.payload as MilestoneParkedPayload), at: event.createdAt });
-    else if (event.type === MILESTONE_UNPARKED) out.delete(event.entityId);
+    if ((event.type === "milestone.changed" && (event.payload as { change?: string }).change === "parked")) out.set(event.entityId, { ...(event.payload as MilestoneParkedPayload), at: event.createdAt });
+    else if ((event.type === "milestone.changed" && (event.payload as { change?: string }).change === "unparked")) out.delete(event.entityId);
   }
   return out;
 }
 
-/** The person said a judgement put to them was right (a `gate_check` answered 「对」). Its entity is the `gate.judged` event id. */
-export const GATE_CONFIRMED = "gate.confirmed";
 /* i18n-ignore-start: Chinese keys, translated where shown */
 export const GATE_VERDICT_LABEL: Record<string, string> = {
   done: "已完成", submitted: "已提交", waiting: "在等别人", planned: "还没做", p1_external: "P1·对外", p1: "P1", external: "对外", normal: "一般",

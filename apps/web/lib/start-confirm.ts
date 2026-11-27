@@ -110,7 +110,7 @@ export async function settleInterviewSettings(ctx: AccessContext, skip: Readonly
   }
   store.setSetting(ctx.workspaceId, INTERVIEW_SETTINGS, JSON.stringify(all));
   if (applied) store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `onboarding:settings-applied:${new Date().toISOString()}`,
-    type: "onboarding.settings_applied", entityId: ctx.workspaceId, payload: { applied, declined: skip.size } });
+    type: "person.decided", entityId: ctx.workspaceId, payload: { applied, declined: skip.size, subject: "onboarding", decision: "settings_applied" } });
   return { applied, failed };
 }
 
@@ -122,7 +122,7 @@ export function confirmStart(ctx: AccessContext): { ok: true } | { ok: false; co
   if ((backlog.frontReplies || backlog.files) && !("failing" in backlog && backlog.failing)) return { ok: false, code: "START_STILL_ORGANIZING" };
   const at = new Date().toISOString();
   store.setSetting(ctx.workspaceId, START_CONFIRMED_SETTING, JSON.stringify({ at, via: "person" }));
-  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `onboarding:start-confirmed:${at}`, type: "onboarding.start_confirmed",
-    entityId: ctx.workspaceId, payload: { by: ctx.principalId } });
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `onboarding:start-confirmed:${at}`, type: "person.decided",
+    entityId: ctx.workspaceId, payload: { by: ctx.principalId, subject: "onboarding", decision: "start_confirmed" } });
   return { ok: true };
 }

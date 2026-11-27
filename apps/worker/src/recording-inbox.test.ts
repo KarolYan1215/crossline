@@ -2,9 +2,9 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { RECORDING_SERVER_CONSENT, RECORDING_SILENT_EVENT, RECORDING_TRANSCRIBED_EVENT, inTranscribeWindow } from "@crossline/core";
+import { RECORDING_SERVER_CONSENT, inTranscribeWindow } from "@crossline/core";
 import { CrosslineStore } from "@crossline/db";
-import { RECORDING_FAILED_EVENT, inboxDir, processInbox, type InboxDeps } from "./recording-inbox";
+import { inboxDir, processInbox, type InboxDeps } from "./recording-inbox";
 import { transcribeBlocks, type BlockTranscript } from "./sensevoice";
 import { RATE, signal } from "./testing/audio";
 
@@ -66,9 +66,9 @@ test("in the night each upload becomes a transcript, a silence, a failure or a k
   expect(doc).toMatchObject({ fileName: "手机上传/组会.m4a 转写.txt", kind: "text" });
   expect(doc.extractedText).toContain("[00:20] 我周五之前把初稿发给王老师");
   expect(doc.extractionNote).toContain("服务器转写");
-  expect(store.listEvents(workspaceId, { type: RECORDING_TRANSCRIBED_EVENT })[0]!.payload).toMatchObject({ where: "server", engine: "sensevoice-small" });
-  expect(store.listEvents(workspaceId, { type: RECORDING_SILENT_EVENT })).toHaveLength(1);
-  expect(store.listEvents(workspaceId, { type: RECORDING_FAILED_EVENT })[0]!.payload).toMatchObject({ message: "ffmpeg 读不了这个录音" });
+  expect(store.listEvents(workspaceId, { type: "recording.changed", change: "transcribed" })[0]!.payload).toMatchObject({ where: "server", engine: "sensevoice-small" });
+  expect(store.listEvents(workspaceId, { type: "recording.changed", change: "silent" })).toHaveLength(1);
+  expect(store.listEvents(workspaceId, { type: "recording.changed", change: "failed" })[0]!.payload).toMatchObject({ message: "ffmpeg 读不了这个录音" });
 });
 
 test("a recording cut off by morning or by the consent is kept for the next night, and nothing of it is stored", async () => {

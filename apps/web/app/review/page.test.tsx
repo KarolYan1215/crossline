@@ -42,7 +42,7 @@ describe("review page", () => {
   test("lists every automatic acceptance individually, with a way to revoke it", async () => {
     const store = seed();
     store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: WORKSPACE, idempotencyKey: "a1",
-      type: "milestone_gate.auto_accepted", entityId: "w1", payload: { milestoneId: "m1", relationIds: [] } });
+      type: "milestone_gate.changed", entityId: "w1", payload: { milestoneId: "m1", relationIds: [], change: "auto_accepted" } });
     const { default: ReviewPage } = await import("./page");
     const html = renderToStaticMarkup(await ReviewPage());
     // Folding these into a count would make the automation unauditable, which is the whole reason
@@ -55,7 +55,7 @@ describe("review page", () => {
     const store = seed();
     store.saveWorkOrder({ ...store.listWorkOrders(WORKSPACE).find((order) => order.id === "w2")!, payload: { humanCore: [{ energy: "low" }] } });
     const observed = (key: string, workOrderId: string, actualLoad: string) => store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: WORKSPACE,
-      idempotencyKey: key, type: "energy.observed", entityId: key, payload: { source: "self_report", level: "low", confidence: "high", context: "after_task", workOrderId, actualLoad } });
+      idempotencyKey: key, type: "energy.changed", entityId: key, payload: { source: "self_report", level: "low", confidence: "high", context: "after_task", workOrderId, actualLoad, change: "observed" } });
     observed("e1", "w2", "medium");
     observed("e2", "w2", "high");
     const { default: ReviewPage } = await import("./page");

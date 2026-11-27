@@ -5,7 +5,7 @@ import { currentRoute, runCodexSkill, type CodexRpcBoundary } from "@crossline/c
 import { imageBackendFromEnv, type ImageBackend } from "@crossline/connectors";
 import type { CrosslineStore } from "@crossline/db";
 
-export const PORTRAIT_ILLUSTRATOR = "crossline:crossline-portrait-illustrator";
+export const PORTRAIT_ILLUSTRATOR = "crossline:crossline-portrait:figure";
 /**
  * `{version, images: {slot: {file, at, basis}}}`: the latest drawing — the report version it was drawn for, its file, and what the person
  * had said about how they look (`appearanceBasis`; absent on drawings from before 2026-10-21).

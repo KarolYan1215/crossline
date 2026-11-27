@@ -29,10 +29,10 @@ function setup() {
 
 /** The real refusal, as the worker now records it: two missing inputs, and the milestone split anyway with getting them first. */
 function refusedWithMissing(store: CrosslineStore) {
-  const { eventId } = store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "blocked-1", type: "goal.backplan_blocked", entityId: "mos2",
+  const { eventId } = store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "blocked-1", type: "goal.changed", entityId: "mos2",
     payload: { milestoneVersion: 2, code: "BACKPLAN_INPUT_BLOCKED", message: "…", missing: [
       { id: "m1", what: "MoS₂ 实测参数数据", whoHas: "师兄", message: "未提供实测 MoS₂ 参数数据。" },
-      { id: "m2", what: "NeuroSim 输入规范", whoHas: "", message: "未提供目标 NeuroSim 版本或输入规范。" }] } });
+      { id: "m2", what: "NeuroSim 输入规范", whoHas: "", message: "未提供目标 NeuroSim 版本或输入规范。" }], change: "backplan_blocked" } });
   const draft = (id: string, payload: Record<string, unknown>) => store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research",
     projectId: "p", milestoneId: "mos2", intent: id, state: "awaiting_plan_approval", riskTier: "routine", estimate, payload });
   draft("get-data", { backplan: { inputsFrom: eventId, acquires: "m1" } });
@@ -70,15 +70,15 @@ test("a pair recorded before this fix is one card, and 「到了」 on it closes
   expect(waiting).toHaveLength(1);
   expect(await answerAsk(TEST_CTX, waiting[0]!.id, "arrived", { note: "在组里网盘 /mos2" }, dayOf)).toMatchObject({ ok: true });
   expect(store.listWaitingItems(ws).map((item) => item.state)).toEqual(["arrived", "arrived"]);
-  expect(store.listEvents(ws, { type: "goal.backplan_input_supplied" })[0]).toMatchObject({ entityId: "mos2", payload: { text: "在组里网盘 /mos2" } });
-  expect(store.listEvents(ws, { type: "goal.backplan_rerun_requested" })).toHaveLength(1);
+  expect(store.listEvents(ws, { type: "goal.changed", change: "backplan_input_supplied" })[0]).toMatchObject({ entityId: "mos2", payload: { text: "在组里网盘 /mos2" } });
+  expect(store.listEvents(ws, { type: "goal.changed", change: "backplan_rerun_requested" })).toHaveLength(1);
   expect(collectAsks(TEST_CTX, dayOf).some((ask) => ask.kind === "waiting_due")).toBe(false);
 });
 
 /** A backplan that stopped with nothing split at all: the one backplan question still asked. */
 function refusedOutright(store: CrosslineStore) {
-  return store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "blocked-all", type: "goal.backplan_blocked", entityId: "mos2",
-    payload: { milestoneVersion: 2, code: "BACKPLAN_SCHEMA_INVALID", message: "答案不完整" } }).eventId;
+  return store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "blocked-all", type: "goal.changed", entityId: "mos2",
+    payload: { milestoneVersion: 2, code: "BACKPLAN_SCHEMA_INVALID", message: "答案不完整", change: "backplan_blocked" } }).eventId;
 }
 
 test("a backplan that split nothing is asked about; 「先不拆」 withdraws the milestone's unstarted steps and closes this version to the timer", async () => {
@@ -90,7 +90,7 @@ test("a backplan that split nothing is asked about; 「先不拆」 withdraws th
   expect(ask!.options.map((option) => option.id)).toEqual(["retry", "own", "skip"]);
   expect(await answerAsk(TEST_CTX, ask!.id, "skip", {}, NOW)).toMatchObject({ ok: true });
   expect(store.listWorkOrders(ws).find((order) => order.id === "get-data")!.state).toBe("archived");
-  expect(store.listEvents(ws, { type: "goal.backplan_declined" })[0]!.payload).toEqual({ milestoneVersion: 2 });
+  expect(store.listEvents(ws, { type: "goal.changed", change: "backplan_declined" })[0]!.payload).toEqual({ milestoneVersion: 2, change: "backplan_declined" });
   expect(collectAsks(TEST_CTX, NOW).filter((item) => item.kind === "backplan_input")).toEqual([]);
 });
 
@@ -299,7 +299,7 @@ test("「全部按推荐」 settles only kinds with a safe default, under one un
 /** Two settlings of `kind` the person undid: the kind waits the 48 hours again. */
 function undoneTwice(store: ReturnType<typeof setup>, kind: string) {
   for (const n of [1, 2]) {
-    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `aa-${kind}-${n}`, type: "ask.auto_answered", entityId: `op-${kind}-${n}`, payload: { opId: `op-${kind}-${n}`, kinds: [kind] } });
+    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `aa-${kind}-${n}`, type: "ask.changed", entityId: `op-${kind}-${n}`, payload: { opId: `op-${kind}-${n}`, kinds: [kind], change: "auto_answered" } });
     store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `undone-${kind}-${n}`, type: "op.undone", entityId: `op-${kind}-${n}`, payload: { label: "x" } });
   }
 }
@@ -322,7 +322,7 @@ test("a risk the person can undo is settled by its recommendation at once and to
   expect(question).toMatch(/^「本周 1 个里程碑有风险」已按推荐处理：全部接受/);
   expect(question).not.toContain("48 小时");
   // The settling is recorded with its kinds, so an undo can be read as the person's 「ask me」.
-  expect(store.listEvents(ws, { type: "ask.auto_answered" }).map((event) => event.payload)).toEqual([{ opId: result.op!.id, kinds: ["risk_digest"] }]);
+  expect(store.listEvents(ws, { type: "ask.changed", change: "auto_answered" }).map((event) => event.payload)).toEqual([{ opId: result.op!.id, kinds: ["risk_digest"], change: "auto_answered" }]);
   expect(undoOp(TEST_CTX, result.op!.id)).toMatchObject({ ok: true });
   expect(await autoAnswerDue(TEST_CTX, NOW)).toEqual({ done: 0 });
 });
@@ -507,8 +507,8 @@ test("a block whose completion check was answered yesterday is not asked about a
   save("answered");
   save("silent");
   store.setSetting(ws, "schedule.day:2026-10-06", JSON.stringify({ answered: "09:00", silent: "14:00" }));
-  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "block-confirmed:m1", type: "block.confirmed", entityId: "m1",
-    payload: { blockId: "scheduled:answered", workOrderId: "answered", day: "2026-10-06", outcome: "not_done" } });
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "block-confirmed:m1", type: "work_order.changed", entityId: "m1",
+    payload: { blockId: "scheduled:answered", workOrderId: "answered", day: "2026-10-06", outcome: "not_done", change: "block_confirmed" } });
   expect(collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "missed_block").map((ask) => ask.entityId)).toEqual(["silent"]);
 });
 
@@ -558,7 +558,7 @@ describe("work that is not the person's own (docs/work-split.md)", () => {
     expect(result).toMatchObject({ ok: true });
     const order = () => store.listWorkOrders(ws).find((item) => item.id === "q")!;
     expect(order()).toMatchObject({ state: "approved", payload: { owner: "assistant", prepares: "core", answer: "作业 2 次各 95，小测 1 次 88" } });
-    expect(store.listEvents(ws, { type: "prep.question_answered", entityId: "q" })).toHaveLength(1);
+    expect(store.listEvents(ws, { type: "person.decided", subject: "prep", decision: "question_answered", entityId: "q" })).toHaveLength(1);
     expect(collectAsks(TEST_CTX, NOW).some((item) => item.kind === "prep_question")).toBe(false);
     const { undoOp } = await import("./undo");
     expect(undoOp(TEST_CTX, (result as { op?: { id: string } }).op!.id)).toMatchObject({ ok: true });
@@ -635,10 +635,10 @@ test("a backplan question about a milestone still in the task library waits unti
 test("a preparation step the runtime lost is not asked about while the worker will run it again; its last refusal on its own merits is", async () => {
   const store = setup();
   const run = (n: number, code: string) => {
-    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `req-${n}`, type: "agent.task.requested", entityId: `t${n}`,
-      payload: { taskId: `t${n}`, workOrderId: "wo", stepId: "v1s1", title: "汇编公式表", category: "read_research_organize" } });
-    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `blk-${n}`, type: "agent.task.blocked", entityId: `t${n}`,
-      payload: { taskId: `t${n}`, code, message: "已取消" } });
+    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `req-${n}`, type: "agent.changed", entityId: `t${n}`,
+      payload: { taskId: `t${n}`, workOrderId: "wo", stepId: "v1s1", title: "汇编公式表", category: "read_research_organize", change: "task_requested" } });
+    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `blk-${n}`, type: "agent.changed", entityId: `t${n}`,
+      payload: { taskId: `t${n}`, code, message: "已取消", change: "task_blocked" } });
   };
   const assistantAsks = () => collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "agent_blocked").map((ask) => ask.entityId);
   run(1, "SKILL_CANCELED");
@@ -791,7 +791,7 @@ test("a refused capture is answered in the person's own words straight into the 
   expect(await answerAsk(TEST_CTX, ask.id, { optionIds: ["context", "discard"] }, {}, NOW)).toMatchObject({ ok: false, code: "ASK_SINGLE_CHOICE" });
   expect(await answerAsk(TEST_CTX, ask.id, { optionIds: [], note: "交付一页回应清单，周五组会前" }, {}, NOW)).toMatchObject({ ok: true });
   expect(store.listCaptures(ws)[0]!.context).toContain("交付一页回应清单");
-  expect(store.listEvents(ws, { type: "ask.answered" }).at(-1)!.payload).toMatchObject({ askId: ask.id, note: "交付一页回应清单，周五组会前" });
+  expect(store.listEvents(ws, { type: "ask.changed", change: "answered" }).at(-1)!.payload).toMatchObject({ askId: ask.id, note: "交付一页回应清单，周五组会前" });
 });
 
 test("a note beside an option fills the field that option asks for, and is kept on the answer where nothing reads it", async () => {
@@ -849,7 +849,7 @@ test("a project's questions are settled on one card: 都按建议 in one tap, or
   const facts = store.listProfileFacts(ws).filter((fact) => fact.slot.startsWith("step_answer_")).map((fact) => fact.value).sort();
   expect(facts).toEqual(["【定价多少？】199 元/月", "【用户怎么联系？】用户怎么联系？-建议", "【首批几家店？】首批几家店？-建议"]);
   // One replan per task, carrying all its answers.
-  const replans = store.listEvents(ws, { type: "task.steps_replan_requested" });
+  const replans = store.listEvents(ws, { type: "task.changed", change: "steps_replan_requested" });
   expect(replans.map((event) => event.entityId).sort()).toEqual(["a", "b"]);
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "step_question")).toBe(false);
 });
@@ -940,8 +940,8 @@ test("a course's or the person's own deadline that passed with work open is aske
     store.saveMilestoneAnchor({ workspaceId: ws, milestoneId: id, stage: 1, deadline: "2026-10-05", baseline: "", target: "", stakeholders: [], sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
     store.saveWorkOrder({ id: `t-${id}`, ownerId: owner, workspaceId: ws, identityId: "research", projectId: id, milestoneId: id, intent: `t-${id}`,
       state: "approved", riskTier: "milestone", estimate, payload: {} });
-    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `milestone-overdue:${id}:2026-10-05`, type: "milestone.overdue", entityId: id,
-      payload: { deadline: "2026-10-05", why: id === "exam" ? "course" : "person" } });
+    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `milestone-overdue:${id}:2026-10-05`, type: "milestone.changed", entityId: id,
+      payload: { deadline: "2026-10-05", why: id === "exam" ? "course" : "person", change: "overdue" } });
   }
   const overdue = () => collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "milestone_overdue");
   // Two passed deadlines are one card listing both (W-228); 「逐个处理」 gives each its own card with its choices.
@@ -976,8 +976,8 @@ test("an exam whose day passed asks how it went, even with its preparation put a
   store.saveMilestone({ id: "mid", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "ece548", title: "ECE 548 期中考试 1 达到 A− 支撑线", status: "approved", version: 1,
     successCriteria: [{ id: "score", statement: "期中分数不低于 85", evidenceOf: "outcome", required: true, measure: { kind: "threshold", comparator: "gte", value: 85, unit: "分" } }] });
   store.saveMilestoneAnchor({ workspaceId: ws, milestoneId: "mid", stage: 1, deadline: "2026-10-05", baseline: "", target: "", stakeholders: [], sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
-  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "milestone-overdue:sitting:mid:2026-10-05", type: "milestone.overdue", entityId: "mid",
-    payload: { deadline: "2026-10-05", why: "sitting" } });
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "milestone-overdue:sitting:mid:2026-10-05", type: "milestone.changed", entityId: "mid",
+    payload: { deadline: "2026-10-05", why: "sitting", change: "overdue" } });
   const asks = () => collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "milestone_overdue");
   expect(asks().map((ask) => ask.title)).toEqual(["「ECE 548 期中考试 1 达到 A− 支撑线」10/5 已经过了，结果怎样？"]);
   expect(asks()[0]!.options.map((option) => option.id)).toEqual(["taken", "pending", "extend", "drop"]);
@@ -992,9 +992,9 @@ test("撤销 on the daily pass hands its assistant results back to the person", 
   const { undoOp } = await import("./undo");
   const { listAgentTasks, reviewAgentTask, settleAgentResult } = await import("@crossline/db");
   for (const taskId of ["kept", "adopted"]) {
-    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `req-${taskId}`, type: "agent.task.requested", entityId: taskId, payload: { title: `任务 · ${taskId}`, category: "read_research_organize", workOrderId: "" } });
-    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `done-${taskId}`, type: "agent.task.completed", entityId: taskId,
-      payload: { directory: "", artifacts: [], needsHuman: 1, checksPassed: true, inputsModified: [], reviewRequired: true } });
+    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `req-${taskId}`, type: "agent.changed", entityId: taskId, payload: { title: `任务 · ${taskId}`, category: "read_research_organize", workOrderId: "", change: "task_requested" } });
+    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `done-${taskId}`, type: "agent.changed", entityId: taskId,
+      payload: { directory: "", artifacts: [], needsHuman: 1, checksPassed: true, inputsModified: [], reviewRequired: true, change: "task_completed" } });
   }
   settleAgentResult(store, ws, "kept", "expired", { day: "2026-10-07" });
   reviewAgentTask(store, ws, "adopted", "accepted", "", { by: "system" });

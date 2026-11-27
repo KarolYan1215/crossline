@@ -58,7 +58,7 @@ export type WeeklyReview = {
   stalled: Array<{ identityId: string; daysSinceLastPass: number }>;
   /** Questions the weekly Skill raised. Absent until it has run — an empty list is not a fabricated one. */
   questions: Array<{ id: string; question: string }>;
-  /** Report-only proposals from `crossline-weekly-insight` — read here, never applied automatically;
+  /** Report-only proposals from `crossline-weekly-review:insight` — read here, never applied automatically;
    * there is no generic "apply an overlay patch" mechanism in this app to wire an apply button to. */
   insightProposals: Array<{ id: string; claim: string; observationCount: number; period: string; proposedOverlayPatch: string }>;
   /**
@@ -85,7 +85,7 @@ export function loadWeeklyReview(ctx: AccessContext, now = new Date()): WeeklyRe
   // judged twice produced two identical lines for one acceptance — a compensating control that
   // double-counts is worse than no count.
   const acceptedOnce = new Map(events
-    .filter((event) => event.type === "milestone_gate.auto_accepted" && event.createdAt >= since)
+    .filter((event) => (event.type === "milestone_gate.changed" && (event.payload as { change?: string }).change === "auto_accepted") && event.createdAt >= since)
     .map((event) => [event.entityId, event]));
   const autoAccepted = [...acceptedOnce.values()]
     // Only orders that really are accepted now: a revoked or re-opened one is no longer an acceptance.
@@ -119,18 +119,19 @@ export function loadWeeklyReview(ctx: AccessContext, now = new Date()): WeeklyRe
     gateProgress.set(payload.milestoneId, current);
   }
 
-  const insightDecisions = new Map(events.filter((event) => ["insight.approved", "insight.revoked", "insight.rejected"].includes(event.type))
-    .map((event) => [event.entityId, event.type]));
+  const insightDecisions = new Map(events.filter((event) => event.type === "insight.changed")
+    .map((event) => [event.entityId, (event.payload as { change?: string }).change ?? ""] as const)
+    .filter(([, change]) => ["approved", "revoked", "rejected"].includes(change)));
   const findings = events
-    .filter((event) => event.type === "flywheel.finding" && event.createdAt >= since)
+    .filter((event) => (event.type === "insight.changed" && (event.payload as { change?: string }).change === "found") && event.createdAt >= since)
     .map((event) => ({ ...(event.payload as Omit<WeeklyReview["findings"][number], "eventId" | "status">),
       eventId: event.eventId,
-      status: (insightDecisions.get(event.eventId)?.replace("insight.", "") ?? "candidate") as WeeklyReview["findings"][number]["status"] }));
+      status: (insightDecisions.get(event.eventId) ?? "candidate") as WeeklyReview["findings"][number]["status"] }));
 
   // Every ranking input below is counted, not scored: stall days, reuse, counterexamples, real minutes.
   const lastPassByMilestone = new Map<string, string>();
   for (const event of events) {
-    if (event.type !== "milestone_gate.auto_accepted" && event.type !== "work_order.transitioned") continue;
+    if (!(event.type === "milestone_gate.changed" && (event.payload as { change?: string }).change === "auto_accepted") && event.type !== "work_order.transitioned") continue;
     const to = (event.payload as { to?: string }).to;
     if (event.type === "work_order.transitioned" && to !== "accepted") continue;
     const order = orders.find((item) => item.id === event.entityId);
@@ -184,7 +185,7 @@ export function loadWeeklyReview(ctx: AccessContext, now = new Date()): WeeklyRe
   const loads = new Map<string, Level>();
   for (const event of events) {
     const payload = event.payload as { context?: string; workOrderId?: string; actualLoad?: string };
-    if (event.type === "energy.observed" && event.createdAt >= since && payload.context === "after_task" && payload.workOrderId
+    if ((event.type === "energy.changed" && (event.payload as { change?: string }).change === "observed") && event.createdAt >= since && payload.context === "after_task" && payload.workOrderId
       && (payload.actualLoad === "low" || payload.actualLoad === "medium" || payload.actualLoad === "high")) loads.set(payload.workOrderId, payload.actualLoad);
   }
   const taskLoad: WeeklyReview["taskLoad"] = [...loads].flatMap(([workOrderId, actual]): WeeklyReview["taskLoad"] => {
@@ -211,11 +212,10 @@ export function loadWeeklyReview(ctx: AccessContext, now = new Date()): WeeklyRe
     findings,
     candidates: { highlighted: ranked.highlighted, kept: ranked.kept, detail },
     stalled,
-    questions: events
-      .filter((event) => event.type === "weekly_review.question" && event.createdAt >= since)
-      .map((event) => ({ id: event.eventId, question: String((event.payload as { question?: string }).question ?? "") })),
+    // `weekly_review.question` has had no writer since the v2 baseline; the type left with the condensation of 2026-11-27.
+    questions: [] as Array<{ id: string; question: string }>,
     insightProposals: events
-      .filter((event) => event.type === "weekly_review.insight_proposal" && event.createdAt >= since)
+      .filter((event) => (event.type === "insight.changed" && (event.payload as { change?: string }).change === "weekly_proposal") && event.createdAt >= since)
       .map((event) => {
         const payload = event.payload as { id?: string; claim?: string; observationCount?: number; period?: string; proposedOverlayPatch?: string };
         return { id: payload.id ?? event.eventId, claim: payload.claim ?? "", observationCount: payload.observationCount ?? 0,

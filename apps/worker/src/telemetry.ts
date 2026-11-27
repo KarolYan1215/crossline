@@ -1,7 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
 import { existsSync, readFileSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
-import { APP_PAGES, sanitizeTelemetryBatch, TELEMETRY_ENABLED_SETTING, telemetryFromLedgerEvent, type TelemetryBatch } from "@crossline/core";
+import { APP_PAGES, sanitizeTelemetryBatch, TELEMETRY_ENABLED_SETTING, telemetryFromLedgerEvent, telemetryTypeOf, type TelemetryBatch } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 
 /**
@@ -48,9 +48,9 @@ function takePages(dataDir: string): { file: string; lines: unknown[] } {
   return { file: sending, lines };
 }
 
+/** Keyed by wire name (`telemetryTypeOf`). `tasks` and `timers` stay in the schema; nothing in the ledger counts them (2026-11-27). */
 const COUNTED: Record<string, "captures" | "tasks" | "milestones" | "timers" | "confirmations"> = {
-  "capture.created": "captures", "analysis.proposed": "tasks", "milestone.proposed": "milestones", "human.started": "timers",
-  "plan.approved": "confirmations", "ask.answered": "confirmations", "evidence.accepted": "confirmations"
+  "capture.created": "captures", "milestone.proposed": "milestones", "ask.changed:answered": "confirmations"
 };
 
 export async function telemetryPass(deps: TelemetryDeps): Promise<TelemetryOutcome> {
@@ -91,7 +91,10 @@ export async function telemetryPass(deps: TelemetryDeps): Promise<TelemetryOutco
   }
   const today = now.toISOString().slice(0, 10);
   const counts: Record<string, number> = {};
-  for (const event of read.events) if (event.createdAt.startsWith(today) && COUNTED[event.type]) counts[COUNTED[event.type]!] = (counts[COUNTED[event.type]!] ?? 0) + 1;
+  for (const event of read.events) {
+    const counted = COUNTED[telemetryTypeOf(event)];
+    if (event.createdAt.startsWith(today) && counted) counts[counted] = (counts[counted] ?? 0) + 1;
+  }
   if (Object.keys(counts).length) events.push({ type: "counts.today", at: now.toISOString(), version, counts });
   if (!events.length) return { skipped: "NOTHING_NEW" };
 

@@ -53,9 +53,9 @@ test("a homework file becomes the task's material: filed under its project, note
   store.saveStepPlan(ws, "hw2", { archetypeId: "problem_set", quantity: { basis: "题", amount: 3, unit: "题" }, rationale: "", steps: [] }, owner, "planned");
   expect(await executeAction(TEST_CTX, { action: "material.attach", summary: "作业 2 题目", args: { documentId: "d1", workOrderId: "hw2" } })).toMatchObject({ ok: true });
   expect(store.listSourceDocuments(ws)[0]!.projectId).toBe("ece548");
-  expect(store.listEvents(ws, { type: "source.project_assigned" })).toHaveLength(1);
-  expect(store.listEvents(ws, { type: "task.note", entityId: "hw2" }).map((event) => (event.payload as { text: string }).text)).toEqual(["添加材料《ECE_548_Homework-2.pdf》"]);
-  expect(store.listEvents(ws, { type: "task.steps_replan_requested", entityId: "hw2" })).toHaveLength(1);
+  expect(store.listEvents(ws, { type: "source.changed", change: "project_assigned" })).toHaveLength(1);
+  expect(store.listEvents(ws, { type: "task.changed", change: "note", entityId: "hw2" }).map((event) => (event.payload as { text: string }).text)).toEqual(["添加材料《ECE_548_Homework-2.pdf》"]);
+  expect(store.listEvents(ws, { type: "task.changed", change: "steps_replan_requested", entityId: "hw2" })).toHaveLength(1);
 });
 
 // W-169 by the box: 「作业 2 题面就是这个文件」 answers the one step that waits for it, instead of only asking for a replan.

@@ -10,8 +10,8 @@ import { readLocale } from "./locale";
 export function requestAutomation(store: CrosslineStore, workspaceId: string, text: string, lineId: string, by: string,
   thread?: { workflowId: string }): string {
   const id = `areq-${randomUUID().slice(0, 10)}`;
-  store.appendEvent({ ownerId: by, workspaceId, idempotencyKey: `automation.requested:${id}`, type: "automation.requested", entityId: id,
-    payload: { text: text.slice(0, 1000), lineId } });
+  store.appendEvent({ ownerId: by, workspaceId, idempotencyKey: `automation.requested:${id}`, type: "automation.changed", entityId: id,
+    payload: { text: text.slice(0, 1000), lineId, change: "requested" } });
   // The request opens the conversation it is designed in (the 自动化 page, 2026-11-10): the person's words, and the designer's answer
   // as it comes. A request about a workflow that already has one goes on in that one.
   const at = new Date().toISOString();
@@ -50,7 +50,7 @@ export function restoreAutomationVersion(store: CrosslineStore, workspaceId: str
     const made = store.annotateWorkflowVersion(workspaceId, "automation", id,
       { source: "rollback", note: tFor(readLocale(store, workspaceId))("回到第 {{version}} 版", { version }) });
     store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "system", workspaceId, idempotencyKey: `automation.restored:${id}:${made}:${now.toISOString()}`,
-      type: "automation.restored", entityId: id, payload: { id, restoredFrom: version, version: made } });
+      type: "automation.changed", entityId: id, payload: { id, restoredFrom: version, version: made, change: "restored" } });
     return made;
   });
 }

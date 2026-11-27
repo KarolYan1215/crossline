@@ -63,7 +63,7 @@ describe("moving the server's copies to the computer", () => {
     expect(server.has(`${ws}/apply-phone`)).toBe(false);
     // The ledger still says held; the move is recorded on the profile's own event, with the computer and never the value.
     expect(applicationProfile(store, ws).find((item) => item.slot === "phone")).toMatchObject({ present: true });
-    expect(store.listEvents(ws, { type: "apply.profile.saved" }).some((event) => (event.payload as { movedToComputer?: string }).movedToComputer === "kai-pc")).toBe(true);
+    expect(store.listEvents(ws, { type: "person.decided", subject: "apply.profile", decision: "saved" }).some((event) => (event.payload as { movedToComputer?: string }).movedToComputer === "kai-pc")).toBe(true);
     expect(leaksPhone(JSON.stringify(store.exportSnapshot(ws)))).toBe(false);
     expect(leaksPhone(JSON.stringify(logged))).toBe(false);
     expect(logged).toContainEqual(expect.objectContaining({ event: "apply.sensitive.moved", slot: "phone" }));

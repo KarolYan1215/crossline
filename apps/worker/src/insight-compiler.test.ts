@@ -28,10 +28,10 @@ beforeEach(() => {
   store.saveWorkOrder({ id: "wo-note", ownerId: "o", workspaceId: ws, identityId: "media", projectId: "p", milestoneId: "", intent: "小红书首篇笔记提纲",
     state: "accepted", riskTier: "routine", estimate, payload: {} });
   const owner = store.getWorkspaceOwnerId(ws)!;
-  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "req", type: "agent.task.requested", entityId: "agent-97846949-1",
-    payload: { taskId: "agent-97846949-1", title: "为小红书首篇「科研如何实际发生」笔记形成提纲", category: "read_research_organize", workOrderId: "wo-note" } });
-  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "rev", type: "agent.task.reviewed", entityId: "agent-97846949-1",
-    payload: { taskId: "agent-97846949-1", decision: "accepted", note: NOTE, category: "read_research_organize" } });
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "req", type: "agent.changed", entityId: "agent-97846949-1",
+    payload: { taskId: "agent-97846949-1", title: "为小红书首篇「科研如何实际发生」笔记形成提纲", category: "read_research_organize", workOrderId: "wo-note", change: "task_requested" } });
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "rev", type: "agent.changed", entityId: "agent-97846949-1",
+    payload: { taskId: "agent-97846949-1", decision: "accepted", note: NOTE, category: "read_research_organize", change: "task_reviewed" } });
 });
 afterEach(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
 
@@ -56,7 +56,7 @@ test("the compiled skill is a new version with its sources, an event, and nothin
   expect(version).toMatchObject({ version: 1, by: "compiler" });
   expect(version.markdown).toContain("1. 笔记先制造冲突");
   expect(version.markdown).toContain("「自媒体的核心是制造冲突和贩卖焦虑，再通过卖 solution 变现」");
-  expect(store.listEvents(ws, { type: "skill.mine.rewritten" }).map((event) => event.payload)).toEqual([expect.objectContaining({ lineId: "media", version: 1, by: "compiler", rules: 1 })]);
+  expect(store.listEvents(ws, { type: "skill.changed", change: "mine_rewritten" }).map((event) => event.payload)).toEqual([expect.objectContaining({ lineId: "media", version: 1, by: "compiler", rules: 1 })]);
   expect(linesAwaitingMineSkill(store, ws)).toEqual([]);
 
   // A hand edit stays in force; only a new decision by the person brings a rewrite, and every older version is still there.
@@ -107,7 +107,7 @@ test("a line the compiler stopped on waits until its materials change, so it is 
   const stop = JSON.stringify({ summary: "", rules: [], blockers: [{ code: "MINE_SKILL_BLOCKED", message: "材料只有课程安排，没有工作方式" }] });
   const runtime = fakeRuntime([stop], INSIGHT_COMPILER);
   expect(await createInsightCompiler(store, ws, "C:\\repo", () => runtime.rpc)()).toEqual({ blocked: "MINE_SKILL_BLOCKED", lineId: "media" });
-  expect(store.listEvents(ws, { type: "skill.mine.blocked" }).at(-1)?.payload).toMatchObject({ code: "MINE_SKILL_BLOCKED", fingerprint: expect.any(String) });
+  expect(store.listEvents(ws, { type: "skill.changed", change: "mine_blocked" }).at(-1)?.payload).toMatchObject({ code: "MINE_SKILL_BLOCKED", fingerprint: expect.any(String) });
   expect(linesAwaitingMineSkill(store, ws, new Date(Date.now() + 3 * 86_400_000))).toEqual([]);
   // Something new the person says is new material: the line is due again.
   store.addPreference({ workspaceId: ws, source: "correction", scope: "media", weight: 1, refId: "y", text: "开头先说结论", createdAt: new Date(Date.now() + 1000).toISOString() });
@@ -115,12 +115,12 @@ test("a line the compiler stopped on waits until its materials change, so it is 
 });
 
 test("a run that failed on the way is tried again on the same materials only after an hour", () => {
-  store.appendEvent({ ownerId: store.getWorkspaceOwnerId(ws)!, workspaceId: ws, idempotencyKey: "fail", type: "skill.mine.blocked", entityId: "media",
-    payload: { lineId: "media", code: "SKILL_RUNTIME_FAILED", message: "", fingerprint: undefined, at: new Date().toISOString() } });
+  store.appendEvent({ ownerId: store.getWorkspaceOwnerId(ws)!, workspaceId: ws, idempotencyKey: "fail", type: "skill.changed", entityId: "media",
+    payload: { lineId: "media", code: "SKILL_RUNTIME_FAILED", message: "", fingerprint: undefined, at: new Date().toISOString(), change: "mine_blocked" } });
   expect(linesAwaitingMineSkill(store, ws)).toEqual(["media"]);
   const at = new Date();
-  store.appendEvent({ ownerId: store.getWorkspaceOwnerId(ws)!, workspaceId: ws, idempotencyKey: "fail-2", type: "skill.mine.blocked", entityId: "media",
-    payload: { lineId: "media", code: "SKILL_RUNTIME_FAILED", message: "", fingerprint: fingerprintOf("media"), at: at.toISOString() } });
+  store.appendEvent({ ownerId: store.getWorkspaceOwnerId(ws)!, workspaceId: ws, idempotencyKey: "fail-2", type: "skill.changed", entityId: "media",
+    payload: { lineId: "media", code: "SKILL_RUNTIME_FAILED", message: "", fingerprint: fingerprintOf("media"), at: at.toISOString(), change: "mine_blocked" } });
   expect(linesAwaitingMineSkill(store, ws, new Date(at.getTime() + 10 * 60_000))).toEqual([]);
   expect(linesAwaitingMineSkill(store, ws, new Date(at.getTime() + 61 * 60_000))).toEqual(["media"]);
 });
@@ -154,7 +154,7 @@ test("the assistant runs with the line's own skill on beside its own, and switch
     expect(calls[0]).toMatchObject({ method: "plugin/install", params: { pluginName: "crossline-mine", marketplacePath: libraryMarketplacePath(dir) } });
     expect(calls.filter((call) => call.method === "skills/config/write").map((call) => call.params.enabled)).toEqual([true, false]);
     expect(readFileSync(path.join(dir, "plugins", "crossline-mine", "skills", "media", "SKILL.md"), "utf8")).toContain("1. 先抛冲突");
-    expect(store.listEvents(ws, { type: "agent.task.completed" }).at(-1)!.payload).toMatchObject({ skills: ["crossline-mine:media"] });
+    expect(store.listEvents(ws, { type: "agent.changed", change: "task_completed" }).at(-1)!.payload).toMatchObject({ skills: ["crossline-mine:media"] });
   } finally { rmSync(outputRoot, { recursive: true, force: true }); }
 });
 

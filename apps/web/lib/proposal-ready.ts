@@ -13,7 +13,7 @@ export function preparingProposalIds(ctx: AccessContext): Set<string> {
   const store = getStore();
   const capacity = new Set(defaultIdentityPacks().filter((pack) => pack.kind === "capacity").map((pack) => pack.id));
   const plans = new Map(store.listStepPlans(ctx.workspaceId).map((plan) => [plan.workOrderId, plan]));
-  const blocked = new Set(store.listEvents(ctx.workspaceId, { type: "task.steps_blocked" }).map((event) => event.entityId));
+  const blocked = new Set(store.listEvents(ctx.workspaceId, { type: "task.changed", change: "steps_blocked" }).map((event) => event.entityId));
   return new Set(store.listWorkOrders(ctx.workspaceId)
     .filter((order) => !proposalReady(order, plans.get(order.id), { planBlocked: blocked.has(order.id), exempt: capacity.has(order.identityId) }))
     .map((order) => order.id));

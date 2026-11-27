@@ -140,7 +140,7 @@ test("only steps marked as needing outside material are researched, and a step a
   const outcome = await createManualbookBuilder(store, WS, dir, "C:\\repo", () => rpc, deps())("w1");
   expect(outcome).toMatchObject({ state: "ready", nodes: 2, sources: 2 });
   expect(prompts().filter((prompt) => prompt.includes("crossline.manualbook.search.v1"))).toHaveLength(1);
-  expect(store.listEvents(WS, { type: "manualbook.built", entityId: "w1" })[0]?.payload).toMatchObject({ researched: 1, inputsVersion: 2 });
+  expect(store.listEvents(WS, { type: "materials.changed", change: "manualbook_built", entityId: "w1" })[0]?.payload).toMatchObject({ researched: 1, inputsVersion: 2 });
 
   // The next task of the same project has a step of the same title: no new search for it.
   store.saveWorkOrder({ id: "w3", ownerId: "o", workspaceId: WS, identityId: "research", projectId: "p", milestoneId: "", intent: "画 8T SRAM 单元",
@@ -257,8 +257,8 @@ test("a tutorial is made just in time: only for work that needs one, starting wi
   store.setSetting(WS, "schedule.orderStarts", JSON.stringify({ hw3: hours(30), w1: hours(5), send: hours(2), rules: hours(3) }));
   expect(pendingTutorials(store, WS, now)).toEqual(["hw3"]);
   // Built from today's inputs: nothing to do.
-  const built = (key: string, inputs: string) => store.appendEvent({ ownerId: "o", workspaceId: WS, idempotencyKey: key, type: "manualbook.built", entityId: "hw3",
-    payload: { nodes: 1, sources: 0, downloaded: 0, inputs, inputsVersion: 2 } });
+  const built = (key: string, inputs: string) => store.appendEvent({ ownerId: "o", workspaceId: WS, idempotencyKey: key, type: "materials.changed", entityId: "hw3",
+    payload: { nodes: 1, sources: 0, downloaded: 0, inputs, inputsVersion: 2, change: "manualbook_built" } });
   built("b1", tutorialInputs(store, WS, "hw3"));
   expect(pendingTutorials(store, WS, now)).toEqual([]);
   // The step plan changed: made again, but not within a day of the last build (a day of replans is one rebuild).
@@ -275,7 +275,7 @@ test("a tutorial is made just in time: only for work that needs one, starting wi
   store.saveStepPlan(WS, "hw3", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 3, unit: "题" }, rationale: "", steps: [plannedStep("a", "解第 1 题"), plannedStep("b", "解第 3 题")] }, "o", "replan2");
   expect(pendingTutorials(store, WS, at(8 * 24))).toEqual(["hw3"]);
   vi.setSystemTime(at(8 * 24));
-  store.appendEvent({ ownerId: "o", workspaceId: WS, idempotencyKey: "tb", type: "tutorial.blocked", entityId: "hw3", payload: { code: "X", message: "" } });
+  store.appendEvent({ ownerId: "o", workspaceId: WS, idempotencyKey: "tb", type: "materials.changed", entityId: "hw3", payload: { code: "X", message: "", change: "tutorial_blocked" } });
   expect(pendingTutorials(store, WS, at(8 * 24))).toEqual([]);
   vi.useRealTimers();
 });

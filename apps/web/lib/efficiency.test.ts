@@ -27,8 +27,8 @@ function seed(withMissed: boolean) {
       continue;
     }
     vi.setSystemTime(new Date(toZonedInstant(day, "11:00", ZONE)));
-    store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: ws, idempotencyKey: `block-confirmed:${day}`, type: "block.confirmed", entityId: day,
-      payload: { blockId: id, workOrderId: "hw", day, outcome: "as_planned", blockMinutes: 60, minutes: 60, energy } });
+    store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: ws, idempotencyKey: `block-confirmed:${day}`, type: "work_order.changed", entityId: day,
+      payload: { blockId: id, workOrderId: "hw", day, outcome: "as_planned", blockMinutes: 60, minutes: 60, energy, change: "block_confirmed" } });
   }
   vi.setSystemTime(NOW);
   return store;

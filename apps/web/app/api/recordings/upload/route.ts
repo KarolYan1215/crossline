@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { RECORDING_FILE, RECORDING_INBOX_SEGMENTS, audioKind, RECORDING_SERVER_CONSENT, RECORDING_SILENT_EVENT, RECORDING_TRANSCRIBED_EVENT,
+import { RECORDING_FILE, RECORDING_INBOX_SEGMENTS, audioKind, RECORDING_SERVER_CONSENT,
   RECORDING_UPLOAD_DAILY_LIMIT, RECORDING_UPLOAD_LIMIT } from "@crossline/core";
 import { readLocale } from "@crossline/db";
 import { tFor } from "../../../../lib/i18n";
@@ -95,7 +95,7 @@ export async function POST(request: Request) {
   const sha256 = hash.digest("hex");
   const waiting = await Promise.all((await readdir(dir).catch(() => [] as string[])).filter((name) => name.endsWith(".json"))
     .map((name) => readFile(path.join(dir, name), "utf8").then((text) => (JSON.parse(text) as { sha256?: unknown }).sha256).catch(() => undefined)));
-  if (waiting.includes(sha256) || store.listEvents(workspaceId, { type: [RECORDING_TRANSCRIBED_EVENT, RECORDING_SILENT_EVENT], entityId: sha256 }).length) {
+  if (waiting.includes(sha256) || store.listEvents(workspaceId, { type: "recording.changed", change: ["transcribed", "silent"], entityId: sha256 }).length) {
     await rm(part, { force: true });
     return Response.json({ ok: true, duplicate: true, size, message: t("这段录音已经收到过，不会再转一次。") });
   }

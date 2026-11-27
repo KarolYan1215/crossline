@@ -19,11 +19,11 @@ function run(store: CrosslineStore, taskId: string, files: Record<string, string
   dirs.push(directory);
   for (const [name, body] of Object.entries(files)) { mkdirSync(path.dirname(path.join(directory, name)), { recursive: true }); writeFileSync(path.join(directory, name), body); }
   writeFileSync(path.join(directory, "audit.json"), "{}");
-  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `req-${taskId}`, type: "agent.task.requested", entityId: taskId,
-    payload: { taskId, title: extra.title ?? taskId, category: "read_research_organize", workOrderId: extra.workOrderId ?? "" } });
-  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `done-${taskId}`, type: "agent.task.completed", entityId: taskId,
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `req-${taskId}`, type: "agent.changed", entityId: taskId,
+    payload: { taskId, title: extra.title ?? taskId, category: "read_research_organize", workOrderId: extra.workOrderId ?? "", change: "task_requested" } });
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `done-${taskId}`, type: "agent.changed", entityId: taskId,
     payload: { taskId, directory, reviewRequired: extra.reviewRequired ?? false,
-      artifacts: Object.entries(files).map(([name, body]) => ({ path: name, sha256: "x", bytes: Buffer.byteLength(body) })) } });
+      artifacts: Object.entries(files).map(([name, body]) => ({ path: name, sha256: "x", bytes: Buffer.byteLength(body) })), change: "task_completed" } });
 }
 
 test("the folder holds what each run handed over, by line and by task, without its helper scripts; a zip carries the same files", async () => {
@@ -51,11 +51,11 @@ test("the folder holds what each run handed over, by line and by task, without i
 test("a run whose directory is not on this server is counted, not listed: its links would answer FILE_NOT_FOUND (W-143)", () => {
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
   run(store, "agent-here", { "清单.md": "# 在" }, { title: "在服务器上" });
-  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "req-agent-gone", type: "agent.task.requested", entityId: "agent-gone",
-    payload: { taskId: "agent-gone", title: "在旧电脑上", category: "read_research_organize", workOrderId: "" } });
-  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "done-agent-gone", type: "agent.task.completed", entityId: "agent-gone",
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "req-agent-gone", type: "agent.changed", entityId: "agent-gone",
+    payload: { taskId: "agent-gone", title: "在旧电脑上", category: "read_research_organize", workOrderId: "", change: "task_requested" } });
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "done-agent-gone", type: "agent.changed", entityId: "agent-gone",
     payload: { taskId: "agent-gone", directory: path.join(tmpdir(), "no-such-crossline-run-dir"), reviewRequired: false,
-      artifacts: [{ path: "旧.md", sha256: "x", bytes: 10 }] } });
+      artifacts: [{ path: "旧.md", sha256: "x", bytes: 10 }], change: "task_completed" } });
   const folder = outputFolder(TEST_CTX);
   expect(folder.lines.flatMap((line) => line.tasks.map((task) => task.title))).toEqual(["在服务器上"]);
   expect(folder.elsewhere).toBe(1);

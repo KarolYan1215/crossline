@@ -37,8 +37,8 @@ type Raw = { prepare: (sql: string) => { get: (...args: unknown[]) => unknown; a
 const Database = (await import("../packages/db/node_modules/better-sqlite3/lib/index.js")).default as unknown as
   new (file: string, options?: { readonly?: boolean; fileMustExist?: boolean }) => Raw;
 
-const STEP_SKILL = "crossline-step-planner";
-const BACKPLAN_SKILL = "crossline-goal-backplanner";
+const STEP_SKILL = "crossline-task-planner:steps";
+const BACKPLAN_SKILL = "crossline-goal-backplanner:backplan";
 const DEFAULT_MODELS = ["deepseek-ai/DeepSeek-V4.1-Flash", "zai-org/GLM-5.3-Flash"];
 const OPEN_STATES = new Set(["awaiting_plan_approval", "approved", "preparing", "ready_for_human", "active"]);
 // What a backplan leaves on a milestone that nobody has started: removed from each copy before the milestone is split again.
@@ -88,7 +88,7 @@ function candidates(store: CrosslineStore, workspaceId: string) {
   const orders = store.listWorkOrders(workspaceId).filter((order) => OPEN_STATES.has(order.state) && lines.has(order.identityId));
   const planned = new Set(store.listStepPlans(workspaceId).map((plan) => plan.workOrderId));
   const tasks = orders.filter((order) => planned.has(order.id)).map((order) => ({ order, documents: planningContext(store, workspaceId, order).documents.length }));
-  const backplanned = new Set(store.listEvents(workspaceId, { type: "goal.backplan_proposed" }).map((event) => event.entityId));
+  const backplanned = new Set(store.listEvents(workspaceId, { type: "goal.changed", change: "backplan_proposed" }).map((event) => event.entityId));
   const anchors = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline ?? ""]));
   const milestones = store.listMilestones(workspaceId).filter((item) => item.status === "approved" && item.projectId && lines.has(item.identityId)
     && backplanned.has(item.id)).map((item) => ({ milestone: item, deadline: anchors.get(item.id) ?? "" }));
@@ -392,7 +392,7 @@ async function copyFor(model: string): Promise<CrosslineStore> {
       && !db.prepare("SELECT 1 FROM executions WHERE workspace_id = ? AND work_order_id = ?").get(workspaceId, row.id));
     for (const order of orders) for (const table of ["work_orders", "task_step_plans", "task_steps"])
       db.prepare(`DELETE FROM ${table} WHERE workspace_id = ? AND ${table === "work_orders" ? "id" : "work_order_id"} = ?`).run(workspaceId, order.id);
-    db.prepare("DELETE FROM events WHERE workspace_id = ? AND entity_id = ? AND type IN ('goal.backplan_proposed', 'goal.backplan_blocked')").run(workspaceId, milestone.id);
+    db.prepare("DELETE FROM events WHERE workspace_id = ? AND entity_id = ? AND type = 'goal.changed' AND json_extract(payload_json, '$.change') IN ('backplan_proposed', 'backplan_blocked')").run(workspaceId, milestone.id);
   }
   db.close();
   return new CrosslineStore(file);
@@ -456,14 +456,14 @@ async function compareOne(model: string): Promise<void> {
     }
     const backplanner = createGoalBackplanner(store, workspaceId, repoRoot, () => supervisor.client, { rolling: true });
     for (const milestone of milestones) {
-      const foldedBefore = store.listEvents(workspaceId, { type: "task.duplicate_prevented" }).length;
+      const foldedBefore = store.listEvents(workspaceId, { type: "task.changed", change: "duplicate_prevented" }).length;
       let answer: { state: string; code?: string; message?: string } | undefined;
       const run = await measured(model, async () => { answer = await backplanner(milestone.id) as typeof answer;
         return answer?.state === "proposed" ? { ok: true } : { ok: false, code: answer?.code ?? "BACKPLAN_FAILED", message: answer?.message ?? "" }; });
       keep({ model, workspace: workspaceId, kind: "backplan", subject: milestone.id, title: milestone.title, ok: run.outcome.ok, ...(run.outcome.code ? { code: run.outcome.code } : {}),
         ...("message" in run.outcome && run.outcome.message ? { message: run.outcome.message.slice(0, 300) } : {}),
         seconds: run.seconds, modelSeconds: run.modelSeconds, repairs: run.repairs, tokens: run.tokens, yuan: run.yuan,
-        result: { folded: store.listEvents(workspaceId, { type: "task.duplicate_prevented" }).length - foldedBefore } });
+        result: { folded: store.listEvents(workspaceId, { type: "task.changed", change: "duplicate_prevented" }).length - foldedBefore } });
     }
   }
   store.close();

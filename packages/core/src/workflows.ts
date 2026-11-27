@@ -295,8 +295,6 @@ export const keptOnReset = (record: Pick<GrownSkillRecord, "name" | "keepOnReset
  */
 export const grownKeptSettingKeys = (id: string) => [grownSkillFilesKey(id), grownVersionsKey(id), `collect.notes.${id}`, `collect.topics.${id}`];
 export const GROWN_VERSIONS_KEPT = 10;
-/** What the person says a workflow should do differently (Skill 库 「让它改进」): the strongest reason to revise it. */
-export const WORKFLOW_FEEDBACK_EVENT = "skill.grown.feedback";
 export type GrownSkillVersion = {
   version: number; at: string;
   /** Why it was replaced (the revision's own note of what changed). */

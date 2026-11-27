@@ -29,12 +29,6 @@ export const STANDING_RECENT = 3;
 /** Extraction runs in a row with no new fact that the header calls out as such. */
 export const SATURATED_RUNS = 3;
 
-/**
- * The round of a part from which every round's note says how long the part has run (replay of 2026-11-23: the story took 9 rounds, the
- * situation 11 and the compass 9 more, so 30 rounds never reached energy). The Skill closes the part at that round.
- */
-export const PART_ROUNDS = 6;
-
 const VERDICT = { fits: "准", partial: "部分对", off: "不准" } as const;
 
 /** Rounds in a row in `stage`, this one included, given the earlier rounds' parts oldest first. */
@@ -42,15 +36,6 @@ export function roundsInPart(stages: readonly string[], stage: string): number {
   let inStage = 1;
   for (let at = stages.length - 1; at >= 0 && stages[at] === stage; at -= 1) inStage += 1;
   return inStage;
-}
-
-/**
- * What the person asked the interviewer in a reply, at most the last two (replay of 2026-11-23: 「到底哪个最适合我？」 got a question
- * about the résumé back, the answer only in `progress.next`). A card's own question 【…？】 is the app's, not the person's.
- */
-export function questionsAsked(text: string): string[] {
-  const own = text.replace(/【[^】]*】/g, " ");
-  return (own.match(/[^。！!？?\n]*[？?]/g) ?? []).map((item) => item.trim()).filter((item) => item.length >= 3).slice(-2);
 }
 
 export function standingLines(input: StandingInput): string[] {

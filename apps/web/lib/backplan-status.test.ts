@@ -19,7 +19,7 @@ test("approved milestones count as being worked backwards until a task serves th
   store.saveWorkOrder({ id: "wo", ownerId, workspaceId, identityId: "research", projectId: "p", milestoneId: "served", intent: "x",
     state: "awaiting_plan_approval", riskTier: "routine", estimate: { p25Minutes: 1, p50Minutes: 2, p85Minutes: 3, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: {} });
   save("refused"); anchor("refused", "2026-10-30");
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: "bp-refused", type: "goal.backplan_blocked", entityId: "refused", payload: { milestoneVersion: 1 } });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: "bp-refused", type: "goal.changed", entityId: "refused", payload: { milestoneVersion: 1, change: "backplan_blocked" } });
   expect(milestonesBeingBackplanned(store, workspaceId, "2026-10-18")).toBe(2);
   store.close();
 });

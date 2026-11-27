@@ -50,7 +50,7 @@ const supervisor = await startCodexSupervisor({
     name: "crossline",
     marketplacePath: path.join(repoRoot, "skills", "marketplace", ".agents", "plugins", "marketplace.json"),
     cwd: repoRoot,
-    requiredSkills: ["crossline:crossline-manualbook-designer", "crossline:crossline-material-researcher", "crossline:crossline-material-writer"]
+    requiredSkills: ["crossline:crossline-task-planner:manual", "crossline:crossline-research:material", "crossline:crossline-material-writer"]
   }
 });
 

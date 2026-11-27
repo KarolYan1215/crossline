@@ -102,7 +102,7 @@ export function importCodexMemories(store: CrosslineStore, options: { homes: Arr
   for (const workspace of workspaces) {
     const count = result.lessons[workspace.id] ?? 0;
     if (count) store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspace.id) ?? "", workspaceId: workspace.id, idempotencyKey: `${CODEX_MEMORY_IMPORT_MARKER}:${workspace.id}`,
-      type: "lessons.imported_from_codex_memory", entityId: workspace.id, payload: { lessons: count, at: now.toISOString() } });
+      type: "job.ran", entityId: workspace.id, payload: { lessons: count, at: now.toISOString(), job: "lessons.codex_memory_import", state: "done" } });
     store.setSetting(workspace.id, CODEX_MEMORY_IMPORT_MARKER, now.toISOString());
   }
   return result;

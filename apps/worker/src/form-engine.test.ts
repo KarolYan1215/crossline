@@ -10,6 +10,7 @@ import { browserUseFallback, stagehandFallback } from "./form-fallbacks";
 import { hashForm } from "./form-profile";
 import { findBrowser } from "./node/browser";
 import { listenForBrowser } from "./browser-port";
+import type { FormRunEvent } from "@crossline/db";
 
 /**
  * The form engine end to end against fake registration pages served here (docs/opportunity-agent.md §14, standards 3 and 5): a real
@@ -174,7 +175,7 @@ async function run(opp: Opportunity, url = opp.url, extra: Partial<EngineDeps> =
   allow: (target: string) => Promise<boolean> = async (target) => target.startsWith(base) || target.startsWith("https://")) {
   const dir = mkdtempSync(path.join(tmpdir(), "crossline-form-"));
   const blocked: Array<{ url: string; why: string }> = [];
-  const saved: Array<{ run: StoredFormRun; event?: { type: string; payload?: Record<string, unknown> } }> = [];
+  const saved: Array<{ run: StoredFormRun; event?: FormRunEvent }> = [];
   const checks: FormCheckContext[] = [];
   const notified: StoredFormRun[] = [];
   const holds: string[] = [];
@@ -255,7 +256,7 @@ describe.skipIf(!chrome)("form engine on fake registration pages", () => {
     const { result, saved } = await run(opportunity(), `${base}/dialog`, { propose, check: slowCheck });
     expect(submissions).toEqual([{ name: "Kai Yan", email: EMAIL }]);
     // One click on a submit button: the dialog's, never the page button the check had seen.
-    expect(saved.filter((item) => item.event?.type === "opportunity.form.submit_clicked")).toHaveLength(1);
+    expect(saved.filter((item) => item.event?.change === "form_submit_clicked")).toHaveLength(1);
     expect(result.state).toBe("submitted");
   }, 120_000);
 
@@ -285,9 +286,9 @@ describe.skipIf(!chrome)("form engine on fake registration pages", () => {
     expect(submissions).toEqual([{ first: "Kai", last: "Yan", email: EMAIL, company: "", country: "China", founder: "no" }]);
     expect(result).toMatchObject({ state: "submitted", submittedBy: "system" });
     // The page's own 「Get tickets」 only opened the form: recorded as that, and the dialog's button was the one submission.
-    expect(saved.filter((item) => item.event?.type === "opportunity.form.opened")).toHaveLength(1);
+    expect(saved.filter((item) => item.event?.change === "form_opened")).toHaveLength(1);
     expect(result.pages[0]!.actions.at(-1)).toMatchObject({ op: "submit", verdict: "allow", reason: "opened the form" });
-    expect(saved.filter((item) => item.event?.type === "opportunity.form.submit_clicked")).toHaveLength(2);
+    expect(saved.filter((item) => item.event?.change === "form_submit_clicked")).toHaveLength(2);
   }, 120_000);
 
   it("for another account's run, an 「Apply」 that may send the application at once is held for the person like any submission", async () => {
@@ -297,14 +298,14 @@ describe.skipIf(!chrome)("form engine on fake registration pages", () => {
     expect(submissions).toHaveLength(0);
     expect(result).toMatchObject({ state: "ready_to_submit" });
     expect(result.heldBecause).toContain("最后一步由本人点击");
-    expect(saved.some((item) => item.event?.type === "opportunity.form.submit_clicked")).toBe(false);
+    expect(saved.some((item) => item.event?.change === "form_submit_clicked")).toBe(false);
   }, 120_000);
 
   it("records the system as submitter only after its own submit click", async () => {
     const propose = async (): Promise<FormFillAnswer> => ({ pageKind: "form", note: "", actions: [move("submit", "button", "Register")] as FormFillAnswer["actions"] });
     const slowCheck = async () => { await new Promise((resolve) => setTimeout(resolve, 2500)); return { ok: true, problems: [] }; };
     const { result, saved } = await run(opportunity(), `${base}/self`, { propose, check: slowCheck });
-    expect(saved.some((item) => item.event?.type === "opportunity.form.submit_clicked")).toBe(false);
+    expect(saved.some((item) => item.event?.change === "form_submit_clicked")).toBe(false);
     expect(result).toMatchObject({ state: "submitted", submittedBy: "person" });
   }, 120_000);
 
@@ -439,7 +440,7 @@ describe.skipIf(!chrome)("form engine on fake registration pages", () => {
     expect(result.state).toBe("ready_to_submit");
     expect(result.heldBecause).toContain("页面出现价格或付款字段");
     expect(submissions).toHaveLength(0);
-    expect(saved.some((item) => item.event?.type === "opportunity.form.submit_clicked")).toBe(false);
+    expect(saved.some((item) => item.event?.change === "form_submit_clicked")).toBe(false);
   }, 60_000);
 
   it("fails closed: a pre-submit check that throws holds the form, a filler that throws stops the run", async () => {
@@ -474,7 +475,7 @@ describe.skipIf(!chrome)("form engine on fake registration pages", () => {
     expect(result.state).toBe("submitted");
     expect(submissions).toEqual([{ name: "Kai Yan", email: EMAIL }]);
     expect(result.pages[0]!.loggedIn).toBe("127.0.0.1");
-    expect(saved.some((item) => item.event?.type === "opportunity.form.page" && item.event.payload?.login === "127.0.0.1")).toBe(true);
+    expect(saved.some((item) => item.event?.change === "form_page" && item.event.payload?.login === "127.0.0.1")).toBe(true);
     expect(model.calls.every((call) => call.savedLogin === true)).toBe(true);
     const seen = JSON.stringify({ calls: model.calls, saved });
     expect(seen).not.toContain(LOGIN_PASSWORD);

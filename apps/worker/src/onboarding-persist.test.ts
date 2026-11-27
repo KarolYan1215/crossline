@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { DATES_UNRECORDED_EVENT, persistFileDates, personTimeZone, withUnmentionedDays } from "./onboarding-persist";
+import { persistFileDates, personTimeZone, withUnmentionedDays } from "./onboarding-persist";
 import { identityLines } from "./lines";
 
 let store: CrosslineStore;
@@ -19,7 +19,7 @@ test("a reading that verifies nothing writes no batch but records what it droppe
   persistFileDates(store, workspaceId, { fileDates: { dates: [{ id: "d", date: "2026-10-20", startTime: "", endTime: "", kind: "deadline", title: "报告",
     project: "", sourceRef: "reply-1", quote: "报告要交", confidence: "high", note: "" }], recurring: [], questions: [] } }, context({ "reply-1": "报告要交" }));
   expect(store.listEvents(workspaceId, { type: "dates.extracted" })).toEqual([]);
-  expect(store.listEvents(workspaceId, { type: DATES_UNRECORDED_EVENT })[0]).toMatchObject({ entityId: "s1",
+  expect(store.listEvents(workspaceId, { type: "onboarding.changed", change: "dates_unrecorded" })[0]).toMatchObject({ entityId: "s1",
     payload: { dropped: [{ title: "报告", code: "DATE_QUOTE_DOES_NOT_SUPPORT_DATE" }] } });
 });
 

@@ -13,7 +13,6 @@ import { tOf } from "./locale";
  * said once in the day's conversation, and can be undone for 24 hours. The month simulation saw 149 confirmed blocks and 152 timed
  * sessions hand in no task at all, because the last step was someone else's reply.
  */
-export const AUTO_CLOSED_EVENT = "work_order.auto_closed";
 const OPEN = ["approved", "ready_for_human", "active"];
 
 /** The person's own steps: not the assistant's and not a wait for someone else. */
@@ -22,7 +21,7 @@ export const isPersonStep = (step: Pick<StoredTaskStep, "executor" | "role">) =>
 /** Orders whose person's part is done and which are still open; each closes at most once (an undone close is left to the person). */
 export function finishedByPerson(ctx: AccessContext): string[] {
   const store = getStore();
-  const closedBefore = new Set(store.listEvents(ctx.workspaceId, { type: AUTO_CLOSED_EVENT }).map((event) => event.entityId));
+  const closedBefore = new Set(store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "auto_closed" }).map((event) => event.entityId));
   // Materials still to be prepared would be asked for by starting it; such work waits for them.
   return store.listWorkOrders(ctx.workspaceId).filter((order) => OPEN.includes(order.state) && !order.tombstone && onPersonsBoard(order) && !closedBefore.has(order.id)
     && inputsReady(order))
@@ -48,8 +47,8 @@ export function autoCloseFinished(ctx: AccessContext, now = appNow()): string[] 
     }
     if (!completeWorkOrderExecution(ctx, id, [], [], at).ok) continue;
     const left = (store.getStepPlan(ctx.workspaceId, id)?.steps ?? []).filter((step) => step.status === "planned").length;
-    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `${AUTO_CLOSED_EVENT}:${id}`, type: AUTO_CLOSED_EVENT,
-      entityId: id, payload: { at, left } });
+    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `work_order.auto_closed:${id}`, type: "work_order.changed",
+      entityId: id, payload: { at, left, change: "auto_closed" } });
     closed.push({ id, title: taskTitleOf(order), left });
   }
   if (!closed.length) return [];

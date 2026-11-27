@@ -30,10 +30,10 @@ export function applyProgressLevel(ctx: AccessContext, orderId: string, stepId: 
 export function progressAsks(ctx: AccessContext, now: Date): Ask[] {
   const store = getStore();
   const t = tOf(ctx);
-  const answered = new Set(store.listEvents(ctx.workspaceId, { type: "progress.answered" })
+  const answered = new Set(store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "progress_answered" })
     .map((event) => String((event.payload as { refEventId?: string }).refEventId ?? "")));
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
-  return store.listEvents(ctx.workspaceId, { type: "return.answered" }).flatMap((event): Ask[] => {
+  return store.listEvents(ctx.workspaceId, { type: "ask.changed", change: "return_answered" }).flatMap((event): Ask[] => {
     const payload = event.payload as { verdict?: string; unclear?: boolean; stepId?: string };
     const order = orders.get(event.entityId);
     if (payload.verdict !== "partial" || !payload.unclear || answered.has(event.eventId) || !order || !OPEN.includes(order.state)
@@ -62,14 +62,14 @@ export function progressNudgeInputs(ctx: AccessContext, now: Date): NonNullable<
 export function answerProgress(ctx: AccessContext, ask: Ask, optionId: string, note: string): { ok: true } | { ok: false; code: string } {
   const store = getStore();
   const refEventId = ask.id.slice("progress:".length);
-  const event = store.listEvents(ctx.workspaceId, { type: "return.answered", entityId: ask.entityId }).find((item) => item.eventId === refEventId);
+  const event = store.listEvents(ctx.workspaceId, { type: "ask.changed", change: "return_answered", entityId: ask.entityId }).find((item) => item.eventId === refEventId);
   if (!event) return { ok: false, code: "ASK_NOT_FOUND" };
   const stepId = (event.payload as { stepId?: string }).stepId ?? "";
   const level = optionId === "stop" ? "" : optionId;
   if (!level && !note.trim() && optionId !== "stop") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
   if (note.trim()) { const reported = reportProgress(ctx, ask.entityId, note); if (!reported.ok) return reported; }
   if (level) applyProgressLevel(ctx, ask.entityId, stepId, level);
-  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `progress.answered:${refEventId}`, type: "progress.answered",
-    entityId: ask.entityId, payload: { refEventId, ...(level ? { level } : {}), ...(note.trim() ? { note: note.trim().slice(0, 300) } : {}), ...(optionId === "stop" ? { stopped: true } : {}) } });
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `progress.answered:${refEventId}`, type: "work_order.changed",
+    entityId: ask.entityId, payload: { refEventId, ...(level ? { level } : {}), ...(note.trim() ? { note: note.trim().slice(0, 300) } : {}), ...(optionId === "stop" ? { stopped: true } : {}), change: "progress_answered" } });
   return { ok: true };
 }

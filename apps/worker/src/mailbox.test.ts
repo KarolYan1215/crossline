@@ -83,7 +83,7 @@ test("new mail is read once per check; sorting turns a to-do into an inbox line 
   expect(done).toEqual({ state: "done", captured: 1, replies: 1, sorted: 3, needsReply: [], recorded: 0, events: 0 });
   expect(store.listCaptures(workspaceId)[0]).toMatchObject({ title: "10/30 前交 HW1（截止延后）" });
   expect(store.listCaptures(workspaceId)[0]!.context).toContain("HW1 extended to Oct 30");
-  expect(store.listEvents(workspaceId, { type: "waiting.mail_seen", entityId: "wait-data" })).toHaveLength(1);
+  expect(store.listEvents(workspaceId, { type: "waiting.changed", change: "mail_seen", entityId: "wait-data" })).toHaveLength(1);
   expect(JSON.parse(store.getSetting(workspaceId, MAIL_LOG_SETTING)!).map((entry: { kind: string }) => entry.kind)).toEqual(["todo", "reply", "ignore"]);
   // The person is asked at once whether it arrived, with a button that answers the waiting ask.
   const said = store.listConversationMessages(workspaceId, store.conversationFor(workspaceId, "2026-10-19").id).filter((m) => m.role === "nudge");
@@ -225,7 +225,7 @@ test("connecting sorts at once; mail read while sorting was off is kept and sort
 test("a company's survey invitation is a promotion, not a todo: the Skill and the runner both say so (W-147)", async () => {
   const { readFileSync } = await import("node:fs");
   const path = await import("node:path");
-  const skill = readFileSync(path.resolve(import.meta.dirname, "../../../skills/marketplace/plugins/crossline/skills/crossline-mail-triage/SKILL.md"), "utf8");
+  const skill = readFileSync(path.resolve(import.meta.dirname, "../../../skills/marketplace/plugins/crossline/skills/crossline-inbox-triage/SKILL.md"), "utf8");
   // On the real account 「Help shape the future of Codex」 became the task 「填写 Codex 使用体验问卷」 on 10-28.
   expect(skill).toMatch(/Help shape the future of <product>.*\| ignore \|/);
   expect(skill).toMatch(/Course staff.*feedback survey.*\| todo \|/);

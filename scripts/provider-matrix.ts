@@ -55,7 +55,7 @@ setUsageSink((usage) => {
 
 const supervisor = await startCodexSupervisor({ port: 3390 + Math.floor(Math.random() * 9), sidecarFactory: () => startCodexAppServer(path.join(dataDir, "codex-home")),
   plugin: { name: "crossline", marketplacePath: path.join(repoRoot, "skills", "marketplace", ".agents", "plugins", "marketplace.json"),
-    cwd: repoRoot, requiredSkills: ["crossline:crossline-conformance", "crossline:crossline-agent"] } });
+    cwd: repoRoot, requiredSkills: ["crossline:crossline-conformance", "crossline:crossline-agent:shell"] } });
 const harness = await startProviderHarness(store, supervisor.client, repoRoot);
 const search = webSearchFromEnv();
 if (stages.has("web") && !search) console.warn(JSON.stringify({ step: "warn", message: "no search API (BOCHA_API_KEY / TAVILY_API_KEY): web stage skipped" }));

@@ -14,7 +14,7 @@ function runtime() {
     const req = JSON.parse(line);
     requests.push(req);
     let result: unknown = {};
-    if (req.method === "skills/list") result = { data: [{ cwd: "C:\\repo", errors: [], skills: [{ name: "crossline:crossline-step-planner", path: "C:\\skill\\SKILL.md", enabled }] }] };
+    if (req.method === "skills/list") result = { data: [{ cwd: "C:\\repo", errors: [], skills: [{ name: "crossline:crossline-task-planner", path: "C:\\skill\\SKILL.md", enabled }] }] };
     if (req.method === "skills/config/write") { enabled = req.params.enabled; result = { effectiveEnabled: enabled }; }
     if (req.method === "account/read") result = { account: { type: "chatgpt" }, requiresOpenaiAuth: false };
     if (req.method === "model/list") result = { data: [] };
@@ -37,7 +37,7 @@ const tools: codex.SkillTools = { specs: [{ name: "search_material", description
 async function run(client: codex.CodexRpcBoundary) {
   const modes: string[] = [];
   const result = await codex.runCodexSkill(client, { materials: { passages: ["top"], candidates: ["c2"] } }, {
-    skillName: "crossline:crossline-step-planner", cwd: "C:\\repo", developerInstructions: "Plan.", outputSchema: { type: "object" },
+    skillName: "crossline:crossline-task-planner:steps", cwd: "C:\\repo", developerInstructions: "Plan.", outputSchema: { type: "object" },
     prepareInput: (value) => value, validateOutput: (output) => output, onAudit: () => {},
     optionalTools: { tools, instructions: "Read candidates with read_chunk.", onMode: (mode) => modes.push(mode),
       withoutTools: (value) => ({ ...(value as object), materials: { passages: ["picked in full"] } }) } });
@@ -46,7 +46,7 @@ async function run(client: codex.CodexRpcBoundary) {
 
 const provider: ProviderConfig = { id: "sf", kind: "chat", label: "SiliconFlow", baseUrl: "https://api.siliconflow.cn/v1", model: "glm", keyLast4: "abcd",
   updatedAt: "2026-10-20T00:00:00.000Z" };
-const routing = (functionCalls: boolean): ProviderRouting => ({ provider, gatewayUrl: "http://127.0.0.1:5555/x", admitted: new Set(["crossline-step-planner"]),
+const routing = (functionCalls: boolean): ProviderRouting => ({ provider, gatewayUrl: "http://127.0.0.1:5555/x", admitted: new Set(["crossline-task-planner:steps"]),
   codexSignedIn: false, functionCalls });
 afterEach(() => codex.setProviderResolver(undefined));
 
@@ -84,10 +84,10 @@ test("a provider whose record shows function calls gets the lookups", async () =
 
 test("a provider that calls functions but failed one Skill's own tools case runs that Skill without its optional tools", async () => {
   const asked: string[] = [];
-  codex.setProviderResolver(() => ({ ...routing(true), functionCallsFor: (skill) => { asked.push(skill); return skill !== "crossline-step-planner"; } }));
+  codex.setProviderResolver(() => ({ ...routing(true), functionCallsFor: (skill) => { asked.push(skill); return skill !== "crossline-task-planner:steps"; } }));
   const fake = runtime();
   const { modes } = await run(fake.client);
-  expect(asked).toContain("crossline-step-planner");
+  expect(asked).toContain("crossline-task-planner:steps");
   expect(modes).toEqual(["fallback"]);
   expect(JSON.stringify(fake.requests.find((request) => request.method === "turn/start")!.params.input)).toContain("picked in full");
   codex.setProviderResolver(() => ({ ...routing(true), functionCallsFor: () => true }));

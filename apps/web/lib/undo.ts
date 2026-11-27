@@ -1,5 +1,5 @@
 import "server-only";
-import { currentInstructionsOf, decideWatch, instructionVersionsOf, readWatchTuning, reopenAgentResult, retractedEventIdsIn, setInstructions, withdrawArtifactRelationsFor, type StepPlanInput } from "@crossline/db";
+import { type EventFilter, currentInstructionsOf, decideWatch, instructionVersionsOf, readWatchTuning, reopenAgentResult, retractedEventIdsIn, setInstructions, withdrawArtifactRelationsFor, type StepPlanInput } from "@crossline/db";
 import { WATCH_TUNING_SETTING, AUTOMATIONS_SETTING, GROWN_LIBRARY_SETTING, MODEL_EFFORT_SETTING, PORTRAIT_FIGURE_SETTING, SELF_SLEEP_SETTING, VOICE_SETTING, taskTitleOf, type AccessContext, type StoredDomainRecord, type WorkOrderState } from "@crossline/core";
 import { archiveWorkOrder, getStore, restoreCapture, restoreWorkOrder, saveMilestoneEdit } from "./crossline";
 import { tOf } from "./locale";
@@ -112,7 +112,7 @@ export function undoMerge(ctx: AccessContext, absorbedId: string): { ok: true } 
   if (!event) return { ok: false, code: "MERGE_NOT_FOUND" };
   const inverse = (event.payload as { inverse: Extract<Inverse, { kind: "task.unmerge" }> }).inverse;
   const undone = store.listEvents(ctx.workspaceId, { type: "op.undone", entityId: event.entityId }).length > 0;
-  const later = store.listEvents(ctx.workspaceId, { type: "task.merged", entityId: inverse.keepId }).some((item) => item.createdAt > event.createdAt);
+  const later = store.listEvents(ctx.workspaceId, { type: "task.changed", change: "merged", entityId: inverse.keepId }).some((item) => item.createdAt > event.createdAt);
   const result = applyInverse(ctx, undone || later ? { kind: "work_order.restore", ids: [absorbedId] } : inverse);
   if (!result.ok) return result;
   if (!undone) store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `op.undone:${event.entityId}`,
@@ -175,7 +175,7 @@ function applyInverse(ctx: AccessContext, inverse: Inverse, reopenReason?: strin
           const state = orders.get(id)?.state as WorkOrderState | undefined;
           // Only an approval nothing has acted on yet can be taken back; a started or handed-in task is past it.
           if (!state || !["approved", "preparing", "ready_for_human"].includes(state)) return { ok: false, code: "APPROVAL_ALREADY_ACTED_ON" };
-          const attempt = store.listEvents(ctx.workspaceId, { type: "approval.revoked", entityId: id }).length;
+          const attempt = revocations(store, ctx.workspaceId, id);
           store.transitionWorkOrder(ctx.workspaceId, id, { type: "approval.revoked", reason: tOf(ctx)("撤销批准") }, `undo-approval:${id}:${attempt}`);
         }
         return { ok: true };
@@ -210,7 +210,7 @@ function applyInverse(ctx: AccessContext, inverse: Inverse, reopenReason?: strin
           if (!order) continue;
           store.saveWorkOrder({ ...order, payload: entry.payload });
           if (entry.state === "awaiting_plan_approval" && ["approved", "preparing", "ready_for_human"].includes(order.state)) {
-            const attempt = store.listEvents(ctx.workspaceId, { type: "approval.revoked", entityId: entry.id }).length;
+            const attempt = revocations(store, ctx.workspaceId, entry.id);
             store.transitionWorkOrder(ctx.workspaceId, entry.id, { type: "approval.revoked", reason: tOf(ctx)("撤销整理") }, `undo-payload:${entry.id}:${attempt}`);
           }
         }
@@ -220,12 +220,12 @@ function applyInverse(ctx: AccessContext, inverse: Inverse, reopenReason?: strin
         const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
         for (const id of inverse.ids) {
           if (orders.get(id)?.state !== "accepted") continue;
-          const attempt = store.listEvents(ctx.workspaceId, { type: "work_order.reopened", entityId: id }).length;
+          const attempt = store.listEvents(ctx.workspaceId, { type: "work_order.changed", change: "reopened", entityId: id }).length;
           const reason = reopenReason ?? tOf(ctx)("撤销自动交上");
           store.transitionWorkOrder(ctx.workspaceId, id, { type: "acceptance.revoked", reason }, `undo-auto-close:${id}:${attempt}:revoke`);
           store.transitionWorkOrder(ctx.workspaceId, id, { type: "blocked", reason }, `undo-auto-close:${id}:${attempt}:hold`);
           store.transitionWorkOrder(ctx.workspaceId, id, { type: "plan.approved", approvalId: ctx.principalId }, `undo-auto-close:${id}:${attempt}:open`);
-          store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `work_order.reopened:${id}:${attempt}`, type: "work_order.reopened", entityId: id, payload: { reason } });
+          store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `work_order.reopened:${id}:${attempt}`, type: "work_order.changed", entityId: id, payload: { reason, change: "reopened" } });
         }
         return { ok: true };
       }
@@ -327,7 +327,15 @@ function applyInverse(ctx: AccessContext, inverse: Inverse, reopenReason?: strin
 const UNDOABLE_SETTINGS = ["schedule.", "goal.settings:", "input.schedule.autoApply", "lines.", "calendar.lines", "ledger.", "design.", PORTRAIT_FIGURE_SETTING, SELF_SLEEP_SETTING,
   "notify.", VOICE_SETTING, MODEL_EFFORT_SETTING, "localActivity.pausedUntil", "activity.blacklist", AUTOMATIONS_SETTING, GROWN_LIBRARY_SETTING] as const;
 /** Ledger markers that hide or close something when written; undoing the operation that wrote them brings it back. */
-const RETRACTABLE_EVENTS = ["risk.accepted", "ask.snoozed", "missed.handled", "agent.blocked_acknowledged", "source.project_cleared", "milestone.overdue_resolved", "task.overdue_resolved"];
+const RETRACTABLE_EVENTS: EventFilter[] = [{ type: "milestone.changed", change: ["risk_accepted", "overdue_resolved"] }, { type: "ask.changed", change: "snoozed" },
+  { type: "work_order.changed", change: "missed_handled" }, { type: "agent.changed", change: "blocked_acknowledged" }, { type: "source.changed", change: "project_cleared" },
+  { type: "task.changed", change: "overdue_resolved" }];
+/**
+ * How many times a task's approval was taken back: its transitions by `approval.revoked`, which keys the next one. A count of
+ * `approval.revoked` events was read until 2026-11-27, a type never written, so a second undo reused the first key and did nothing.
+ */
+const revocations = (store: ReturnType<typeof getStore>, workspaceId: string, id: string) => store.listEvents(workspaceId, { type: "work_order.transitioned", entityId: id })
+  .filter((event) => (event.payload as { event?: { type?: string } }).event?.type === "approval.revoked").length;
 
 type Snapshot = ReturnType<typeof snapshot>;
 function snapshot(ctx: AccessContext) {
@@ -346,7 +354,7 @@ function snapshot(ctx: AccessContext) {
       { kind: record.kind, category: record.category, categoryBy: record.categoryBy, status: record.status, possibleDupOf: record.possibleDupOf, refundOf: record.refundOf, voidReason: record.voidReason }])),
     evidence: new Map(store.listRecordEvidence(ctx.workspaceId).map((item) => [item.id, item.recordId])),
     wealth: wealthRows(ctx.workspaceId),
-    eventIds: new Set(store.listEvents(ctx.workspaceId, { type: RETRACTABLE_EVENTS }).map((event) => event.eventId)),
+    eventIds: new Set(RETRACTABLE_EVENTS.flatMap((filter) => store.listEvents(ctx.workspaceId, filter)).map((event) => event.eventId)),
     sessions: new Set(store.listExecutions(ctx.workspaceId).filter((execution) => String(execution.outcome) === "confirmed").map((execution) => execution.id)),
     energy: new Set(store.listEnergyObservations(ctx.workspaceId).filter((item) => item.source === "self_report").map((item) => item.id)),
     instructions: currentInstructionsOf(store, ctx.workspaceId).version,

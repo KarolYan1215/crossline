@@ -20,7 +20,7 @@ function setup() {
   return store;
 }
 const question = (over: Record<string, unknown> = {}) => ({ question: "这次作业打算用 Python 还是 MATLAB？", why: "决定要不要排环境配置步骤", knownBy: "person" as const,
-  options: ["Python", "MATLAB"], answerType: "choice" as const, assumption: "Python", blocking: true, skill: "crossline:crossline-step-planner",
+  options: ["Python", "MATLAB"], answerType: "choice" as const, assumption: "Python", blocking: true, skill: "crossline:crossline-task-planner:steps",
   ref: { kind: "task" as const, id: "hw4" }, identityId: "research", projectId: "ece555", dueBy: "2026-11-27", origin: "own" as const, ...over });
 
 test("a blocking question is a card on 待确认; its answer is the person's confirmed fact and the task's steps are planned again", async () => {
@@ -35,7 +35,7 @@ test("a blocking question is a card on 待确认; its answer is the person's con
   const fact = store.listProfileFacts(ws).find((item) => item.sourceRef === personQuestionKey(id))!;
   expect(fact).toMatchObject({ status: "confirmed", sourceQuote: "MATLAB", projectId: "ece555" });
   expect(store.questionByKey(ws, personQuestionKey(id))).toMatchObject({ status: "answered", answer: "MATLAB" });
-  const replan = store.listEvents(ws, { type: "task.steps_replan_requested", entityId: "hw4" });
+  const replan = store.listEvents(ws, { type: "task.changed", change: "steps_replan_requested", entityId: "hw4" });
   expect(replan).toHaveLength(1);
   expect(String((replan[0]!.payload as { feedback?: string }).feedback)).toContain("MATLAB");
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "skill_question")).toBe(false);
@@ -44,18 +44,18 @@ test("a blocking question is a card on 待确认; its answer is the person's con
 test("a milestone waiting on the same question is worked backwards again; keeping the assumption reruns nothing", async () => {
   const store = setup();
   const id = recordPersonQuestion(store, ws, question({ blocking: false }), NOW.toISOString());
-  joinPersonQuestion(store, ws, id, { skill: "crossline:crossline-goal-backplanner", ref: { kind: "milestone", id: "m-1" }, blocking: true });
+  joinPersonQuestion(store, ws, id, { skill: "crossline:crossline-goal-backplanner:backplan", ref: { kind: "milestone", id: "m-1" }, blocking: true });
   const card = collectAsks(TEST_CTX, NOW).find((ask) => ask.kind === "skill_question")!;
   expect(await answerAsk(TEST_CTX, card.id, { optionIds: [], note: "两个都用" }, {}, NOW)).toMatchObject({ ok: true });
-  expect(store.listEvents(ws, { type: "goal.backplan_rerun_requested", entityId: "m-1" })).toHaveLength(1);
+  expect(store.listEvents(ws, { type: "goal.changed", change: "backplan_rerun_requested", entityId: "m-1" })).toHaveLength(1);
   // The task asked without blocking: nothing to redo there.
-  expect(store.listEvents(ws, { type: "task.steps_replan_requested" })).toHaveLength(0);
+  expect(store.listEvents(ws, { type: "task.changed", change: "steps_replan_requested" })).toHaveLength(0);
 
   const second = recordPersonQuestion(store, ws, question({ question: "每周能给这门课几个小时？", answerType: "text", options: [], assumption: "6 小时" }), NOW.toISOString());
   const text = collectAsks(TEST_CTX, NOW).find((ask) => ask.id === `pq:${second}`)!;
   expect(await answerAsk(TEST_CTX, text.id, { optionIds: ["assume"] }, {}, NOW)).toMatchObject({ ok: true });
   expect(store.questionByKey(ws, personQuestionKey(second))).toMatchObject({ status: "assumed", answer: "6 小时" });
-  expect(store.listEvents(ws, { type: "task.steps_replan_requested" })).toHaveLength(0);
+  expect(store.listEvents(ws, { type: "task.changed", change: "steps_replan_requested" })).toHaveLength(0);
 });
 
 test("a question that blocks nothing and is not due this week waits for the weekly review; one from an untrusted run says so", () => {

@@ -9,7 +9,7 @@ import { fakeRuntime } from "./testing/fake-runtime";
  * through `web_research`, a separate scout run that sees the queries and purpose alone, and what comes back is fenced as untrusted data.
  * The people and pages here are fictional.
  */
-const SKILL = "crossline:crossline-due-diligence";
+const SKILL = "crossline:crossline-research:diligence";
 let store: CrosslineStore;
 let workspaceId: string;
 beforeEach(() => {
@@ -73,11 +73,11 @@ test("a private run gets no hosted search, only web_research; the scout searches
 });
 
 test("a hosted search that carries the person's name ends the run as soon as it shows", async () => {
-  const runtime = fakeRuntime([answer], "crossline:crossline-visa-finder", { script: async ({ threadId, turnId, emit }) => {
+  const runtime = fakeRuntime([answer], "crossline:crossline-page-reader:visa", { script: async ({ threadId, turnId, emit }) => {
     emit({ method: "item/started", params: { threadId, turnId, item: { type: "webSearch", id: "w1", query: "林晓舟 visa", action: { type: "search", query: "林晓舟 visa", queries: null } } } });
     await new Promise((resolve) => setTimeout(resolve, 20));
   } });
-  const result = await runCodexSkill(runtime.rpc, { citizenship: "China", destination: "Germany" }, { ...options, skillName: "crossline:crossline-visa-finder", allowWebSearch: true });
+  const result = await runCodexSkill(runtime.rpc, { citizenship: "China", destination: "Germany" }, { ...options, skillName: "crossline:crossline-page-reader:visa", allowWebSearch: true });
   expect(result.ok).toBe(false);
   expect(!result.ok && result.blocker).toMatchObject({ code: "SKILL_TOOL_FORBIDDEN", detail: "web_search:private" });
   expect((runtime.threadStarts()[0] as { config: Record<string, unknown> }).config.web_search).toBe("live");

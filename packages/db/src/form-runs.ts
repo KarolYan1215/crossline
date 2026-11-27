@@ -1,6 +1,6 @@
 import {
   APPLICATION_SLOTS, APPLY_KIT_SETTING, FORM_RUNS_SETTING, KIT_DOCUMENT_LABEL, editKit, readApplyKit, tFor, type ApplyKit, type KitEdit, SENSITIVE_PROFILE_SETTING, applySlotFact, assembleProfile, isSensitiveSlot,
-  type ApplicationSlot, type Opportunity, type ProfileItem, type StoredFormRun
+  type ApplicationSlot, type EventChange, type Opportunity, type ProfileItem, type StoredFormRun
 } from "@crossline/core";
 import { randomUUID } from "node:crypto";
 import type { CrosslineStore } from "./index";
@@ -22,14 +22,18 @@ export function readFormRuns(store: CrosslineStore, workspaceId: string): Stored
 }
 export const formRunOf = (store: CrosslineStore, workspaceId: string, id: string) => readFormRuns(store, workspaceId).find((run) => run.id === id);
 
+/** What a run's change is recorded as: an `opportunity.changed` event whose `change` is one of the `form_*` values. */
+export type FormRunEvent = { change: EventChange<"opportunity.changed">; payload?: Record<string, unknown> };
+
 /** Writes one run back (newest first, the oldest finished ones dropped past the cap) and records the change as an event. */
-export function saveFormRun(store: CrosslineStore, workspaceId: string, run: StoredFormRun, event?: { type: string; payload?: Record<string, unknown> }): StoredFormRun {
+export function saveFormRun(store: CrosslineStore, workspaceId: string, run: StoredFormRun, event?: FormRunEvent): StoredFormRun {
   const next = { ...run, updatedAt: new Date().toISOString() };
   const others = readFormRuns(store, workspaceId).filter((item) => item.id !== run.id);
   store.setSetting(workspaceId, FORM_RUNS_SETTING, JSON.stringify([next, ...others].slice(0, RUNS_KEPT)));
-  if (event) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, type: event.type, entityId: run.id,
-    idempotencyKey: `${event.type}:${run.id}:${Date.now()}:${randomUUID().slice(0, 8)}`,
-    payload: { opportunityId: run.opportunityId, host: run.host, state: next.state, pageNo: next.pageNo, ...(next.stoppedFor ? { stoppedFor: next.stoppedFor } : {}), ...(event.payload ?? {}) } });
+  if (event) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, type: "opportunity.changed", entityId: run.id,
+    idempotencyKey: `opportunity.${event.change}:${run.id}:${Date.now()}:${randomUUID().slice(0, 8)}`,
+    payload: { opportunityId: run.opportunityId, host: run.host, state: next.state, pageNo: next.pageNo, ...(next.stoppedFor ? { stoppedFor: next.stoppedFor } : {}), ...(event.payload ?? {}),
+      change: event.change } });
   return next;
 }
 
@@ -48,7 +52,7 @@ export function queueFormRun(store: CrosslineStore, workspaceId: string, input: 
     filled: [], screenshots: [], engines: [], opportunity: input.opportunity, decision: { choice: input.choice, at, by: "person" },
     queuedAt: at, updatedAt: at, pages: [], ...(input.drafts ? { drafts: input.drafts } : {}),
     ...(input.kitVersion !== undefined ? { kitVersion: input.kitVersion } : {}) };
-  return saveFormRun(store, workspaceId, run, { type: "opportunity.form.queued", payload: { choice: input.choice } });
+  return saveFormRun(store, workspaceId, run, { change: "form_queued", payload: { choice: input.choice } });
 }
 
 // ———————————————————————————————————————— the application profile
@@ -62,8 +66,8 @@ export function recordSensitiveSlot(store: CrosslineStore, workspaceId: string, 
   const record = readSensitiveRecord(store, workspaceId);
   if (held) record[slot] = { confirmedAt: new Date().toISOString() }; else delete record[slot];
   store.setSetting(workspaceId, SENSITIVE_PROFILE_SETTING, JSON.stringify(record));
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, type: held ? "apply.profile.saved" : "apply.profile.removed", entityId: slot,
-    idempotencyKey: `apply.profile:${slot}:${Date.now()}:${randomUUID().slice(0, 8)}`, payload: { slot, sensitive: true } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, type: "person.decided", entityId: slot,
+    idempotencyKey: `apply.profile:${slot}:${Date.now()}:${randomUUID().slice(0, 8)}`, payload: { slot, sensitive: true, subject: "apply.profile", decision: held ? "saved" : "removed" } });
 }
 
 export const applicationProfile = (store: CrosslineStore, workspaceId: string): ProfileItem[] =>
@@ -75,13 +79,13 @@ export function saveProfileFact(store: CrosslineStore, workspaceId: string, slot
   if (isSensitiveSlot(slot)) throw new Error("PROFILE_SLOT_SENSITIVE");
   store.upsertProfileFact({ workspaceId, identityId: "person", projectId: "", slot: applySlotFact(slot), value: value.trim().slice(0, 500), status: "confirmed",
     sourceRef, sourceQuote: "", updatedAt: new Date().toISOString() });
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, type: "apply.profile.saved", entityId: slot,
-    idempotencyKey: `apply.profile:${slot}:${Date.now()}:${randomUUID().slice(0, 8)}`, payload: { slot, sensitive: false, sourceRef } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, type: "person.decided", entityId: slot,
+    idempotencyKey: `apply.profile:${slot}:${Date.now()}:${randomUUID().slice(0, 8)}`, payload: { slot, sensitive: false, sourceRef, subject: "apply.profile", decision: "saved" } });
 }
 export function removeProfileFact(store: CrosslineStore, workspaceId: string, slot: ApplicationSlot): boolean {
   const removed = store.deleteProfileFact(workspaceId, "person", "", applySlotFact(slot));
-  if (removed) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, type: "apply.profile.removed", entityId: slot,
-    idempotencyKey: `apply.profile:${slot}:${Date.now()}:${randomUUID().slice(0, 8)}`, payload: { slot, sensitive: false } });
+  if (removed) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, type: "person.decided", entityId: slot,
+    idempotencyKey: `apply.profile:${slot}:${Date.now()}:${randomUUID().slice(0, 8)}`, payload: { slot, sensitive: false, subject: "apply.profile", decision: "removed" } });
   return removed;
 }
 
@@ -109,8 +113,8 @@ export function editApplyKit(store: CrosslineStore, workspaceId: string, edit: K
       : t("删去文件「{{title}}」", { title: title.slice(0, 40) }) });
   if (!result.changed) return result;
   store.setSetting(workspaceId, APPLY_KIT_SETTING, JSON.stringify(result.kit));
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, type: "apply.kit.edited", entityId: String(result.kit.version),
-    idempotencyKey: `apply.kit:${result.kit.version}:${randomUUID().slice(0, 8)}`, payload: { version: result.kit.version, op: edit.op } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, type: "person.decided", entityId: String(result.kit.version),
+    idempotencyKey: `apply.kit:${result.kit.version}:${randomUUID().slice(0, 8)}`, payload: { version: result.kit.version, op: edit.op, subject: "apply.kit", decision: "edited" } });
   return result;
 }
 

@@ -4,7 +4,7 @@ import { SPONSOR_MODEL_CHOICE } from "@crossline/core";
 import { fakeRuntime } from "./testing/fake-runtime";
 
 // A top-tier Skill that steps down when the budget is tight, so the choice's exemption shows.
-const SKILL = "crossline:crossline-milestone-architect";
+const SKILL = "crossline:crossline-milestone-architect:design";
 const options = (skillName: string) => ({
   skillName, cwd: "C:\\repo", developerInstructions: "x", outputSchema: {}, prepareInput: (input: unknown) => input,
   validateOutput: (output: unknown) => output, onAudit: () => {}, timeoutMs: 5_000
@@ -27,7 +27,7 @@ test("the person's chosen model and effort win over the table, the economy step 
 test("a spent ChatGPT quota is said, not handed to the developer's model, when the person chose the model", async () => {
   // The developer's model stands in for this Skill while the account's ChatGPT quota is spent.
   setProviderResolver(() => ({ provider: { id: "sponsor", kind: "responses", label: "开发者提供的模型", baseUrl: "https://example.invalid/v1", model: "dev-model",
-    keyLast4: null, updatedAt: "2026-11-22T00:00:00Z" }, gatewayUrl: "http://127.0.0.1:1/x", admitted: new Set(["crossline-milestone-architect"]),
+    keyLast4: null, updatedAt: "2026-11-22T00:00:00Z" }, gatewayUrl: "http://127.0.0.1:1/x", admitted: new Set(["crossline-milestone-architect:design"]),
     codexSignedIn: true, chatgptExhausted: { until: "2026-11-23T08:00:00Z" } }) as never);
   setModelChoiceProvider(() => ({ model: "gpt-5.6-sol" }));
   const { rpc, turns } = fakeRuntime(["{}"], SKILL);
@@ -47,7 +47,7 @@ test("without a choice the table still decides, economy and all", async () => {
 
 const sponsorRouting = (extra: Record<string, unknown>) => ({ provider: { id: "sponsor", kind: "responses", label: "开发者提供的模型",
   baseUrl: "https://example.invalid/v1", model: "dev-model", keyLast4: null, updatedAt: "2026-11-22T00:00:00Z" }, gatewayUrl: "http://127.0.0.1:1/x",
-  admitted: new Set(["crossline-milestone-architect"]), codexSignedIn: true, ...extra }) as never;
+  admitted: new Set(["crossline-milestone-architect:design"]), codexSignedIn: true, ...extra }) as never;
 
 test("choosing the sponsored model keeps the run on it, not on the account's ChatGPT (2026-11-22)", async () => {
   setProviderResolver(() => sponsorRouting({}));

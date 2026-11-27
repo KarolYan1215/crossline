@@ -2,8 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import {
-  DRILL_ANSWERED, DRILL_GRADED, DRILL_ISSUE_FAILED, DRILL_ISSUED, GATE_JUDGED, weekStartOf,
+import { GATE_JUDGED, weekStartOf,
   type DrillAnsweredPayload, type DrillFile, type DrillGradedPayload, type DrillIssuedPayload, type DrillKeyEntry, type GateJudgedPayload
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
@@ -22,7 +21,8 @@ import { runGate } from "./run";
  * Grading is a gate judgement (`gate.judged`, gate `drill`) against the stored key, with a fixed file the person attached simulated
  * first and given as evidence.
  */
-export const DRILL_SKILL = "crossline-gate-drill";
+/** The owner's own plugin's Skill since 2026-11-27 (docs/plans/condense-1127.md §B): the drill is their line's, not Crossline's. */
+export const DRILL_SKILL = "crossline-personal:crossline-gate-drill";
 export const DRILL_PROMPT_VERSION = "crossline.gate.drill.v1";
 /** The names the person's files carry; the model writes only their text. */
 export const DESIGN_FILE = "dut.sv";
@@ -154,15 +154,15 @@ export const drillWeekOf = (now: Date, timeZone: string | undefined) => weekStar
 export type DrillOptions = { simulator?: Simulator; timeZone?: string; log?: (event: Record<string, unknown>) => void };
 
 function history(store: CrosslineStore, workspaceId: string) {
-  const graded = new Map(store.listEvents(workspaceId, { type: DRILL_GRADED }).map((event) => [(event.payload as DrillGradedPayload).week, event.payload as DrillGradedPayload]));
-  return store.listEvents(workspaceId, { type: DRILL_ISSUED }).map((event) => event.payload as DrillIssuedPayload)
+  const graded = new Map(store.listEvents(workspaceId, { type: "gate.changed", change: "drill_graded" }).map((event) => [(event.payload as DrillGradedPayload).week, event.payload as DrillGradedPayload]));
+  return store.listEvents(workspaceId, { type: "gate.changed", change: "drill_issued" }).map((event) => event.payload as DrillIssuedPayload)
     .sort((a, b) => b.week.localeCompare(a.week)).slice(0, 8)
     .map((drill) => ({ week: drill.week, title: drill.title, topic: drill.topic, found: graded.get(drill.week)?.found ?? "", total: drill.key.length }));
 }
 
 async function askModel(client: CodexRpcBoundary, cwd: string, input: Record<string, unknown>): Promise<Exercise | undefined> {
   const result = await runCodexSkill<Exercise>(client, input, {
-    skillName: `crossline:${DRILL_SKILL}`, cwd,
+    skillName: DRILL_SKILL, cwd,
     developerInstructions: "Write (or, with `feedback`, repair) this week's drill as the crossline-gate-drill Skill describes for mode `issue`, and return only the requested JSON.",
     outputSchema: EXERCISE_SCHEMA, prepareInput: () => input, stableKeys: ["version", "mode"],
     validateOutput: (output) => output as Exercise, onAudit: () => {}, timeoutMs: 30 * 60_000
@@ -177,8 +177,8 @@ async function askModel(client: CodexRpcBoundary, cwd: string, input: Record<str
 export async function drillIssuePass(store: CrosslineStore, workspaceId: string, client: CodexRpcBoundary, cwd: string, now = new Date(), options: DrillOptions = {}): Promise<boolean> {
   const log = options.log ?? ((event) => console.info(JSON.stringify(event)));
   const week = drillWeekOf(now, options.timeZone);
-  if (store.listEvents(workspaceId, { type: DRILL_ISSUED, entityId: week }).length) return false;
-  if (store.listEvents(workspaceId, { type: DRILL_ISSUE_FAILED, entityId: week }).length >= ISSUE_ATTEMPTS) return false;
+  if (store.listEvents(workspaceId, { type: "gate.changed", change: "drill_issued", entityId: week }).length) return false;
+  if (store.listEvents(workspaceId, { type: "gate.changed", change: "drill_issue_failed", entityId: week }).length >= ISSUE_ATTEMPTS) return false;
   const sim = options.simulator ?? iverilogSimulator();
   // Never an exercise nobody simulated: without iverilog the drill simply waits.
   if (!await sim.available()) { log({ type: "drill.simulator_missing", workspaceId, week }); return false; }
@@ -207,15 +207,15 @@ export async function drillIssuePass(store: CrosslineStore, workspaceId: string,
     files: [{ name: DESIGN_FILE, text: buggy }, { name: TESTBENCH_FILE, text: exercise.testbench }, { name: README_FILE, text: exercise.readme }],
     key: [...bugs].sort((a, b) => a.line - b.line).map((bug) => ({ line: bug.line, description: bug.description, failingCheck: bug.failingCheck, original: bug.original, replacement: bug.replacement }))
   };
-  const written = store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, type: DRILL_ISSUED, entityId: week, idempotencyKey: `${DRILL_ISSUED}:${week}`, payload });
+  const written = store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, type: "gate.changed", entityId: week, idempotencyKey: `drill.issued:${week}`, payload: { ...payload, change: "drill_issued" } });
   if (written.inserted) log({ type: "drill.issued", workspaceId, week, bugs: bugs.length, dropped: exercise.bugs.length - bugs.length });
   return written.inserted;
 }
 
 function failed(store: CrosslineStore, workspaceId: string, week: string, reason: string, bugs: number, log: (event: Record<string, unknown>) => void): false {
-  const attempt = store.listEvents(workspaceId, { type: DRILL_ISSUE_FAILED, entityId: week }).length + 1;
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, type: DRILL_ISSUE_FAILED, entityId: week,
-    idempotencyKey: `${DRILL_ISSUE_FAILED}:${week}:${attempt}`, payload: { week, reason, bugs, attempt } });
+  const attempt = store.listEvents(workspaceId, { type: "gate.changed", change: "drill_issue_failed", entityId: week }).length + 1;
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, type: "gate.changed", entityId: week,
+    idempotencyKey: `drill.issue_failed:${week}:${attempt}`, payload: { week, reason, bugs, attempt, change: "drill_issue_failed" } });
   log({ type: "drill.issue_failed", workspaceId, week, reason, bugs, attempt });
   return false;
 }
@@ -234,20 +234,20 @@ export type DrillDetail = { found: number; total: number; falsePositives: number
 
 /** `drill.answered` events with no `drill.graded` yet, oldest first. */
 export function ungradedDrillAnswers(store: CrosslineStore, workspaceId: string) {
-  const graded = new Set(store.listEvents(workspaceId, { type: DRILL_GRADED }).map((event) => event.entityId));
-  return store.listEvents(workspaceId, { type: DRILL_ANSWERED }).filter((event) => !graded.has(event.eventId));
+  const graded = new Set(store.listEvents(workspaceId, { type: "gate.changed", change: "drill_graded" }).map((event) => event.entityId));
+  return store.listEvents(workspaceId, { type: "gate.changed", change: "drill_answered" }).filter((event) => !graded.has(event.eventId));
 }
 
 function writeGraded(store: CrosslineStore, workspaceId: string, answeredId: string, week: string, total: number, judgedId: string, detail: DrillDetail | undefined) {
   const payload: DrillGradedPayload = { week, found: detail?.found ?? 0, total, falsePositives: detail?.falsePositives ?? 0, judgedId };
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, type: DRILL_GRADED, entityId: answeredId, idempotencyKey: `${DRILL_GRADED}:${answeredId}`, payload });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, type: "gate.changed", entityId: answeredId, idempotencyKey: `drill.graded:${answeredId}`, payload: { ...payload, change: "drill_graded" } });
 }
 
 /** Grades every answered drill not graded yet in one gate run. Returns how many were graded. */
 export async function drillGradePass(store: CrosslineStore, workspaceId: string, client: CodexRpcBoundary, cwd: string, now = new Date(), options: DrillOptions = {}): Promise<number> {
   const pending = ungradedDrillAnswers(store, workspaceId);
   if (!pending.length) return 0;
-  const issued = new Map(store.listEvents(workspaceId, { type: DRILL_ISSUED }).map((event) => [event.entityId, event.payload as DrillIssuedPayload]));
+  const issued = new Map(store.listEvents(workspaceId, { type: "gate.changed", change: "drill_issued" }).map((event) => [event.entityId, event.payload as DrillIssuedPayload]));
   const judged = new Map(store.listEvents(workspaceId, { type: GATE_JUDGED }).filter((event) => (event.payload as GateJudgedPayload).gate === "drill"
     && (event.payload as GateJudgedPayload).run === 1).map((event) => [event.entityId, event]));
   const sim = options.simulator ?? iverilogSimulator();

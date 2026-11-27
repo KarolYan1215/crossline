@@ -5,7 +5,7 @@ import type { CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
 import { localOnlyFile, pdkTermsOf, shownFolderLabel, type ScreenListed } from "./source-folders";
 
-export const FOLDER_CLASSIFIER = "crossline:crossline-folder-classifier";
+export const FOLDER_CLASSIFIER = "crossline:crossline-line-filer:folder";
 
 /** Files offered to the screening at most (a picked folder's readable files, most recent first; the rest are not offered). */
 const SCREEN_OFFERED = 1000;

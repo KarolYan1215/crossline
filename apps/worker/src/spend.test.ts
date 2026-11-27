@@ -26,7 +26,7 @@ test("节省额度: non-core work stops once it passes a fifth of the person's w
   store.setSetting(ws, "schedule.preferences", JSON.stringify({ timeZone: "America/Chicago" }));
   // Wednesday 10:00 in Chicago; the week began Monday 2026-10-19 05:00 UTC.
   const now = new Date("2026-10-21T15:00:00Z");
-  const row = (at: string, purpose: string, outputTokens: number) => store.saveModelUsage({ workspaceId: ws, skill: "crossline:crossline-skill-scout", tier: "", model: "gpt-5.6-terra",
+  const row = (at: string, purpose: string, outputTokens: number) => store.saveModelUsage({ workspaceId: ws, skill: "crossline:crossline-research:skills", tier: "", model: "gpt-5.6-terra",
     effort: "", spendMode: "normal", threadId: "", ok: true, errorCode: "", repairs: 0, turns: 1, inputTokens: 0, cachedInputTokens: 0, outputTokens,
     reasoningTokens: 0, totalTokens: outputTokens, durationMs: 1, at, purpose });
   row("2026-10-20T12:00:00.000Z", "", 800);

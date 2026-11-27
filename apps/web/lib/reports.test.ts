@@ -18,10 +18,10 @@ function run(store: CrosslineStore, taskId: string, files: Record<string, string
   dirs.push(directory);
   for (const [name, body] of Object.entries(files)) { mkdirSync(path.dirname(path.join(directory, name)), { recursive: true }); writeFileSync(path.join(directory, name), body); }
   writeFileSync(path.join(directory, "audit.json"), "{}");
-  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `req-${taskId}`, type: "agent.task.requested", entityId: taskId,
-    payload: { taskId, title: "按话题整理小红书收藏：早餐", category: "read_research_organize", workOrderId: "" } });
-  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `done-${taskId}`, type: "agent.task.completed", entityId: taskId,
-    payload: { taskId, directory, reviewRequired: false, artifacts: [] } });
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `req-${taskId}`, type: "agent.changed", entityId: taskId,
+    payload: { taskId, title: "按话题整理小红书收藏：早餐", category: "read_research_organize", workOrderId: "", change: "task_requested" } });
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `done-${taskId}`, type: "agent.changed", entityId: taskId,
+    payload: { taskId, directory, reviewRequired: false, artifacts: [], change: "task_completed" } });
 }
 
 const ITEMS = JSON.stringify([
@@ -70,10 +70,10 @@ test("two runs finished in the same millisecond: the later request is the latest
       manifest: { summary: "按话题整理小红书收藏" } }]));
     const tick = (ms: number) => vi.setSystemTime(new Date(Date.parse("2026-11-06T10:00:00.000Z") + ms));
     const directory = (taskId: string) => { const dir = mkdtempSync(path.join(tmpdir(), `report-${taskId}-`)); dirs.push(dir); writeFileSync(path.join(dir, "总览.md"), "# x"); writeFileSync(path.join(dir, "audit.json"), "{}"); return dir; };
-    const request = (taskId: string) => store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `req-${taskId}`, type: "agent.task.requested",
-      entityId: taskId, payload: { taskId, title: "整理", category: "read_research_organize", workOrderId: "" } });
-    const complete = (taskId: string) => store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `done-${taskId}`, type: "agent.task.completed",
-      entityId: taskId, payload: { taskId, directory: directory(taskId), reviewRequired: false, artifacts: [] } });
+    const request = (taskId: string) => store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `req-${taskId}`, type: "agent.changed",
+      entityId: taskId, payload: { taskId, title: "整理", category: "read_research_organize", workOrderId: "", change: "task_requested" } });
+    const complete = (taskId: string) => store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `done-${taskId}`, type: "agent.changed",
+      entityId: taskId, payload: { taskId, directory: directory(taskId), reviewRequired: false, artifacts: [], change: "task_completed" } });
     tick(0); request("flow-xhs-a");
     tick(1); complete("flow-xhs-a"); request("flow-xhs-b"); complete("flow-xhs-b");
     expect(listReports(TEST_CTX).map((report) => report.id)).toEqual(["flow-xhs-b"]);

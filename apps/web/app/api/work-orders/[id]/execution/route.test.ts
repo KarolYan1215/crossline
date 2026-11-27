@@ -69,8 +69,8 @@ test("archiving takes an optional reason, keeps it on the ledger, and an archive
   const before = store.listWorkOrders(TEST_CTX.workspaceId)[0]!.state;
   expect((await post({ action: "archive", reason: "提案读不通，重收一次" })).status).toBe(200);
   expect(store.listWorkOrders(TEST_CTX.workspaceId)[0]?.state).toBe("archived");
-  expect(store.listEvents(TEST_CTX.workspaceId).find((event) => event.type === "work_order.archived")?.payload)
-    .toEqual({ reason: "提案读不通，重收一次", from: before });
+  expect(store.listEvents(TEST_CTX.workspaceId).find((event) => (event.type === "work_order.changed" && (event.payload as { change?: string }).change === "archived"))?.payload)
+    .toEqual({ reason: "提案读不通，重收一次", from: before, change: "archived" });
   expect(restoreWorkOrder(TEST_CTX, "w1")).toEqual({ ok: true });
   expect(store.listWorkOrders(TEST_CTX.workspaceId)[0]?.state).toBe(before);
   expect((await post({ action: "archive", reason: "  " })).status).toBe(200);
@@ -80,7 +80,7 @@ test("archiving takes an optional reason, keeps it on the ledger, and an archive
 test("the phone's 「推迟 10 分钟」 snoozes the block it names, nothing else (2026-11-11 §3)", async () => {
   const store = seed();
   expect((await post({ action: "snooze", blockId: "scheduled:w1:v1s1" })).status).toBe(200);
-  expect(store.listEvents(TEST_CTX.workspaceId, { type: "block.snoozed" }).map((event) => (event.payload as { blockId: string }).blockId)).toEqual(["scheduled:w1:v1s1"]);
+  expect(store.listEvents(TEST_CTX.workspaceId, { type: "work_order.changed", change: "block_snoozed" }).map((event) => (event.payload as { blockId: string }).blockId)).toEqual(["scheduled:w1:v1s1"]);
   expect((await post({ action: "snooze", blockId: "scheduled:other:v1s1" })).status).toBe(409);
   expect(store.listWorkOrders(TEST_CTX.workspaceId)[0]?.state).toBe("ready_for_human");
 });

@@ -12,7 +12,7 @@ function runtime(plugins: Record<string, unknown> | undefined) {
     const req = JSON.parse(line);
     requests.push(req);
     let result: unknown = {};
-    if (req.method === "skills/list") result = { data: [{ cwd: "C:\\repo", errors: [], skills: [{ name: "crossline:crossline-step-planner", path: "C:\\skill\\SKILL.md", enabled }] }] };
+    if (req.method === "skills/list") result = { data: [{ cwd: "C:\\repo", errors: [], skills: [{ name: "crossline:crossline-task-planner", path: "C:\\skill\\SKILL.md", enabled }] }] };
     if (req.method === "skills/config/write") { enabled = req.params.enabled; result = { effectiveEnabled: enabled }; }
     if (req.method === "account/read") result = { account: { type: "chatgpt" }, requiresOpenaiAuth: false };
     if (req.method === "model/list") result = { data: [] };
@@ -31,7 +31,7 @@ function runtime(plugins: Record<string, unknown> | undefined) {
 }
 
 const run = (client: codex.CodexRpcBoundary, extra: Partial<codex.SkillRunOptions<unknown>> = {}) => codex.runCodexSkill(client, { task: "x" }, {
-  skillName: "crossline:crossline-step-planner", cwd: "C:\\repo", developerInstructions: "Plan.", outputSchema: { type: "object" },
+  skillName: "crossline:crossline-task-planner:steps", cwd: "C:\\repo", developerInstructions: "Plan.", outputSchema: { type: "object" },
   prepareInput: (value) => value, validateOutput: (output) => output, onAudit: () => {}, ...extra });
 const pluginKeys = (requests: Array<{ method: string; params: Record<string, unknown> }>) =>
   Object.keys(requests.find((request) => request.method === "thread/start")!.params.config as Record<string, unknown>).filter((key) => key.startsWith("plugins."));
@@ -59,8 +59,8 @@ test("nothing is changed when the settings hold none of ours, a named library pl
     expect(pluginKeys(fake.requests)).toEqual([]);
   }
   // A library skill whose plugin is not switched on would be turned off with the rest: the run keeps every plugin.
-  expect(codex.onlyOwnPlugins(["crossline@crossline-local"], ["crossline:crossline-step-planner", "crossline-public:deck"])).toEqual({});
-  expect(codex.onlyOwnPlugins(["crossline@crossline-local", "crossline-public@crossline-library"], ["crossline:crossline-step-planner", "crossline-public:deck"]))
+  expect(codex.onlyOwnPlugins(["crossline@crossline-local"], ["crossline:crossline-task-planner:steps", "crossline-public:deck"])).toEqual({});
+  expect(codex.onlyOwnPlugins(["crossline@crossline-local", "crossline-public@crossline-library"], ["crossline:crossline-task-planner:steps", "crossline-public:deck"]))
     .toEqual({ "plugins._default.enabled": false, "plugins.crossline@crossline-local.enabled": true, "plugins.crossline-public@crossline-library.enabled": true });
   const images = runtime(configured);
   await run(images.client, { allowImageGeneration: true, onImage: () => {} });

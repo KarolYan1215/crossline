@@ -13,7 +13,7 @@ test("a waiting item is recorded once, deferred, then closed by the person's ans
   expect(store.answerWaitingItem("w", "wait-1", { kind: "arrived" }, "o").changed).toBe(true);
   expect(store.listWaitingItems("w", { state: "open" })).toEqual([]);
   expect(store.answerWaitingItem("w", "wait-1", { kind: "cancelled" }, "o").changed).toBe(false);
-  expect(store.listEvents("w", { entityId: "wait-1" }).map((event) => event.type)).toEqual(["waiting.created", "waiting.deferred", "waiting.arrived"]);
+  expect(store.listEvents("w", { entityId: "wait-1" }).map((event) => (event.payload as { change?: string }).change)).toEqual(["created", "deferred", "arrived"]);
   expect(() => store.answerWaitingItem("w", "wait-1x", { kind: "arrived" }, "o")).toThrow("WAITING_ITEM_NOT_FOUND");
   store.close();
 });

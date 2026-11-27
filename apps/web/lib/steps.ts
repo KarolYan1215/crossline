@@ -33,7 +33,7 @@ export function requestStepReplan(ctx: AccessContext, workOrderId: string, feedb
   const store = getStore();
   if (!store.listWorkOrders(ctx.workspaceId).some((order) => order.id === workOrderId)) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `task.steps_replan_requested:${workOrderId}:${randomUUID()}`,
-    type: "task.steps_replan_requested", entityId: workOrderId, payload: { feedback: feedback.trim().slice(0, 1000) } });
+    type: "task.changed", entityId: workOrderId, payload: { feedback: feedback.trim().slice(0, 1000), change: "steps_replan_requested" } });
   requestTaskPass(ctx);
   return { ok: true };
 }
@@ -51,7 +51,7 @@ export function reportProgress(ctx: AccessContext, workOrderId: string, text: st
   if (!store.listWorkOrders(ctx.workspaceId).some((order) => order.id === workOrderId)) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   const reportId = randomUUID();
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `task.progress_reported:${reportId}`,
-    type: "task.progress_reported", entityId: workOrderId, payload: { reportId, text: text.trim().slice(0, 2000) } });
+    type: "task.changed", entityId: workOrderId, payload: { reportId, text: text.trim().slice(0, 2000), change: "progress_reported" } });
   // The judge takes only how far the steps are; a date, a person or a fact said in the report is read for the ledger as well.
   const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === workOrderId)!;
   keepNote(ctx, text, { kind: "progress", id: reportId }, `任务「${taskTitleOf(order)}」的进度`); // i18n-ignore: context for the extraction model
@@ -64,7 +64,7 @@ export function confirmCriterion(ctx: AccessContext, workOrderId: string, criter
   const store = getStore();
   if (!store.listWorkOrders(ctx.workspaceId).some((order) => order.id === workOrderId)) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `criterion.confirmed:${workOrderId}:${criterionId}`,
-    type: "criterion.confirmed", entityId: workOrderId, payload: { criterionId } });
+    type: "task.changed", entityId: workOrderId, payload: { criterionId, change: "criterion_confirmed" } });
   const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === workOrderId)!;
   const statement = store.listMilestones(ctx.workspaceId).filter((item) => item.id === order.milestoneId).at(-1)?.successCriteria
     .find((criterion) => criterion.id === criterionId)?.statement ?? criterionId;

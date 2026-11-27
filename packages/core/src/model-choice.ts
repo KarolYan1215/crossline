@@ -5,6 +5,8 @@
  * does not have, or a spent quota, is said as such (`packages/codex/src/skill-runner.ts`). Only runs on the account's own Codex take it;
  * a provider's model is the provider's.
  */
+import { currentSkillKeys, skillKey } from "./skill-modes";
+
 export const MODEL_CHOICE_SETTING = "model.choice";
 
 /** The slot for every Skill without a choice of its own. */
@@ -24,11 +26,11 @@ export type ModelChoices = Record<string, ModelChoice>;
 export const MODEL_CHOICE_SLOTS = [
   { key: "crossline-onboarding", label: "访谈" },
   { key: "crossline-onboarding-extract", label: "整理层" },
-  { key: "crossline-onboarding-research", label: "调研层" },
+  { key: "crossline-research:onboarding", label: "调研层" },
   // The main input box (2026-11-25, the owner: the model is switched where the person talks, not only in Settings).
   { key: "crossline-concierge", label: "对话" },
   // What the box hands to the assistant; the tools-mode assistant shares the slot (`modelChoiceFor`).
-  { key: "crossline-agent", label: "助手任务" },
+  { key: "crossline-agent:shell", label: "助手任务" },
   { key: OTHER_SKILLS, label: "其他 Skill" }
 ] as const;
 export type ModelChoiceSlot = (typeof MODEL_CHOICE_SLOTS)[number]["key"];
@@ -55,7 +57,9 @@ export function modelChoicesOf(raw: string | null | undefined): ModelChoices {
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
     const choices: ModelChoices = {};
-    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    for (const [stored, value] of Object.entries(parsed as Record<string, unknown>)) {
+      // A choice stored under a Skill's name before the merge of 2026-11-27 (`crossline-agent`) is read as its slot now.
+      const key = isModelChoiceSlot(stored) ? stored : currentSkillKeys(stored)[0]!;
       if (!isModelChoiceSlot(key) || !value || typeof value !== "object") continue;
       const { model, effort } = value as { model?: unknown; effort?: unknown };
       if (modelChoiceProblem({ model, effort })) continue;
@@ -67,8 +71,8 @@ export function modelChoicesOf(raw: string | null | undefined): ModelChoices {
 
 /** The choice a Skill runs on: its own slot's, else the one for every other Skill, else none (the route table decides). */
 export function modelChoiceFor(choices: ModelChoices, skillName: string): ModelChoice | undefined {
-  const key = skillName.replace(/^crossline:/, "");
-  return choices[key === "crossline-agent-tools" ? "crossline-agent" : key] ?? choices[OTHER_SKILLS];
+  const key = skillKey(skillName);
+  return choices[key === "crossline-agent:functions" ? "crossline-agent:shell" : key] ?? choices[OTHER_SKILLS];
 }
 
 /** The choices with one slot set, or cleared with `null` (back to the route table). */

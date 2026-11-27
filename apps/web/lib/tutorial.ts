@@ -13,9 +13,9 @@ export function requestTutorial(ctx: AccessContext, workOrderId: string): { ok: 
   const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === workOrderId);
   if (!order) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   if (!["approved", "preparing", "ready_for_human", "active"].includes(order.state)) return { ok: false, code: "TUTORIAL_NOT_AVAILABLE" };
-  const attempt = store.listEvents(ctx.workspaceId, { type: "tutorial.requested", entityId: workOrderId }).length;
+  const attempt = store.listEvents(ctx.workspaceId, { type: "materials.changed", change: "tutorial_requested", entityId: workOrderId }).length;
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `tutorial.requested:${workOrderId}:${attempt}`,
-    type: "tutorial.requested", entityId: workOrderId, payload: {} });
+    type: "materials.changed", entityId: workOrderId, payload: { change: "tutorial_requested" } });
   requestCodexSupervisor(ctx, `/v1/work-orders/${encodeURIComponent(workOrderId)}/tutorial`, {
     method: "POST", headers: { "content-type": "application/json" }, body: "{}", signal: AbortSignal.timeout(10_000)
   }).catch(() => {});

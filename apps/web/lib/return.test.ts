@@ -114,7 +114,7 @@ test("one tap each: 完成 hands the task in with how long it took; 做了一部
   expect(store.getWorkOrder(ws, "read")!.state).toBe("approved");
   // Answering is the person acting: they are back.
   expect(returnDue(TEST_CTX, now)).toBeUndefined();
-  expect(store.listEvents(ws, { type: "return.answered" }).map((event) => (event.payload as { verdict: string }).verdict)).toEqual(["done", "partial", "dropped", "rolled"]);
+  expect(store.listEvents(ws, { type: "ask.changed", change: "return_answered" }).map((event) => (event.payload as { verdict: string }).verdict)).toEqual(["done", "partial", "dropped", "rolled"]);
 });
 
 test("proposals and drafts nobody touched for fourteen days are archived, recoverable; newer and edited ones stay", () => {
@@ -125,7 +125,7 @@ test("proposals and drafts nobody touched for fourteen days are archived, recove
   store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: ws, idempotencyKey: "p-old", type: "milestone.proposed", entityId: "draft-old", payload: {} });
   store.saveMilestone({ id: "draft-edited", ownerId: TEST_CTX.principalId, workspaceId: ws, identityId: "research", projectId: "ece555", title: "ECE 548 期中 90 分", status: "draft", version: 1 });
   store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: ws, idempotencyKey: "p-ed", type: "milestone.proposed", entityId: "draft-edited", payload: {} });
-  store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: ws, idempotencyKey: "r-ed", type: "milestone.revised", entityId: "draft-edited", payload: {} });
+  store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: ws, idempotencyKey: "r-ed", type: "milestone.changed", entityId: "draft-edited", payload: { change: "revised" } });
   // Today nothing is fourteen days old.
   expect(cleanStale(TEST_CTX, new Date())).toEqual({ ok: true, orders: [], milestones: [] });
   const later = new Date(Date.now() + 15 * DAY);
@@ -157,11 +157,11 @@ test("each step that had a time while away is its own item, named 「任务 · �
   expect(answerReturn(TEST_CTX, "paper", "done", { stepId: s1!, minutes: 40 }, now)).toEqual({ ok: true });
   expect(store.getStepPlan(ws, "paper")!.steps.map((item) => item.status)).toEqual(["done", "planned", "planned"]);
   expect(store.getWorkOrder(ws, "paper")!.state).toBe("approved");
-  expect(store.listEvents(ws, { type: "execution.confirmed", entityId: "paper" })[0]?.payload).toMatchObject({ minutes: 40, source: "one_tap" });
+  expect(store.listEvents(ws, { type: "execution.changed", change: "confirmed", entityId: "paper" })[0]?.payload).toMatchObject({ minutes: 40, source: "one_tap" });
   // 顺延 on the other settles only that step.
   expect(answerReturn(TEST_CTX, "paper", "rolled", { stepId: s2! }, now)).toEqual({ ok: true });
   expect(returnView(TEST_CTX, since.toISOString(), now).items).toEqual([]);
-  expect(store.listEvents(ws, { type: "return.answered" }).map((event) => (event.payload as { stepId?: string }).stepId)).toEqual([s1, s2]);
+  expect(store.listEvents(ws, { type: "ask.changed", change: "return_answered" }).map((event) => (event.payload as { stepId?: string }).stepId)).toEqual([s1, s2]);
 });
 
 test("an overdue task listed by its current step is settled by one answer: the next step does not come up as a new item", () => {
@@ -224,14 +224,14 @@ test("做了一部分: a level records 1/4, 2/4 or 3/4 of the step; nothing at a
   // A level: 做了一半左右 is two quarters of this step; nothing to ask later.
   expect(answerReturn(TEST_CTX, "hw7", "partial", { stepId: s1!, level: "less" }, now)).toEqual({ ok: true });
   expect(quarters("hw7")).toEqual([["planned", 2], ["planned", 0]]);
-  expect(store.listEvents(ws, { type: "return.answered", entityId: "hw7" })[0]?.payload).toMatchObject({ verdict: "partial", level: "less" });
+  expect(store.listEvents(ws, { type: "ask.changed", change: "return_answered", entityId: "hw7" })[0]?.payload).toMatchObject({ verdict: "partial", level: "less" });
   // Words only: the page sends them to the box; the answer is not unclear.
   expect(answerReturn(TEST_CTX, "plain", "partial", { note: "读到第 3 节" }, now)).toEqual({ ok: true });
-  expect(store.listEvents(ws, { type: "return.answered", entityId: "plain" })[0]?.payload).toMatchObject({ note: "读到第 3 节" });
+  expect(store.listEvents(ws, { type: "ask.changed", change: "return_answered", entityId: "plain" })[0]?.payload).toMatchObject({ note: "读到第 3 节" });
   // Nothing chosen, nothing said: no progress invented, the step is kept as unclear and asked about once, at an idle moment.
   expect(answerReturn(TEST_CTX, "hw6", "partial", { stepId: s1! }, now)).toEqual({ ok: true });
   expect(quarters("hw6")).toEqual([["planned", 0], ["planned", 0]]);
-  expect(store.listEvents(ws, { type: "return.answered", entityId: "hw6" })[0]?.payload).toMatchObject({ verdict: "partial", stepId: s1, unclear: true });
+  expect(store.listEvents(ws, { type: "ask.changed", change: "return_answered", entityId: "hw6" })[0]?.payload).toMatchObject({ verdict: "partial", stepId: s1, unclear: true });
   const asks = progressAsks(TEST_CTX, now);
   expect(asks.map((ask) => [ask.kind, ask.entityId])).toEqual([["progress_check", "hw6"]]);
   expect(asks[0]!.title).toContain("做到哪了");

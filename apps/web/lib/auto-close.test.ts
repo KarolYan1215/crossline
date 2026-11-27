@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore, type StepPlanInput } from "@crossline/db";
 vi.mock("server-only", () => ({}));
 vi.mock("./codex-runtime", () => ({ requestCodexSupervisor: vi.fn(async () => ({})), CodexSupervisorRequestError: class extends Error {} }));
-import { AUTO_CLOSED_EVENT, autoCloseFinished, finishedByPerson } from "./auto-close";
+import { autoCloseFinished, finishedByPerson } from "./auto-close";
 import { undoOp } from "./undo";
 import { TEST_CTX } from "./test-support";
 
@@ -49,6 +49,6 @@ test("撤销 opens the task again, and it is not closed by itself a second time"
   const op = store.listEvents(ws, { type: "op.applied" }).at(-1)!;
   expect(undoOp(TEST_CTX, op.entityId)).toMatchObject({ ok: true });
   expect(store.getWorkOrder(ws, "waiting")!.state).toBe("approved");
-  expect(store.listEvents(ws, { type: AUTO_CLOSED_EVENT })).toHaveLength(2);
+  expect(store.listEvents(ws, { type: "work_order.changed", change: "auto_closed" })).toHaveLength(2);
   expect(autoCloseFinished(TEST_CTX)).toEqual([]);
 });

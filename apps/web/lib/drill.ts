@@ -1,6 +1,5 @@
 import "server-only";
-import {
-  DRILL_ANSWERED, DRILL_GRADED, DRILL_ISSUED, GATE_JUDGED, type AccessContext, type DrillAnswer as Answer, type DrillAnsweredPayload as AnsweredPayload,
+import { GATE_JUDGED, type AccessContext, type DrillAnswer as Answer, type DrillAnsweredPayload as AnsweredPayload,
   type DrillFile, type DrillGradedPayload as GradedPayload, type DrillIssuedPayload as IssuedPayload, type DrillMatch as Match, type GateJudgedPayload
 } from "@crossline/core";
 import { getStore } from "./crossline";
@@ -27,9 +26,9 @@ export type DrillView = {
 
 export function loadDrill(ctx: AccessContext): DrillView {
   const store = getStore();
-  const issued = store.listEvents(ctx.workspaceId, { type: DRILL_ISSUED }).sort((a, b) => b.entityId.localeCompare(a.entityId));
-  const answered = new Map(store.listEvents(ctx.workspaceId, { type: DRILL_ANSWERED }).map((event) => [event.entityId, event]));
-  const graded = new Map(store.listEvents(ctx.workspaceId, { type: DRILL_GRADED }).map((event) => [(event.payload as GradedPayload).week, event]));
+  const issued = store.listEvents(ctx.workspaceId, { type: "gate.changed", change: "drill_issued" }).sort((a, b) => b.entityId.localeCompare(a.entityId));
+  const answered = new Map(store.listEvents(ctx.workspaceId, { type: "gate.changed", change: "drill_answered" }).map((event) => [event.entityId, event]));
+  const graded = new Map(store.listEvents(ctx.workspaceId, { type: "gate.changed", change: "drill_graded" }).map((event) => [(event.payload as GradedPayload).week, event]));
   const history = issued.map((event) => {
     const drill = event.payload as IssuedPayload;
     const grade = graded.get(drill.week)?.payload as GradedPayload | undefined;
@@ -66,9 +65,9 @@ export type AnswerDrillInput = { week: unknown; answers: unknown; fixedFile?: un
 export function answerDrill(ctx: AccessContext, input: AnswerDrillInput): { ok: true } | { ok: false; code: string } {
   const store = getStore();
   const week = typeof input.week === "string" ? input.week : "";
-  const issued = week ? store.listEvents(ctx.workspaceId, { type: DRILL_ISSUED, entityId: week })[0] : undefined;
+  const issued = week ? store.listEvents(ctx.workspaceId, { type: "gate.changed", change: "drill_issued", entityId: week })[0] : undefined;
   if (!issued) return { ok: false, code: "DRILL_NOT_FOUND" };
-  if (store.listEvents(ctx.workspaceId, { type: DRILL_ANSWERED, entityId: week }).length) return { ok: false, code: "DRILL_ALREADY_ANSWERED" };
+  if (store.listEvents(ctx.workspaceId, { type: "gate.changed", change: "drill_answered", entityId: week }).length) return { ok: false, code: "DRILL_ALREADY_ANSWERED" };
   if (!Array.isArray(input.answers) || !input.answers.length || input.answers.length > MAX_ANSWERS) return { ok: false, code: "DRILL_ANSWER_INVALID" };
   const answers: Answer[] = [];
   for (const raw of input.answers as Array<Record<string, unknown> | null>) {
@@ -85,6 +84,6 @@ export function answerDrill(ctx: AccessContext, input: AnswerDrillInput): { ok: 
     fixedFile = { name, text: file.text };
   }
   const payload: AnsweredPayload = { week, issuedId: issued.eventId, answers, ...(fixedFile ? { fixedFile } : {}) };
-  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, type: DRILL_ANSWERED, entityId: week, idempotencyKey: `${DRILL_ANSWERED}:${week}`, payload });
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, type: "gate.changed", entityId: week, idempotencyKey: `drill.answered:${week}`, payload: { ...payload, change: "drill_answered" } });
   return { ok: true };
 }

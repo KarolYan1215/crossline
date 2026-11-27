@@ -564,7 +564,7 @@ const actionValue = { anyOf: [
   { type: "object", additionalProperties: false, required: ["text"], properties: { text: { type: "string", maxLength: 200 } } },
   { type: "null" }] } as const;
 export const FORM_PAGE_KINDS = ["form", "confirmation", "login", "captcha", "payment", "closed", "other"] as const;
-/** `crossline-form-filler`: one page's proposed actions, in the order to do them (fields first, at most one next/submit last). */
+/** `crossline-form-page:fill`: one page's proposed actions, in the order to do them (fields first, at most one next/submit last). */
 export const FORM_FILL_SCHEMA = {
   type: "object", additionalProperties: false, required: ["pageKind", "actions", "note"],
   properties: {
@@ -575,7 +575,7 @@ export const FORM_FILL_SCHEMA = {
     note: { type: "string", maxLength: 300 }
   }
 } as const;
-/** `crossline-form-checker`: whether the list about to be submitted fits the intent, judged from the list alone. */
+/** `crossline-outward-check:form`: whether the list about to be submitted fits the intent, judged from the list alone. */
 export const FORM_CHECK_SCHEMA = {
   type: "object", additionalProperties: false, required: ["ok", "problems"],
   properties: {

@@ -70,7 +70,7 @@ test("each thread's lessons go to the account that ran it, nobody's are skipped,
   const first = store.createPrincipalWithWorkspace("user-a", "A").workspace.id;
   const second = store.createPrincipalWithWorkspace("user-b", "B").workspace.id;
   const usage = { tier: "mid", model: "m", effort: "low", spendMode: "normal", ok: true, errorCode: "", repairs: 0, turns: 1, inputTokens: 0, cachedInputTokens: 0,
-    outputTokens: 0, reasoningTokens: 0, totalTokens: 0, durationMs: 0, at: "2026-10-06T00:00:00.000Z", skill: "crossline:crossline-agent" };
+    outputTokens: 0, reasoningTokens: 0, totalTokens: 0, durationMs: 0, at: "2026-10-06T00:00:00.000Z", skill: "crossline:crossline-agent:shell" };
   store.saveModelUsage({ ...usage, workspaceId: first, threadId: "thread-a" });
   store.saveModelUsage({ ...usage, workspaceId: second, threadId: "thread-b" });
 
@@ -91,7 +91,7 @@ test("each thread's lessons go to the account that ran it, nobody's are skipped,
   expect(existsSync(path.join(home, "memories"))).toBe(false);
   expect(existsSync(path.join(home, "memories_1.sqlite"))).toBe(false);
   expect(store.getSetting(first, CODEX_MEMORY_IMPORT_MARKER)).toBeTruthy();
-  expect(store.listEvents(first, { type: "lessons.imported_from_codex_memory" })).toHaveLength(1);
+  expect(store.listEvents(first, { type: "job.ran", job: "lessons.codex_memory_import" })).toHaveLength(1);
   // Once only.
   expect(importCodexMemories(store, { homes: [{ label: "owner", dir: home }], dataDir, now })).toBeUndefined();
   store.close();

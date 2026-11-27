@@ -24,7 +24,7 @@ function hoursOnRecord(store: CrosslineStore, workspaceId: string): NonNullable<
     return (proposal?.windows ?? []).map((window) => ({ days: window.days, startMinute: minute(window.start), endMinute: minute(window.end), energy: window.energy }));
   } catch { return []; }
 }
-import { DATES_UNRECORDED_EVENT, ONBOARDING_UNRECORDED_EVENT, persistExtraction, personTimeZone, readProfileModel, readSectionRecords } from "./onboarding-persist";
+import { persistExtraction, personTimeZone, readProfileModel, readSectionRecords } from "./onboarding-persist";
 import { readResearch, researchFindings } from "./onboarding-research";
 import { sourceIds } from "./source-ids";
 import { DOMAIN_PACKS, domainGuides } from "@crossline/identity-packs";
@@ -190,8 +190,8 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     const at = new Date().toISOString();
     writeExtractState(store, workspaceId, laneStateKey(sessionId, lane), { ...state, failures, lastError: { code, message, at }, retryAt: new Date(Date.now() + wait * 60_000).toISOString() });
     const ownerId = store.getWorkspaceOwnerId(workspaceId);
-    if (ownerId) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:extract-failed:${sessionId}:${at}`, type: "onboarding.extract_failed",
-      entityId: sessionId, payload: { code, message: message.slice(0, 300), failures, lane } });
+    if (ownerId) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:extract-failed:${sessionId}:${at}`, type: "job.ran",
+      entityId: sessionId, payload: { code, message: message.slice(0, 300), failures, lane, job: "onboarding.extract", state: "failed" } });
     return { state: "blocked", sessionId, code, message };
   }
 
@@ -403,7 +403,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       // The 「符合」 was said in the last reply this run read, and the portrait was rewritten with it in hand: the confirmation holds for the
       // portrait it wrote (before, the person was asked to confirm again every round, 2026-10-16). Not when a correction followed it.
       const lastSeq = pendingReplies.at(-1)?.seq;
-      const confirmedHere = writes("sections") && !focus && !notes && lastSeq !== undefined && store.listEvents(workspaceId, { type: "profile.confirmed" })
+      const confirmedHere = writes("sections") && !focus && !notes && lastSeq !== undefined && store.listEvents(workspaceId, { type: "profile.changed", change: "confirmed" })
         .some((event) => (event.payload as { sessionId?: string; replySeq?: number }).sessionId === sessionId && Number((event.payload as { replySeq?: number }).replySeq) === lastSeq);
       if (confirmedHere) store.setSetting(workspaceId, PROFILE_CONFIRMED, JSON.stringify({ fingerprint: portraitFingerprint(readProfileModel(store, workspaceId)), at: new Date().toISOString() }));
       // Read again here, inside the transaction: the dialogue may have queued files while the model ran.
@@ -427,20 +427,20 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       if (finishing && profileTask) markFinishing(store, workspaceId, sessionId, finishing.runs + 1);
     });
     nearTermCaptures(store, workspaceId, ownerId, sessionId, result.output.slotUpdates);
-    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:extracted:${sessionId}:${upTo}:${new Date().toISOString()}`, type: "onboarding.extracted",
+    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:extracted:${sessionId}:${upTo}:${new Date().toISOString()}`, type: "job.ran",
       entityId: sessionId, payload: { replies: pendingReplies.length, files: taken.length, facts: result.output.slotUpdates.length,
-        repairs: result.audit.repairs ?? 0, warnings: result.audit.warnings ?? [], pruned, lane } });
-    if (pruned.length) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:unrecorded:${sessionId}:${upTo}:${randomUUID()}`, type: ONBOARDING_UNRECORDED_EVENT,
-      entityId: sessionId, payload: { dropped: pruned.map((title) => ({ title, code: "NOT_KEPT" })) } });
+        repairs: result.audit.repairs ?? 0, warnings: result.audit.warnings ?? [], pruned, lane, job: "onboarding.extract", state: "done" } });
+    if (pruned.length) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:unrecorded:${sessionId}:${upTo}:${randomUUID()}`, type: "onboarding.changed",
+      entityId: sessionId, payload: { dropped: pruned.map((title) => ({ title, code: "NOT_KEPT" })), change: "unrecorded" } });
     if (full.length) {
       const t = tOfWorkspace(store, workspaceId);
       const limit = (items: typeof full) => items.map(({ path, max }) => ({ title: t("{{what}}（这次读到上限 {{max}} 条）", { what: t(LIMITED_LISTS[path]!), max }), code: "LIMIT_REACHED" }));
       const dates = full.filter((item) => item.path.startsWith("fileDates.")), rest = full.filter((item) => !item.path.startsWith("fileDates."));
       // The dates' limit is listed with the date list (its drops), the others with what the interview was not able to keep.
-      if (dates.length) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `dates:unrecorded:limit:${sessionId}:${upTo}:${randomUUID()}`, type: DATES_UNRECORDED_EVENT,
-        entityId: sessionId, payload: { dropped: limit(dates) } });
-      if (rest.length) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:unrecorded:limit:${sessionId}:${upTo}:${randomUUID()}`, type: ONBOARDING_UNRECORDED_EVENT,
-        entityId: sessionId, payload: { dropped: limit(rest) } });
+      if (dates.length) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `dates:unrecorded:limit:${sessionId}:${upTo}:${randomUUID()}`, type: "onboarding.changed",
+        entityId: sessionId, payload: { dropped: limit(dates), change: "dates_unrecorded" } });
+      if (rest.length) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:unrecorded:limit:${sessionId}:${upTo}:${randomUUID()}`, type: "onboarding.changed",
+        entityId: sessionId, payload: { dropped: limit(rest), change: "unrecorded" } });
     }
     if (!focus && !notes && session?.state === "active") await injectBack(store, workspaceId, client, session.codexThreadId, lane, result.output.slotUpdates.length);
     const more = Boolean(nextSession([], lane));
@@ -634,8 +634,11 @@ export const extractionSettled = (workspaceId: string, lane?: ExtractLane): Prom
   ? inFlight.get(slotOf(workspaceId, lane))?.promise ?? Promise.resolve()
   : Promise.all(slotsOf(workspaceId).map((slot) => inFlight.get(slot)?.promise ?? Promise.resolve())).then(() => undefined);
 
-/** The person's 「没有」 to the near-term question (`near_term` with no task in it). */
-export const NO_NEAR_TERM = /^\s*(没有|无|暂无|没有了|都没有|none|nothing|no)\s*[。.!！]?\s*$/i;
+/**
+ * The person's 「没有」 to the near-term question: the extraction writes this fixed value (its Skill), in any language (2026-11-27: a token
+ * the schema names, instead of a word list over what the person said).
+ */
+export const NO_NEAR_TERM = "none";
 /**
  * What the person said they will finish this week or next (`near_term`, 2026-11-20 §3.6): each becomes a capture the moment it is said, so
  * the Today page has it before the interview ends. The person's own words are exempt from the milestone gate (round 1, R1-2): analysed and
@@ -645,7 +648,7 @@ export function nearTermCaptures(store: CrosslineStore, workspaceId: string, own
   const t = tOfWorkspace(store, workspaceId);
   let made = 0;
   for (const fact of facts) {
-    if (fact.slot !== "near_term" || fact.status !== "confirmed" || !fact.value.trim() || NO_NEAR_TERM.test(fact.value)) continue;
+    if (fact.slot !== "near_term" || fact.status !== "confirmed" || !fact.value.trim() || fact.value.trim().toLowerCase() === NO_NEAR_TERM) continue;
     const key = createHash("sha256").update(`${fact.identityId}|${fact.value.trim()}`).digest("hex").slice(0, 12);
     const id = `cap-interview-${key}`;
     if (store.listCaptures(workspaceId).some((capture) => capture.id === id)) continue;

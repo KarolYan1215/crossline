@@ -1,13 +1,13 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { formatInTimeZone } from "date-fns-tz";
-import { dueProvenance, listAgentTasks, type StoredConversationMessage } from "@crossline/db";
+import { dueProvenance, listAgentTasks, type EventFilter, type StoredConversationMessage } from "@crossline/db";
 import {
   askNature, availableSlots, calendarLineOf, inferBlockOutcome, OVER_CAPACITY_TAG, type InferredOutcome, isCancelledEvent, onPersonsBoard, planNudges, preparesOf, taskTitleOf,
   type AccessContext, type NotifyLevelName, type NudgeBlock, type NudgeEnding, type NudgeButton, type NudgeKind, type NudgeSlack, type PlannedNudge, type ProposedAction,
   QUIET_HOURS_SETTING, inQuiet, quietHoursOf, forgottenTimerStop
 } from "@crossline/core";
-import { commitSoon, effectiveSchedulePreferences, energyAnswerMatters, getStore, loadCurrentPlan, planToday, readAvailability, STEP_FOCUSED, stopWorkOrderExecutionAt,
+import { commitSoon, effectiveSchedulePreferences, energyAnswerMatters, getStore, loadCurrentPlan, planToday, readAvailability, stopWorkOrderExecutionAt,
   toZonedInstant, calendarMarks } from "./crossline";
 import { blockWorkMinutes, dayCapacityOf, measuredCapacityOn, measuredView } from "./measured-capacity";
 import { listed, openAsks, thisWeek } from "./asks";
@@ -191,7 +191,7 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
   // The step the session is about: the block's own step it was started on (`focusStep`, W-258), else the task's first open one — the
   // usual minutes 「超时」 measures against are that step's.
   const openSteps = timerOrder ? (store.getStepPlan(ctx.workspaceId, timerOrder.id)?.steps ?? []).filter((step) => step.status === "planned") : [];
-  const focused = timerOrder && running ? (store.listEvents(ctx.workspaceId, { type: STEP_FOCUSED, entityId: timerOrder.id })
+  const focused = timerOrder && running ? (store.listEvents(ctx.workspaceId, { type: "task.changed", change: "step_focused", entityId: timerOrder.id })
     .filter((event) => event.createdAt >= running.startedAt).at(-1)?.payload as { stepId?: string } | undefined)?.stepId : undefined;
   const currentStep = openSteps.find((step) => step.id === focused) ?? openSteps[0];
   // A timer nobody stopped (2026-11-11, 15:37 to 20:58 on one step): stopped where 「超时」 was due, and said once.
@@ -254,7 +254,7 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
  */
 function snoozesOn(ctx: AccessContext, day: string, local: (iso: string) => string): Map<string, { count: number; until: string }> {
   const out = new Map<string, { count: number; until: string }>();
-  for (const event of getStore().listEvents(ctx.workspaceId, { type: "block.snoozed" })) {
+  for (const event of getStore().listEvents(ctx.workspaceId, { type: "work_order.changed", change: "block_snoozed" })) {
     const payload = event.payload as { blockId?: string; day?: string; until?: string };
     if (payload.day !== day || !payload.blockId || !payload.until) continue;
     const before = out.get(payload.blockId);
@@ -454,7 +454,7 @@ export async function ensureOpener(ctx: AccessContext, now = new Date(), force =
     const acted = ((existing.payload.card as Card | undefined)?.items ?? []).some((item) => item.state !== "pending");
     // Something that moves today's work since it was read (a task handed in, a step done, a postponement, new hours) rewrites it at the
     // next poll instead of up to five minutes later: it said 「工作 3 段 · 共 3.2 小时」 beside a calendar holding 0.3 hours (W-250).
-    const changed = Date.parse(store.latestEventAt(ctx.workspaceId, OPENER_PLAN_EVENTS) ?? "") > read;
+    const changed = Date.parse(OPENER_PLAN_EVENTS.map((filter) => store.latestEventAt(ctx.workspaceId, filter) ?? "").sort().at(-1) ?? "") > read;
     if (acted || (!changed && now.getTime() - read < OPENER_REFRESH_MS)) return false;
   }
   const { fixed, work, soon, asks, records, opener } = await dayAtGlance(ctx, now);
@@ -498,9 +498,10 @@ export async function ensureOpener(ctx: AccessContext, now = new Date(), force =
 }
 
 /** Events that change today's placed work: the opener is read again at once after one of them. */
-const OPENER_PLAN_EVENTS = ["work_order.transitioned", "work_order.archived", "work_order.deferred", "work_order.reopened", "work_order.due_changed",
-  "work_order.created", "task.step_progress", "task.steps_planned", "task.postponed", "block.confirmed", "plan.approved", "plan.reality_changed",
-  "schedule.preferences_saved", "schedule.params_saved"];
+const OPENER_PLAN_EVENTS: EventFilter[] = [{ type: "work_order.transitioned" },
+  { type: "work_order.changed", change: ["archived", "deferred", "reopened", "due_changed", "block_confirmed"] },
+  { type: "task.changed", change: ["step_progress", "steps_planned", "postponed"] }, { type: "plan.changed", change: ["approved", "reality_changed"] },
+  { type: "person.decided", subject: "schedule" }];
 
 /** How often the day's opener is read again to keep it current. */
 const OPENER_REFRESH_MS = 5 * 60_000;

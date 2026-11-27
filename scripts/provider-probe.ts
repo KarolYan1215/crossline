@@ -5,7 +5,7 @@
  *   pnpm exec tsx scripts/provider-probe.ts [chat|responses|thread-config|all]
  *
  * Real runs, no fakes: a throwaway CODEX_HOME per probe, the pinned Codex binary (`CROSSLINE_CODEX_PATH`, else the fork in vendor/),
- * the Crossline plugin installed, and the real `crossline-task-titler` Skill with its real schema and validator.
+ * the Crossline plugin installed, and the real `crossline-goal-backplanner:title` Skill with its real schema and validator.
  *
  *  - chat:          a Chat-Completions-only endpoint behind the local bridge (`chat-bridge.ts`). Default upstream is the local Ollama's
  *                   `/v1/chat/completions`; set PROBE_CHAT_BASE_URL (+ PROBE_CHAT_KEY_ENV naming the env var that holds the key) for
@@ -55,7 +55,7 @@ async function withRuntime<T>(label: string, configToml: string, work: (client: 
     port: 3390 + Math.floor(Math.random() * 8),
     sidecarFactory: () => startCodexAppServer(home),
     plugin: { name: "crossline", marketplacePath: path.join(repoRoot, "skills", "marketplace", ".agents", "plugins", "marketplace.json"),
-      cwd: repoRoot, requiredSkills: ["crossline:crossline-task-titler"] }
+      cwd: repoRoot, requiredSkills: ["crossline:crossline-goal-backplanner:title"] }
   });
   try { return await work(supervisor.client); } finally { await supervisor.stop(); }
 }
@@ -63,7 +63,7 @@ async function withRuntime<T>(label: string, configToml: string, work: (client: 
 async function titlerTurn(client: CodexRpcBoundary): Promise<unknown> {
   const context = { version: "crossline.task-titles.v1", tasks };
   const started = Date.now();
-  const result = await runCodexSkill<TaskTitles>(client, context, { skillName: "crossline:crossline-task-titler", cwd: repoRoot,
+  const result = await runCodexSkill<TaskTitles>(client, context, { skillName: "crossline:crossline-goal-backplanner:title", cwd: repoRoot,
     developerInstructions: "Name each task as the Skill describes. Return raw JSON only.", outputSchema: TASK_TITLES_SCHEMA, prepareInput: () => context,
     validateOutput: (output) => validateTaskTitles(output, tasks.map((task) => task.id)), onAudit: () => {}, timeoutMs: 15 * 60_000 });
   return { seconds: Math.round((Date.now() - started) / 1000), ...result, usage: usage.at(-1) };

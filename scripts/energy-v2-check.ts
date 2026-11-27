@@ -75,6 +75,6 @@ for (let back = 13; back >= 0; back -= 1) {
   const capacity = model.capacity(at.toISOString(), day);
   if (capacity.multiplier < 1) console.log(`  ${day}: capacity ${capacity.multiplier} — ${capacity.basis.join("；")}`);
 }
-const samples = store.listEvents(ws, { type: "block.confirmed" }).filter((event) => (event.payload as { energy?: unknown }).energy);
+const samples = store.listEvents(ws, { type: "work_order.changed", change: "block_confirmed" }).filter((event) => (event.payload as { energy?: unknown }).energy);
 console.log(`completion checks carrying block energy: ${samples.length} (factors are learned only once the backtest beats 0.8/0.65)`);
 store.close();

@@ -9,7 +9,7 @@ import { LINE_SETTING, readLineSpecs } from "@crossline/identity-packs";
 import { identityLines } from "./lines";
 import { ownerOf } from "./owner";
 
-export const GOAL_SPLITTER = "crossline:crossline-goal-splitter";
+export const GOAL_SPLITTER = "crossline:crossline-milestone-architect:split";
 
 const goalHash = (goal: string) => createHash("sha256").update(goal.trim()).digest("hex").slice(0, 16);
 
@@ -19,7 +19,7 @@ const goalHash = (goal: string) => createHash("sha256").update(goal.trim()).dige
  * person rewrites later is a new goal and is split again.
  */
 export function linesAwaitingSplit(store: CrosslineStore, workspaceId: string): GoalSplitContext["lines"] {
-  const done = new Set(store.listEvents(workspaceId, { type: "line.goal_split" }).map((event) => `${event.entityId}:${(event.payload as { goalHash?: string }).goalHash ?? ""}`));
+  const done = new Set(store.listEvents(workspaceId, { type: "line.changed", change: "goal_split" }).map((event) => `${event.entityId}:${(event.payload as { goalHash?: string }).goalHash ?? ""}`));
   return identityLines(store, workspaceId)
     .filter((line) => (line.goals ?? []).length > 0 && !(line.goalParts ?? []).length && !done.has(`${line.id}:${goalHash(line.goals![0]!)}`))
     .map((line) => ({ id: line.id, label: line.label, goals: line.goals! }));
@@ -31,7 +31,7 @@ export function linesAwaitingSplit(store: CrosslineStore, workspaceId: string): 
  * sentences cut into chips (seen on the real account on 2026-10-10: 「外推人类知识边界」 next to 「以神经形态…外推知识边界」).
  */
 export function linesAwaitingCandidateSplit(store: CrosslineStore, workspaceId: string): GoalSplitContext["lines"] {
-  const done = new Set(store.listEvents(workspaceId, { type: "line.candidates_split" }).map((event) => event.entityId));
+  const done = new Set(store.listEvents(workspaceId, { type: "line.changed", change: "candidates_split" }).map((event) => event.entityId));
   let profiles: Record<string, StoredLineProfile> = {};
   try { profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") ?? {}; } catch { return []; }
   return identityLines(store, workspaceId).flatMap((line) => {
@@ -86,8 +86,8 @@ export function createGoalSplitter(store: CrosslineStore, workspaceId: string, c
         const added = descriptive.length ? descriptive : split;
         if (!added.length || profiles[candidateLine.id]?.attributes?.length) continue;
         profiles[candidateLine.id] = { ...profiles[candidateLine.id], description: profiles[candidateLine.id]?.description ?? "", attributes: added };
-        store.appendEvent({ ownerId, workspaceId, idempotencyKey: `line:candidates-split:${candidateLine.id}`, type: "line.candidates_split", entityId: candidateLine.id,
-          payload: { candidates: candidateLine.goals, attributes: added.map((item) => item.text) } });
+        store.appendEvent({ ownerId, workspaceId, idempotencyKey: `line:candidates-split:${candidateLine.id}`, type: "line.changed", entityId: candidateLine.id,
+          payload: { candidates: candidateLine.goals, attributes: added.map((item) => item.text), change: "candidates_split" } });
         count += 1;
         continue;
       }
@@ -105,9 +105,9 @@ export function createGoalSplitter(store: CrosslineStore, workspaceId: string, c
         added.push({ text: part.text, kind: part.kind, sourceRef: "goal" });
       }
       profiles[line.id] = { description: profiles[line.id]?.description ?? "", attributes: [...existing, ...added] };
-      store.appendEvent({ ownerId, workspaceId, idempotencyKey: `line:goal-split:${line.id}:${goalHash(line.goals[0]!)}`, type: "line.goal_split", entityId: line.id,
+      store.appendEvent({ ownerId, workspaceId, idempotencyKey: `line:goal-split:${line.id}:${goalHash(line.goals[0]!)}`, type: "line.changed", entityId: line.id,
         payload: { goal: line.goals[0], goalHash: goalHash(line.goals[0]!), parts: spec.goalParts, kinds: first.parts.map((part) => part.kind),
-          recomposed: recomposes(spec.goalParts, line.label, line.goals[0]!) } });
+          recomposed: recomposes(spec.goalParts, line.label, line.goals[0]!), change: "goal_split" } });
       count += 1;
     }
     if (count) {
