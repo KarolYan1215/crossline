@@ -32,13 +32,29 @@ export function numeralValue(text: string): number | undefined {
 // rule: interview.unsaid-count
 const COUNT = new RegExp(`(?<![第到至~\\-—–\\d零一二两三四五六七八九十百千万几每])(\\d{1,5}|[零一二两三四五六七八九十百千万]{1,6})(?=[${CLASSIFIERS}])([${CLASSIFIERS}])`, "gu");
 
-/** Each count in a text, as 「<number><classifier>」 (「两张」 and 「2张」 alike are 「2张」). */
-export function countsIn(text: string): Array<{ key: string; words: string }> {
-  const out: Array<{ key: string; words: string }> = [];
+/** Each count in a text, as 「<number><classifier>」 (「两张」 and 「2张」 alike are 「2张」); `at` is where the numeral starts. */
+export function countsIn(text: string): Array<{ key: string; words: string; at: number }> {
+  const out: Array<{ key: string; words: string; at: number }> = [];
   for (const match of text.matchAll(COUNT)) {
     const value = numeralValue(match[1]!);
     if (value === undefined || value === 1) continue;
-    out.push({ key: `${value}${match[2]}`, words: match[0] });
+    out.push({ key: `${value}${match[2]}`, words: match[0], at: match.index });
+  }
+  return out;
+}
+
+// rule: interview.unsaid-count
+const ORDINAL = new RegExp(`第(\\d{1,3}|[一二两三四五六七八九十百]{1,4})([${CLASSIFIERS}])`, "gu");
+
+/**
+ * The counts an enumeration implies (replay 2026-11-27: the person named 第一章…第四章 and 「四章里有两章」 was sent back): a person who said
+ * 「第四章」 said there are at least four, so every count of chapters up to four is theirs.
+ */
+function impliedByOrdinals(text: string): string[] {
+  const out: string[] = [];
+  for (const match of text.matchAll(ORDINAL)) {
+    const value = Math.min(numeralValue(match[1]!) ?? 0, 100);
+    for (let n = 2; n <= value; n += 1) out.push(`${n}${match[2]}`);
   }
   return out;
 }
@@ -53,9 +69,13 @@ export function countsFirstSaidByInterviewer(turns: ReadonlyArray<{ role: "user"
   return new Set([...first].filter(([, role]) => role === "assistant").map(([key]) => key));
 }
 
-/** The counts the reply states (outside its questions) that none of `said` contains, in the words the reply used. */
+/**
+ * The counts the reply states (outside its questions) that none of `said` contains, in the words the reply used. A count after 这/那
+ * points back at things already named (「这两件事不是一回事」, replay 2026-11-27), it does not report how many there are.
+ */
 export function unsaidCounts(reply: string, said: readonly string[]): string[] {
-  const known = new Set(said.flatMap((text) => countsIn(text).map((count) => count.key)));
+  const known = new Set(said.flatMap((text) => [...countsIn(text).map((count) => count.key), ...impliedByOrdinals(text)]));
   const statements = (reply.match(/[^。！？!?\n]+[。！？!?]?/gu) ?? []).filter((sentence) => !/[？?]/u.test(sentence));
-  return [...new Set(statements.flatMap((sentence) => countsIn(sentence)).filter((count) => !known.has(count.key)).map((count) => count.words))];
+  return [...new Set(statements.flatMap((sentence) => countsIn(sentence)
+    .filter((count) => !/[这那]/u.test(sentence[count.at - 1] ?? "") && !known.has(count.key))).map((count) => count.words))];
 }

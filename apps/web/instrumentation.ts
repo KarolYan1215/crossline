@@ -42,6 +42,10 @@ export async function register(): Promise<void> {
       const { nudgePass, NUDGE_INTERVAL_MS } = await import("./lib/nudges");
       const nudges = setInterval(unlessDevice(nudgePass), NUDGE_INTERVAL_MS);
       nudges.unref?.();
+      // The portrait report by mail once it is written (the owner's decision of 2026-11-27).
+      const { portraitMailPass, PORTRAIT_MAIL_INTERVAL_MS } = await import("./lib/portrait-mail");
+      const mail = setInterval(unlessDevice(portraitMailPass), PORTRAIT_MAIL_INTERVAL_MS);
+      mail.unref?.();
     }
     const { resolveCrosslineAuthOptions } = await import("./lib/auth");
     const options = resolveCrosslineAuthOptions();

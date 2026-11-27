@@ -34,7 +34,7 @@ import {
 } from "../packages/core/src/index";
 import { CrosslineStore, interviewChecklistFor, rateInsight } from "../packages/db/src/index";
 import { composeAnswers, type Question } from "../apps/web/app/onboarding/onboarding-types";
-import { shouldRemindFull, shouldRemindStart } from "../apps/web/app/onboarding/finish-button";
+import { shouldRemindFull } from "../apps/web/app/onboarding/finish-button";
 import { interviewMetrics } from "../apps/worker/src/interview-metrics";
 import { identityLines } from "../apps/worker/src/lines";
 import { createOnboardingExtractor, extractionSettled, requestExtraction } from "../apps/worker/src/onboarding-extract";
@@ -189,8 +189,8 @@ async function runPerson(name: string, opening: Opening) {
   let turns = 0, state = "", goalsAdopted = 0;
   const started = Date.now();
   let readyAt: number | undefined;
-  // The page's reminders beside 「结束并出报告」, each said once a session (`shouldRemindStart`, `shouldRemindFull`).
-  let startReminded = false, fullReminded = false;
+  // The page's reminder beside 「结束并出报告」, said once a session (`shouldRemindFull`; the start standard's went on 2026-11-27).
+  let fullReminded = false;
 
   /** A person adopting a long-term goal from the chips (「采用」): the first two attributes, or the one there is, for a line with none. */
   const adoptGoals = () => {
@@ -272,15 +272,13 @@ async function runPerson(name: string, opening: Opening) {
         const said = side.ok ? [side.output.answers[0]?.other, side.output.freeText].filter(Boolean).join(" ") : "";
         if (said) { research.answer("eval", thread.id, said); transcript.push(`**侧栏调研卡**：${thread.question}`, "", `问：${thread.ask}`, "", `答：${said}`, ""); }
       }
-      // The end is the person's (2026-11-15): the page offers 「结束并出报告」 once the start standard stands and says so once, then once more
-      // when the completeness is full; the player decides whether to press it, as a person reading the page would.
+      // The end is the person's (2026-11-15): the page offers 「结束并出报告」 once the start standard stands and says so once the completeness
+      // is full; the player decides whether to press it, as a person reading the page would.
       const completeness = interviewCompleteness({ lowerBound: Boolean(readyAt), stagesSeen: rounds.map((round) => String(round.stage ?? "")),
         ...json<{ dimensions?: []; hypotheses?: []; careers?: [] }>("profile.model", {}) });
       log({ turn: turns, completeness: completeness.score, full: completeness.full });
-      const reminder = shouldRemindFull(completeness.full, fullReminded) ? "访谈已经很完整，可以结束出报告；也可以继续聊"
-        : shouldRemindStart(Boolean(readyAt), completeness.full, startReminded) ? "开始使用需要的已经齐了，现在就可以结束出报告；接着聊，报告会更准" : "";
+      const reminder = shouldRemindFull(completeness.full, fullReminded) ? "访谈已经很完整，可以结束出报告；也可以继续聊" : "";
       if (completeness.full) fullReminded = true;
-      if (readyAt) startReminded = true;
       if (reminder) transcript.push(`**页面提示**：${reminder}`, "");
 
       const context = { version: "crossline.eval-persona.v2", persona: life, reply: turn.reply,

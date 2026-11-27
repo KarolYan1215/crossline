@@ -12,5 +12,13 @@
   "画像还有 {{count}} 个维度缺本人的话或行为作证据": "{{count}} portrait dimensions still lack the person's own words or behaviour as evidence",
   "验证或推翻的推断还不到 {{count}} 条（现有 {{settled}} 条）": "Fewer than {{count}} inferences supported or refuted ({{settled}} so far)",
   "还没有带试做的职业方向": "No career direction with a trial yet",
-  "访谈调研": "Interview research"
+  "访谈调研": "Interview research",
+  "核心矛盾：{{text}}": "Core tension: {{text}}",
+  "真正的问题": "The real problem",
+  "说与做": "Saying and doing",
+  "洞察与建议": "Insights and advice",
+  "试做：{{task}}": "Trial: {{task}}",
+  "完整报告和图表：{{link}}": "The full report with its charts: {{link}}",
+  "你的画像报告写好了": "Your portrait report is ready",
+  "「{{fallacy}}」其实是：{{reframe}}": "“{{fallacy}}” is really: {{reframe}}"
 }

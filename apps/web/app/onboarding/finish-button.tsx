@@ -6,8 +6,6 @@ import type { Completeness } from "./interview-contract";
 
 /** Where the reminder that the interview is complete is remembered, per session, so it is shown once. */
 const REMINDED_KEY = "crossline.interview.fullReminded:";
-/** Where the reminder that the start standard stands is remembered, per session (2026-11-15). */
-const START_REMINDED_KEY = "crossline.interview.startReminded:";
 
 /**
  * What the 「结束并出报告」 button shows (decision 27): pressable only once the lower bound (the start standard) stands, the score drawn as
@@ -24,16 +22,8 @@ export function shouldRemindFull(full: boolean | undefined, alreadyReminded: boo
   return Boolean(full) && !alreadyReminded;
 }
 
-/**
- * Whether to say 「可以结束了」 now (2026-11-15, the owner: the page says it, from the ledger, not the dialogue): the first time the start
- * standard stands in this session, unless the fuller 「访谈已经很完整」 is said at the same time. Replay 15 met it in round 8 and was never told.
- */
-export function shouldRemindStart(lowerBound: boolean | undefined, full: boolean | undefined, alreadyReminded: boolean): boolean {
-  return Boolean(lowerBound) && !full && !alreadyReminded;
-}
-
-const readReminded = (sessionId: string, key = REMINDED_KEY) => { try { return window.localStorage.getItem(key + sessionId) === "1"; } catch { return false; } };
-const writeReminded = (sessionId: string, key = REMINDED_KEY) => { try { window.localStorage.setItem(key + sessionId, "1"); } catch { /* the session's own state still holds it */ } };
+const readReminded = (sessionId: string) => { try { return window.localStorage.getItem(REMINDED_KEY + sessionId) === "1"; } catch { return false; } };
+const writeReminded = (sessionId: string) => { try { window.localStorage.setItem(REMINDED_KEY + sessionId, "1"); } catch { /* the session's own state still holds it */ } };
 
 /**
  * The interview ends only when the person presses this (decision 13 and 27): `POST /api/onboarding/finish`, then the portrait page, where
@@ -49,18 +39,14 @@ export function FinishButton({ sessionId, completeness, disabled: busy = false, 
   const [sending, setSending] = useState(false);
   const [refused, setRefused] = useState<string[] | null>(null);
   const [error, setError] = useState("");
-  const [reminder, setReminder] = useState<"" | "start" | "full">("");
-  // Remembered in the page too, for a browser whose storage throws: each reminder is still said once a visit.
+  const [reminder, setReminder] = useState(false);
+  // Remembered in the page too, for a browser whose storage throws: the reminder is still said once a visit. The one that the start
+  // standard stood (2026-11-15) is gone (the owner, 2026-11-27): replay persona a ended at 51% on it, with only the life story walked.
   const reminded = useRef(false);
-  const startReminded = useRef(false);
   useEffect(() => {
-    if (!sessionId) return;
-    if (shouldRemindFull(completeness?.full, reminded.current || readReminded(sessionId))) {
-      reminded.current = true; writeReminded(sessionId); setReminder("full"); return;
-    }
-    if (!shouldRemindStart(completeness?.lowerBound, completeness?.full, startReminded.current || readReminded(sessionId, START_REMINDED_KEY))) return;
-    startReminded.current = true; writeReminded(sessionId, START_REMINDED_KEY); setReminder("start");
-  }, [completeness?.full, completeness?.lowerBound, sessionId]);
+    if (!sessionId || !shouldRemindFull(completeness?.full, reminded.current || readReminded(sessionId))) return;
+    reminded.current = true; writeReminded(sessionId); setReminder(true);
+  }, [completeness?.full, sessionId]);
 
   const finish = async () => {
     setSending(true); setError(""); setRefused(null);
@@ -88,9 +74,8 @@ export function FinishButton({ sessionId, completeness, disabled: busy = false, 
     {!view.disabled && completeness?.storyShort && <small className="ob-finish-missing">{t("人生故事还没讲，报告里的叙事会很短")}</small>}
     {error && <small className="ob-finish-missing" role="alert">{error}</small>}
     {reminder && <p className="ob-finish-reminder" role="status">
-      <span>{reminder === "full" ? t("访谈已经很完整，可以结束出报告；也可以继续聊")
-        : t("开始使用需要的已经齐了，现在就可以结束出报告；接着聊，报告会更准")}</span>
-      <button type="button" className="ob-btn ob-quiet" onClick={() => setReminder("")}>{t("知道了")}</button>
+      <span>{t("访谈已经很完整，可以结束出报告；也可以继续聊")}</span>
+      <button type="button" className="ob-btn ob-quiet" onClick={() => setReminder(false)}>{t("知道了")}</button>
     </p>}
   </div>;
 }

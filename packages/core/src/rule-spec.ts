@@ -130,7 +130,7 @@ export const RULE_SPEC = {
     retire: "Each IR rule retires on its own status in INTERVIEW_RULES; this entry goes when no record-only IR rule is left." },
   // ── said-counts.ts ───────────────────────────────────────────────────────────────────────────────────────────────────
   "interview.unsaid-count": { file: `${CORE}/said-counts.ts`, kind: "evidence", mode: "enforce",
-    what: "unsaidCounts: a count (「七张」「3 篇」) the interview's reply states about the person that no reply, file or earlier reply of its own said (IR-200).",
+    what: "unsaidCounts: a count (「七张」「3 篇」) the interview's reply states about the person that no reply, file or earlier reply of its own said (IR-200). A count after 这/那 is referential and not checked; 「第四章」 said implies every count of chapters up to four.",
     readers: "The interview round's check: sent back once naming the count; the model's second answer stands.",
     retire: "Replays show the interviewer no longer introduces counts (no IR-200 send-back for 30 days of replays), or the dialogue cites a sentence for every restated figure." },
   // ── profile-gaps.ts ──────────────────────────────────────────────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 import { buildDivergenceGraph, evidenceEdgeKind, fitsEntries, fitsFirst } from "./divergence-graph";
 import { DivergenceView } from "./divergence-view";
-import { finishView, FinishButton, shouldRemindFull, shouldRemindStart } from "./finish-button";
+import { finishView, FinishButton, shouldRemindFull } from "./finish-button";
 import { falsifierCondition, InsightCard } from "./insight-card";
 import type { Hypothesis, ResearchThread } from "./interview-contract";
 import { ResearchPanel } from "./research-panel";
@@ -89,9 +89,6 @@ test("the finish button waits for the lower bound, saying what is missing, draws
   expect(shouldRemindFull(true, true)).toBe(false);
   expect(shouldRemindFull(false, false)).toBe(false);
   expect(shouldRemindFull(undefined, false)).toBe(false);
-  // The start standard standing is said once by the page, unless the fuller reminder says it at the same time (2026-11-15).
-  expect([shouldRemindStart(true, false, false), shouldRemindStart(true, false, true), shouldRemindStart(true, true, false), shouldRemindStart(false, false, false)])
-    .toEqual([true, false, false, false]);
   const below = renderToStaticMarkup(<FinishButton sessionId="s" completeness={{ lowerBound: false, score: 0.3, full: false, missing: ["固定日程", "每周可用时间"] }} />);
   expect(below).toMatch(/<button[^>]*disabled/);
   expect(below).toContain("开始使用前还差：固定日程、每周可用时间");
@@ -99,6 +96,8 @@ test("the finish button waits for the lower bound, saying what is missing, draws
   const above = renderToStaticMarkup(<FinishButton sessionId="s" completeness={{ lowerBound: true, score: 0.6, full: false, missing: [] }} />);
   expect(above).not.toMatch(/<button[^>]*disabled/);
   expect(above).toContain("结束并出报告");
+  // The page no longer says the start standard stands (the owner, 2026-11-27).
+  expect(above).not.toContain("开始使用需要的已经齐了");
 });
 
 test("research threads are listed with their status, and a thread that asks comes up as its own card", () => {
