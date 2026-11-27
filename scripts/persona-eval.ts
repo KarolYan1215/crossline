@@ -25,7 +25,7 @@
  * run as a side effect. On the hosted beta it is the `persona` action of .github/workflows/server.yml, and `persona-report` fetches it.
  */
 import { register } from "node:module";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { configureModelGate, runCodexSkill, setProviderResolver, setUsageSink, startCodexAppServer, startCodexSupervisor, startModelGateway,
@@ -121,6 +121,8 @@ if (codex) {
   const home = path.join(scratch, "codex-home");
   mkdirSync(home, { recursive: true });
   copyFileSync(path.join(homedir(), ".codex", "auth.json"), path.join(home, "auth.json"));
+  // The sign-in copy never outlives the run (the throwaway home is otherwise left for reading the rollouts).
+  process.on("exit", () => rmSync(path.join(home, "auth.json"), { force: true }));
 }
 const supervisor = await startCodexSupervisor({ port: Number(process.env.CROSSLINE_CODEX_SUPERVISOR_PORT ?? 3392),
   sidecarFactory: () => startCodexAppServer(path.join(scratch, "codex-home")),
