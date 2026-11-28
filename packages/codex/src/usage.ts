@@ -24,27 +24,50 @@ export type SkillUsage = {
 
 export const emptyBreakdown = (): TokenBreakdown => ({ inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0 });
 
-/** Collects the usage notifications of one run: the latest reading per turn, summed when asked. */
+const breakdownOf = (value: unknown): TokenBreakdown | undefined => {
+  if (!value || typeof value !== "object") return undefined;
+  const reading = value as Record<string, unknown>;
+  const n = (key: string) => typeof reading[key] === "number" ? reading[key] as number : 0;
+  return { inputTokens: n("inputTokens"), cachedInputTokens: n("cachedInputTokens"), outputTokens: n("outputTokens"),
+    reasoningOutputTokens: n("reasoningOutputTokens"), totalTokens: n("totalTokens") };
+};
+const minus = (a: TokenBreakdown, b: TokenBreakdown): TokenBreakdown =>
+  Object.fromEntries((Object.keys(a) as Array<keyof TokenBreakdown>).map((key) => [key, a[key] - b[key]])) as TokenBreakdown;
+
+/**
+ * Collects the usage notifications of one run, per turn, summed when asked.
+ *
+ * Codex sends one `thread/tokenUsage/updated` per model request: `last` is that one request, `total` the thread's running sum. A turn
+ * that calls a tool makes a request per call, so its cost is every request, not the last one: it is `total` now less `total` before
+ * the turn's first request (that notification's `total − last`). Until 2026-11-28 the collector kept the latest `last` of each turn,
+ * and a run with lookups was billed for its final request only — on the owner's interview that day, half of what the extraction spent
+ * (the rollouts: 15.2M input tokens in 46 minutes, `model_usage` 7.7M).
+ */
 export function createUsageCollector() {
-  const perTurn = new Map<string, TokenBreakdown>();
+  const perTurn = new Map<string, { before?: TokenBreakdown; now?: TokenBreakdown; last: TokenBreakdown }>();
   const seconds: number[] = [];
   return {
     noteTurnSeconds(value: number): void { seconds.push(Math.round(value)); },
     turnSeconds: () => [...seconds],
-    /** `params` is a `thread/tokenUsage/updated` notification; its `last` is what that turn has used so far. */
+    /** `params` is a `thread/tokenUsage/updated` notification: `last` is one model request, `total` the thread's sum so far. */
     note(params: Record<string, unknown>): void {
       const turnId = typeof params.turnId === "string" ? params.turnId : "";
-      const usage = params.tokenUsage as { last?: Record<string, unknown> } | undefined;
-      const last = usage?.last;
+      const usage = params.tokenUsage as { last?: unknown; total?: unknown } | undefined;
+      const last = breakdownOf(usage?.last);
       if (!turnId || !last) return;
-      const n = (key: string) => typeof last[key] === "number" ? last[key] as number : 0;
-      perTurn.set(turnId, { inputTokens: n("inputTokens"), cachedInputTokens: n("cachedInputTokens"), outputTokens: n("outputTokens"),
-        reasoningOutputTokens: n("reasoningOutputTokens"), totalTokens: n("totalTokens") });
+      const total = breakdownOf(usage?.total);
+      const seen = perTurn.get(turnId);
+      perTurn.set(turnId, { last, ...(total ? { before: seen?.before ?? minus(total, last), now: total } : {}) });
     },
     turns: () => perTurn.size,
     total(): TokenBreakdown {
       const sum = emptyBreakdown();
-      for (const turn of perTurn.values()) for (const key of Object.keys(sum) as Array<keyof TokenBreakdown>) sum[key] += turn[key];
+      for (const turn of perTurn.values()) {
+        // A runtime that sends no running sum (or resets it) is read as before: its latest request.
+        const spent = turn.before && turn.now ? minus(turn.now, turn.before) : undefined;
+        const reading = spent && spent.inputTokens >= turn.last.inputTokens ? spent : turn.last;
+        for (const key of Object.keys(sum) as Array<keyof TokenBreakdown>) sum[key] += reading[key];
+      }
       return sum;
     }
   };

@@ -48,7 +48,9 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
   /** Skills of the person's library the runtime has installed (off until a run switches them on), e.g. `crossline-mine:media`. */
   library?: string[];
   /** What `windowsSandbox/readiness` answers, and the `windows.sandbox` that `config/read` shows (docs/plans/harness-1125.md §9). */
-  windowsSandbox?: { status: string; configured?: string } } = {}): {
+  windowsSandbox?: { status: string; configured?: string };
+  /** `thread/fork` fails (the parent's rollout is gone), so the runner has to start a thread of its own. */
+  forkFails?: boolean } = {}): {
   rpc: JsonLineRpcClient;
   turns: () => number;
   /** The first text part of each turn (a fresh run's: the Skill named and its input). */
@@ -58,6 +60,8 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
   interrupts: () => number;
   /** The thread/start parameters the runner sent. */
   threadStarts: () => Array<Record<string, unknown>>;
+  /** The `thread/fork` parameters the runner sent, in order. */
+  forks: () => Array<Record<string, unknown>>;
   /** Every `skills/config/write` and `plugin/install` the runner sent, in order. */
   configCalls: () => Array<{ method: string; params: Record<string, unknown> }>;
   /** Threads the runner let go of (`thread/unsubscribe`), in order. */
@@ -91,6 +95,7 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
   const prompts: string[] = [];
   const inputs: string[][] = [];
   const starts: Array<Record<string, unknown>> = [];
+  const forks: Array<Record<string, unknown>> = [];
   const warmed = new Set<string>();
   const pendingAsks = new Map<string, (value: Record<string, unknown>) => void>();
   let askId = 0;
@@ -111,6 +116,14 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
     calls.push(request.method);
     // Counted per thread, not per turn — that conflation is the bug this helper exists to fix.
     if (request.method === "thread/start") { threadId = `thread-${(threads += 1)}`; starts.push(request.params ?? {}); subscribed.add(threadId); startedThreads.push(threadId); }
+    if (request.method === "thread/fork") {
+      forks.push(request.params ?? {});
+      if (options.forkFails) {
+        queueMicrotask(() => rpc.receiveLine(JSON.stringify({ id: request.id, error: { code: -32600, message: `no rollout found for thread id ${String(request.params?.threadId)}` } })));
+        return;
+      }
+      threadId = `thread-${(threads += 1)}`; subscribed.add(threadId); startedThreads.push(threadId);
+    }
     if (request.method === "thread/resume") {
       const id = String(request.params?.threadId);
       if (options.lostThreads?.includes(id)) {
@@ -143,7 +156,7 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
       : request.method === "thread/loaded/list" ? { data: startedThreads.filter((id) => !options.lostThreads?.includes(id) && !options.unloadedThreads?.includes(id)), nextCursor: null }
       : request.method === "thread/resume" ? { thread: { id: String(request.params?.threadId) }, approvalPolicy: "untrusted", sandbox: { type: "readOnly" }, instructionSources: [], ...(options.threadResponse ?? {}) }
       : request.method === "thread/compact/start" ? {}
-      : request.method === "thread/start"
+      : request.method === "thread/start" || request.method === "thread/fork"
         ? { thread: { id: threadId }, approvalPolicy: "untrusted", sandbox: { type: "readOnly" }, instructionSources: [], ...(options.threadResponse ?? {}) }
         : request.method === "turn/steer" ? { turnId: String(request.params?.expectedTurnId ?? "") }
         : { turn: { id: `turn-${turns + 1}`, status: "inProgress" } };
@@ -208,7 +221,7 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
       }, options.delayMs ?? 1);
     }
   });
-  return { rpc, turns: () => turns, prompts: () => prompts, inputs: () => inputs, interrupts: () => interrupts, threadStarts: () => starts, configCalls: () => configCalls,
+  return { rpc, turns: () => turns, prompts: () => prompts, inputs: () => inputs, interrupts: () => interrupts, threadStarts: () => starts, forks: () => forks, configCalls: () => configCalls,
     unsubscribed: () => unsubscribed, resumes: () => resumes, resumeParams: () => resumeParams, calls: () => calls,
     turnParams: () => turnParams, steers: () => steers };
 }

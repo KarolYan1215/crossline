@@ -38,7 +38,7 @@ function capturing(rpc: JsonLineRpcClient): { client: CodexRpcBoundary; runs: Ca
         runs.push({ skill: /^\$(\S+)/.exec(parts[0] ?? "")?.[1] ?? "", developer: developer.get(String(record.threadId)) ?? "", parts });
       }
       const result = await rpc.request(method, params);
-      if (method === "thread/start") developer.set(String(((result as { thread?: { id?: string } }).thread ?? {}).id), String(record.developerInstructions ?? ""));
+      if (method === "thread/start" || method === "thread/fork") developer.set(String(((result as { thread?: { id?: string } }).thread ?? {}).id), String(record.developerInstructions ?? ""));
       return result;
     },
     onNotification: (handler) => rpc.onNotification(handler),
@@ -157,7 +157,7 @@ test("the tutorial's designer, researcher and writer: the person's and the line'
   expectShared(MATERIAL_WRITER_SKILL, runs, ["version", "profile", "person", "aiTools", "task", "inputs", "sources"], 4);
 });
 
-test("the interview's extraction: the lines, projects and portrait first; the replies after", async () => {
+test("the interview's extraction: the lines, projects, facts and portrait first; the replies after", async () => {
   const round = JSON.stringify({ reply: "收到。", questions: [], coverage: [], nextAction: "ask", stage: "orientation" });
   const empty = JSON.stringify({ slotUpdates: [], projectsDetected: [], flywheelCandidates: [], lineProfiles: [], goalEdits: [],
     fileDates: { dates: [], recurring: [], questions: [], undated: [] }, availability: { windows: [], why: "" }, profile: null });
@@ -166,7 +166,7 @@ test("the interview's extraction: the lines, projects and portrait first; the re
   const run = createOnboardingSessionRunner(store, ws, "C:\\repo", () => client, { extract: "await", lanes: false });
   await run({ sessionId: "s", text: "我在读电子工程硕士，这学期修 ECE 555。" });
   await run({ sessionId: "s", text: "每周大概能投入 40 小时，周日休息。" });
-  expectShared(ONBOARDING_EXTRACT_SKILL, runs, ["version", "timeZone", "lines", "domainGuides", "lineProfiles", "projects", "focusLine", "profile", "facts"]);
+  expectShared(ONBOARDING_EXTRACT_SKILL, runs, ["version", "timeZone", "lines", "domainGuides", "lineProfiles", "projects", "focusLine", "facts", "profile"]);
 });
 
 test("the capture analysis: the lines, the person, the milestones and the open tasks first; the capture after", async () => {

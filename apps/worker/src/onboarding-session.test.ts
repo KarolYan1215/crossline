@@ -126,16 +126,17 @@ test("a connected calendar's coming week goes to the interview on the first turn
 });
 
 test("the second turn continues the same thread and only carries what is new, with what the extraction recorded since", async () => {
-  const { rpc, prompts, threadStarts } = fakeRuntime([firstAnswer, turn()]);
+  const { rpc, prompts, threadStarts, forks } = fakeRuntime([firstAnswer, turn()]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   await run({ sessionId: "s1", text: "西湖那篇 10/31 前要投出，数据下周到。" });
   await run({ sessionId: "s1", text: "图表清单在师兄给的文档里" });
-  // One dialogue thread; each extraction on a thread of its own.
+  // One dialogue thread; each extraction on a thread of its own, the second a fork of the first's (its prompt-cache key, 2026-11-28).
   expect(dialogue(prompts)).toHaveLength(2);
   expect(extraction(prompts)).toHaveLength(2);
-  expect(threadStarts()).toHaveLength(3);
+  expect(threadStarts()).toHaveLength(2);
+  expect(forks()).toHaveLength(1);
   // The dialogue and the extraction both carry the one portrait framework (D0–D9).
-  for (const start of threadStarts()) expect(String(start.developerInstructions)).toContain(PROFILE_FRAMEWORK);
+  for (const start of [...threadStarts(), ...forks()]) expect(String(start.developerInstructions)).toContain(PROFILE_FRAMEWORK);
   expect(dialogue(prompts)[1]).not.toContain("identities");
   expect(dialogue(prompts)[1]).toContain("reply-3");
   // The first turn's extraction wrote the deadline; the dialogue hears of it on the next turn.

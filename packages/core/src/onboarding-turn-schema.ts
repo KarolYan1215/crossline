@@ -699,14 +699,15 @@ export const onboardingDialogueSchema = (ids?: TurnIds) => object(pick(turnField
 /** The extraction's schema; `keys` narrows it to one lane's fields (`EXTRACT_LANE_KEYS`). */
 export const onboardingExtractSchema = (ids?: TurnIds, keys: readonly (typeof EXTRACT_KEYS)[number][] = EXTRACT_KEYS) => object(pick(turnFields(ids), keys));
 /**
- * The extraction's three lanes (2026-11-12): fields that rest on each other go together, the rest run beside them. The ledger (facts,
- * projects, dates, line descriptions, hours, settings, card answers in words) is what the start standard and the next round wait for;
- * the portrait's sections and the inference log (hypotheses, the careers that cite them, the dimensions) are written by runs of their own.
+ * The extraction's two lanes: fields that rest on each other go together, the rest run beside them. The ledger (facts, projects, dates,
+ * line descriptions, hours, settings, card answers in words) is what the start standard and the next round wait for; the portrait (its
+ * sections, the points, the links between lines, and the inference log: hypotheses, the careers that cite them, the dimensions) is
+ * written by a run of its own. From 2026-11-12 the portrait was two lanes, sections and inferences, each rereading the same 60k-character
+ * portrait for every reply; the owner merged them on 2026-11-28 (docs/token-economy.md §6), a third fewer extraction runs.
  */
 export const EXTRACT_LANE_KEYS = {
   ledger: ["slotUpdates", "projectsDetected", "fileDates", "lineProfiles", "goalEdits", "availability", "settings", "itemScores"],
-  sections: ["profileSections", "flywheelCandidates", "pointChanges"],
-  insights: ["hypotheses", "careers", "dimensions", "dropCareers"]
+  portrait: ["profileSections", "flywheelCandidates", "pointChanges", "hypotheses", "careers", "dimensions", "dropCareers"]
 } as const satisfies Record<string, readonly (typeof EXTRACT_KEYS)[number][]>;
 export type ExtractLaneName = keyof typeof EXTRACT_LANE_KEYS;
 export const ONBOARDING_DIALOGUE_SCHEMA = onboardingDialogueSchema();

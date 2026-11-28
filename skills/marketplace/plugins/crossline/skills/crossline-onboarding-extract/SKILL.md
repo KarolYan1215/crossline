@@ -9,10 +9,9 @@ description: 读 Crossline 访谈刚听到的内容（本人的新回答和新�
 
 接收 `crossline.onboarding.extract.v1`：`{lane?, rules?, points?, split?, today, timeZone, lines[], projects[], facts[], lineProfiles[], candidatesWanted, profile, profileTask, stage, focusLine, replies[], sources[], sourcesWaiting?, reread, observations?, scaleItems?, research?}`。
 
-- `lane`（有时出现）表示这次运行只负责整理的一部分，另外两部分由并行的运行同时写，返回的 JSON 也只有这一部分的字段：
+- `lane`（有时出现）表示这次运行只负责整理的一部分，另一部分由并行的运行同时写，返回的 JSON 也只有这一部分的字段：
   - `"ledger"`：事实、项目、日期、主线描述与定语、目标改动、时间、设置、卡片题的文字回答。`profile` 是 null，**这不表示回复是笔记**，照常按回复记。
-  - `"sections"`：画像各节（`profileSections`）、主线之间的联系（`flywheelCandidates`），新访谈还有要点账本（`pointChanges`）。不读文件，需要时用查询工具查。
-  - `"insights"`：假设日志、职业方向和维度（以及 `dropCareers`）。`profileTask` 是 null，不写画像各节。
+  - `"portrait"`：画像各节（`profileSections`）、主线之间的联系（`flywheelCandidates`），新访谈还有要点账本（`pointChanges`）；以及假设日志、职业方向和维度（`hypotheses`、`careers`、`dimensions`、`dropCareers`）。不读文件，需要时用查询工具查。
   - 没有 `lane` 时一次写全部。各部分的规则都按下文，不变。
 
 - `replies[]` 是本人的新回复，旧的在前：`{id: "reply-N", asked: [这条回复回答的问题], sentences}`。回复常是答题卡的格式，每题一行：「【问题】选择：A；B。补充：文字」，方括号里是问题，所以「【组会是哪天？】」下面的「选择：周三」表示组会在周三。

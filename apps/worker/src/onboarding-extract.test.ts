@@ -285,7 +285,7 @@ test("under the points rules an ended interview owes no whole rewrite: only new 
   const extractor = createOnboardingExtractor(store, workspaceId, "C:\\repo", () => rpc);
   const before = prompts().length;
   expect(extractor.nextSession()).toBeUndefined();
-  expect(await extractor.runOnce([], "sections")).toEqual({ state: "idle" });
+  expect(await extractor.runOnce([], "portrait")).toEqual({ state: "idle" });
   expect(prompts().length).toBe(before);
 });
 
@@ -326,17 +326,16 @@ test("words the person wrote elsewhere are read as notes: facts with their sente
   expect(extractor.nextSession()).toBeUndefined();
 });
 
-test("in lanes the ledger, the portrait's sections and its inferences are written by three runs side by side, each with its own fields and watermark", async () => {
+test("in lanes the ledger and the portrait (its sections and its inferences) are written by two runs side by side, each with its own fields and watermark", async () => {
   // One reply, read by every lane at once: the portrait's batching is tested on its own.
   process.env.CROSSLINE_PORTRAIT_BATCH = "1";
   const now = "2026-11-12T00:00:00.000Z";
   const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
   store.saveOnboardingSession({ id: "s", ownerId, workspaceId, state: "active", coverage: { stage: "situation", flow: "v1" }, createdAt: now, updatedAt: now });
-  const sections = facts({ profileSections: { situation: { problem: "论文和产品抢同一段时间", gravity: [], designable: [], reframes: [], refs: [1] },
-    compass: null, energy: null, synthesis: null } });
+  const portrait = facts({ profileSections: { situation: { problem: "论文和产品抢同一段时间", gravity: [], designable: [], reframes: [], refs: [1] },
+    compass: null, energy: null, synthesis: null }, hypotheses: [], careers: [], dimensions: [], dropCareers: [] });
   const { rpc, prompts } = fakeRuntime([round], [ONBOARDING_SKILL, ONBOARDING_EXTRACT_SKILL], { routes: [
-    { match: '"lane":"sections"', answers: [sections] },
-    { match: '"lane":"insights"', answers: [JSON.stringify({ hypotheses: [], careers: [], dimensions: [], dropCareers: [] })] },
+    { match: '"lane":"portrait"', answers: [portrait] },
     { match: EXTRACT, answers: [deadline([1])] }] });
   // The person's ratings of this session's cards, in full and with the correction (another session's are not this one's).
   store.setSetting(workspaceId, ONBOARDING_INSIGHTS, JSON.stringify({
@@ -347,21 +346,19 @@ test("in lanes the ledger, the portrait's sections and its inferences are writte
   expect((await run({ sessionId: "s", text: "论文 12 月中投稿，和产品在抢同一段时间。" })).state).toBe("asked");
   await extractionSettled(workspaceId);
   const runs = prompts().filter((prompt) => prompt.includes(EXTRACT));
-  expect(runs).toHaveLength(3);
+  expect(runs).toHaveLength(2);
   const contextOf = (lane: string) => { const prompt = runs.find((item) => item.includes(`"lane":"${lane}"`))!;
     return JSON.parse(prompt.slice(prompt.indexOf("{"), prompt.lastIndexOf("}") + 1)) as { profile: unknown; profileTask: unknown }; };
-  // The ledger lane records facts without the portrait in its context; the sections' lane owes the portrait, the inferences' reads it.
-  const ledger = runs.find((item) => !item.includes('"lane":"sections"') && !item.includes('"lane":"insights"'))!;
-  expect(JSON.parse(ledger.slice(ledger.indexOf("{"), ledger.lastIndexOf("}") + 1))).toMatchObject({ lane: "ledger", profile: null, profileTask: null });
-  expect(contextOf("sections").profileTask).toEqual({ finalize: [], synthesize: false });
-  expect(contextOf("insights")).toMatchObject({ profileTask: null, profile: expect.any(Object) });
-  expect((contextOf("insights") as { observations?: string[] }).observations)
+  // The ledger lane records facts without the portrait in its context; the portrait's lane owes the portrait and reads the ratings.
+  expect(contextOf("ledger")).toMatchObject({ lane: "ledger", profile: null, profileTask: null });
+  expect(contextOf("portrait")).toMatchObject({ profileTask: { finalize: [], synthesize: false }, profile: expect.any(Object) });
+  expect((contextOf("portrait") as { observations?: string[] }).observations)
     .toEqual(["准：你先搭框架再动手。", "部分对：你最投入的两次都有人等着结果。 → 本人更正：等结果的是我自己定的期限"]);
-  expect(readLaneState(store, workspaceId, "s", "insights").readAt).toEqual(expect.any(String));
+  expect(readLaneState(store, workspaceId, "s", "portrait").readAt).toEqual(expect.any(String));
   expect(store.listProfileFacts(workspaceId).map((fact) => fact.slot)).toEqual(["deadline"]);
   expect(JSON.parse(store.getSetting(workspaceId, "profile.model")!)).toMatchObject({ problem: "论文和产品抢同一段时间" });
-  for (const lane of ["ledger", "sections", "insights"] as const) expect(readLaneState(store, workspaceId, "s", lane)).toMatchObject({ upTo: 1, failures: 0 });
-  expect(readExtractState(store, workspaceId, "s#sections").upTo).toBe(1);
+  for (const lane of ["ledger", "portrait"] as const) expect(readLaneState(store, workspaceId, "s", lane)).toMatchObject({ upTo: 1, failures: 0 });
+  expect(readExtractState(store, workspaceId, "s#portrait").upTo).toBe(1);
 });
 
 test("a portrait lane that never ran starts at the single run's watermark: an interview from before the lanes is not read again", () => {
@@ -371,15 +368,15 @@ test("a portrait lane that never ran starts at the single run's watermark: an in
   for (const text of ["一", "二"]) store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text }, createdAt: now });
   writeExtractState(store, workspaceId, "s", { upTo: 2, failures: 0, ranAt: now });
   const extractor = createOnboardingExtractor(store, workspaceId, "C:\\repo", () => undefined);
-  expect(readLaneState(store, workspaceId, "s", "sections").upTo).toBe(2);
-  expect(extractor.nextSession([], "sections")).toBeUndefined();
-  expect(extractor.nextSession(["s"], "insights")).toBeUndefined();
+  expect(readLaneState(store, workspaceId, "s", "portrait").upTo).toBe(2);
+  expect(extractor.nextSession([], "portrait")).toBeUndefined();
+  expect(extractor.nextSession(["s"], "portrait")).toBeUndefined();
   store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text: "三" }, createdAt: now });
-  expect(extractor.nextSession([], "insights")).toBe("s");
+  expect(extractor.nextSession([], "portrait")).toBe("s");
   // A line's own interview and the notes are the ledger's only.
   store.saveOnboardingSession({ id: "line-research", ownerId, workspaceId, state: "active", coverage: {}, createdAt: now, updatedAt: now });
   store.appendOnboardingMessage({ sessionId: "line-research", workspaceId, role: "user", content: { text: "四" }, createdAt: now });
-  expect(extractor.nextSession(["line-research"], "sections")).toBe("s");
+  expect(extractor.nextSession(["line-research"], "portrait")).toBe("s");
   expect(extractor.nextSession(["line-research"], "ledger")).toBe("line-research");
 });
 
@@ -394,28 +391,45 @@ test("the ledger lane moving on pins where a portrait lane that has not run star
     expect((await extractor.runOnce(["s"], "ledger")).state).toBe("done");
   }
   expect(readLaneState(store, workspaceId, "s", "ledger").upTo).toBe(3);
-  expect(readLaneState(store, workspaceId, "s", "sections")).toMatchObject({ upTo: 0, pinned: true });
-  expect(extractor.nextSession([], "sections")).toBe("s");
+  expect(readLaneState(store, workspaceId, "s", "portrait")).toMatchObject({ upTo: 0, pinned: true });
+  expect(extractor.nextSession([], "portrait")).toBe("s");
 });
 
-test("under the points rules the sections' lane writes points with their quotes, and a stage's view only once the stage is over", async () => {
+// The owner merged the portrait's two lanes on 2026-11-28 (docs/token-economy.md §6). An interview under way then had read its replies in
+// two lanes: the merged lane goes on from the earlier of them, so a reply one of them had not read yet is read, and nothing twice more.
+test("the portrait's lane goes on from the earlier watermark of the two lanes it replaced, with the corrections the inferences had read", () => {
+  const now = "2026-11-28T00:00:00.000Z";
+  const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
+  store.saveOnboardingSession({ id: "s", ownerId, workspaceId, state: "active", coverage: { stage: "situation", flow: "v1" }, createdAt: now, updatedAt: now });
+  for (const text of ["一", "二", "三", "四"]) store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text }, createdAt: now });
+  writeExtractState(store, workspaceId, "s", { upTo: 4, failures: 0, ranAt: now });
+  writeExtractState(store, workspaceId, "s#sections", { upTo: 4, failures: 0, ranAt: now });
+  writeExtractState(store, workspaceId, "s#insights", { upTo: 3, failures: 0, ranAt: now, readAt: "2026-11-28T00:00:05.000Z" });
+  expect(readLaneState(store, workspaceId, "s", "portrait")).toMatchObject({ upTo: 3, readAt: "2026-11-28T00:00:05.000Z" });
+  expect(createOnboardingExtractor(store, workspaceId, "C:\\repo", () => undefined).nextSession([], "portrait")).toBe("s");
+  // Once it has run, its own watermark is what counts.
+  writeExtractState(store, workspaceId, "s#portrait", { upTo: 4, failures: 0, ranAt: now });
+  expect(readLaneState(store, workspaceId, "s", "portrait").upTo).toBe(4);
+});
+
+test("under the points rules the portrait's lane writes points with their quotes, and a stage's view only once the stage is over", async () => {
   // One reply, read by every lane at once: the portrait's batching is tested on its own.
   process.env.CROSSLINE_PORTRAIT_BATCH = "1";
   const now = "2026-11-12T00:00:00.000Z";
   const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
   store.saveOnboardingSession({ id: "s", ownerId, workspaceId, state: "active", coverage: { stage: "situation", flow: "v1", rules: "points" }, createdAt: now, updatedAt: now });
-  const sections = facts({ profileSections: { situation: { problem: "改写成段的处境", gravity: [], designable: [], reframes: [], refs: [1] }, compass: null, energy: null, synthesis: null },
+  const portrait = facts({ profileSections: { situation: { problem: "改写成段的处境", gravity: [], designable: [], reframes: [], refs: [1] }, compass: null, energy: null, synthesis: null },
+    hypotheses: [], careers: [], dimensions: [], dropCareers: [],
     pointChanges: [
       { op: "add", id: "", section: "situation", text: "论文 12 月中投稿，和产品抢同一段时间", refs: [1], external: [], why: "" },
       { op: "add", id: "", section: "situation", text: "没有引用的要点", refs: [], external: [], why: "" }] });
   const { rpc, prompts } = fakeRuntime([round], [ONBOARDING_SKILL, ONBOARDING_EXTRACT_SKILL], { routes: [
-    { match: '"lane":"sections"', answers: [sections] },
-    { match: '"lane":"insights"', answers: [JSON.stringify({ hypotheses: [], careers: [], dimensions: [], dropCareers: [] })] },
+    { match: '"lane":"portrait"', answers: [portrait] },
     { match: EXTRACT, answers: [deadline([1])] }] });
   const run = createRunner(store, workspaceId, "C:\repo", () => rpc);
   expect((await run({ sessionId: "s", text: "论文 12 月中投稿，和产品在抢同一段时间。" })).state).toBe("asked");
   await extractionSettled(workspaceId);
-  const prompt = prompts().find((item) => item.includes('"lane":"sections"'))!;
+  const prompt = prompts().find((item) => item.includes('"lane":"portrait"'))!;
   expect(prompt).toContain('"rules":"points"');
   const profile = JSON.parse(store.getSetting(workspaceId, "profile.model")!) as { problem: string; points: Array<{ id: string; text: string; quotes: unknown[]; source: string }> };
   // The stage is under way: no paragraph, only the point that cites a sentence.
@@ -450,8 +464,8 @@ test("a split run of an account moved to the points rules writes points only and
   const { rpc, prompts } = runtime([], [facts({ profileSections: { situation: { problem: "改写成段的处境", gravity: [], designable: [], reframes: [], refs: [1] }, compass: null, energy: null, synthesis: null },
     pointChanges: [{ op: "add", id: "", section: "situation", text: "论文 12 月中投稿，和产品抢同一段时间", refs: [1], external: [], why: "" }] })]);
   const extractor = createOnboardingExtractor(store, workspaceId, "C:\repo", () => rpc);
-  expect(extractor.nextSession([], "sections")).toBe("s");
-  expect(await extractor.runOnce([], "sections")).toMatchObject({ state: "done" });
+  expect(extractor.nextSession([], "portrait")).toBe("s");
+  expect(await extractor.runOnce([], "portrait")).toMatchObject({ state: "done" });
   expect(prompts().find((prompt) => prompt.includes(EXTRACT))).toContain('"split":["situation"]');
   const profile = JSON.parse(store.getSetting(workspaceId, "profile.model")!) as { problem: string; points: Array<{ text: string }> };
   expect(profile.problem).toBe("旧段落");
@@ -459,29 +473,43 @@ test("a split run of an account moved to the points rules writes points only and
   expect(store.getSetting(workspaceId, POINTS_SPLIT_SETTING)).toBeUndefined();
 });
 
-test("by default every lane reads a reply as it comes (2026-11-17); a batch set by environment makes the portrait's lanes wait for it, or for the oldest to have waited ten minutes; the ledger never waits, and the inferences only while the log has cards to offer", () => {
+test("while an interview is under way the portrait's lane waits for five replies (2026-11-28), or for the oldest to have waited ten minutes, but only while the log has cards to offer and no correction is unread; the ledger never waits", () => {
   const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
   const now = new Date().toISOString();
   store.saveOnboardingSession({ id: "s", ownerId, workspaceId, state: "active", coverage: { stage: "situation", flow: "v1" }, createdAt: now, updatedAt: now });
   const extractor = createOnboardingExtractor(store, workspaceId, "C:\repo", () => undefined);
   store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text: "一" }, createdAt: now });
-  expect(extractor.nextSession(["s"], "sections")).toBe("s");
-  process.env.CROSSLINE_PORTRAIT_BATCH = "3";
-  store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text: "二" }, createdAt: now });
   expect(extractor.nextSession([], "ledger")).toBe("s");
-  expect(extractor.nextSession(["s"], "sections")).toBeUndefined();
-  // The inferences wait too only once the log has two hypotheses to offer the next cards.
-  expect(extractor.nextSession([], "insights")).toBe("s");
+  // The next cards come from the log: until it has two hypotheses to offer, the portrait reads every reply at once.
+  expect(extractor.nextSession(["s"], "portrait")).toBe("s");
   const two = [{ kind: "quote", text: "一", ref: "reply-1" }, { kind: "quote", text: "二", ref: "reply-3" }];
   store.setSetting(workspaceId, "profile.model", JSON.stringify({ hypotheses: ["h1", "h2"].map((id) => ({ id, dimension: "D2", statement: "推断", basis: two,
     falsifier: "", alternative: "", status: "open" })) }));
-  expect(extractor.nextSession([], "insights")).toBeUndefined();
-  store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text: "三" }, createdAt: now });
-  expect(extractor.nextSession(["s"], "sections")).toBe("s");
-  // Two replies, the older eleven minutes old.
+  for (const text of ["二", "三", "四"]) {
+    expect(extractor.nextSession(["s"], "portrait")).toBeUndefined();
+    store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text }, createdAt: now });
+  }
+  expect(extractor.nextSession(["s"], "portrait")).toBeUndefined();
+  expect(extractor.nextSession([], "ledger")).toBe("s");
+  store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text: "五" }, createdAt: now });
+  expect(extractor.nextSession(["s"], "portrait")).toBe("s");
+  writeExtractState(store, workspaceId, "s#portrait", { upTo: 99, failures: 0, ranAt: now, readAt: now });
+  // A correction the log has not been checked against is read at once.
+  store.saveOnboardingSession({ id: "u", ownerId, workspaceId, state: "active", coverage: { stage: "situation", flow: "v1" }, createdAt: now, updatedAt: now });
+  store.appendOnboardingMessage({ sessionId: "u", workspaceId, role: "user", content: { text: "不对" }, createdAt: now });
+  expect(extractor.nextSession(["u"], "portrait")).toBeUndefined();
+  store.setSetting(workspaceId, ONBOARDING_INSIGHTS, JSON.stringify({ "u#1": { verdict: "off", text: "卡", at: now } }));
+  expect(extractor.nextSession(["u"], "portrait")).toBe("u");
+  // The environment sets another batch.
+  process.env.CROSSLINE_PORTRAIT_BATCH = "1";
+  store.saveOnboardingSession({ id: "v", ownerId, workspaceId, state: "active", coverage: { stage: "situation", flow: "v1" }, createdAt: now, updatedAt: now });
+  store.appendOnboardingMessage({ sessionId: "v", workspaceId, role: "user", content: { text: "一" }, createdAt: now });
+  expect(extractor.nextSession(["v"], "portrait")).toBe("v");
+  delete process.env.CROSSLINE_PORTRAIT_BATCH;
+  // One reply, eleven minutes old.
   store.saveOnboardingSession({ id: "t", ownerId, workspaceId, state: "active", coverage: { stage: "situation", flow: "v1" }, createdAt: now, updatedAt: now });
   store.appendOnboardingMessage({ sessionId: "t", workspaceId, role: "user", content: { text: "早" }, createdAt: new Date(Date.now() - 11 * 60_000).toISOString() });
-  expect(extractor.nextSession(["t"], "insights")).toBe("t");
+  expect(extractor.nextSession(["t"], "portrait")).toBe("t");
 });
 
 // Replay 17 (2026-11-17): five extraction answers that did not parse, recorded on the server. Words replaced by placeholders, refs
