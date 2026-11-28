@@ -7,7 +7,6 @@ import { isCrossSiteWrite } from "../../../../lib/same-origin";
 export const runtime = "nodejs";
 
 const MESSAGES: Record<string, string> = {
-  ACCOUNT_RESET_LOCAL: "本机安装版的数据在这台电脑上，重新安装即清空。",
   EMAIL_MISMATCH: "输入的邮箱与这个账号不一致。"
 };
 

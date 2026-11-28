@@ -115,12 +115,12 @@ export default async function SettingsPage({ searchParams }: { searchParams?: Pr
   const host = process.env.CROSSLINE_TAILSCALE_HOSTNAME?.trim();
   const hosted = isHostedBeta();
   const deviceLinked = hosted && Boolean(store.getSetting(ctx.workspaceId, "device.token.sha256"));
-  // 删除账号 is offered on the hosted beta to every account but the machine owner's; 清空数据重新开始 to every hosted account
-  // (lib/account-deletion.ts).
+  // 删除账号 is offered on the hosted beta to every account but the machine owner's; 清空数据重新开始 to every signed-in account,
+  // an installed copy's included (lib/account-deletion.ts).
   // The signed-in account's email, also said on the mailbox card: mailboxes belong to the account they were connected under.
   const sessionEmail = await (async () => { try { return (await getAuth().api.getSession({ headers: await headers() }))?.user.email; } catch { return undefined; } })();
-  const accountEmail = hosted ? sessionEmail : undefined;
-  const deletable = accountEmail && !deletionRefused(store, ctx.workspaceId) ? accountEmail : undefined;
+  const accountEmail = hosted || isLocalInstall() ? sessionEmail : undefined;
+  const deletable = accountEmail && hosted && !deletionRefused(store, ctx.workspaceId) ? accountEmail : undefined;
   // On the hosted beta the app already is a web address; elsewhere the phone reaches this machine over the private network.
   const phoneUrl = hosted ? process.env.CROSSLINE_WEB_BASE_URL?.trim() || undefined
     : process.env.CROSSLINE_DEPLOYMENT_MODE === "private" && host ? `https://${host}` : undefined;

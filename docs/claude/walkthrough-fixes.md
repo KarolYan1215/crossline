@@ -22,7 +22,7 @@
   - Tutorial research gets the person's confirmed `setting` (city, country, language).
   - The scheduler reads a milestone's deadline through `milestoneDeadline` (goal setting, else the approved milestone's anchor): approving a draft writes no goal setting, and every backplanned task had read as deadline-free.
   - Work marked one-sitting but longer than `MAX_SITTING_MINUTES` (180) is placed in sessions (`SITTING_SPLIT` note); pencilled-in overflow never goes onto a day with no available hours.
-  - Settings → 通用 「清空数据重新开始」 (`resetAccountData`, `CrosslineStore.resetWorkspace`) empties a workspace but keeps the account, its membership, the model connection and the machine-owner mark.
+  - Settings → 通用 「清空数据重新开始」 (`resetAccountData`, `CrosslineStore.resetWorkspace`) empties a workspace but keeps the account, its membership, the model connection and the machine-owner mark. Since 2026-11-28 (the owner) the installed copy offers it too instead of refusing with `ACCOUNT_RESET_LOCAL`; 删除账号 stays hosted-only (`apps/web/lib/account-reset.test.ts`).
 - **Old accounts brought up to the current rules (2026-10-21; W-97–W-101 in `docs/walkthrough-ledger.md`).** On the owner's hosted ledger 待确认 counted 97; these took it to 33:
   - Files from a folder (a file name with a path: an authorized folder, a folder picked in the interview, a recording's transcript) are not asked about one by one (`fromFolder` in `packages/db/src/file-belonging.ts`); only one dates were read from under an unclear course is. That was 60 of the 97.
   - A date batch still waiting is adopted by the web's ten-minute attention pass (`adoptPendingDates` in `lib/attention.ts`), not only when the interview page opens.

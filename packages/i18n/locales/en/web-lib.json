@@ -484,7 +484,6 @@
   "机主账号不能在网页上删除。": "The machine owner's account cannot be deleted on the web.",
   "本机安装版的数据在这台电脑上，卸载即删除。": "An installed copy keeps its data on this computer; uninstalling deletes it.",
   "输入的邮箱与这个账号不一致。": "The email entered does not match this account.",
-  "本机安装版的数据在这台电脑上，重新安装即清空。": "An installed copy keeps its data on this computer; reinstalling clears it.",
   "后台服务没有响应：可能正在重启，稍等几秒。": "The background service is not responding: it may be restarting. Wait a few seconds.",
   "需要地址和令牌。": "An address and a token are required.",
   "这里暂时不能申请邀请码。": "Invite codes cannot be applied for here at the moment.",

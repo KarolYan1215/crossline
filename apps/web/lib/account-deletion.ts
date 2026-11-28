@@ -31,7 +31,7 @@ function removeInside(root: string, target: string): boolean {
   return true;
 }
 
-export type AccountReset = { ok: true; rows: number; files: number } | { ok: false; code: "ACCOUNT_RESET_LOCAL" | "EMAIL_MISMATCH" };
+export type AccountReset = { ok: true; rows: number; files: number } | { ok: false; code: "EMAIL_MISMATCH" };
 
 /** What a reset keeps (`@crossline/db`, where the account scripts read it too). */
 export { RESET_KEEPS };
@@ -42,10 +42,10 @@ export { RESET_KEEPS };
  * conversation and calendar subscriptions — while the login, the model connection, the machine-owner mark and the calendar writers' setup
  * and records stay (`RESET_KEEPS`: the next publish withdraws what they wrote that is still to come), and so do the built-in workflows and
  * those the person marked 「重置时保留」 (`resetWorkspaceKeepingWorkflows`, 2026-11-21). The next page is the
- * interview's opening card. Offered to every hosted account; an installed copy is reset by reinstalling.
+ * interview's opening card. Offered to every hosted account and, since 2026-11-28 (the owner: clear the installed copy's account and
+ * redo the interview without reinstalling), to an installed copy too — the same rows and files go, inside its own data directory.
  */
 export function resetAccountData(ctx: AccessContext, session: { email: string }, typedEmail: string): AccountReset {
-  if (isLocalInstall()) return { ok: false, code: "ACCOUNT_RESET_LOCAL" };
   if (typedEmail.trim().toLowerCase() !== session.email.trim().toLowerCase()) return { ok: false, code: "EMAIL_MISMATCH" };
   const store = getStore();
   const root = path.resolve(dataDirectory());
