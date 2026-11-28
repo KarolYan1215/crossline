@@ -132,3 +132,11 @@ test("a spent usage quota is reported as its own blocker, not as a refusal", asy
   expect(result.blocker.message).toContain("额度");
   expect(JSON.stringify(result.blocker)).not.toContain("usageLimitExceeded");
 });
+
+test("an API key's, a project's or an organisation's spend limit is the same blocker as a spent quota (Codex 0.172.0)", async () => {
+  for (const info of ["apiKeySpendLimitExceeded", "projectSpendLimitExceeded", "organizationSpendLimitExceeded"]) {
+    const fake = runtime("", "failed", { codexErrorInfo: info, message: "Spend limit reached." });
+    const result = await codex.runCodexAnalysis(fake.client, context, { skillName: "crossline-automation-stripper", cwd: "C:\\repo", onAudit: () => {} });
+    expect(result.ok ? "" : result.blocker.code).toBe("ANALYSIS_USAGE_LIMIT");
+  }
+});

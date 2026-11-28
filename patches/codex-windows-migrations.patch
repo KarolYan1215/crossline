@@ -1,10 +1,11 @@
 diff --git a/codex-rs/state/src/migrations.rs b/codex-rs/state/src/migrations.rs
-index efbb76c..73cb9d3 100644
+index 33eed1bb96..a7b136fadb 100644
 --- a/codex-rs/state/src/migrations.rs
 +++ b/codex-rs/state/src/migrations.rs
-@@ -1,5 +1,9 @@
+@@ -1,6 +1,10 @@
  use std::borrow::Cow;
  
+ use crate::sqlite::SqliteWriteQueryExt;
 +#[cfg(windows)]
 +use sqlx::Row;
 +#[cfg(windows)]
@@ -12,7 +13,7 @@ index efbb76c..73cb9d3 100644
  use sqlx::migrate::Migrator;
  use sqlx_sqlite::SqlitePool;
  
-@@ -28,6 +32,126 @@ fn runtime_migrator(base: &'static Migrator) -> Migrator {
+@@ -29,6 +33,126 @@ fn runtime_migrator(base: &'static Migrator) -> Migrator {
      }
  }
  
@@ -140,7 +141,7 @@ index efbb76c..73cb9d3 100644
      runtime_migrator(&STATE_MIGRATOR)
  }
 diff --git a/codex-rs/state/src/migrations_tests.rs b/codex-rs/state/src/migrations_tests.rs
-index d8e14b7..a486399 100644
+index d8e14b752b..a486399def 100644
 --- a/codex-rs/state/src/migrations_tests.rs
 +++ b/codex-rs/state/src/migrations_tests.rs
 @@ -2,6 +2,8 @@ use codex_utils_absolute_path::test_support::PathExt;
@@ -309,10 +310,10 @@ index d8e14b7..a486399 100644
      Migrator {
          migrations: Cow::Owned(
 diff --git a/codex-rs/state/src/sqlite.rs b/codex-rs/state/src/sqlite.rs
-index e35a074..ec5bf48 100644
+index 733cf1de86..818007353a 100644
 --- a/codex-rs/state/src/sqlite.rs
 +++ b/codex-rs/state/src/sqlite.rs
-@@ -8,6 +8,7 @@
+@@ -12,6 +12,7 @@
  
  use crate::DbTelemetry;
  use crate::migrations::repair_legacy_recency_migration_version;
@@ -320,7 +321,7 @@ index e35a074..ec5bf48 100644
  use crate::runtime::recovery::RuntimeDbInitError;
  use crate::telemetry;
  use crate::telemetry::DbKind;
-@@ -316,6 +317,7 @@ impl SqliteConfig {
+@@ -411,6 +412,7 @@ impl SqliteConfig {
          })?;
          let started = Instant::now();
          let migrate_result = async {
@@ -329,7 +330,7 @@ index e35a074..ec5bf48 100644
                  repair_legacy_recency_migration_version(&pool, migrator).await?;
              }
 diff --git a/codex-rs/utils/home-dir/src/lib.rs b/codex-rs/utils/home-dir/src/lib.rs
-index caa4356..b92e50a 100644
+index caa43569c7..b92e50aab9 100644
 --- a/codex-rs/utils/home-dir/src/lib.rs
 +++ b/codex-rs/utils/home-dir/src/lib.rs
 @@ -1,10 +1,13 @@
