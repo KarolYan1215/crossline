@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 
+use crate::sqlite::SqliteWriteQueryExt;
 #[cfg(windows)]
 use sqlx::Row;
 #[cfg(windows)]
@@ -236,7 +237,7 @@ WHERE version = ?
     .bind(38_i64)
     .bind(recency_migration.checksum.as_ref())
     .bind(recency_migration.version)
-    .execute(pool)
+    .execute_with_busy_retry(pool)
     .await?;
     Ok(())
 }
