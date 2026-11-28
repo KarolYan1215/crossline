@@ -20,6 +20,21 @@ test("a model the account has is kept; one it lacks falls down the tier ladder, 
   expect(fitRoute({ model: "gpt-6.2-sol" }, "top", null, DEFAULT_TIERS)).toEqual({ model: "gpt-6.2-sol" });
 });
 
+test("a missing model takes the newest listed one of its family before stepping down a tier", () => {
+  // The 0.163.0 runtime's catalogue on a Plus plan (2026-11-26): gpt-6.2-sol needs 0.166.0 and is left out.
+  const old = [model("gpt-6.1-terra"), model("gpt-reserve", { hidden: true }), model("gpt-6-sol"), model("gpt-6.1-sol"),
+    model("gpt-6-astra"), model("gpt-6-luna"), model("gpt-5.6-sol"), model("gpt-5.6-terra")];
+  expect(fitRoute({ model: "gpt-6.2-sol", effort: "medium" }, "top", old, DEFAULT_TIERS)).toEqual({ model: "gpt-6.1-sol", effort: "medium" });
+  expect(fitRoute({ model: "gpt-6.2-sol", effort: "medium" }, "top", old.filter((item) => item.model !== "gpt-6.1-sol"), DEFAULT_TIERS))
+    .toEqual({ model: "gpt-6-sol", effort: "medium" });
+  // A hidden one of the family is not taken; with no visible sol the tier ladder applies as before.
+  const hiddenSol = [model("gpt-6.1-sol", { hidden: true }), model("gpt-6.1-terra")];
+  expect(fitRoute({ model: "gpt-6.2-sol", effort: "medium" }, "top", hiddenSol, DEFAULT_TIERS)).toEqual({ model: "gpt-6.1-terra", effort: "medium" });
+  // Another prefix is another family.
+  expect(fitRoute({ model: "gpt-6.2-sol", effort: "medium" }, "top", [model("o-6.1-sol"), model("gpt-6.1-terra")], DEFAULT_TIERS))
+    .toEqual({ model: "gpt-6.1-terra", effort: "medium" });
+});
+
 test("the catalogue is read once per workspace for ten minutes, and a runtime that cannot say leaves routes alone", async () => {
   forgetAccountModels();
   let calls = 0;
