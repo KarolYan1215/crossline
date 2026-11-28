@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { agentLanguageLine, runLocale, schemaForLocale, styleInstructions } from "./style";
 import { join } from "node:path";
@@ -17,6 +17,8 @@ import { accountModels, fitRoute, routeForChoice } from "./model-catalog";
 import { registerAgentThread, SANDBOX_PROFILE, sandboxProfile, WINDOWS_SHELL_PROFILE, windowsShellConfig, type AgentMode } from "./agent-mode";
 
 export type AnalysisAudit = { threadId?: string; turnId?: string;
+  /** With `cacheGroup`: the run went on a fork of this group's first thread (its cache key), not a thread of its own. */
+  forkedFrom?: string;
   /** How many times a turn went silent for so long it was interrupted and sent again. Absent means none did. */
   stalls?: number;
   /** How many turns ended without a final message and were asked for it again (at most one a run). Absent means none did. */
@@ -130,6 +132,15 @@ export type SkillRunOptions<T> = {
    * (today's date, the object of this run) after, each in the order the runner wrote it (`cacheOrderedInput`). Nothing is added or left out.
    */
   stableKeys?: readonly string[];
+  /**
+   * Runs that share a cache: each one after the first goes on a fork of the first run's thread with no turns (`thread/fork`,
+   * `ephemeral: true`, before the first turn), which Codex sends with that thread's session id as the prompt-cache key (vendor/codex
+   * core/src/session/session.rs `fork_cache_key`). A fresh thread is a new key, and the provider routes a new key to a machine that has
+   * not seen the prompt: on the owner's interview (2026-11-28) an extraction whose input matched the one sent a minute before for 60k of
+   * its 65k characters still had only the shared 14k-token opening cached. One group per kind of run whose prompts share most of
+   * themselves (the interview's extraction lanes, per workspace); kept in memory per runtime, so a restart begins a new one.
+   */
+  cacheGroup?: string;
   /**
    * What only this run is told beside the Skill's own instructions (feedback to apply, the library skills it names, a mode): sent as the
    * last part of the first prompt, after the input, so the developer instructions are the same for every run of the Skill and the
@@ -1193,7 +1204,7 @@ async function startAgentThread<T>(scope: Scope, options: SkillRunOptions<T>, co
  * Starts the one thread a fresh run uses, with everything that makes it safe to run unattended: read-only sandbox, the
  * `untrusted` approval policy, no tools but the one granted, no instruction files, no MCP servers. Returns its id.
  */
-async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>, context: RunContext, resumeId?: string): Promise<string> {
+async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>, context: RunContext, resumeId?: string, audit?: AnalysisAudit): Promise<string> {
   const runtimeConfig = record(record(await scope.rpc("config/read", { includeLayers: false }))?.config);
   if (!runtimeConfig) fail("SKILL_PROTOCOL_INVALID");
   const mcp = record(runtimeConfig.mcp_servers) ?? {};
@@ -1248,11 +1259,64 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
     ...(context.route ? { model: context.route.model } : {}),
     ...(context.provider ? { modelProvider: context.provider.id } : {})
   };
-  const started = await openThread(scope, threadParams, config, resumeId);
+  const group = !resumeId && audit && options.cacheGroup && !context.provider && !options.keepThread && !forkRefused.has(scope.client) ? options.cacheGroup : undefined;
+  const key = group ? anchorKey(options.skillName, threadParams) : undefined;
+  const anchor = group ? anchorsOf(scope.client).get(group) : undefined;
+  let started: Record<string, unknown> | undefined;
+  if (group && anchor && anchor.key === key) {
+    try {
+      // The fork takes the anchor's tools with it (they are the same: `key`) and is given every setting the fresh thread would be.
+      started = record(await scope.rpc("thread/fork", { threadId: anchor.threadId, beforeTurnId: anchor.turnId, ephemeral: true, excludeTurns: true, config,
+        ...Object.fromEntries(FORKED_PARAMS.filter((name) => threadParams[name] !== undefined).map((name) => [name, threadParams[name]])) }));
+      audit!.forkedFrom = anchor.threadId;
+    } catch (error) {
+      // Gone (its rollout deleted, a runtime restarted with another store): the run starts its own thread and becomes the anchor.
+      anchorsOf(scope.client).delete(group);
+      // A compute node passes only the methods it lists (node/protocol.ts `ALLOWED_METHODS`): its runs keep a thread of their own.
+      if (/METHOD_REFUSED|method not found/i.test(error instanceof Error ? error.message : "")) forkRefused.add(scope.client);
+      console.info(JSON.stringify({ type: "skill.anchor_lost", skill: options.skillName, group, reason: (error instanceof Error ? error.message : "").slice(0, 200) }));
+    }
+  }
+  started ??= await openThread(scope, threadParams, config, resumeId);
+  if (group && key && !audit!.forkedFrom) pendingAnchors.set(audit!, { client: scope.client, group, key });
   const threadId = record(started?.thread)?.id;
   if (!identifier(threadId) || (resumeId && threadId !== resumeId)) fail("SKILL_PROTOCOL_INVALID");
   if (started?.approvalPolicy !== "untrusted" || record(started.sandbox)?.type !== "readOnly" || !Array.isArray(started.instructionSources) || started.instructionSources.length) fail("SKILL_PERMISSION_DENIED");
   return threadId;
+}
+
+/** What `thread/fork` is given of a fresh thread's start parameters; `dynamicTools` it cannot take, the fork keeps its parent's. */
+const FORKED_PARAMS = ["runtimeWorkspaceRoots", "sandbox", "approvalPolicy", "approvalsReviewer", "developerInstructions", "model", "modelProvider"] as const;
+/** Per runtime, per `cacheGroup`: the first run's thread and first turn, and what a fork of it must match to stand in for a fresh thread. */
+type CacheAnchor = { threadId: string; turnId: string; key: string };
+const cacheAnchors = new WeakMap<object, Map<string, CacheAnchor>>();
+/** Runtimes that do not take `thread/fork` at all. */
+const forkRefused = new WeakSet<object>();
+function anchorsOf(client: object): Map<string, CacheAnchor> {
+  let anchors = cacheAnchors.get(client);
+  if (!anchors) { anchors = new Map(); cacheAnchors.set(client, anchors); }
+  return anchors;
+}
+/**
+ * A fresh run of a group whose thread becomes the anchor once its first turn has started (`rememberAnchor`). The first turn, not the
+ * last: a repair is a later turn on the same thread, and the fork is cut before the first.
+ */
+const pendingAnchors = new WeakMap<AnalysisAudit, { client: object; group: string; key: string; turnId?: string }>();
+function noteFirstTurn(audit: AnalysisAudit, turnId: string): void {
+  const pending = pendingAnchors.get(audit);
+  if (pending) pending.turnId ??= turnId;
+}
+/** The Skill, its instructions, its tools and its model: a fork has the anchor's tools, so a run whose tools differ starts afresh. */
+function anchorKey(skillName: string, threadParams: Record<string, unknown>): string {
+  return createHash("sha256").update(JSON.stringify([skillName, threadParams.developerInstructions, threadParams.dynamicTools, threadParams.model ?? null])).digest("hex");
+}
+function rememberAnchor(audit: AnalysisAudit): void {
+  const pending = pendingAnchors.get(audit);
+  pendingAnchors.delete(audit);
+  if (!pending?.turnId || !audit.threadId) return;
+  const anchors = anchorsOf(pending.client);
+  if (anchors.get(pending.group)?.key === pending.key) return;
+  anchors.set(pending.group, { threadId: audit.threadId, turnId: pending.turnId, key: pending.key });
 }
 
 /**
@@ -1412,6 +1476,7 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
     }))?.turn);
     if (!identifier(turn?.id)) fail("SKILL_PROTOCOL_INVALID");
     audit.turnId = turn.id;
+    noteFirstTurn(audit, turn.id);
     run.onAudit({ ...audit });
     // This turn's own window: the time the previous one took is not held against it.
     const turnStarted = Date.now();
@@ -1885,6 +1950,7 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, given: unknown, wanted:
   } catch (error) { return failureResult<T>(client, error, withWebUrls(audit, egress), options.locale); }
   finally {
     unregister?.(); scope?.dispose();
+    rememberAnchor(audit);
     if (audit.threadId) releaseThread(client, audit.threadId, options.keepThread ? threadKeepMs(options.skillName) : 0);
     if (audit.threadId && options.keepThread) queueCompaction(client, audit.threadId, options.skillName);
   }
@@ -1893,7 +1959,7 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, given: unknown, wanted:
 /** The run's thread: a new one, or `resumeThreadId` gone on with — and a new one when the runtime no longer has it. */
 async function openRunThread<T>(client: CodexRpcBoundary, scope: Scope, options: SkillRunOptions<T>, context: RunContext, audit: AnalysisAudit): Promise<string> {
   const resumeId = options.resumeThreadId;
-  if (!resumeId) return startIsolatedThread(scope, options, context);
+  if (!resumeId) return startIsolatedThread(scope, options, context, undefined, audit);
   try {
     const threadId = await startIsolatedThread(scope, options, context, resumeId);
     // Subscribed again: a later release of it is a fresh one.

@@ -212,7 +212,7 @@ export async function onboardingExtractPass(workspaceId: string): Promise<void> 
   }
   // The start-on-use handle: a guest's runtime that went idle after the reply is started again, or the retry fails for want of a client.
   const extractor = createOnboardingExtractor(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId));
-  // Each lane on its own (the ledger, the portrait's sections and its inferences): one that is running or has nothing due is left alone.
+  // Each lane on its own (the ledger, the portrait): one that is running or has nothing due is left alone.
   const due = EXTRACT_LANES.filter((lane) => !extractionRunning(workspaceId, lane) && extractor.nextSession([], lane));
   if (!due.length) return;
   // A turn starts its own extraction whatever the quota says (the person is there); a retry from the tick is core work like any other.

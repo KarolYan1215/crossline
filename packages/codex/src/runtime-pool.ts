@@ -41,7 +41,7 @@ export function createRuntimePool(local: CodexRpcBoundary, members: () => PoolMe
     const wrapped: CodexRpcBoundary = {
       request: async (method, params) => {
         const result = await member.client.request(method, params);
-        if (method === "thread/start") {
+        if (method === "thread/start" || method === "thread/fork") {
           const id = (result as { thread?: { id?: unknown } } | undefined)?.thread?.id;
           if (typeof id === "string") remember(id, member.id);
         }

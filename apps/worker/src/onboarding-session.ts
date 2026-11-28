@@ -1018,14 +1018,13 @@ export function finishInterview(store: CrosslineStore, workspaceId: string, cwd:
   const lastReply = store.listOnboardingMessages(workspaceId, sessionId).filter((message) => message.role === "user").at(-1)?.seq;
   if (options.extract === false) return { outcome: { state: "finished", sessionId }, complete: Promise.resolve() };
   const complete = (async () => {
-    // Every reply recorded first (the ledger, then the inferences and the sections, side by side), then the finishing run that writes the
-    // synthesis (as a round that ended the interview used to): the sections' lane, with lanes.
+    // Every reply recorded first (the ledger, then the portrait), then the finishing run that writes the synthesis (as a round that ended
+    // the interview used to): the portrait's lane, with lanes.
     if (lastReply !== undefined) {
       await extractionReached(store, workspaceId, sessionId, lastReply, ask).catch(() => false);
-      if (lanes) await Promise.all((["insights", "sections"] as const).map((which) =>
-        extractionReached(store, workspaceId, sessionId, lastReply, lane(which), Number.POSITIVE_INFINITY, which).catch(() => false)));
+      if (lanes) await extractionReached(store, workspaceId, sessionId, lastReply, lane("portrait"), Number.POSITIVE_INFINITY, "portrait").catch(() => false);
     }
-    await (lanes ? lane("sections")() : ask()).catch(() => undefined);
+    await (lanes ? lane("portrait")() : ask()).catch(() => undefined);
   })();
   return { outcome: { state: "finished", sessionId }, complete };
 }

@@ -4,7 +4,7 @@
  *
  *   pnpm exec tsx scripts/points-migrate.ts --email someone@example.com --split [--data /data] [--apply]
  *     The account's main interview runs under the points rules from now on, and its paragraphs (the portrait's sections) are split into
- *     points: the worker's sections lane owes one run for it (`profile.points.split`) and does it with the account's own model, each point
+ *     points: the worker's portrait lane owes one run for it (`profile.points.split`) and does it with the account's own model, each point
  *     resting on the person's own words. The paragraphs stay as they are: the split run is asked for no section, and every section that
  *     holds one is closed so no later run finalizes it again.
  *

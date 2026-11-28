@@ -92,7 +92,7 @@ export function persistExtraction(store: CrosslineStore, workspaceId: string, ex
   }
   // The hypothesis log, career directions and dimension notes (contract B): the run sends only what is new or changed, merged by id
   // (`mergeProfileInsights`, 2026-11-12); what it did not name stays. The person's 准/不准 on a hypothesis stays with its id. Written by
-  // a lane of its own (`EXTRACT_LANE_KEYS.insights`), which owes no portrait section; a line's own interview never touches them.
+  // the portrait's lane (`EXTRACT_LANE_KEYS.portrait`) with the points; a line's own interview never touches them.
   const { hypotheses, careers, dimensions, dropCareers } = extraction;
   if (!sessionId.startsWith("line-") && (hypotheses?.length || careers?.length || dimensions?.length || dropCareers?.length)) {
     const profile = readProfileModel(store, workspaceId);

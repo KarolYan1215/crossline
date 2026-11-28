@@ -55,10 +55,13 @@ const REPLIES_PER_PORTRAIT_RUN = 12;
  */
 /**
  * Replies the portrait's lanes wait for while an interview is under way (`CROSSLINE_PORTRAIT_BATCH` overrides it), and how long the oldest
- * may wait before they read it anyway. 1 since 2026-11-17 (the owner: no limit in the interview): each reply is read as it comes, and a
- * run reads every reply that arrived while the one before it ran. It was 3.
+ * may wait before they read it anyway. It was 3, then 1 from 2026-11-17 (the owner: no limit in the interview), and 5 since 2026-11-28
+ * (the owner, after the interview spent the quota in under an hour, docs/token-economy.md §6): replies came 1.6 minutes apart (median),
+ * so five are about eight minutes, inside `PORTRAIT_WAIT_MS`. Once per stage was the other choice; the owner's stages held 3 to 35
+ * replies. The log still reads every reply while it has fewer than two cards to offer or a correction is unread, and a finished interview
+ * is read at once.
  */
-export const PORTRAIT_BATCH = 1;
+export const PORTRAIT_BATCH = 5;
 /** The observation ratings a portrait run reads, oldest dropped first: every correction of a usual interview. */
 const OBSERVATIONS_READ = 16;
 
@@ -68,32 +71,42 @@ export function correctedSince(store: CrosslineStore, workspaceId: string, sessi
     .some(([key, rating]) => key.startsWith(`${sessionId}#`) && rating.verdict !== "fits" && (!since || rating.at > since || (inclusive && rating.at === since)));
 }
 
-/** Whether the person corrected a card the inferences' lane has not read yet: the log may still rest on what was corrected. */
+/** Whether the person corrected a card the portrait's lane has not read yet: the log may still rest on what was corrected. */
 export const correctionUnread = (store: CrosslineStore, workspaceId: string, sessionId: string, lanes = true): boolean =>
-  correctedSince(store, workspaceId, sessionId, readLaneState(store, workspaceId, sessionId, lanes ? "insights" : "all").readAt);
+  correctedSince(store, workspaceId, sessionId, readLaneState(store, workspaceId, sessionId, lanes ? "portrait" : "all").readAt);
 
 export const PORTRAIT_WAIT_MS = 10 * 60_000;
 
 /**
  * Which part of the extraction a run writes (2026-11-12): `all` in one run (the shape the tests and the scripts' single runs use), or
- * one of three lanes that run side by side (`EXTRACT_LANE_KEYS`). The ledger lane keeps the watermark the start standard and the next
- * round wait for; the portrait's two lanes keep their own, read no files (they look sentences up), and are the main interview's only.
+ * one of two lanes that run side by side (`EXTRACT_LANE_KEYS`). The ledger lane keeps the watermark the start standard and the next
+ * round wait for; the portrait's lane keeps its own, reads no files (it looks sentences up), and is the main interview's only.
  * Before, one run wrote all of it and rewrote the portrait's lists in full, and a timetable given in round 14 was on record in round 24.
  */
 export type ExtractLane = "all" | ExtractLaneName;
-export const EXTRACT_LANES: readonly ExtractLaneName[] = ["ledger", "sections", "insights"];
-const portraitLane = (lane: ExtractLane) => lane === "sections" || lane === "insights";
+export const EXTRACT_LANES: readonly ExtractLaneName[] = ["ledger", "portrait"];
+const portraitLane = (lane: ExtractLane) => lane === "portrait";
 /** The watermark's key: the ledger lane shares the one a single run keeps. */
 export const laneStateKey = (sessionId: string, lane: ExtractLane = "all") => portraitLane(lane) ? `${sessionId}#${lane}` : sessionId;
+/** The two portrait lanes before 2026-11-28, whose watermarks an interview under way then still has (`readLaneState`). */
+const MERGED_LANES = ["sections", "insights"] as const;
 /**
  * A lane's watermark. A portrait lane that has never run starts where the single run (and the ledger lane, which shares its watermark)
  * got to: an interview already under way, or long finished, when the lanes came is not read again from its first reply. The ledger
  * lane pins that starting point the first time it moves on (`pinned`): read live, it moved with every reply, so in the eighth replay
- * (2026-11-13) the sections' lane never had three replies waiting and read none of the interview.
+ * (2026-11-13) the sections' lane never had three replies waiting and read none of the interview. An interview the two older portrait
+ * lanes had read goes on from the earlier of their watermarks, with the inferences' `readAt` (the corrections they had read).
  */
 export function readLaneState(store: CrosslineStore, workspaceId: string, sessionId: string, lane: ExtractLane = "all"): ExtractState {
   const own = readExtractState(store, workspaceId, laneStateKey(sessionId, lane));
-  return portraitLane(lane) && own.ranAt === undefined && !own.failures && !own.pinned ? { ...own, upTo: readExtractState(store, workspaceId, sessionId).upTo } : own;
+  if (!portraitLane(lane) || own.ranAt !== undefined || own.failures || own.pinned) return own;
+  const before = MERGED_LANES.map((name) => readExtractState(store, workspaceId, `${sessionId}#${name}`))
+    .filter((state) => state.ranAt !== undefined || state.pinned);
+  if (before.length) {
+    const readAt = readExtractState(store, workspaceId, `${sessionId}#insights`).readAt;
+    return { ...own, upTo: Math.min(...before.map((state) => state.upTo)), ...(readAt ? { readAt } : {}) };
+  }
+  return { ...own, upTo: readExtractState(store, workspaceId, sessionId).upTo };
 }
 /** The fact index shown to a run: enough to update rather than repeat, short enough not to crowd out the new sentences. */
 const FACTS_SHOWN = 200;
@@ -154,17 +167,17 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       if (!portraitLane(lane) || sessions.find((session) => session.id === id)?.state !== "active") return true;
       // The inferences are what the next cards are chosen from: they wait for a batch only while the log has two or more to offer
       // (the seventh replay: batched from the start, the lane ran three times and no card came from the log).
-      if (lane === "insights" && cardCandidates(readProfileModel(store, workspaceId).hypotheses ?? []).length < 2) return true;
+      if (cardCandidates(readProfileModel(store, workspaceId).hypotheses ?? []).length < 2) return true;
       // A correction the log has not been checked against goes beside the next round's cards (`cardsCheck`): the lane reads it at once.
-      if (lane === "insights" && correctedSince(store, workspaceId, id, state(id).readAt)) return true;
+      if (correctedSince(store, workspaceId, id, state(id).readAt)) return true;
       return pending.length >= (Number(process.env.CROSSLINE_PORTRAIT_BATCH) || PORTRAIT_BATCH) || Date.now() - Date.parse(pending[0]!.createdAt) >= PORTRAIT_WAIT_MS;
     };
     const due = (id: string) => { const retryAt = state(id).retryAt; return !retryAt || Date.parse(retryAt) <= Date.now(); };
     // An interview the dialogue ended whose synthesis is not written yet still owes a run, even with nothing new to read. The sections'
-    // lane writes it; the ledger and the inferences owe nothing past the last reply.
+    // lane writes it; the ledger owes nothing past the last reply.
     // Under the points rules an ended interview owes no run of its own: the report writes the synthesis (`portraitTask`).
     const finishing = (id: string) => { const mark = readFinishing(store, workspaceId, id);
-      return (lane === "all" || lane === "sections") && !pointsRules(sessions.find((session) => session.id === id)?.coverage)
+      return (lane === "all" || lane === "portrait") && !pointsRules(sessions.find((session) => session.id === id)?.coverage)
         && Boolean(mark && mark.runs < FINISH_RUNS_MAX && !synthesized()); };
     const filesFor = (id: string) => !portraitLane(lane) && pendingExtractDocs(store, workspaceId).length > 0 && docsSession(id) === id;
     const asked = preferred.find((id) => (!portraitLane(lane) || ours.has(id)) && (waiting(id) || filesFor(id) || finishing(id)));
@@ -173,8 +186,8 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     if (replies) return replies.id;
     const owed = sessions.find((session) => finishing(session.id) && due(session.id));
     if (owed) return owed.id;
-    // An account moved to the points rules owes one run of the sections' lane that splits its paragraphs into points.
-    const split = (lane === "all" || lane === "sections") && readPointsSplit(store, workspaceId).length
+    // An account moved to the points rules owes one run of the portrait's lane that splits its paragraphs into points.
+    const split = (lane === "all" || lane === "portrait") && readPointsSplit(store, workspaceId).length
       ? sessions.find((session) => pointsRules(session.coverage) && !session.id.startsWith("line-") && session.id !== NOTES_SESSION && due(session.id)) : undefined;
     if (split) return split.id;
     if (portraitLane(lane) || !pendingExtractDocs(store, workspaceId).length) return undefined;
@@ -214,8 +227,8 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     const state = readLaneState(store, workspaceId, sessionId, lane);
     const client = getClient();
     const blocked = (code: string, message: string): ExtractOutcome => failed(sessionId, code, message, lane);
-    /** Whether this run writes a group of fields: every group in a single run, else its lane's. */
-    const writes = (group: ExtractLaneName) => lane === "all" || lane === group;
+    /** Whether this run writes a group of fields: every group in a single run, else its lane's (the portrait's: its sections and inferences). */
+    const writes = (group: "ledger" | "sections" | "insights") => lane === "all" || (group === "ledger" ? lane === "ledger" : lane === "portrait");
     if (!client) return blocked("CODEX_SUPERVISOR_UNAVAILABLE", "Codex 运行时不可用。");
     const ownerId = store.getWorkspaceOwnerId(workspaceId);
     if (!ownerId) return blocked("WORKSPACE_OWNER_MISSING", "找不到这个工作区的所有者。");
@@ -366,9 +379,13 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       // them, with no time limit since 2026-11-22, W-313): they go as turns too.
       ...(finishing || (lane === "ledger" && session?.state === "active") ? { priority: "interactive" as const }
         : portraitLane(lane) ? { priority: "planning" as const } : {}),
-      // The prompt cache (docs/token-economy.md §2.5): the lines, projects and portrait first, the facts on record (which grow) after
-      // them, and this run's replies, files, task and date last.
-      stableKeys: ["version", "lane", "timeZone", "lines", "domainGuides", "lineProfiles", "projects", "focusLine", "profile", "facts"],
+      // The prompt cache (docs/token-economy.md §2.5): the lines, projects and facts on record first, then the portrait, whose points
+      // are rewritten in place nearly every run. In 22 runs of one lane of the owner's interview on 2026-11-28 the facts never changed
+      // and the points changed between 16 of the 21 pairs; with the facts first a run shares 64% of its input with the one before, not
+      // 43%. This run's replies, files, task and date come last.
+      stableKeys: ["version", "lane", "timeZone", "lines", "domainGuides", "lineProfiles", "projects", "focusLine", "facts", "profile"],
+      // Each lane's runs go on forks of its first thread, so the provider routes them to the machine that holds their cache (2026-11-28).
+      cacheGroup: `${ONBOARDING_EXTRACT_SKILL}:${workspaceId}:${lane}`,
       validateOutput: (output) => {
         full = listsAtLimit(output);
         const valid = validateOnboardingExtraction(output, known);
@@ -598,8 +615,8 @@ export function requestExtraction(workspaceId: string, run: (preferred: string[]
   return entry.promise;
 }
 /**
- * The three lanes at once (2026-11-12): the ledger, the portrait's sections and its inferences each in a run of its own, side by side.
- * Resolves with the ledger lane, the one the next round and the start standard wait for; the portrait's lanes finish on their own.
+ * Both lanes at once (2026-11-12, two since 2026-11-28): the ledger and the portrait each in a run of its own, side by side. Resolves with
+ * the ledger lane, the one the next round and the start standard wait for; the portrait's lane finishes on its own.
  */
 export function requestAllLanes(workspaceId: string, run: (preferred: string[], lane: ExtractLaneName) => Promise<ExtractOutcome>, preferred?: string): Promise<void> {
   const ledger = requestExtraction(workspaceId, (asked) => run(asked, "ledger"), preferred, "ledger");
