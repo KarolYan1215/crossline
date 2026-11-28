@@ -1,28 +1,28 @@
 {
   "repository": "https://github.com/KarolYan1215/codex.git",
   "upstream": "https://github.com/openai/codex.git",
-  "tag": "rust-v0.163.0",
-  "commit": "83086188ae0614bd882818ff1aa23f3194962012",
+  "tag": "rust-v0.172.0",
+  "commit": "3d86e43b075adeba2193ec5c22ac92f55afd82e6",
   "integration": "app-server-stdio",
   "previous": {
-    "tag": "rust-v0.155.0",
-    "commit": "f0a1b8f0849d90960bc406b848f32e5a129b0457",
-    "note": "Upgraded 2026-10-20 (docs/codex-upgrade-0.163.md). The Windows debug and release hashes below are still the 0.155.0 builds until each is rebuilt from this source; the hosted server's 0.155.0 Linux binary stays accepted (CODEX_PREVIOUS_BINARY_SHA256) until it is replaced."
+    "tag": "rust-v0.163.0",
+    "commit": "83086188ae0614bd882818ff1aa23f3194962012",
+    "note": "Upgraded 2026-11-28 (docs/codex-upgrade-0.172.md) because gpt-6.2-sol has minimal_client_version 0.166.0 and the backend left it out of 0.163.0's model catalogue. The Windows debug hash below (build) is still the 0.163.0 root build: it names the runtime in provider conformance records, so it changes only when the root is rebuilt. The 0.163.0 release and Linux binaries stay accepted (CODEX_PREVIOUS_BINARY_SHA256) until each place that runs one is replaced."
   },
   "patches": [
     {
       "path": "patches/codex-windows-migrations.patch",
-      "sha256": "76d9188367fb6772c45f1dad4e953c43aa95b13ebe162a2a5f6c2d961a2abf63",
-      "purpose": "Safely repair verified CRLF migration checksums used by existing Windows Codex homes. Regenerated against rust-v0.163.0, which still lacks an equivalent repair. Since 2026-10-22 it also keeps the fork out of the official Codex app's ~/.codex: with CODEX_HOME unset the Windows default home is Crossline's own (utils/home-dir crossline_default_home), and the repair skips databases directly in %USERPROFILE%/.codex (state is_official_codex_home_db)."
+      "sha256": "13755c8edb7a2e6982b6c0d53601f11b4b4bcbdf99e252b30a3bfaadae996e9f",
+      "purpose": "Safely repair verified CRLF migration checksums used by existing Windows Codex homes. Regenerated against rust-v0.172.0 (2026-11-28; the only conflict was an import line in migrations.rs), which still lacks an equivalent repair. Since 2026-10-22 it also keeps the fork out of the official Codex app's ~/.codex: with CODEX_HOME unset the Windows default home is Crossline's own (utils/home-dir crossline_default_home), and the repair skips databases directly in %USERPROFILE%/.codex (state is_official_codex_home_db)."
     }
   ],
   "build": {
     "command": "cargo build --locked -p codex-cli --bin codex",
-    "lockfileSha256": "cae541406f7ec43a418e126be2bcd5de00b243e7bbf6382570028727d99c1069",
-    "lockfileNote": "The release tag recorded 160 workspace packages as 0.0.0; Cargo synchronized only those entries to 0.163.0 before the locked rebuild (git diff shows 160 version lines changed and nothing else).",
+    "lockfileSha256": "0c017d96dae581ea09834ddbda7c572dd48e771cf86e9f87f8b3bcb4ab16f686",
+    "lockfileNote": "The rust-v0.172.0 tag records 174 workspace packages as 0.0.0; Cargo synchronized only those entries to 0.172.0 before the locked rebuild (git diff shows 174 version lines changed and nothing else, 2026-11-28).",
     "binary": "vendor/codex/codex-rs/target/debug/codex.exe",
     "binarySha256": "e4c4529140304f07d74e262a2dee7eae1cacefe875b640b4cc19c0819fa97df0",
-    "binaryNote": "rust-v0.163.0 plus the fork's ~/.codex isolation (crossline_default_home, is_official_codex_home_db), built 2026-11-01 with cargo build --locked (17 min, rustc 1.95.0) in the worktree modest-nightingale-ea278c (branch fix/fork-codex-home-isolation-main; the 2026-10-22 build 43b258b2… of the same source on fix/fork-codex-home-isolation was never merged) and copied to this path, where the worker resolves it. Rust debug builds embed the absolute source path, so a build elsewhere has another hash; lockfileSha256 is the provenance proof. The root build before the isolation (e6300d7f…, 2026-10-20) stays accepted in CODEX_PREVIOUS_BINARY_SHA256 until the root's copy is replaced.",
+    "binaryNote": "Still the rust-v0.163.0 root build (2026-11-01, e4c45291…): the root has not been rebuilt from rust-v0.172.0. rust-v0.163.0 plus the fork's ~/.codex isolation (crossline_default_home, is_official_codex_home_db), built 2026-11-01 with cargo build --locked (17 min, rustc 1.95.0) in the worktree modest-nightingale-ea278c (branch fix/fork-codex-home-isolation-main; the 2026-10-22 build 43b258b2… of the same source on fix/fork-codex-home-isolation was never merged) and copied to this path, where the worker resolves it. Rust debug builds embed the absolute source path, so a build elsewhere has another hash; lockfileSha256 is the provenance proof. The root build before the isolation (e6300d7f…, 2026-10-20) stays accepted in CODEX_PREVIOUS_BINARY_SHA256 until the root's copy is replaced.",
     "isolationCheck": "2026-11-01, on e4c45291…: with CODEX_HOME unset and LOCALAPPDATA pointed at a temp folder the binary opened <LOCALAPPDATA>/Crossline/codex-home; with USERPROFILE and CODEX_HOME pointing at copies of the official ~/.codex databases it refused to start and every _sqlx_migrations checksum stayed byte-identical; cargo test --locked -p codex-state -p codex-utils-home-dir passed (231 + 5 + 1).",
     "worktreeBuild": {
       "builtOn": "2026-10-20, in the worktree agent-abcaf4eff22c451b2 (21 min 34 s, rustc 1.95.0 from rust-toolchain.toml)",
@@ -34,44 +34,60 @@
     }
   },
   "release": {
-    "purpose": "The binaries the Windows installers ship (docs/local-installer.md, and the 「Crossline 节点」 installer, docs/compute-node.md): the rust-v0.163.0 release build.",
-    "v8": "rusty_v8 150.4.0 ptrcomp_sandbox release, fetched by scripts/fetch-rusty-v8.ts from openai/codex rusty-v8-v150.4.0 and checked against vendor/codex/third_party/v8/rusty_v8_150_4_0_release_manifests.sha256",
+    "purpose": "The binaries the Windows installers ship (docs/local-installer.md, and the 「Crossline 节点」 installer, docs/compute-node.md): the rust-v0.172.0 release build.",
+    "v8": "rusty_v8 152.2.0 ptrcomp_sandbox release, fetched by scripts/fetch-rusty-v8.ts from openai/codex rusty-v8-v152.2.0 and checked against vendor/codex/third_party/v8/rusty_v8_152_2_0_release_manifests.sha256",
     "command": "cargo build --release --locked -p codex-cli --bin codex -p codex-code-mode-host --bin codex-code-mode-host (with RUSTY_V8_ARCHIVE and RUSTY_V8_SRC_BINDING_PATH set)",
     "binary": "vendor/codex/codex-rs/target/release/codex.exe",
-    "binarySha256": "a28abf32699e994bbbbea94f5dd5e9b1615ba9bde1cf6922a275aa23cce9ec8a",
-    "codeModeHostSha256": "7b129f38801396f34193c10aa375378fbb6b4e207988056ad3e30a855ac6db80",
-    "builtOn": "2026-10-23 (rust-v0.163.0), in the main checkout, about 75 minutes (rustc per rust-toolchain.toml)",
-    "previous": { "binarySha256": "ce19ac66ee6204888bf6318f0ae1b02f83b35f512ca5144f1e8bf42b9f7b11b9", "codeModeHostSha256": "a4a0b6d634a7e33dcdab777b90cde478eb19927f7220c0d87dab0490081f862c", "builtOn": "2026-10-13 (rust-v0.155.0)" },
-    "contractTest": "scripts/codex-smoke.ts passed 2026-10-13 with both binaries copied to an empty folder, PATH without cargo or codex, LOCALAPPDATA and CROSSLINE_STATE_DIR in a temporary folder",
-    "webSearch": "live web_search on an ephemeral thread completed 2026-10-13 with two webSearch items"
+    "binarySha256": "6b1773095c4a4f8ffb78411d7f2dcad8485201109e196d7f4abd13916a05e46b",
+    "codeModeHostSha256": "f4cbc0d238ccd22297fc5346dc402094cbbdd501de84cd2c829f7940dee218f7",
+    "builtOn": "2026-11-28 (rust-v0.172.0), in the worktree awesome-liskov-23faab, -j 4 (16 jobs ran out of memory), about 70 minutes; CARGO_HOME through a subst drive because rusty_v8 is now a git dependency whose submodule checkout has a 269-character path",
+    "previous": {
+      "binarySha256": "a28abf32699e994bbbbea94f5dd5e9b1615ba9bde1cf6922a275aa23cce9ec8a",
+      "codeModeHostSha256": "7b129f38801396f34193c10aa375378fbb6b4e207988056ad3e30a855ac6db80",
+      "builtOn": "2026-10-23 (rust-v0.163.0)"
+    },
+    "contractTest": "scripts/codex-smoke.ts passed 2026-11-28 (crossline/0.172.0) with both binaries copied to an empty folder, PATH without cargo or codex, LOCALAPPDATA and CROSSLINE_STATE_DIR in a temporary folder",
+    "lockedRebuild": "cargo build --release --locked reproduced the same codex.exe in 6 s; Cargo.lock changed only 174 workspace version lines (0.0.0 to 0.172.0)",
+    "patchTest": "cargo test --release --locked -p codex-state -p codex-utils-home-dir passed 2026-11-28 (248 + 5 + 1)"
   },
   "linuxRelease": {
     "purpose": "The hosted server's runtime (deploy/app/Dockerfile mounts it at /opt/codex).",
-    "url": "https://github.com/openai/codex/releases/download/rust-v0.163.0/codex-x86_64-unknown-linux-musl.tar.gz",
-    "assetSha256": "beb339e8ecd9ba057a6bb2dc81ad8ca474812edfbf0fc5056ca818797648dde4",
-    "binarySha256": "399ff69c431c066e40de318fba45c2b07f45a76b19939d247ee4828fc70c4215",
-    "checkedOn": "2026-10-20: downloaded, asset digest matched GitHub's, binary hashed after extraction"
+    "url": "https://github.com/openai/codex/releases/download/rust-v0.172.0/codex-x86_64-unknown-linux-musl.tar.gz",
+    "assetSha256": "a2342a8f7f68f088be30620ccfe9cb84162c93a6b56177855961cda3ed6be392",
+    "binarySha256": "ad83b94c093f0cdd8176a6bc8005a461bdf23a759863e157d40f562b8a9d664d",
+    "codeModeHost": {
+      "url": "https://github.com/openai/codex/releases/download/rust-v0.172.0/codex-code-mode-host-x86_64-unknown-linux-musl.tar.gz",
+      "assetSha256": "20b0a4bcf332415a5997914c943d04af6c3627af0c379fdbf65400550e352bb4",
+      "binarySha256": "1800682c85429ff546b23a1aa96b5c1405fe74ac6743690d89d6dc5cfaf3b4f1"
+    },
+    "checkedOn": "2026-11-28: downloaded, asset digests matched GitHub's, binaries hashed after extraction; not yet installed on the server",
+    "previous": {
+      "binarySha256": "399ff69c431c066e40de318fba45c2b07f45a76b19939d247ee4828fc70c4215",
+      "tag": "rust-v0.163.0"
+    }
   },
-  "runtimeVersion": "codex-cli 0.163.0",
-  "runtimeUserAgent": "crossline/0.163.0 (Windows 10.0.26200; x86_64) dumb (crossline; 0.1.0)",
+  "runtimeVersion": "codex-cli 0.172.0",
+  "runtimeUserAgent": "crossline/0.172.0 (Windows 10.0.26200; x86_64) xterm-256color (crossline; 0.1.0)",
   "generatedProtocol": {
     "command": "codex app-server generate-ts --experimental --out <temporary-directory>",
-    "sha256": "0a029db4277456684f035f790bda8ea8651d4120fe3ab6c17436fadf1dfa7a05",
+    "sha256": "d2e1a9b1bd32c5fefd035790a2ffe6a4b448c864130b2bc521cdc4f5d19ca3cc",
     "sha256Method": "cd <out>; find . -type f | LC_ALL=C sort | xargs sha256sum | sha256sum",
-    "fileCount": 896,
-    "observedAgainstRuntime": "codex-cli 0.163.0 (worktree build)"
+    "fileCount": 970,
+    "observedAgainstRuntime": "codex-cli 0.172.0 (worktree release build 6b177309…)"
   },
   "contractTest": {
     "command": "pnpm exec tsx scripts/codex-smoke.ts",
-    "result": "pending",
-    "note": "Runs against the repo root's binary, which is still 0.155.0; it requires crossline/0.163.0 now and passes once the root is rebuilt. Last passed 2026-09-22 against crossline/0.155.0.",
+    "result": "passed",
+    "note": "Run against the release build copied to an empty folder (CROSSLINE_CODEX_PATH). The repo root's debug binary is still 0.163.0 and would fail this check until it is rebuilt.",
     "verified": [
       "pinned binary SHA-256",
       "plugin/install",
       "skills/list",
       "10 namespaced Crossline skills discovered",
       "read-only untrusted thread/start"
-    ]
+    ],
+    "observedOn": "2026-11-28",
+    "observedRuntime": "crossline/0.172.0"
   },
   "relationStatus": "verified",
   "relationNote": "The worker resolves only the fork build path, verifies its SHA-256 before spawning it, and reports verified only for that path. Protocol generation and contract tests used the same binary."

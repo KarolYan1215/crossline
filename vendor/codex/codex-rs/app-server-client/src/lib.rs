@@ -20,8 +20,23 @@
 //! runtime remain bounded; the local consumer event queue is unbounded so
 //! unread notifications cannot prevent request responses from being delivered.
 
+mod cloud;
+pub mod cloud_backend;
+pub use codex_cloud_client::EnvironmentSelection;
+pub use codex_cloud_client::ProjectEnvironment;
+pub use codex_cloud_client::SavedEnvironment;
 mod path;
 mod remote;
+mod remote_addr;
+mod remote_websocket;
+pub use cloud::CLOUD_RECOVERY_NETWORK_BLOCKED;
+pub use cloud::CloudClient;
+pub use cloud::CloudCommand;
+pub use cloud::CloudOperation;
+pub use cloud::CloudRecoveryRelease;
+pub use cloud::CloudRequestHandle;
+pub use cloud::CloudUserMessageReceipt;
+pub use cloud_backend::CloudRecoverySignInChanged;
 mod server_request;
 pub use server_request::AppServerReplyHandle;
 
@@ -40,6 +55,9 @@ pub use codex_app_server::in_process::InProcessServerEvent;
 use codex_app_server::in_process::InProcessStartArgs;
 use codex_app_server::in_process::LogDbLayer;
 pub use codex_app_server::in_process::StateDbHandle;
+pub use codex_app_server::in_process::ThreadPermissions;
+use codex_app_server::in_process::ThreadPermissionsReader;
+pub use codex_app_server::verified_local_daemon_socket;
 use codex_app_server_protocol::ClientInfo;
 use codex_app_server_protocol::ClientNotification;
 use codex_app_server_protocol::ClientRequest;
@@ -60,6 +78,7 @@ pub use codex_core::otel_init::build_provider as build_otel_provider;
 pub use codex_exec_server::EnvironmentManager;
 pub use codex_exec_server::ExecServerRuntimeOptions;
 use codex_feedback::CodexFeedback;
+use codex_protocol::ThreadId;
 use codex_protocol::protocol::SessionSource;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use serde::de::DeserializeOwned;
@@ -73,6 +92,8 @@ pub use crate::path::AppServerPath;
 pub use crate::remote::RemoteAppServerClient;
 pub use crate::remote::RemoteAppServerConnectArgs;
 pub use crate::remote::RemoteAppServerEndpoint;
+pub use crate::remote_addr::resolve_remote_addr;
+pub use crate::remote_addr::resolve_remote_endpoint;
 
 /// Transitional access to core-only embedded app-server types.
 ///
@@ -102,10 +123,18 @@ pub type RequestResult = std::result::Result<JsonRpcResult, JSONRPCErrorError>;
 
 #[derive(Debug, Clone)]
 pub enum AppServerEvent {
-    Lagged { skipped: usize },
+    Lagged {
+        skipped: usize,
+    },
     ServerNotification(Box<ServerNotification>),
     ServerRequest(Box<ServerRequest>),
-    Disconnected { message: String },
+    /// A native Cloud reply stream ended. The underlying thread can still be running.
+    ThreadStreamDisconnected(Box<codex_app_server_protocol::ErrorNotification>),
+    /// The Cloud worker is listening again on the same conversation.
+    ThreadStreamReconnected(String),
+    Disconnected {
+        message: String,
+    },
 }
 
 impl From<InProcessServerEvent> for AppServerEvent {
@@ -200,6 +229,8 @@ where
 
 #[derive(Clone)]
 pub struct InProcessClientStartArgs {
+    /// This client collects fresh human decisions for managed command checkpoints.
+    pub required_human_approval: bool,
     /// Resolved argv0 dispatch paths used by command execution internals.
     pub arg0_paths: Arg0DispatchPaths,
     /// Shared config used to initialize app-server runtime.
@@ -246,6 +277,7 @@ impl InProcessClientStartArgs {
     /// Builds initialize params from caller-provided metadata.
     pub fn initialize_params(&self) -> InitializeParams {
         let capabilities = InitializeCapabilities {
+            required_human_approval: self.required_human_approval,
             explicit_gateway_oauth: false,
             experimental_api: self.experimental_api,
             request_attestation: false,
@@ -333,6 +365,7 @@ enum ClientCommand {
 /// boundary.
 pub struct InProcessAppServerClient {
     command_tx: mpsc::Sender<ClientCommand>,
+    thread_permissions_reader: ThreadPermissionsReader,
     event_rx: mpsc::UnboundedReceiver<InProcessServerEvent>,
     worker_handle: tokio::task::JoinHandle<()>,
 }
@@ -344,11 +377,24 @@ pub struct InProcessAppServerRequestHandle {
 
 #[derive(Clone)]
 pub enum AppServerRequestHandle {
+    Cloud(CloudRequestHandle),
     InProcess(InProcessAppServerRequestHandle),
     Remote(crate::remote::RemoteAppServerRequestHandle),
 }
 
+impl AppServerRequestHandle {
+    /// Operating system reported by the app-server that serves these requests.
+    pub fn platform_os(&self) -> Option<&str> {
+        match self {
+            Self::InProcess(_) => Some(std::env::consts::OS),
+            Self::Remote(client) => client.platform_os.as_deref(),
+            Self::Cloud(_) => None,
+        }
+    }
+}
+
 pub enum AppServerClient {
+    Cloud(CloudClient),
     InProcess(InProcessAppServerClient),
     Remote(RemoteAppServerClient),
 }
@@ -363,6 +409,7 @@ impl InProcessAppServerClient {
         let mut handle =
             codex_app_server::in_process::start(args.into_runtime_start_args()).await?;
         let request_sender = handle.sender();
+        let thread_permissions_reader = handle.thread_permissions_reader();
         let (command_tx, mut command_rx) = mpsc::channel::<ClientCommand>(channel_capacity);
         // e9996ec62a preserved transcript events by awaiting a bounded queue, but that can
         // deadlock a foreground request whose response is behind unread notifications.
@@ -382,13 +429,15 @@ impl InProcessAppServerClient {
                                 // this loop can keep draining runtime events
                                 // while the request is blocked on client input.
                                 tokio::spawn(async move {
-                                    // Device ceremonies belong to the waiting UI. Preserve
-                                    // its cancellation through this buffering task.
+                                    // Dropping the UI's request must drop the detached runtime
+                                    // future too: its drop guard cancels verification and search.
                                     let cancellable = matches!(*request,
                                         ClientRequest::UserVerificationStatus { .. }
                                         | ClientRequest::UserVerificationEnroll { .. }
                                         | ClientRequest::UserVerificationDelete { .. }
-                                        | ClientRequest::UserVerificationVerify { .. });
+                                        | ClientRequest::UserVerificationVerify { .. }
+                                        | ClientRequest::ThreadSearch { .. }
+                                        | ClientRequest::ThreadSearchStream { .. });
                                     let mut response_tx = response_tx;
                                     tokio::select! {
                                         _ = response_tx.closed(), if cancellable => {}
@@ -467,6 +516,7 @@ impl InProcessAppServerClient {
 
         Ok(Self {
             command_tx,
+            thread_permissions_reader,
             event_rx,
             worker_handle,
         })
@@ -476,6 +526,11 @@ impl InProcessAppServerClient {
         InProcessAppServerRequestHandle {
             command_tx: self.command_tx.clone(),
         }
+    }
+
+    /// Reads effective permissions for a thread loaded in this embedded server.
+    pub async fn thread_permissions(&self, thread_id: ThreadId) -> IoResult<ThreadPermissions> {
+        self.thread_permissions_reader.read(thread_id).await
     }
 
     /// Sends a typed client request and returns raw JSON-RPC result.
@@ -581,6 +636,7 @@ impl InProcessAppServerClient {
     pub async fn shutdown(self) -> IoResult<()> {
         let Self {
             command_tx,
+            thread_permissions_reader: _,
             event_rx,
             worker_handle,
         } = self;
@@ -699,6 +755,27 @@ impl InProcessAppServerRequestHandle {
 }
 
 impl AppServerRequestHandle {
+    /// Starts a native Cloud thread with a saved config or a default project checkout.
+    pub async fn start_cloud_thread_with_environment(
+        &self,
+        request_id: RequestId,
+        params: codex_app_server_protocol::ThreadStartParams,
+        environment: codex_cloud_client::EnvironmentSelection,
+    ) -> Result<codex_app_server_protocol::ThreadStartResponse, TypedRequestError> {
+        let response = match self {
+            Self::Cloud(handle) => {
+                handle
+                    .start_thread_with_environment(request_id, params, environment)
+                    .await
+            }
+            Self::InProcess(_) | Self::Remote(_) => Err(IoError::new(
+                std::io::ErrorKind::Unsupported,
+                "Selecting an environment requires the native Cloud transport.",
+            )),
+        };
+        decode_typed_response("thread/start", response)
+    }
+
     pub(crate) async fn resolve_server_request(
         &self,
         request_id: RequestId,
@@ -707,6 +784,7 @@ impl AppServerRequestHandle {
         match self {
             Self::InProcess(handle) => handle.resolve_server_request(request_id, result).await,
             Self::Remote(handle) => handle.resolve_server_request(request_id, result).await,
+            Self::Cloud(handle) => handle.resolve_server_request(request_id, result).await,
         }
     }
 
@@ -718,6 +796,7 @@ impl AppServerRequestHandle {
         match self {
             Self::InProcess(handle) => handle.reject_server_request(request_id, error).await,
             Self::Remote(handle) => handle.reject_server_request(request_id, error).await,
+            Self::Cloud(handle) => handle.reject_server_request(request_id, error).await,
         }
     }
 
@@ -725,6 +804,7 @@ impl AppServerRequestHandle {
         match self {
             Self::InProcess(handle) => handle.request(request).await,
             Self::Remote(handle) => handle.request(request).await,
+            Self::Cloud(handle) => handle.request(request).await,
         }
     }
 
@@ -745,6 +825,7 @@ impl AppServerClient {
         match self {
             Self::InProcess(_) => Some(std::env::consts::FAMILY),
             Self::Remote(client) => client.platform_family(),
+            Self::Cloud(_) => None,
         }
     }
 
@@ -753,6 +834,7 @@ impl AppServerClient {
         match self {
             Self::InProcess(_) => Some(std::env::consts::OS),
             Self::Remote(client) => client.platform_os(),
+            Self::Cloud(_) => None,
         }
     }
 
@@ -762,6 +844,7 @@ impl AppServerClient {
                 local_codex_home.display().to_string(),
             )),
             Self::Remote(client) => client.codex_home().map(AppServerPath::from_app_server),
+            Self::Cloud(_) => None,
         }
     }
 
@@ -769,6 +852,7 @@ impl AppServerClient {
         match self {
             Self::InProcess(client) => client.request(request).await,
             Self::Remote(client) => client.request(request).await,
+            Self::Cloud(client) => client.request(request).await,
         }
     }
 
@@ -785,6 +869,7 @@ impl AppServerClient {
         match self {
             Self::InProcess(client) => client.notify(notification).await,
             Self::Remote(client) => client.notify(notification).await,
+            Self::Cloud(client) => client.notify(notification).await,
         }
     }
 
@@ -796,6 +881,7 @@ impl AppServerClient {
         match self {
             Self::InProcess(client) => client.resolve_server_request(request_id, result).await,
             Self::Remote(client) => client.resolve_server_request(request_id, result).await,
+            Self::Cloud(client) => client.resolve_server_request(request_id, result).await,
         }
     }
 
@@ -807,6 +893,7 @@ impl AppServerClient {
         match self {
             Self::InProcess(client) => client.reject_server_request(request_id, error).await,
             Self::Remote(client) => client.reject_server_request(request_id, error).await,
+            Self::Cloud(client) => client.reject_server_request(request_id, error).await,
         }
     }
 
@@ -814,6 +901,7 @@ impl AppServerClient {
         match self {
             Self::InProcess(client) => client.next_event().await.map(Into::into),
             Self::Remote(client) => client.next_event().await,
+            Self::Cloud(client) => client.next_event().await,
         }
     }
 
@@ -821,6 +909,7 @@ impl AppServerClient {
         match self {
             Self::InProcess(client) => client.shutdown().await,
             Self::Remote(client) => client.shutdown().await,
+            Self::Cloud(client) => client.shutdown().await,
         }
     }
 
@@ -828,6 +917,7 @@ impl AppServerClient {
         match self {
             Self::InProcess(client) => AppServerRequestHandle::InProcess(client.request_handle()),
             Self::Remote(client) => AppServerRequestHandle::Remote(client.request_handle()),
+            Self::Cloud(client) => AppServerRequestHandle::Cloud(client.request_handle()),
         }
     }
 }
@@ -927,6 +1017,7 @@ mod tests {
             .await
             .expect("state db should initialize for in-process test");
         let client = InProcessAppServerClient::start(InProcessClientStartArgs {
+            required_human_approval: false,
             arg0_paths: Arg0DispatchPaths::default(),
             config,
             cli_overrides: Vec::new(),
@@ -1113,19 +1204,23 @@ mod tests {
     }
 
     fn item_completed_notification(text: &str) -> ServerNotification {
-        ServerNotification::ItemCompleted(codex_app_server_protocol::ItemCompletedNotification {
-            thread_id: "thread".to_string(),
-            turn_id: "turn".to_string(),
-            completed_at_ms: 0,
-            item: codex_app_server_protocol::ThreadItem::AgentMessage {
-                id: "item".to_string(),
-                text: text.to_string(),
-                phase: None,
-                memory_citation: None,
-                delivery: None,
-                questions: None,
-            },
-        })
+        ServerNotification::ItemCompleted(
+            codex_app_server_protocol::ItemCompletedNotification::new(
+                "thread".to_string(),
+                "turn".to_string(),
+                codex_app_server_protocol::ThreadItemPayload::AgentMessage {
+                    moderation: None,
+                    id: "item".to_string(),
+                    text: text.to_string(),
+                    phase: None,
+                    memory_citation: None,
+                    delivery: None,
+                    questions: None,
+                },
+                /*started_at_ms*/ None,
+                /*completed_at_ms*/ 0,
+            ),
+        )
     }
 
     fn turn_completed_notification() -> ServerNotification {
@@ -1147,6 +1242,7 @@ mod tests {
 
     fn test_remote_connect_args(websocket_url: String) -> RemoteAppServerConnectArgs {
         RemoteAppServerConnectArgs {
+            required_human_approval: false,
             endpoint: RemoteAppServerEndpoint::WebSocket {
                 websocket_url,
                 auth_token: None,
@@ -1444,6 +1540,7 @@ mod tests {
                 JSONRPCMessage::Response(JSONRPCResponse {
                     id: request.id,
                     result: serde_json::to_value(GetAccountResponse {
+                        user_id: None,
                         workspace_routing: None,
                         account: None,
                         requires_openai_auth: false,
@@ -1500,6 +1597,7 @@ mod tests {
                 JSONRPCMessage::Response(JSONRPCResponse {
                     id: request.id,
                     result: serde_json::to_value(GetAccountResponse {
+                        user_id: None,
                         workspace_routing: None,
                         account: None,
                         requires_openai_auth: false,
@@ -1511,6 +1609,7 @@ mod tests {
             websocket.close(None).await.expect("close should succeed");
         });
         let client = RemoteAppServerClient::connect(RemoteAppServerConnectArgs {
+            required_human_approval: false,
             endpoint: RemoteAppServerEndpoint::UnixSocket { socket_path },
             client_name: "codex-app-server-client-test".to_string(),
             client_version: "0.0.0-test".to_string(),
@@ -1577,6 +1676,7 @@ mod tests {
         assert_eq!(
             response,
             GetAccountResponse {
+                user_id: None,
                 workspace_routing: None,
                 account: None,
                 requires_openai_auth: false,
@@ -1598,6 +1698,7 @@ mod tests {
         )
         .await;
         let client = RemoteAppServerClient::connect(RemoteAppServerConnectArgs {
+            required_human_approval: false,
             endpoint: RemoteAppServerEndpoint::WebSocket {
                 websocket_url,
                 auth_token: Some(auth_token),
@@ -1618,6 +1719,7 @@ mod tests {
     #[tokio::test]
     async fn remote_connect_rejects_non_loopback_ws_when_auth_configured() {
         let result = RemoteAppServerClient::connect(RemoteAppServerConnectArgs {
+            required_human_approval: false,
             endpoint: RemoteAppServerEndpoint::WebSocket {
                 websocket_url: "ws://example.com:4500".to_string(),
                 auth_token: Some("remote-bearer-token".to_string()),
@@ -1681,6 +1783,7 @@ mod tests {
                 JSONRPCMessage::Response(JSONRPCResponse {
                     id: request.id,
                     result: serde_json::to_value(GetAccountResponse {
+                        user_id: None,
                         workspace_routing: None,
                         account: None,
                         requires_openai_auth: false,
@@ -1735,6 +1838,7 @@ mod tests {
         assert_eq!(
             first_response,
             GetAccountResponse {
+                user_id: None,
                 workspace_routing: None,
                 account: None,
                 requires_openai_auth: false,
@@ -1753,6 +1857,7 @@ mod tests {
                 serde_json::from_value(
                     serde_json::to_value(ServerNotification::AccountUpdated(
                         AccountUpdatedNotification {
+                            reason: None,
                             auth_mode: None,
                             plan_type: None,
                         },
@@ -1861,8 +1966,8 @@ mod tests {
                     }
                     ServerNotification::ItemCompleted(notification)
                         if matches!(
-                            &notification.item,
-                            codex_app_server_protocol::ThreadItem::AgentMessage { text, .. }
+                            &notification.item.payload,
+                            codex_app_server_protocol::ThreadItemPayload::AgentMessage { text, .. }
                                 if text == "hello"
                         ) =>
                     {
@@ -2120,6 +2225,7 @@ mod tests {
 
         let mut client = InProcessAppServerClient {
             command_tx,
+            thread_permissions_reader: ThreadPermissionsReader::default(),
             event_rx,
             worker_handle,
         };
@@ -2153,6 +2259,7 @@ mod tests {
         );
 
         let runtime_args = InProcessClientStartArgs {
+            required_human_approval: false,
             arg0_paths: Arg0DispatchPaths::default(),
             config: config.clone(),
             cli_overrides: Vec::new(),
@@ -2227,6 +2334,7 @@ mod tests {
         });
         let client = InProcessAppServerClient {
             command_tx,
+            thread_permissions_reader: ThreadPermissionsReader::default(),
             event_rx,
             worker_handle,
         };

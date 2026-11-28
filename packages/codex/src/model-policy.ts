@@ -24,8 +24,9 @@ export type SpendMode = "normal" | "economy" | "manual_core_only";
 // Three models by Codex credit price (2026-11-25, docs/plans/harness-1125.md §8). Credits per 1M tokens, input/output, from
 // learn.chatgpt.com/docs/pricing: gpt-5.6-terra 50/300 (the old single model, two generations behind), gpt-6.2-sol 50/250,
 // gpt-6.1-terra 25/125, gpt-6-luna 2.5/12.5. Top costs what every run used to, mid half, low about a twentieth. The 2026-10-20 single-model
-// table existed because the old sol cost several times terra; that is no longer so. A model the account does not list falls down the
-// ladder (`fitRoute`), so naming a newer one than an old runtime knows costs nothing.
+// table existed because the old sol cost several times terra; that is no longer so. A model the account does not list — the backend also
+// leaves out a model newer than the runtime (gpt-6.2-sol needs Codex 0.166.0) — falls to the newest listed one of its family, then down
+// the ladder (`fitRoute`).
 export const DEFAULT_TIERS: Record<RouteTier, ModelRoute> = {
   top: { model: "gpt-6.2-sol", effort: "medium" },
   mid: { model: "gpt-6.1-terra", effort: "medium" },

@@ -5,6 +5,27 @@ use pretty_assertions::assert_eq;
 use serde_json::Value;
 use test_case::test_case;
 
+#[test_case(CloudConfigBundleLoadErrorCode::RequestFailed, "cloud config: request failed"; "request")]
+#[test_case(CloudConfigBundleLoadErrorCode::Auth, "cloud config: authentication failed"; "refresh")]
+fn cloud_failures_preserve_policy_denials_but_redact_other_messages(
+    code: CloudConfigBundleLoadErrorCode,
+    redacted: &str,
+) {
+    let denied = NetworkPolicyDenied::Destination.to_string();
+    for (message, expected) in [
+        (denied.clone(), denied),
+        (
+            "destination denied by application network policy: sk-test-private-value".into(),
+            redacted.into(),
+        ),
+    ] {
+        let error = io::Error::other(CloudConfigBundleLoadError::new(
+            code, /*status_code*/ None, message,
+        ));
+        assert_eq!(workspace_config_load_reason(&error), expected);
+    }
+}
+
 #[test_case(None; "signed_out")]
 #[test_case(Some("dummy"); "api_key")]
 #[tokio::test]
@@ -77,12 +98,19 @@ async fn background_routing_skips_config_until_chatgpt_sign_in(
         sender,
         codex_analytics::AnalyticsEventsClient::disabled(),
     ));
+    let model_catalog = Arc::new(crate::model_catalog::ModelCatalog::new(
+        manager.clone(),
+        Some(config.cwd.to_path_buf()),
+        Arc::clone(&config),
+        Arc::clone(&threads),
+    ));
     let processor = AccountRequestProcessor::new(
         Arc::clone(&auth_manager),
         threads,
         outgoing,
         config,
         manager,
+        model_catalog,
     );
     let initial_loads = loads.load(Ordering::SeqCst);
     for _ in 0..3 {
@@ -119,19 +147,27 @@ async fn background_routing_skips_config_until_chatgpt_sign_in(
     );
     assert!(loads.load(Ordering::SeqCst) > initial_loads);
 
-    std::fs::write(home.path().join("config.toml"), "invalid = [")?;
-    assert!(matches!(
-        processor
-            .read_account_for_background_workspace_routing()
-            .await,
-        Err(AccountReadError::Routing(
-            WorkspaceRoutingError::RequirementsLoad
-        ))
-    ));
+    let config_path = home.path().join("config.toml");
+    std::fs::write(&config_path, "invalid = [ 'sk-test-private-value',")?;
+    let Err(error) = processor
+        .read_account_for_background_workspace_routing()
+        .await
+    else {
+        panic!("invalid config must prevent workspace routing");
+    };
+    let message = error.to_string();
+    assert!(
+        message.starts_with(&format!(
+            "failed to load workspace requirements: invalid configuration at {}:1:",
+            config_path.display(),
+        )),
+        "{message}"
+    );
+    assert!(!message.contains("sk-test-private-value"), "{message}");
     Ok(())
 }
 
-#[test_case(Some("https://gov.chatgpt.com/backend-api/"), "NO_CONSTRAINT", "https://gov.chatgpt.com"; "configured_only")]
+#[test_case(Some("https://custom.example/backend-api/"), "NO_CONSTRAINT", "https://custom.example"; "configured_only")]
 #[test_case(None, "https://gov.chatgpt.com", "https://gov.chatgpt.com"; "discovered_only")]
 #[test_case(Some("https://GOV.chatgpt.com:443/backend-api/"), "https://gov.chatgpt.com", "https://gov.chatgpt.com"; "matching_effective_port")]
 #[test_case(Some("https://example.com:8443/backend-api/"), "https://example.com:8443", "https://example.com:8443"; "custom_port")]
@@ -149,6 +185,22 @@ fn resolves_origins(required: Option<&str>, discovered: &str, expected: &str) {
             backend_origin: expected.into(),
             account_routing_override: "NO_CONSTRAINT".into(),
         }
+    );
+}
+
+#[test_case(Some("https://GOV.chatgpt.com:443/backend-api/"), "https://chatgpt.com/backend-api/"; "required_gov")]
+#[test_case(None, "https://gov.chatgpt.com/backend-api/"; "effective_gov")]
+fn rejects_commercial_workspace_on_government_backend(required: Option<&str>, effective: &str) {
+    let entry = serde_json::from_value(serde_json::json!({
+        "id": "workspace", "workspace_backend_origin": "NO_CONSTRAINT",
+        "account_routing_override": "NO_CONSTRAINT",
+    }))
+    .unwrap();
+    assert_eq!(
+        resolve_routing(entry, required, effective),
+        Err(AccountReadError::Routing(
+            WorkspaceRoutingError::GovernmentWorkspaceRequired
+        ))
     );
 }
 

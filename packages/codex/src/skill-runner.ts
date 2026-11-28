@@ -1449,7 +1449,9 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
       settle?.reject(withDetail(new Error(turn.status === "interrupted" ? "SKILL_CANCELED"
         : info === "unauthorized" ? "SKILL_UNAUTHENTICATED"
         : info === "sandboxError" ? "SKILL_PERMISSION_DENIED"
-        : info === "usageLimitExceeded" ? "SKILL_USAGE_LIMIT"
+        // 0.172.0 also names an API key's, a project's and an organisation's spend limit apart from the plan's quota.
+        : info === "usageLimitExceeded" || info === "apiKeySpendLimitExceeded" || info === "projectSpendLimitExceeded"
+          || info === "organizationSpendLimitExceeded" ? "SKILL_USAGE_LIMIT"
         : "SKILL_TURN_FAILED"), typeof error?.message === "string" ? error.message.slice(0, 400) : undefined));
     }
   });

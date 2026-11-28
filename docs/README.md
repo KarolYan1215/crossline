@@ -48,6 +48,7 @@
 | [rituals.md](rituals.md) | 每周承诺（保 / 推 / 砍，一次撤销）、晚间收工（替换逐块确认推送）、待确认「全部按推荐」、风险周报与计数统一（2026-10-28 定，已实现） |
 | [structured-output.md](structured-output.md) | 模型的结构化输出怎么约束、怎么校验、怎么修正，出问题怎么查，现有的实测数据 |
 | [codex-fork-runtime.md](codex-fork-runtime.md) | 固定在 `vendor/codex` 的 Codex 运行时：来源、补丁、构建、哈希校验、升级方式、supervisor 令牌 |
+| [codex-upgrade-0.172.md](codex-upgrade-0.172.md) | 0.163.0 → 0.172.0：gpt-6.2-sol 要求客户端 0.166.0、同族模型优先、协议差异、构建与待换的二进制 |
 | [codex-upgrade-0.163.md](codex-upgrade-0.163.md) | 0.155.0 → 0.163.0：协议差异、显式压缩、自动化续跑、没采用的上游新能力、待换的二进制 |
 | [private-network-deployment.md](private-network-deployment.md) | 通过 Tailscale Serve 跨设备访问（`CROSSLINE_DEPLOYMENT_MODE=private`） |
 | [external-deployment.md](external-deployment.md) | 真正的公网暴露为什么还被禁止，以及解禁前要满足的清单 |

@@ -123,6 +123,7 @@ pub(crate) enum SelectionRowDisplay {
 
 /// One selectable item in the generic selection list.
 pub(crate) type SelectionAction = Box<dyn Fn(&AppEventSender) + Send + Sync>;
+pub(crate) type SelectionKeyAction = Box<dyn Fn(&AppEventSender, KeyBinding) + Send + Sync>;
 
 /// A second way to accept the highlighted row, sharing its dismissal behavior.
 pub(crate) struct SelectionSecondaryAction {
@@ -185,6 +186,8 @@ pub(crate) struct SelectionItem {
     pub is_current: bool,
     pub is_disabled: bool,
     pub actions: Vec<SelectionAction>,
+    /// Primary action that also needs the physical key to guard a view transition.
+    pub on_accept_key: Option<SelectionKeyAction>,
     pub secondary_action: Option<SelectionSecondaryAction>,
     /// Footer hint shown while this row is selected.
     pub footer_hint: Option<Line<'static>>,
@@ -235,6 +238,8 @@ pub(crate) struct SelectionViewParams {
     /// Optional non-text key that can toggle a row while printable keys edit the search query.
     pub search_toggle_key: Option<KeyBinding>,
     pub search_mode: SearchMode,
+    /// Use ordinal digits in the gutter; when false, use only each row's explicit shortcut.
+    pub auto_number_shortcuts: bool,
     pub search_placeholder: Option<String>,
     pub col_width_mode: ColumnWidthMode,
     pub row_display: SelectionRowDisplay,
@@ -301,6 +306,7 @@ impl Default for SelectionViewParams {
             is_searchable: false,
             search_toggle_key: None,
             search_mode: SearchMode::default(),
+            auto_number_shortcuts: true,
             search_placeholder: None,
             col_width_mode: ColumnWidthMode::AutoVisible,
             row_display: SelectionRowDisplay::Wrapped,
@@ -358,6 +364,7 @@ pub(crate) struct ListSelectionView {
     search_toggle_key: Option<KeyBinding>,
     search_mode: SearchMode,
     search_active: bool,
+    auto_number_shortcuts: bool,
     search_query: String,
     search_placeholder: Option<String>,
     col_width_mode: ColumnWidthMode,
@@ -515,6 +522,7 @@ impl ListSelectionView {
             search_mode: params.search_mode,
             search_active,
             search_query,
+            auto_number_shortcuts: params.auto_number_shortcuts,
             search_placeholder: if params.is_searchable {
                 params.search_placeholder
             } else {
@@ -656,7 +664,7 @@ impl ListSelectionView {
         limit.min(len.max(/*other*/ 1))
     }
 
-    fn selected_actual_idx(&self) -> Option<usize> {
+    pub(crate) fn selected_actual_idx(&self) -> Option<usize> {
         self.state
             .selected_idx
             .and_then(|visible_idx| self.filtered_indices.get(visible_idx).copied())
@@ -764,6 +772,11 @@ impl ListSelectionView {
                         // The number keys don't work when search is enabled (since we let the
                         // numbers be used for the search query).
                         format!("{prefix} ")
+                    } else if !self.auto_number_shortcuts {
+                        item.display_shortcut.map_or_else(
+                            || format!("{prefix} "),
+                            |shortcut| format!("{prefix} {}. ", shortcut.display_label()),
+                        )
                     } else if is_disabled {
                         if let Some(disabled_gutter_marker) = item.disabled_gutter_marker {
                             let marker_width = UnicodeWidthStr::width(disabled_gutter_marker);
@@ -777,8 +790,12 @@ impl ListSelectionView {
                         format!("{prefix}    {label}. ")
                     } else {
                         enabled_row_number += 1;
-                        let n = enabled_row_number;
-                        format!("{prefix} {n}. ")
+                        if enabled_row_number <= 9 {
+                            format!("{prefix} {enabled_row_number}. ")
+                        } else {
+                            let number_width = enabled_row_number.to_string().len();
+                            format!("{prefix} {}", " ".repeat(number_width + 2))
+                        }
                     };
                     let wrap_prefix_width = UnicodeWidthStr::width(wrap_prefix.as_str());
                     let mut name_prefix_spans = Vec::new();
@@ -798,12 +815,15 @@ impl ListSelectionView {
                         selection_style: row_selection_style,
                         name: name_with_marker,
                         name_prefix_spans,
-                        display_shortcut: item.display_shortcut,
-                        match_indices: None,
+                        display_shortcut: self
+                            .auto_number_shortcuts
+                            .then_some(item.display_shortcut)
+                            .flatten(),
                         description,
                         wrap_indent,
                         is_disabled,
                         disabled_reason: item.disabled_reason.clone(),
+                        ..Default::default()
                     }
                 })
             })
@@ -957,7 +977,7 @@ impl ListSelectionView {
         }
     }
 
-    fn accept(&mut self, kind: SelectionActionKind) {
+    fn accept(&mut self, kind: SelectionActionKind, key: KeyBinding) {
         let selected_actual_idx = self.selected_actual_idx();
         if matches!(kind, SelectionActionKind::Primary)
             && selected_actual_idx
@@ -976,6 +996,9 @@ impl ListSelectionView {
                 SelectionActionKind::Primary => {
                     for act in &item.actions {
                         act(&self.app_event_tx);
+                    }
+                    if let Some(action) = &item.on_accept_key {
+                        action(&self.app_event_tx, key);
                     }
                 }
                 SelectionActionKind::Secondary => {
@@ -999,7 +1022,7 @@ impl ListSelectionView {
         }
     }
 
-    fn select_shortcut(&mut self, actual_idx: usize) {
+    fn select_shortcut(&mut self, actual_idx: usize, key: KeyBinding) {
         let previously_selected = self.selected_actual_idx();
         self.state.selected_idx = Some(actual_idx);
         if self
@@ -1011,7 +1034,7 @@ impl ListSelectionView {
                 self.fire_selection_changed();
             }
         } else {
-            self.accept(SelectionActionKind::Primary);
+            self.accept(SelectionActionKind::Primary, key);
         }
     }
 
@@ -1106,7 +1129,7 @@ impl ListSelectionView {
             None
         }
         .or_else(|| self.footer_note.clone());
-        let mut lines = note.map(&wrap).unwrap_or_default();
+        let mut lines = note.map(wrap).unwrap_or_default();
         if self.reserve_result_rows && show_selected_description {
             let height = self
                 .items
@@ -1274,6 +1297,15 @@ impl BottomPaneView for ListSelectionView {
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
+        self.handle_key_event_with_activation_key(key_event, /*activation_key*/ None);
+    }
+
+    fn handle_key_event_with_activation_key(
+        &mut self,
+        key_event: KeyEvent,
+        activation_key: Option<KeyBinding>,
+    ) {
+        let key = activation_key.unwrap_or_else(|| KeyBinding::from_event(key_event));
         // An active search reserves printable keys for the query. On-demand search leaves the
         // configured list bindings untouched until its shortcut is pressed.
         let search_field_visible = self.search_field_visible();
@@ -1330,7 +1362,7 @@ impl BottomPaneView for ListSelectionView {
                 code: KeyCode::Enter,
                 modifiers: KeyModifiers::NONE,
                 ..
-            } if self.on_demand_search_active() => self.accept(SelectionActionKind::Primary),
+            } if self.on_demand_search_active() => self.accept(SelectionActionKind::Primary, key),
             KeyEvent {
                 code: KeyCode::Backspace,
                 ..
@@ -1366,7 +1398,7 @@ impl BottomPaneView for ListSelectionView {
                 self.on_ctrl_c();
             }
             _ if allow_plain_char_actions && self.keymap.accept.is_pressed(key_event) => {
-                self.accept(SelectionActionKind::Primary)
+                self.accept(SelectionActionKind::Primary, key)
             }
             _ if allow_plain_char_navigation
                 && self
@@ -1375,7 +1407,7 @@ impl BottomPaneView for ListSelectionView {
                     .and_then(|item| item.secondary_action.as_ref())
                     .is_some_and(|action| action.key.is_press(key_event)) =>
             {
-                self.accept(SelectionActionKind::Secondary);
+                self.accept(SelectionActionKind::Secondary, key);
             }
             _ if self.is_searchable
                 && !self.search_active
@@ -1416,15 +1448,16 @@ impl BottomPaneView for ListSelectionView {
                         || item.child_label == Some(c))
                         && Self::item_is_enabled(item)
                 }) {
-                    self.select_shortcut(idx);
+                    self.select_shortcut(idx, key);
                     return;
                 }
-                if let Some(idx) = c
-                    .to_digit(10)
-                    .map(|d| d as usize)
-                    .and_then(|number| self.actual_idx_for_enabled_number(number))
+                if self.auto_number_shortcuts
+                    && let Some(idx) = c
+                        .to_digit(/*radix*/ 10)
+                        .map(|d| d as usize)
+                        .and_then(|number| self.actual_idx_for_enabled_number(number))
                 {
-                    self.select_shortcut(idx);
+                    self.select_shortcut(idx, key);
                 }
             }
             _ => {}
@@ -2855,6 +2888,30 @@ mod tests {
         view.handle_key_event(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE));
 
         assert_eq!(view.take_last_selected_index(), Some(3));
+    }
+
+    #[test]
+    fn automatic_shortcuts_stop_at_nine() {
+        let (tx, _rx) = unbounded_channel();
+        let mut view = new_view(
+            SelectionViewParams {
+                items: (1..=10)
+                    .map(|n| SelectionItem {
+                        name: format!("Row {n}"),
+                        ..Default::default()
+                    })
+                    .collect(),
+                initial_selected_idx: Some(8),
+                ..Default::default()
+            },
+            AppEventSender::new(tx),
+        );
+        let rows = view.build_rows();
+        assert_eq!(rows[8].name_prefix_spans[0].content, "› 9. ");
+        assert_eq!(rows[9].name_prefix_spans[0].content, "      ");
+        view.handle_key_event(KeyEvent::from(KeyCode::Down));
+        view.handle_key_event(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(view.take_last_selected_index(), Some(9));
     }
 
     #[test]
