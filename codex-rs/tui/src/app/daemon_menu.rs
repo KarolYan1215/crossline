@@ -47,10 +47,18 @@ impl App {
             .remote_connection
             .as_ref()
             .filter(|_| matches!(self.app_server_target, AppServerTarget::LocalDaemon { .. }))
-            .map(|connection| format!("Running daemon: {}", connection.version))
+            .map(|connection| {
+                format!(
+                    "Running daemon: {}",
+                    connection.version.as_deref().unwrap_or("unknown")
+                )
+            })
             .unwrap_or_else(|| "Not connected to the local background server.".to_string());
         let mut header = vec![Line::from("Daemon".bold()), Line::from(status.dim())];
-        let unavailable = if matches!(self.app_server_target, AppServerTarget::Remote { .. }) {
+        let unavailable = if matches!(
+            self.app_server_target,
+            AppServerTarget::Remote { .. } | AppServerTarget::Cloud
+        ) {
             Some(
                 "Manage this server on its host. Local daemon updates are unavailable for remote connections.",
             )
@@ -160,7 +168,10 @@ impl App {
         let Some(executable) = &self.daemon_cli_executable else {
             return;
         };
-        if matches!(self.app_server_target, AppServerTarget::Remote { .. }) {
+        if matches!(
+            self.app_server_target,
+            AppServerTarget::Remote { .. } | AppServerTarget::Cloud
+        ) {
             return;
         }
         let mut explanation = match source {

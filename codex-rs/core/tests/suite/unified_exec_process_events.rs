@@ -75,6 +75,10 @@ const REPLAY_RETAINED_OUTPUT_SEQ: u64 = 800;
 #[cfg_attr(windows, allow(dead_code))]
 enum PushedExecScenario {
     Complete,
+    CredentialMasking,
+    CredentialMaskingCustomProvidersUnsupported,
+    CredentialMaskingUnsupportedShell,
+    CredentialMaskingUnsupported,
     OutputAfterExit,
     OutputAfterRecoveredExit,
     OutputOpenAtDeadline,
@@ -88,7 +92,7 @@ enum PushedExecScenario {
     CodexPathDisabledFeature,
     CodexPathWithExplicitOverride,
     UnusableCodexPath,
-    DirectDenied,
+    DirectDenied { output_closed: bool },
     DenyWin,
     DenyWinUnchanged,
     DenyOldLinux,
@@ -191,6 +195,18 @@ async fn respond_environment_info(
             | PushedExecScenario::RejectedLongWindowsDangerousCommand
     ) {
         json!({ "name": "powershell", "path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" })
+    } else if matches!(
+        scenario,
+        PushedExecScenario::CredentialMaskingUnsupportedShell
+    ) {
+        json!({ "name": "sh", "path": "/bin/sh" })
+    } else if matches!(
+        scenario,
+        PushedExecScenario::CredentialMasking
+            | PushedExecScenario::CredentialMaskingCustomProvidersUnsupported
+            | PushedExecScenario::CredentialMaskingUnsupported
+    ) {
+        json!({ "name": "bash", "path": "/bin/bash" })
     } else {
         json!({ "name": "zsh", "path": "/bin/zsh" })
     };
@@ -200,10 +216,22 @@ async fn respond_environment_info(
         | PushedExecScenario::RejectedLongWindowsDangerousCommand => Some("windows"),
         PushedExecScenario::DenyOldLinux
         | PushedExecScenario::DenyOldLinuxWithRoot(_)
-        | PushedExecScenario::DenyLinux => Some("linux"),
+        | PushedExecScenario::DenyLinux
+        | PushedExecScenario::CredentialMasking
+        | PushedExecScenario::CredentialMaskingCustomProvidersUnsupported
+        | PushedExecScenario::CredentialMaskingUnsupportedShell
+        | PushedExecScenario::CredentialMaskingUnsupported => Some("linux"),
         _ => None,
     };
     let mut capabilities = json!({ "networkProxyLaunch": true });
+    if matches!(
+        scenario,
+        PushedExecScenario::CredentialMasking
+            | PushedExecScenario::CredentialMaskingCustomProvidersUnsupported
+            | PushedExecScenario::CredentialMaskingUnsupportedShell
+    ) {
+        capabilities["credentialMasking"] = json!(true);
+    }
     if matches!(
         scenario,
         PushedExecScenario::DenyOldLinuxWithRoot(_) | PushedExecScenario::DenyLinux
@@ -387,6 +415,7 @@ async fn serve_exec_with_pushed_events(
             _ => b"x",
         }
     };
+    let replay_stream = |seq| if seq == 1 { "stderr" } else { "stdout" };
     if matches!(scenario, PushedExecScenario::ReplayGap) {
         // The process replay log retains 256 events. This burst is much larger
         // than both that log and the JSON-RPC event queue, so the reader must
@@ -402,7 +431,7 @@ async fn serve_exec_with_pushed_events(
                     "params": {
                         "processId": &process_id,
                         "seq": seq,
-                        "stream": "stdout",
+                        "stream": replay_stream(seq),
                         "chunk": BASE64_STANDARD.encode(replay_output(seq)),
                     }
                 }),
@@ -542,6 +571,10 @@ async fn serve_exec_with_pushed_events(
             }
         }
         PushedExecScenario::Complete
+        | PushedExecScenario::CredentialMasking
+        | PushedExecScenario::CredentialMaskingCustomProvidersUnsupported
+        | PushedExecScenario::CredentialMaskingUnsupportedShell
+        | PushedExecScenario::CredentialMaskingUnsupported
         | PushedExecScenario::DenyWin
         | PushedExecScenario::DenyWinUnchanged
         | PushedExecScenario::DenyOldLinux
@@ -584,7 +617,7 @@ async fn serve_exec_with_pushed_events(
         PushedExecScenario::RejectedLongWindowsDangerousCommand => {
             panic!("dangerous command must not reach the executor")
         }
-        PushedExecScenario::DirectDenied => {
+        PushedExecScenario::DirectDenied { output_closed } => {
             send_exec_server_json(
                 &mut websocket,
                 json!({
@@ -598,6 +631,16 @@ async fn serve_exec_with_pushed_events(
                 }),
             )
             .await;
+            if output_closed {
+                send_exec_server_json(
+                    &mut websocket,
+                    json!({
+                        "method": "process/closed",
+                        "params": { "processId": &process_id, "seq": 2 }
+                    }),
+                )
+                .await;
+            }
         }
         PushedExecScenario::SandboxedInterceptedPatch
         | PushedExecScenario::SandboxedDirectPatch
@@ -695,6 +738,10 @@ async fn serve_exec_with_pushed_events(
                         panic!("unexpected read after the delayed-output sequence")
                     }
                     PushedExecScenario::Complete
+                    | PushedExecScenario::CredentialMasking
+                    | PushedExecScenario::CredentialMaskingCustomProvidersUnsupported
+                    | PushedExecScenario::CredentialMaskingUnsupportedShell
+                    | PushedExecScenario::CredentialMaskingUnsupported
                     | PushedExecScenario::CodexPath
                     | PushedExecScenario::CodexPathDefaultFeature
                     | PushedExecScenario::CodexPathDisabledFeature
@@ -712,12 +759,12 @@ async fn serve_exec_with_pushed_events(
                         "failure": null,
                         "sandboxDenied": false,
                     }),
-                    PushedExecScenario::DirectDenied => json!({
+                    PushedExecScenario::DirectDenied { output_closed } => json!({
                         "chunks": [],
-                        "nextSeq": 2,
+                        "nextSeq": if output_closed { 3 } else { 2 },
                         "exited": true,
                         "exitCode": 1,
-                        "closed": false,
+                        "closed": output_closed,
                         "failure": null,
                         "sandboxDenied": true,
                     }),
@@ -756,7 +803,7 @@ async fn serve_exec_with_pushed_events(
                             .map(|seq| {
                                 json!({
                                     "seq": seq,
-                                    "stream": "stdout",
+                                    "stream": replay_stream(seq),
                                     "chunk": BASE64_STANDARD.encode(replay_output(seq)),
                                 })
                             })
@@ -825,10 +872,15 @@ async fn serve_exec_with_pushed_events(
 #[test_case(PushedExecScenario::CodexPathDisabledFeature, ManagedNetworkScenario::None, false ; "disabled_codex_path_preserves_original_login_command")]
 #[test_case(PushedExecScenario::CodexPathWithExplicitOverride, ManagedNetworkScenario::None, false ; "explicit_path_override_preserves_original_login_command")]
 #[test_case(PushedExecScenario::UnusableCodexPath, ManagedNetworkScenario::None, false ; "unusable_codex_path_preserves_requested_login_shell")]
-#[test_case(PushedExecScenario::DirectDenied, ManagedNetworkScenario::None, false ; "direct_sandbox_denial")]
+#[test_case(PushedExecScenario::DirectDenied { output_closed: false }, ManagedNetworkScenario::None, false ; "direct_sandbox_denial")]
+#[test_case(PushedExecScenario::DirectDenied { output_closed: true }, ManagedNetworkScenario::None, false ; "direct_sandbox_denial_with_closed_output")]
 #[test_case(PushedExecScenario::LegacyExit, ManagedNetworkScenario::None, false ; "legacy_exit_metadata")]
 #[test_case(PushedExecScenario::ReplayGap, ManagedNetworkScenario::None, false ; "truncated_event_replay")]
 #[test_case(PushedExecScenario::Complete, ManagedNetworkScenario::Enabled { policy_callbacks: true }, false ; "managed_network_uses_executor_proxy_launch")]
+#[test_case(PushedExecScenario::CredentialMasking, ManagedNetworkScenario::Enabled { policy_callbacks: true }, false ; "credential_masking_launches_on_supported_executor")]
+#[test_case(PushedExecScenario::CredentialMaskingCustomProvidersUnsupported, ManagedNetworkScenario::Enabled { policy_callbacks: true }, false ; "configured_credential_provider_warns_and_runs_on_old_executor")]
+#[test_case(PushedExecScenario::CredentialMaskingUnsupported, ManagedNetworkScenario::Enabled { policy_callbacks: true }, false ; "credential_masking_warns_and_runs_unsupported_executor")]
+#[test_case(PushedExecScenario::CredentialMaskingUnsupportedShell, ManagedNetworkScenario::Enabled { policy_callbacks: true }, false ; "credential_masking_warns_and_runs_unsupported_shell")]
 #[test_case(PushedExecScenario::Complete, ManagedNetworkScenario::Enabled { policy_callbacks: false }, false ; "strict_managed_allowlist_omits_policy_callbacks")]
 #[test_case(PushedExecScenario::Complete, ManagedNetworkScenario::Disabled, false ; "disabled_managed_network_omits_executor_proxy_launch")]
 #[cfg_attr(not(windows), test_case(PushedExecScenario::Complete, ManagedNetworkScenario::Enabled { policy_callbacks: true }, true ; "foreign_windows_managed_network_preserves_approval_registration"))]
@@ -869,6 +921,13 @@ async fn exec_command_consumes_pushed_remote_process_events(
     let terminate_after_exit = terminate_initial_collection
         || matches!(scenario, PushedExecScenario::OutputOpenWhenTerminated);
     let explicit_path = "/user/configured/bin:/user/other/bin";
+    let credential_masking = matches!(
+        scenario,
+        PushedExecScenario::CredentialMasking
+            | PushedExecScenario::CredentialMaskingCustomProvidersUnsupported
+            | PushedExecScenario::CredentialMaskingUnsupported
+            | PushedExecScenario::CredentialMaskingUnsupportedShell
+    );
     let managed_network_configured = !matches!(managed_network, ManagedNetworkScenario::None);
     let managed_network_enabled = matches!(managed_network, ManagedNetworkScenario::Enabled { .. });
     let policy_callbacks = matches!(
@@ -916,6 +975,11 @@ async fn exec_command_consumes_pushed_remote_process_events(
                 "yield_time_ms": 1_000,
             })
             .to_string(),
+        ),
+        PushedExecScenario::CredentialMasking => ev_function_call(
+            CALL_ID,
+            "exec_command",
+            &json!({ "cmd": "pwd", "login": false, "yield_time_ms": 1_000 }).to_string(),
         ),
         _ => ev_function_call(
             CALL_ID,
@@ -1041,10 +1105,24 @@ enabled = false
         };
         builder = builder
             .with_cloud_config_bundle(cloud_config_bundle)
-            .with_pre_build_hook(|home| {
+            .with_pre_build_hook(move |home| {
+                let provider_config = if matches!(
+                    scenario,
+                    PushedExecScenario::CredentialMaskingCustomProvidersUnsupported
+                ) {
+                    r#"[features.network_proxy.credentials.vendor]
+env = ["VENDOR_TOKEN"]
+patterns = ["vendor_[a-z]{8}"]
+url_prefix_from_env = "VENDOR_BASE_URL"
+auth = ["bearer"]
+"#
+                } else {
+                    ""
+                };
                 fs::write(
                     home.join("config.toml"),
-                    r#"default_permissions = "workspace"
+                    format!(
+                        r#"default_permissions = "workspace"
 
 [permissions.workspace.filesystem]
 ":minimal" = "read"
@@ -1056,6 +1134,8 @@ allow_local_binding = true
 
 [features]
 hooks = true
+credential_masking = {credential_masking}
+{provider_config}
 
 [hooks]
 
@@ -1065,7 +1145,8 @@ hooks = true
 type = "command"
 command = "unused"
 timeout = 900
-"#,
+"#
+                    ),
                 )
                 .expect("write managed-network test config");
             });
@@ -1698,7 +1779,23 @@ timeout = 900
         assert_eq!(params["managedNetwork"], Value::Null);
         assert_eq!(params["env"]["HTTP_PROXY"], Value::Null);
         assert_eq!(params["networkProxy"]["proxy"]["enabled"], true);
+        assert_eq!(
+            params["networkProxy"]["proxy"]["credentialMasking"],
+            if matches!(
+                scenario,
+                PushedExecScenario::CredentialMasking
+                    | PushedExecScenario::CredentialMaskingUnsupportedShell
+            ) {
+                json!(true)
+            } else {
+                Value::Null
+            }
+        );
         assert_eq!(params["networkProxy"]["proxy"]["mode"], "full");
+        assert_eq!(
+            params["networkProxy"]["proxy"]["credentialProviders"],
+            Value::Null
+        );
         assert_eq!(
             params["networkProxy"]["policyDecisionTimeoutMs"].as_u64(),
             policy_callbacks.then_some(1_000_000)
@@ -1712,6 +1809,51 @@ timeout = 900
         })
         .await
         .context("model should receive the remote exec output")?;
+        if matches!(
+            scenario,
+            PushedExecScenario::CredentialMaskingUnsupportedShell
+                | PushedExecScenario::CredentialMaskingUnsupported
+                | PushedExecScenario::CredentialMaskingCustomProvidersUnsupported
+        ) {
+            let shell = if matches!(
+                scenario,
+                PushedExecScenario::CredentialMaskingUnsupportedShell
+            ) {
+                "/bin/sh"
+            } else {
+                "/bin/bash"
+            };
+            assert_eq!(params["argv"], json!([shell, "-lc", "pwd"]));
+            let warning = core_test_support::wait_for_event(&test.codex, |event| {
+                matches!(event, EventMsg::Warning(warning) if warning.message.starts_with("Credential masking is unavailable"))
+            })
+            .await;
+            let EventMsg::Warning(warning) = warning else {
+                unreachable!("waited for a credential masking warning")
+            };
+            if matches!(
+                scenario,
+                PushedExecScenario::CredentialMaskingUnsupportedShell
+            ) {
+                insta::assert_snapshot!(warning.message, @"Credential masking is unavailable for shell `sh` on environment `remote`. This command will run with unmasked credentials.");
+            } else if matches!(
+                scenario,
+                PushedExecScenario::CredentialMaskingCustomProvidersUnsupported
+            ) {
+                insta::assert_snapshot!(warning.message, @"Credential masking is unavailable for this network proxy configuration on environment `remote`. This command will run with unmasked credentials.");
+            } else {
+                insta::assert_snapshot!(warning.message, @"Credential masking is unavailable on environment `remote` because its exec-server does not support it. This command will run with unmasked credentials.");
+            }
+            let request = response_mock
+                .last_request()
+                .context("remote exec response")?;
+            assert!(
+                request
+                    .function_call_output_text(CALL_ID)
+                    .context("remote exec output")?
+                    .contains(COMPLETE_OUTPUT)
+            );
+        }
         return Ok(());
     }
     if matches!(managed_network, ManagedNetworkScenario::Disabled) {
@@ -1786,6 +1928,10 @@ timeout = 900
             );
         }
         PushedExecScenario::Complete
+        | PushedExecScenario::CredentialMasking
+        | PushedExecScenario::CredentialMaskingCustomProvidersUnsupported
+        | PushedExecScenario::CredentialMaskingUnsupportedShell
+        | PushedExecScenario::CredentialMaskingUnsupported
         | PushedExecScenario::DenyWin
         | PushedExecScenario::DenyWinUnchanged
         | PushedExecScenario::DenyOldLinux
@@ -1806,7 +1952,7 @@ timeout = 900
         PushedExecScenario::RejectedLongWindowsDangerousCommand => {
             unreachable!("dangerous command returned early")
         }
-        PushedExecScenario::DirectDenied => {
+        PushedExecScenario::DirectDenied { .. } => {
             assert!(!saw_exec_command_begin);
             assert!(output.contains("Process exited with code 1"));
             assert_eq!(process_read_requests, 0, "unexpected compatibility read");
@@ -1840,3 +1986,6 @@ timeout = 900
 
 #[path = "network_approval_completion.rs"]
 mod network_approval_completion;
+
+#[path = "guardian_sandbox_retry.rs"]
+mod guardian_sandbox_retry;
