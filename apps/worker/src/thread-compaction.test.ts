@@ -41,7 +41,7 @@ test("a context well inside the window is left alone, and a one-off run is never
   expect(oneOff.calls()).not.toContain("thread/compact/start");
 });
 
-test("the interview's thread is compacted only past 75% of the window and is kept an hour (2026-11-17, no limit in the interview)", async () => {
+test("the interview's thread is compacted past 75% of the window or 120k tokens, whichever comes first, and is kept an hour", async () => {
   const interview = "crossline:crossline-onboarding";
   expect(threadKeepMs(interview)).toBe(60 * 60_000);
   expect(threadKeepMs(SKILL)).toBe(THREAD_KEEP_MS);
@@ -56,6 +56,13 @@ test("the interview's thread is compacted only past 75% of the window and is kep
   await continueSkillTurn(at78.rpc, again.audit.threadId!, "下一句", { ...turnOptions, skillName: interview });
   await settle();
   expect(at78.calls()).toContain("thread/compact/start");
+
+  // A large window (2026-11-27): 122k of 400k is far from 75%, but past the interview's 120k.
+  const large = fakeRuntime(["{}", "{}"], interview, { usage: { input: 120_000, output: 2_000 }, contextWindow: 400_000 });
+  const third = await runCodexSkill(large.rpc, {}, { ...options, skillName: interview, keepThread: true });
+  await continueSkillTurn(large.rpc, third.audit.threadId!, "下一句", { ...turnOptions, skillName: interview });
+  await settle();
+  expect(large.calls()).toContain("thread/compact/start");
 });
 
 test("a window the runtime did not report is no reason to compact (its own automatic compaction still holds)", async () => {

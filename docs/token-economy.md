@@ -65,7 +65,7 @@
 - 整理三条通道不再封顶思考（`EXTRACT_THINKING_BUDGET` 2048、`PORTRAIT_THINKING_BUDGET` 4096 和当天先提的推断通道 8192 都删了），开发者模型按服务商默认想。
 - 画像两条通道不再等批：`PORTRAIT_BATCH` 由 3 改 1，每条回答到了就读；一次运行读它运行期间攒下的全部回答。`CROSSLINE_PORTRAIT_BATCH` 仍可设回批量。
 - 整理和研究线程从 `mid` 升到 `top`；对话、整理、研究、画像撰写四个 Skill 进 `NEVER_DOWNGRADED`，额度紧时也不降档（`model-policy.ts`）。
-- 访谈对话和研究线程空闲一小时才释放（其他对话仍是 `THREAD_KEEP_MS` 10 分钟），过 0.75 窗口才在两轮之间压缩（其他仍是 `COMPACT_AT` 0.6；运行时自己 0.8）（`threadKeepMs`、`INTERVIEW_COMPACT_AT`，`skill-runner.ts`）。
+- 访谈对话和研究线程空闲一小时才释放（其他对话仍是 `THREAD_KEEP_MS` 10 分钟），过 0.75 窗口或约 12 万 token（先到者，2026-11-27 本人决定，`INTERVIEW_COMPACT_TOKENS`）就在两轮之间压缩（其他仍是 `COMPACT_AT` 0.6；运行时自己 0.8）（`threadKeepMs`、`INTERVIEW_COMPACT_AT`，`skill-runner.ts`）。
 
 花费会上去，用下一次回放量。留着的：每次读的回答数和文件字数（`REPLIES_PER_RUN`、`TEXT_TOTAL` 等）只是分段，没读完的下一次接着读，不丢内容；确定性校验、安全规则和访谈的交互设计（每轮题数、卡数）不动。
 

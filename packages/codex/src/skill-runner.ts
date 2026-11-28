@@ -1705,13 +1705,19 @@ export const THREAD_KEEP_MS = Math.max(60_000, (Number(process.env.CROSSLINE_THR
 /**
  * The interview's own threads (its dialogue and its research threads; 2026-11-17, the owner: no limit on the interview's context, the
  * model at least as free as in Codex itself). They stay loaded an hour without a turn rather than `THREAD_KEEP_MS` (a thread unloaded
- * part way through is rebuilt from the ledger and loses what it reasoned in the thread), and are compacted only near the runtime's own
- * limit (`contextWindowConfig`: 0.8 of the window), not from `COMPACT_AT`.
+ * part way through is rebuilt from the ledger and loses what it reasoned in the thread), and are compacted past 0.75 of the window or
+ * `INTERVIEW_COMPACT_TOKENS`, whichever comes first, not from `COMPACT_AT`.
  */
 const INTERVIEW_THREADS = new Set(["crossline-onboarding", "crossline-research:onboarding"]);
 export const interviewThread = (skillName: string) => INTERVIEW_THREADS.has(skillName.replace(/^crossline:/, ""));
 export const INTERVIEW_THREAD_KEEP_MS = 60 * 60_000;
 export const INTERVIEW_COMPACT_AT = 0.75;
+/**
+ * The owner's decision of 2026-11-27 (docs/plans/condense-1127.md): an interview's thread is compacted once it holds about 120k tokens,
+ * whatever the window. Each round brings its own ledger snapshot, so the earlier rounds' snapshots in the thread repeat what the newest
+ * says; left to 0.75 of a large window, one ChatGPT replay sent ~300k tokens a call by round 48 and used up the account's quota.
+ */
+export const INTERVIEW_COMPACT_TOKENS = 120_000;
 export const threadKeepMs = (skillName: string) => interviewThread(skillName) ? Math.max(THREAD_KEEP_MS, INTERVIEW_THREAD_KEEP_MS) : THREAD_KEEP_MS;
 const releaseTimers = new WeakMap<object, Map<string, ReturnType<typeof setTimeout>>>();
 /** Threads this client unsubscribed from: a later turn on one must subscribe again first (`resubscribe`). */
@@ -1930,8 +1936,10 @@ function noteContext(client: CodexRpcBoundary, threadId: string, params: Record<
 /** Whether the thread's context has filled past `COMPACT_AT` of its window (an interview's: `INTERVIEW_COMPACT_AT`), and how far. */
 export function compactionDue(client: CodexRpcBoundary, threadId: string, skillName = ""): { used: number; window: number } | undefined {
   const context = contextsOf(client).get(threadId);
-  const at = interviewThread(skillName) ? Math.max(COMPACT_AT, INTERVIEW_COMPACT_AT) : COMPACT_AT;
-  return context && context.used >= context.window * at ? context : undefined;
+  if (!context) return undefined;
+  const limit = interviewThread(skillName)
+    ? Math.min(context.window * Math.max(COMPACT_AT, INTERVIEW_COMPACT_AT), INTERVIEW_COMPACT_TOKENS) : context.window * COMPACT_AT;
+  return context.used >= limit ? context : undefined;
 }
 /** Queues a compaction behind the thread's current turn when one is due; the next turn on the thread waits for it. */
 function queueCompaction(client: CodexRpcBoundary, threadId: string, skillName: string): void {
