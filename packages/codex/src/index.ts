@@ -140,9 +140,7 @@ export const CODEX_PREVIOUS_BINARY_SHA256: readonly string[] = ["660e159a49e823a
   "ce19ac66ee6204888bf6318f0ae1b02f83b35f512ca5144f1e8bf42b9f7b11b9",
   "e6300d7fd03c53a11a746e49f12706c313a04eaedb4541f1857799d9551617ac",
   // rust-v0.163.0's release build (2026-10-23), which the installed copies and compute nodes ship until they are updated.
-  "a28abf32699e994bbbbea94f5dd5e9b1615ba9bde1cf6922a275aa23cce9ec8a",
-  // rust-v0.163.0's Linux release, on the hosted server until /srv/crossline/codex is replaced with 0.172.0 (docs/codex-upgrade-0.172.md).
-  "399ff69c431c066e40de318fba45c2b07f45a76b19939d247ee4828fc70c4215"];
+  "a28abf32699e994bbbbea94f5dd5e9b1615ba9bde1cf6922a275aa23cce9ec8a"];
 
 export function codexProcessEnvironment(
   base: NodeJS.ProcessEnv = process.env,

@@ -45,13 +45,14 @@ OpenAI 帮助页也写着 Codex CLI 0.166.0 起才能用 GPT-6.2 Sol / Astra。
   - rusty_v8 现在是 git 依赖。它的子模块里有一个 269 字符的路径，libgit2 在 `LongPathsEnabled=0` 的机器上检出失败。没改系统设置，用 `subst Q: %USERPROFILE%\.cargo` 加 `CARGO_HOME=Q:\` 把路径缩短，检出一次后就撤掉了。
   - 16 个并行任务把内存用光（`rustc-LLVM ERROR: out of memory`），后面的报错都是 `can't find crate`。改成 `-j 4`。
   - C 盘只剩十几 GB 时写满了（os error 112）。删了主检出里 `target/debug/incremental`（23 GB 的增量缓存，最后写入在 10 月；删了只是下次 debug 构建慢些，不影响正在运行的 `codex.exe`）。
-- **Linux（托管服务器）**：上游发布资产 `codex-x86_64-unknown-linux-musl.tar.gz`，摘要 `a2342a8f…` 下载后核对一致，二进制 `ad83b94c…`，写进 `CODEX_LINUX_RELEASE_BINARY_SHA256`。`codex-code-mode-host` 的 Linux 版资产摘要 `20b0a4bc…`，二进制 `1800682c…`。0.163.0 的 `399ff69c…` 暂时留在 `CODEX_PREVIOUS_BINARY_SHA256`。服务器上**还没换**。
+- **Linux（托管服务器）**：上游发布资产 `codex-x86_64-unknown-linux-musl.tar.gz`，摘要 `a2342a8f…` 下载后核对一致，二进制 `ad83b94c…`，写进 `CODEX_LINUX_RELEASE_BINARY_SHA256`。`codex-code-mode-host` 的 Linux 版资产摘要 `20b0a4bc…`，二进制 `1800682c…`。2026-11-28 换上服务器：先部署接受两个哈希的镜像，再由服务器自己从上游下载这两个资产（四个摘要都与上面一致），装成 `/srv/crossline/codex/codex` 和 `codex-code-mode-host`（root，755），旧的 0.163.0 留作同目录的 `codex.0.163.0`，重启 `crossline-worker` 和 `crossline-transcriber`。容器里 `/opt/codex/codex --version` 是 `codex-cli 0.172.0`，服务器的 `models_cache.json` 是 `client_version` 0.172.0，列出 `gpt-6.2-sol`。之后从 `CODEX_PREVIOUS_BINARY_SHA256` 删掉了 0.163.0 的 `399ff69c…`：要退回旧版，得先把这个哈希加回去再部署。
 - **Windows debug（仓库根目录的常驻版）**：没有重建，仍是 0.163.0 的 `e4c45291…`。`CODEX_FORK_BINARY_SHA256` 因此没变。它也是供应方一致性记录里的 `RUNTIME_VERSION`，所以各供应方的测评不会过期重跑。常驻版的目录里没有 gpt-6.2-sol，但现在会用 gpt-6.1-sol。
 
-## 留给人做的事
+## 上线情况（2026-11-28，本人同意后）
 
-1. **服务器和节点要一起换**。hub 要求节点的 Codex 版本和服务器完全一致（`NODE_CODEX_VERSION`，`apps/worker/src/node/hub.ts`）。服务器换成 0.172.0 之后，还在跑 0.163.0 的节点都会被拒绝接活，直到它们更新。所以发新的「Crossline 节点」安装包和换服务器二进制要同一时间做。节点包要本人的签名密钥（`CROSSLINE_RELEASE_KEY`）。
-2. **托管服务器**：把 `/srv/crossline/codex/codex` 换成上面的 0.172.0（核对 `ad83b94c…`），有 `codex-code-mode-host` 的话一起换，再重启 worker 容器。确认后从 `CODEX_PREVIOUS_BINARY_SHA256` 删掉 `399ff69c…`，并更新 `docs/beta-launch.md` §10 里写的版本。
-3. **本人的安装版**：按 `docs/local-installer.md` 打包，`--codex-dir` 指向这次的 `target/release`（或者先把这两个文件复制到主检出）。装好以后看 `state\codex-home\models_cache.json`，应该是 `client_version` 0.172.0，并且列出 `gpt-6.2-sol`。到那时可以把设置里访谈的临时选择（`gpt-6.1-terra` high）改回跟档位走。
-4. **fork 仓库**：`KarolYan1215/codex` 还没有 0.172.0 的提交。`scripts/verify-codex-fork.ts` 已经改成 0.172.0、174 个版本号，要等把这个源码推到 fork 以后才能跑。
-5. **仓库根目录的 debug 运行时**：可以不重建。要重建的话，先停常驻 worker，然后 `cargo build --locked -p codex-cli --bin codex`。这会让 `RUNTIME_VERSION` 变，各供应方的一致性测评会过期重跑，要花额度。
+1. **托管服务器**：已换，见上面「Linux」一条。
+2. **本人的安装版**：0.3.10（`--personal`，带 Graph），经 `install-personal.cmd` 装好，`data\` 先备份到 `backups\before-personal-20261128-042028`。装好后 `state\codex-home\models_cache.json` 是 `client_version` 0.172.0、列出 `gpt-6.2-sol`，当天的 sandbox 日志 `selection: mxc`。设置里访谈的临时选择（`gpt-6.1-terra` high）没动，要不要改回跟档位走由本人定。
+3. **fork 仓库**：`KarolYan1215/codex` 打了标签 `rust-v0.172.0` → `3d86e43b`（fork 与上游共用对象）。
+4. **节点**：hub 要求节点的 Codex 版本和服务器完全一致（`NODE_CODEX_VERSION`，`apps/worker/src/node/hub.ts`），服务器换好之后，0.163.0 的节点（1.2.1 及以前）被拒绝接活，直到更新。换的时候最近 4 小时没有节点连着。1.2.2 已打包（`package-node.ts` 的版本核对改成 0.172.0；`dist
+ode-installerCrossline-Node-Setup-1.2.2.exe`，SHA-256 `035a5bf0…`，只在这台电脑上的 worktree `awesome-liskov-23faab` 里），但这台电脑上没有 `CROSSLINE_RELEASE_KEY`，`node-latest.json` 没签名，不能发布。本人签名、发布：`release-sign.ts sign dist\node-installer\node-latest.json`，然后按 `docs/compute-node.md` 的 `gh release create node-v1.2.2 …`。
+5. **仓库根目录的 debug 运行时**：没有重建（本人同意）。要重建的话，先停常驻 worker，然后 `cargo build --locked -p codex-cli --bin codex`。这会让 `RUNTIME_VERSION` 变，各供应方的一致性测评会过期重跑，要花额度。

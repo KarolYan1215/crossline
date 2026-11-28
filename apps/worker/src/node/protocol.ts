@@ -276,7 +276,7 @@ export function rewriteParams(params: unknown, map: { roots: string[]; mirror: s
   return walk(params, "");
 }
 
-/** The Codex version in `initialize`'s `userAgent` ("crossline/0.163.0 (…)" → "0.163.0"); the node and the server must agree on it. */
+/** The Codex version in `initialize`'s `userAgent` ("crossline/0.172.0 (…)" → "0.172.0"); the node and the server must agree on it. */
 export function codexVersionOf(initializeResult: unknown): string {
   const agent = (initializeResult as { userAgent?: unknown } | undefined)?.userAgent;
   return typeof agent === "string" ? /\/(\d+\.\d+\.\d+)/.exec(agent)?.[1] ?? agent : "";

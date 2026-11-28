@@ -24,7 +24,7 @@
   - 池子之外的请求（登录、额度读取、状态）和 shell 助手（`codexSupervisor.client`）始终在服务器。服务器自己的运行时在池子里就是原来那个客户端对象，配置锁、线程保持等按客户端记的状态和 shell 助手共用。
 - **闸门把节点算进去。** 节点的容量（每台在 `hello` 里报，默认每个逻辑核一路、每 GB 内存至多一路，4–16 路，`nodeCapacity`；本人的电脑 16 核 32 GB 即 16 路；`CROSSLINE_NODE_CAPACITY` 可直接指定。本人：「每个节点默认远强于服务器，可以支持多个线程」）加到本账号的份额和后台总名额上（`extraCapacity`）；节点有空位时，本账号的下一次运行不受服务器内存高水位限制（`nodeRoom`，看池子的 `load`），因为它不会在服务器上跑。
 - **就绪前先装插件。** 节点连上后，服务器经节点的运行时装 Crossline 插件（`installLocalPlugin`），插件目录先镜像到电脑（`files`），必需的 Skill 都在才算就绪。
-- **版本必须相同。** 节点和服务器的 Codex 版本（`userAgent` 里的版本号）不同就拒绝（4009）。2026-10-23 两边都是 0.163.0。
+- **版本必须相同。** 节点和服务器的 Codex 版本（`userAgent` 里的版本号）不同就拒绝（4009）。2026-10-23 两边都是 0.163.0，2026-11-28 起一起换成 0.172.0（docs/codex-upgrade-0.172.md）。
 - **图片。** 回合交给模型的图片（输入框截图、收藏笔记的图）是服务器上的路径，节点先按 `image` 帧取过来再交给本机运行时；只给服务器临时图片目录和数据目录里的 png/jpg/gif/webp，单张不超过 20 MB。
 - **一个账号可以同时有几台节点。** 每台按「种类:主机名」认（`device:PC`、`standalone:PC`）：同一台电脑重连（休眠醒来、重启）替换它自己原来的连接，不碰别的节点。设备模式的电脑和独立节点同时在线就一起干活；网页版卡片逐台列出主机、种类、同时几路和状态。（同日先做过「先在线的保留、后来的待命」，随后按本人「协同」的要求改成现在这样。）
 - **电脑端拒绝的东西。** 白名单外的方法（`command/exec`、`account/logout`……）、`danger-full-access`/`workspace-write`、shell 工具、权限档案，一律回错误给服务器，不交给本机运行时。
@@ -49,7 +49,7 @@
 
 - `main.mjs`：`apps/worker/src/node/standalone.ts` 连同中继（`agent.ts`、`protocol.ts`）和 `ws` 打包、压缩成一个文件（2026-10-28 起 84 KB：多了启动器的更新与验签两个文件，见「托盘与桌宠」）。打包脚本按 esbuild 的输入清单检查，Crossline 自己的文件只能是这三个，多一个就失败（`NODE_BUNDLE_TOO_WIDE`）。Skill、提示词、计划和校验都不在包里：节点连上后由服务器经镜像装插件。
 - `node.exe`（打包时运行的那个 Node）。
-- `codex\codex.exe`、`codex\codex-code-mode-host.exe`：从 `vendor/codex`（rust-v0.163.0，带 Windows 迁移校验和补丁）编译的 release 版，打包时核对 `--version` 是 0.163.0。
+- `codex\codex.exe`、`codex\codex-code-mode-host.exe`：从 `vendor/codex`（rust-v0.172.0，带 Windows 迁移校验和修复与 ~/.codex 隔离）编译的 release 版（2026-11-28 起；之前是 0.163.0）。
 - `ffmpeg\ffmpeg.exe`、`ffmpeg\ffprobe.exe` 与 GPLv3 许可（2026-11-03，shell 助手在本人电脑上剪辑视频用）：Gyan 的 essentials 静态构建 9.0.2，取自 GitHub `GyanD/codexffmpeg` 的 release，打包脚本里固定版本和 zip 的 SHA-256（`FFMPEG`），先核对再解压；下载缓存在仓库外的 `%LOCALAPPDATA%\crossline-build-cache`（`CROSSLINE_BUILD_CACHE` 可改）。节点程序启动时把 `app\ffmpeg` 放到 `PATH` 最前，它启动的 Codex 和 Codex 执行的命令都直接找得到 `ffmpeg`。
 - 用到 VC++ 运行库的模块旁边放运行库（dumpbin 检查）；许可证；托盘 `CrosslineNode.exe` 与 WebView2 SDK 的三个 DLL（见下「托盘与桌宠」）；`start.vbs` 只为旧安装的开机项保留，现在启动托盘。
 - 每用户安装到 `%LOCALAPPDATA%\Crossline Node\app`，不要管理员权限；默认勾选「登录 Windows 时自动运行」（`HKCU\...\Run`，启动托盘并带 `--background`，托盘再以 `--autostart` 启动节点）。

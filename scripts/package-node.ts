@@ -4,7 +4,7 @@
  * - `main.mjs`: `apps/worker/src/node/standalone.ts` bundled and minified with everything it imports (the relay and `ws`), nothing else
  *   of Crossline — the Skills come from the server when the node connects;
  * - `node.exe`, the one running this script;
- * - `codex\codex.exe` and `codex\codex-code-mode-host.exe`: the release build of the vendored Codex (rust-v0.163.0, docs/local-installer.md);
+ * - `codex\codex.exe` and `codex\codex-code-mode-host.exe`: the release build of the vendored Codex (rust-v0.172.0, docs/local-installer.md);
  * - the Visual C++ runtime beside whatever imports it and the licences;
  * - `CrosslineNode.exe`, the tray (installer/node-tray/CrosslineNode.cs: icon, menu, Ctrl+Alt+H and the 小帮手's desktop window), compiled
  *   here with the .NET Framework C# compiler against the WebView2 SDK's managed DLLs, which ship beside it (`WEBVIEW2` below: version and
@@ -91,7 +91,7 @@ for (const binary of ["codex.exe", "codex-code-mode-host.exe"]) {
   cpSync(path.join(codexOut, binary), path.join(stage, "codex", binary));
 }
 const codexVersion = run(path.join(stage, "codex", "codex.exe"), ["--version"]).trim();
-if (!/\b0\.163\.0\b/.test(codexVersion)) throw new Error(`CODEX_VERSION_UNEXPECTED ${codexVersion}`);
+if (!/\b0\.172\.0\b/.test(codexVersion)) throw new Error(`CODEX_VERSION_UNEXPECTED ${codexVersion}`);
 // The pinned release build only (codex-baseline.json `release`): a binary from elsewhere is never shipped by accident.
 if (sha256(path.join(stage, "codex", "codex.exe")) !== CODEX_RELEASE_BINARY_SHA256) throw new Error("CODEX_RELEASE_HASH_MISMATCH");
 
@@ -165,7 +165,7 @@ writeFileSync(path.join(notices, "README.txt"), [
   "Crossline 节点随附的第三方程序：",
   `- Node.js ${process.version}（node.exe），MIT 等许可，见 node-LICENSE.txt`,
   `- OpenAI Codex（codex\\codex.exe、codex\\codex-code-mode-host.exe，${codexVersion}），Apache-2.0，见 codex-LICENSE.txt 与 codex-NOTICE.txt；`,
-  "  源码固定在 https://github.com/openai/codex 的 rust-v0.163.0（83086188ae0614bd882818ff1aa23f3194962012），附一处 Windows 迁移校验和补丁",
+  "  源码固定在 https://github.com/openai/codex 的 rust-v0.172.0（3d86e43b075adeba2193ec5c22ac92f55afd82e6），附 Windows 迁移校验和修复与 ~/.codex 隔离两处补丁",
   "- ws（打包在 main.mjs 内），MIT，见 ws-LICENSE.txt",
   `- FFmpeg ${FFMPEG.version}（ffmpeg\\ffmpeg.exe、ffmpeg\\ffprobe.exe，Gyan Doshi 的 essentials 静态构建，${FFMPEG.url}），`,
   "  GPLv3，见 ffmpeg\\LICENSE.txt；FFmpeg 源码见 https://ffmpeg.org/releases/ ，该构建所含各库的源码与配置见 https://www.gyan.dev/ffmpeg/builds/",
